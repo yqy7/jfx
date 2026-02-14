@@ -27,10 +27,9 @@
 
 #include "ContextDestructionObserver.h"
 #include "ExceptionCode.h"
-#include <variant>
+#include <span>
 #include <wtf/Deque.h>
 #include <wtf/Function.h>
-#include <wtf/Span.h>
 #include <wtf/UniqueRef.h>
 #include <wtf/WeakPtr.h>
 #include <wtf/text/CString.h>
@@ -48,8 +47,8 @@ class FragmentedSharedBuffer;
 class WEBCORE_EXPORT NetworkSendQueue : public ContextDestructionObserver {
 public:
     using WriteString = Function<void(const CString& utf8)>;
-    using WriteRawData = Function<void(const Span<const uint8_t>&)>;
-    enum class Continue { No, Yes };
+    using WriteRawData = Function<void(std::span<const uint8_t>)>;
+    enum class Continue : bool { No, Yes };
     using ProcessError = Function<Continue(ExceptionCode)>;
     NetworkSendQueue(ScriptExecutionContext&, WriteString&&, WriteRawData&&, ProcessError&&);
     ~NetworkSendQueue();
@@ -63,7 +62,7 @@ public:
 private:
     void processMessages();
 
-    using Message = std::variant<CString, Ref<FragmentedSharedBuffer>, UniqueRef<BlobLoader>>;
+    using Message = Variant<CString, Ref<FragmentedSharedBuffer>, UniqueRef<BlobLoader>>;
     Deque<Message> m_queue;
 
     WriteString m_writeString;

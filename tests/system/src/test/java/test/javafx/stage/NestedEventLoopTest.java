@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,39 +25,24 @@
 
 package test.javafx.stage;
 
-import java.util.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
-
-import javafx.animation.KeyFrame;
-import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
-import javafx.print.PrinterJob;
 import javafx.scene.Group;
 import javafx.scene.Scene;
-import javafx.scene.control.Alert;
 import javafx.scene.paint.Color;
-import javafx.scene.shape.Rectangle;
 import javafx.stage.Stage;
-import javafx.util.Duration;
-import junit.framework.AssertionFailedError;
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-import org.junit.runners.Parameterized.Parameters;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.application.PlatformImpl;
 import test.util.Util;
-
-import static org.junit.Assert.*;
-import static org.junit.Assume.*;
-import static test.util.Util.TIMEOUT;
 
 /**
  * Test program for nested event loop functionality.
@@ -95,33 +80,24 @@ public class NestedEventLoopTest {
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void setupOnce() {
-        // Start the Application
-        new Thread(() -> Application.launch(MyApp.class, (String[])null)).start();
-
-        try {
-            if (!launchLatch.await(TIMEOUT, TimeUnit.MILLISECONDS)) {
-                throw new AssertionFailedError("Timeout waiting for Application to launch");
-            }
-        } catch (InterruptedException ex) {
-            AssertionFailedError err = new AssertionFailedError("Unexpected exception");
-            err.initCause(ex);
-            throw err;
-        }
+        Util.launch(launchLatch, MyApp.class);
     }
 
-    @AfterClass
+    @AfterAll
     public static void teardownOnce() {
-        Platform.exit();
+        Util.shutdown();
     }
 
     // Verify that we cannot enter a nested event loop on a thread other than
     // the FX Application thread
-    @Test (expected=IllegalStateException.class)
+    @Test
     public void testMustRunOnAppThread() {
-        assertFalse(Platform.isFxApplicationThread());
-        Platform.enterNestedEventLoop(new Object());
+        assertThrows(IllegalStateException.class, () -> {
+            assertFalse(Platform.isFxApplicationThread());
+            Platform.enterNestedEventLoop(new Object());
+        });
     }
 
     // Verify that we can enter and exit a nested event loop
@@ -148,42 +124,50 @@ public class NestedEventLoopTest {
     }
 
     // Verify that we cannot enter a nested event loop with the same key twice
-    @Test (expected=IllegalArgumentException.class)
+    @Test
     public void testUniqueKeyRequired() {
-        final Object key = new Object();
-        Util.runAndWait(
-                () -> Platform.enterNestedEventLoop(key),
-                () -> Platform.enterNestedEventLoop(key),
-                () -> Platform.exitNestedEventLoop(key, null)
-        );
+        assertThrows(IllegalArgumentException.class, () -> {
+            final Object key = new Object();
+            Util.runAndWait(
+                    () -> Platform.enterNestedEventLoop(key),
+                    () -> Platform.enterNestedEventLoop(key),
+                    () -> Platform.exitNestedEventLoop(key, null)
+            );
+        });
     }
 
     // Verify that we cannot enter a nested event loop with a null key
-    @Test (expected=NullPointerException.class)
+    @Test
     public void testNonNullKeyRequired() {
-        Util.runAndWait(
+        assertThrows(NullPointerException.class, () -> {
+            Util.runAndWait(
                 () -> Platform.enterNestedEventLoop(null)
-        );
+            );
+        });
     }
 
     // Verify that we cannot exit a nested event loop with a null key
-    @Test (expected=NullPointerException.class)
+    @Test
     public void testNonNullExitKeyRequired() {
-        Util.runAndWait(
+        assertThrows(NullPointerException.class, () -> {
+            Util.runAndWait(
                 () -> Platform.enterNestedEventLoop("validKey"),
                 () -> Platform.exitNestedEventLoop(null, null),
                 () -> Platform.exitNestedEventLoop("validKey", null)
-        );
+            );
+        });
     }
 
     // Verify that we cannot exit a nested event loop with a key that has not been used
-    @Test (expected=IllegalArgumentException.class)
+    @Test
     public void testExitLoopKeyHasBeenRegistered() {
-        Util.runAndWait(
+        assertThrows(IllegalArgumentException.class, () -> {
+            Util.runAndWait(
                 () -> Platform.enterNestedEventLoop("validKey"),
                 () -> Platform.exitNestedEventLoop("invalidKey", null),
                 () -> Platform.exitNestedEventLoop("validKey", null)
-        );
+            );
+        });
     }
 
     // Verify that we can enter and exit multiple nested event loops, in the order they are started
@@ -326,6 +310,54 @@ public class NestedEventLoopTest {
             assertFalse(loopTwoRunning.get());
             assertFalse(loopThreeRunning.get());
             assertEquals(result1, returnedValue1.get());
+        });
+    }
+
+    // Verify that an exception is thrown if we exceed the maximum number of
+    // nested event loops.
+    private void createManyNestedLoops(int n, Object previousLoop, AtomicBoolean exceptionThrown) {
+        if (exceptionThrown.get()) {
+            // Previous run loop was not created.
+            return;
+        }
+
+        if (n <= 0) {
+            // We created all the nested loops successfully. Unwind them.
+            if (previousLoop != null) {
+                Platform.exitNestedEventLoop(previousLoop, null);
+            }
+        } else {
+            final Integer thisLoop = n;
+            Platform.runLater(() -> {
+                createManyNestedLoops(n - 1, thisLoop, exceptionThrown);
+            });
+
+            try {
+                Platform.enterNestedEventLoop(thisLoop);
+            } catch (IllegalStateException ex) {
+                exceptionThrown.set(true);
+            }
+
+            if (previousLoop != null) {
+                Platform.exitNestedEventLoop(previousLoop, null);
+            }
+        }
+    }
+
+    @Test public void maxNestedLoops() {
+        Util.runAndWait(() -> {
+            // Test the exception case first to ensure the system recovers
+            // correctly.
+            AtomicBoolean expectedException = new AtomicBoolean(false);
+            createManyNestedLoops(PlatformImpl.MAX_NESTED_EVENT_LOOPS + 1, null, expectedException);
+            assertFalse(Platform.isNestedLoopRunning());
+
+            AtomicBoolean noExceptionExpected = new AtomicBoolean(false);
+            createManyNestedLoops(PlatformImpl.MAX_NESTED_EVENT_LOOPS, null, noExceptionExpected);
+            assertFalse(Platform.isNestedLoopRunning());
+
+            assertTrue(expectedException.get());
+            assertFalse(noExceptionExpected.get());
         });
     }
 }

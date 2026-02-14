@@ -20,8 +20,10 @@
 
 #pragma once
 
+#include "CommonAtomStrings.h"
 #include "FEConvolveMatrix.h"
 #include "SVGFilterPrimitiveStandardAttributes.h"
+#include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
 
@@ -40,7 +42,7 @@ struct SVGPropertyTraits<EdgeModeType> {
         case EdgeModeType::Wrap:
             return "wrap"_s;
         case EdgeModeType::None:
-            return "none"_s;
+            return noneAtom();
         }
 
         ASSERT_NOT_REACHED();
@@ -49,18 +51,19 @@ struct SVGPropertyTraits<EdgeModeType> {
 
     static EdgeModeType fromString(const String& value)
     {
-        if (value == "duplicate")
+        if (value == "duplicate"_s)
             return EdgeModeType::Duplicate;
-        if (value == "wrap")
+        if (value == "wrap"_s)
             return EdgeModeType::Wrap;
-        if (value == "none")
+        if (value == noneAtom())
             return EdgeModeType::None;
         return EdgeModeType::Unknown;
     }
 };
 
 class SVGFEConvolveMatrixElement final : public SVGFilterPrimitiveStandardAttributes {
-    WTF_MAKE_ISO_ALLOCATED(SVGFEConvolveMatrixElement);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(SVGFEConvolveMatrixElement);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(SVGFEConvolveMatrixElement);
 public:
     static Ref<SVGFEConvolveMatrixElement> create(const QualifiedName&, Document&);
 
@@ -93,20 +96,20 @@ public:
     SVGAnimatedNumber& kernelUnitLengthYAnimated() { return m_kernelUnitLengthY; }
     SVGAnimatedBoolean& preserveAlphaAnimated() { return m_preserveAlpha; }
 
+    using PropertyRegistry = SVGPropertyOwnerRegistry<SVGFEConvolveMatrixElement, SVGFilterPrimitiveStandardAttributes>;
+
 private:
     SVGFEConvolveMatrixElement(const QualifiedName&, Document&);
 
-    using PropertyRegistry = SVGPropertyOwnerRegistry<SVGFEConvolveMatrixElement, SVGFilterPrimitiveStandardAttributes>;
-    const SVGPropertyRegistry& propertyRegistry() const final { return m_propertyRegistry; }
-
-    void parseAttribute(const QualifiedName&, const AtomString&) override;
+    void attributeChanged(const QualifiedName&, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason) override;
     void svgAttributeChanged(const QualifiedName&) override;
 
-    bool setFilterEffectAttribute(FilterEffect*, const QualifiedName&) override;
-    Vector<AtomString> filterEffectInputsNames() const override { return { in1() }; }
-    RefPtr<FilterEffect> filterEffect(const SVGFilterBuilder&, const FilterEffectVector&) const override;
+    bool isValidTargetXOffset() const;
+    bool isValidTargetYOffset() const;
+    bool setFilterEffectAttribute(FilterEffect&, const QualifiedName&) override;
+    Vector<AtomString> filterEffectInputsNames() const override { return { AtomString { in1() } }; }
+    RefPtr<FilterEffect> createFilterEffect(const FilterEffectVector&, const GraphicsContext& destinationContext) const override;
 
-    PropertyRegistry m_propertyRegistry { *this };
     Ref<SVGAnimatedString> m_in1 { SVGAnimatedString::create(this) };
     Ref<SVGAnimatedInteger> m_orderX { SVGAnimatedInteger::create(this) };
     Ref<SVGAnimatedInteger> m_orderY { SVGAnimatedInteger::create(this) };

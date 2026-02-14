@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2008 Apple Inc. All Rights Reserved.
- * Copyright (C) 2011 Google, Inc. All Rights Reserved.
+ * Copyright (C) 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2011 Google, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,11 +30,13 @@
 
 #include "Chrome.h"
 #include "ChromeClient.h"
+#include "ContextDestructionObserverInlines.h"
 #include "Database.h"
 #include "DatabaseManager.h"
 #include "DatabaseTask.h"
 #include "DatabaseThread.h"
-#include "Document.h"
+#include "DocumentInlines.h"
+#include "FrameDestructionObserverInlines.h"
 #include "LegacySchemeRegistry.h"
 #include "Page.h"
 #include "ScriptExecutionContext.h"
@@ -176,10 +178,9 @@ bool DatabaseContext::stopDatabases(DatabaseTaskSynchronizer* synchronizer)
 
 bool DatabaseContext::allowDatabaseAccess() const
 {
-    auto* context = scriptExecutionContext();
-    if (is<Document>(*context)) {
-        auto& document = downcast<Document>(*context);
-        if (!document.page() || (document.page()->usesEphemeralSession() && !LegacySchemeRegistry::allowsDatabaseAccessInPrivateBrowsing(document.securityOrigin().protocol())))
+    RefPtr context = scriptExecutionContext();
+    if (RefPtr document = dynamicDowncast<Document>(*context)) {
+        if (!document->page() || (document->page()->usesEphemeralSession() && !LegacySchemeRegistry::allowsDatabaseAccessInPrivateBrowsing(document->securityOrigin().protocol())))
             return false;
         return true;
     }
@@ -190,14 +191,18 @@ bool DatabaseContext::allowDatabaseAccess() const
 
 void DatabaseContext::databaseExceededQuota(const String& name, DatabaseDetails details)
 {
-    auto* context = scriptExecutionContext();
-    if (is<Document>(*context)) {
-        auto& document = downcast<Document>(*context);
-        if (Page* page = document.page())
-            page->chrome().client().exceededDatabaseQuota(*document.frame(), name, details);
+    RefPtr context = scriptExecutionContext();
+    if (RefPtr document = dynamicDowncast<Document>(*context)) {
+        if (RefPtr page = document->page())
+            page->chrome().client().exceededDatabaseQuota(*document->frame(), name, details);
         return;
     }
     ASSERT(context->isWorkerGlobalScope());
+}
+
+Document* DatabaseContext::document() const
+{
+    return downcast<Document>(ActiveDOMObject::scriptExecutionContext());
 }
 
 const SecurityOriginData& DatabaseContext::securityOrigin() const

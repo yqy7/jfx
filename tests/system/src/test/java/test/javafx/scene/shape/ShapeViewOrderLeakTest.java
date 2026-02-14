@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,8 @@
 
 package test.javafx.scene.shape;
 
+import java.lang.ref.WeakReference;
+import java.util.concurrent.CountDownLatch;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.scene.Group;
@@ -34,21 +36,15 @@ import javafx.scene.shape.Circle;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.shape.Shape;
 import javafx.stage.Stage;
-
-import java.lang.ref.WeakReference;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-import junit.framework.Assert;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import test.util.Util;
-import static org.junit.Assert.assertTrue;
+import test.util.memory.JMemoryBuddy;
 
 public class ShapeViewOrderLeakTest {
 
-    private static CountDownLatch startupLatch;
+    private static CountDownLatch startupLatch = new CountDownLatch(1);
     private static StackPane root;
     private static Stage stage;
     private static Group group;
@@ -78,12 +74,14 @@ public class ShapeViewOrderLeakTest {
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() throws Exception {
-        startupLatch = new CountDownLatch(1);
-        new Thread(() -> Application.launch(TestApp.class, (String[]) null)).start();
-        assertTrue("Timeout waiting for FX runtime to start",
-                   startupLatch.await(15, TimeUnit.SECONDS));
+        Util.launch(startupLatch, TestApp.class);
+    }
+
+    @AfterAll
+    public static void teardownOnce() {
+        Util.shutdown();
     }
 
     @Test
@@ -93,22 +91,7 @@ public class ShapeViewOrderLeakTest {
             group.getChildren().clear();
             root.getChildren().clear();
         });
-        for (int i = 0; i < 10; i++) {
-            System.gc();
-            if (shapeWeakRef.get() == null) {
-                break;
-            }
-            Util.sleep(500);
-        }
-        // Ensure that Shape is GCed.
-        Assert.assertNull("Couldn't collect Shape", shapeWeakRef.get());
-    }
 
-    @AfterClass
-    public static void teardownOnce() {
-        Platform.runLater(() -> {
-            stage.hide();
-            Platform.exit();
-        });
+        JMemoryBuddy.assertCollectable(shapeWeakRef);
     }
 }

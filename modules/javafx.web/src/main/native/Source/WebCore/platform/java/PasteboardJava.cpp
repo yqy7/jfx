@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,8 +30,11 @@
 #include "DocumentFragment.h"
 #include "Image.h"
 #include "Editor.h"
+#include "ElementInlines.h"
+#include "ContainerNodeInlines.h"
 #include "Frame.h"
 #include "FrameView.h"
+#include "LocalFrame.h"
 #include "markup.h"
 #include "Pasteboard.h"
 #include "RenderImage.h"
@@ -178,27 +181,24 @@ void writeImageToDataObject(RefPtr<DataObjectJava> dataObject, const Element& el
 String imageToMarkup(const String& url, const Element& element)
 {
     StringBuilder markup;
-    markup.append("<img src=\"");
+    markup.append(WTF::String::fromUTF8("<img src=\""));
     markup.append(url);
-    markup.append("\"");
+    markup.append(WTF::String::fromUTF8("\""));
     // Copy over attributes.  If we are dragging an image, we expect things like
     // the id to be copied as well.
-    NamedNodeMap* attrs = &element.attributes();
-    unsigned length = attrs->length();
-    for (unsigned i = 0; i < length; ++i) {
-        RefPtr<Attr> attr(static_cast<Attr*>(attrs->item(i).get()));
-        if (attr->name() == "src")
+    for (const auto& attr : element.attributes()) {
+        if (attr.name() == "src"_s)
             continue;
-        markup.append(" ");
-        markup.append(attr->name());
-        markup.append("=\"");
-        String escapedAttr = attr->value();
-        escapedAttr.replace("\"", "&quot;");
+        markup.append(WTF::String::fromUTF8(" "));
+        markup.append(attr.localName().string());
+        markup.append(WTF::String::fromUTF8("=\""));
+        String escapedAttr = attr.value().string();
+        escapedAttr = makeStringByReplacingAll(escapedAttr,"\""_s, "&quot;"_s);
         markup.append(escapedAttr);
-        markup.append("\"");
+        markup.append(WTF::String::fromUTF8("\""));
     }
 
-    markup.append("/>");
+    markup.append(WTF::String::fromUTF8("/>"));
     return markup.toString();
 }
 
@@ -260,10 +260,10 @@ void Pasteboard::setDragImage(DragImage, const IntPoint&)
 void Pasteboard::writeSelection(
     const SimpleRange& selectedRange,
     bool canSmartCopyOrDelete,
-    Frame& frame,
+    LocalFrame& frame,
     ShouldSerializeSelectedTextForDataTransfer shouldSerializeSelectedTextForDataTransfer)
 {
-    String markup = serializePreservingVisualAppearance(selectedRange, nullptr, AnnotateForInterchange::Yes, ConvertBlocksToInlines::No, ResolveURLs::YesExcludingLocalFileURLsForPrivacy);
+    String markup = serializePreservingVisualAppearance(selectedRange, nullptr, AnnotateForInterchange::Yes, ConvertBlocksToInlines::No, ResolveURLs::YesExcludingURLsForPrivacy);
     String plainText = shouldSerializeSelectedTextForDataTransfer == IncludeImageAltTextForDataTransfer
         ? frame.editor().selectedTextForDataTransfer()
         : frame.editor().selectedText();
@@ -330,7 +330,7 @@ void Pasteboard::writeImage(Element& element, const URL& url, const String& titl
 
     AtomString imageURL = element.getAttribute(HTMLNames::srcAttr);
     if (!imageURL.isEmpty()) {
-        String fullURL = element.document().completeURL(stripLeadingAndTrailingHTMLSpaces(imageURL)).string();
+        String fullURL = element.document().completeURL(imageURL).string();  //REVISIT
         if (!fullURL.isEmpty()) {
             m_dataObject->setHTML(
                 imageToMarkup(fullURL, element),
@@ -474,7 +474,7 @@ bool Pasteboard::canSmartReplace()
 }
 
 RefPtr<DocumentFragment> Pasteboard::documentFragment(
-    Frame& frame, const SimpleRange& range, bool allowPlainText, bool &chosePlainText)
+    LocalFrame& frame, const SimpleRange& range, bool allowPlainText, bool &chosePlainText)
 {
     chosePlainText = false;
 
@@ -484,7 +484,7 @@ RefPtr<DocumentFragment> Pasteboard::documentFragment(
 
     if (!htmlString.isNull()) {
         if (RefPtr<DocumentFragment> fragment = createFragmentFromMarkup(
-                *frame.document(), htmlString, String(), DisallowScriptingContent))
+                *frame.document(), htmlString, emptyString(), ParserContentPolicy::AllowScriptingContent))
         {
             return fragment;
         }

@@ -54,6 +54,7 @@ static String httpStyleLanguageCode(CFStringRef language, ShouldMinimizeLanguage
         preferredLanguageCode = adoptCF(CFLocaleCreateCanonicalLanguageIdentifierFromString(kCFAllocatorDefault, language));
     else {
 #endif
+
         SInt32 languageCode;
         SInt32 regionCode;
         SInt32 scriptCode;
@@ -94,24 +95,24 @@ Vector<String> platformUserPreferredLanguages(ShouldMinimizeLanguages shouldMini
 {
     auto platformLanguages = adoptCF(CFLocaleCopyPreferredLanguages());
 
-    LOG_WITH_STREAM(Language, stream << "CFLocaleCopyPreferredLanguages() returned: " << reinterpret_cast<id>(const_cast<CFMutableArrayRef>(platformLanguages.get())));
+    LOG_WITH_STREAM(Language, stream << "CFLocaleCopyPreferredLanguages() returned: "_s << reinterpret_cast<id>(const_cast<CFMutableArrayRef>(platformLanguages.get())));
 #if !PLATFORM(JAVA)
     if (shouldMinimizeLanguages == ShouldMinimizeLanguages::Yes)
         platformLanguages = minimizedLanguagesFromLanguages(platformLanguages.get());
-    LOG_WITH_STREAM(Language, stream << "Minimized languages: " << reinterpret_cast<id>(const_cast<CFMutableArrayRef>(platformLanguages.get())));
+
+    LOG_WITH_STREAM(Language, stream << "Minimized languages: "_s << reinterpret_cast<id>(const_cast<CFMutableArrayRef>(platformLanguages.get())));
 #endif
 
     CFIndex platformLanguagesCount = CFArrayGetCount(platformLanguages.get());
     if (!platformLanguagesCount)
         return { "en"_s };
 
-    Vector<String> languages;
-    for (CFIndex i = 0; i < platformLanguagesCount; i++) {
+    Vector<String> languages(platformLanguagesCount, [&](size_t i) {
         auto platformLanguage = static_cast<CFStringRef>(CFArrayGetValueAtIndex(platformLanguages.get(), i));
-        languages.append(httpStyleLanguageCode(platformLanguage, shouldMinimizeLanguages));
-    }
+        return httpStyleLanguageCode(platformLanguage, shouldMinimizeLanguages);
+    });
 
-    LOG_WITH_STREAM(Language, stream << "After passing through httpStyleLanguageCode: " << languages);
+    LOG_WITH_STREAM(Language, stream << "After passing through httpStyleLanguageCode: "_s << languages);
 
     return languages;
 }

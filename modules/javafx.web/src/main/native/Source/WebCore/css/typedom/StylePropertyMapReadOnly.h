@@ -25,8 +25,6 @@
 
 #pragma once
 
-#if ENABLE(CSS_TYPED_OM)
-
 #include "CSSStyleValue.h"
 #include "CSSValue.h"
 #include <wtf/RefCounted.h>
@@ -34,19 +32,53 @@
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
+
 class Document;
 class Element;
+class ScriptExecutionContext;
 class StyledElement;
 
 class StylePropertyMapReadOnly : public RefCounted<StylePropertyMapReadOnly> {
 public:
-    virtual ~StylePropertyMapReadOnly() = default;
-    virtual RefPtr<CSSStyleValue> get(const String& property) const = 0;
+    using StylePropertyMapEntry = KeyValuePair<String, Vector<RefPtr<CSSStyleValue>>>;
 
-    static RefPtr<CSSStyleValue> reifyValue(CSSValue*, Document&, Element* = nullptr);
-    static RefPtr<CSSStyleValue> customPropertyValueOrDefault(const String& name, Document&, CSSValue*, Element* = nullptr);
+    enum class Type {
+        Computed,
+        Declared,
+        HashMap,
+        Inline,
+    };
+
+    virtual Type type() const = 0;
+
+    class Iterator {
+    public:
+        explicit Iterator(StylePropertyMapReadOnly&, ScriptExecutionContext*);
+        std::optional<StylePropertyMapEntry> next();
+
+    private:
+        Vector<StylePropertyMapEntry> m_values;
+        size_t m_index { 0 };
+    };
+    Iterator createIterator(ScriptExecutionContext* context) { return Iterator(*this, context); }
+
+    virtual ~StylePropertyMapReadOnly() = default;
+    using CSSStyleValueOrUndefined = Variant<std::monostate, RefPtr<CSSStyleValue>>;
+    virtual ExceptionOr<CSSStyleValueOrUndefined> get(ScriptExecutionContext&, const AtomString& property) const = 0;
+    virtual ExceptionOr<Vector<RefPtr<CSSStyleValue>>> getAll(ScriptExecutionContext&, const AtomString&) const = 0;
+    virtual ExceptionOr<bool> has(ScriptExecutionContext&, const AtomString&) const = 0;
+    virtual unsigned size() const = 0;
+
+    static RefPtr<CSSStyleValue> reifyValue(Document&, RefPtr<CSSValue>&&, std::optional<CSSPropertyID>);
+    static Vector<RefPtr<CSSStyleValue>> reifyValueToVector(Document&, RefPtr<CSSValue>&&, std::optional<CSSPropertyID>);
+
+protected:
+    virtual Vector<StylePropertyMapEntry> entries(ScriptExecutionContext*) const = 0;
 };
 
 } // namespace WebCore
 
-#endif
+#define SPECIALIZE_TYPE_TRAITS_CSSOM_STYLE_PROPERTY_MAP(ToValueTypeName, predicate) \
+SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::ToValueTypeName) \
+    static bool isType(const WebCore::StylePropertyMapReadOnly& value) { return value.type() == predicate; } \
+SPECIALIZE_TYPE_TRAITS_END()

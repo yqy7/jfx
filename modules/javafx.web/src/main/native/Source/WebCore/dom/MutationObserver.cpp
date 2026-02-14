@@ -42,13 +42,15 @@
 #include "MutationRecord.h"
 #include "WindowEventLoop.h"
 #include <algorithm>
-#include <wtf/IsoMallocInlines.h>
+#include <ranges>
 #include <wtf/MainThread.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/RobinHoodHashSet.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(MutationObserver);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(MutationObserver);
 
 static unsigned s_observerPriority = 0;
 
@@ -66,7 +68,7 @@ MutationObserver::MutationObserver(Ref<MutationCallback>&& callback)
 
 MutationObserver::~MutationObserver()
 {
-    ASSERT(m_registrations.computesEmpty());
+    ASSERT(m_registrations.isEmptyIgnoringNullReferences());
 }
 
 bool MutationObserver::validateOptions(MutationObserverOptions options)
@@ -90,7 +92,7 @@ ExceptionOr<void> MutationObserver::observe(Node& node, const Init& init)
     if (init.characterDataOldValue.value_or(false))
         options.add(OptionType::CharacterDataOldValue);
 
-    HashSet<AtomString> attributeFilter;
+    MemoryCompactLookupOnlyRobinHoodHashSet<AtomString> attributeFilter;
     if (init.attributeFilter) {
         for (auto& value : init.attributeFilter.value())
             attributeFilter.add(value);
@@ -104,7 +106,7 @@ ExceptionOr<void> MutationObserver::observe(Node& node, const Init& init)
         options.add(OptionType::CharacterData);
 
     if (!validateOptions(options))
-        return Exception { TypeError };
+        return Exception { ExceptionCode::TypeError };
 
     node.registerMutationObserver(*this, options, attributeFilter);
 
@@ -191,13 +193,13 @@ void MutationObserver::deliver()
 
     // Calling takeTransientRegistrations() can modify m_registrations, so it's necessary
     // to make a copy of the transient registrations before operating on them.
-    Vector<MutationObserverRegistration*, 1> transientRegistrations;
-    Vector<std::unique_ptr<HashSet<GCReachableRef<Node>>>, 1> nodesToKeepAlive;
+    Vector<WeakPtr<MutationObserverRegistration>, 1> transientRegistrations;
+    Vector<HashSet<GCReachableRef<Node>>, 1> nodesToKeepAlive;
     HashSet<GCReachableRef<Node>> pendingTargets;
     pendingTargets.swap(m_pendingTargets);
     for (auto& registration : m_registrations) {
         if (registration.hasTransientRegistrations())
-            transientRegistrations.append(&registration);
+            transientRegistrations.append(registration);
     }
     for (auto& registration : transientRegistrations)
         nodesToKeepAlive.append(registration->takeTransientRegistrations());
@@ -212,12 +214,12 @@ void MutationObserver::deliver()
 
     // FIXME: Keep mutation observer callback as long as its observed nodes are alive. See https://webkit.org/b/179224.
     if (m_callback->hasCallback()) {
-        auto* context = m_callback->scriptExecutionContext();
+        RefPtr context = m_callback->scriptExecutionContext();
         if (!context)
             return;
 
         InspectorInstrumentation::willFireObserverCallback(*context, "MutationObserver"_s);
-        m_callback->handleEvent(*this, records, *this);
+        m_callback->invoke(*this, records, *this);
         InspectorInstrumentation::didFireObserverCallback(*context);
     }
 }
@@ -239,7 +241,7 @@ void MutationObserver::notifyMutationObservers(WindowEventLoop& eventLoop)
         // 2. Let notify list be a copy of unit of related similar-origin browsing contexts' list of MutationObserver objects.
         auto notifyList = copyToVector(eventLoop.activeMutationObservers());
         eventLoop.activeMutationObservers().clear();
-        std::sort(notifyList.begin(), notifyList.end(), [](auto& lhs, auto& rhs) {
+        std::ranges::sort(notifyList, [](auto& lhs, auto& rhs) {
             return lhs->m_priority < rhs->m_priority;
         });
 

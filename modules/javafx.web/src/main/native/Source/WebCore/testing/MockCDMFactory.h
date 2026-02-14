@@ -35,13 +35,23 @@
 #include "MediaKeyEncryptionScheme.h"
 #include "MediaKeysRequirement.h"
 #include <wtf/HashMap.h>
-#include <wtf/RefCounted.h>
+#include <wtf/RefCountedAndCanMakeWeakPtr.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/Vector.h>
 #include <wtf/WeakPtr.h>
 
 namespace WebCore {
+class MockCDM;
+}
 
-class MockCDMFactory : public RefCounted<MockCDMFactory>, public CanMakeWeakPtr<MockCDMFactory>, private CDMFactory {
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::MockCDM> : std::true_type { };
+}
+
+namespace WebCore {
+
+class MockCDMFactory : public RefCountedAndCanMakeWeakPtr<MockCDMFactory>, private CDMFactory {
 public:
     static Ref<MockCDMFactory> create() { return adoptRef(*new MockCDMFactory); }
     ~MockCDMFactory();
@@ -53,7 +63,7 @@ public:
     void setSupportedSessionTypes(Vector<MediaKeySessionType>&& types) { m_supportedSessionTypes = WTFMove(types); }
 
     const Vector<AtomString>& supportedRobustness() const { return m_supportedRobustness; }
-    void setSupportedRobustness(Vector<String>&&);
+    void setSupportedRobustness(Vector<AtomString>&& supportedRobustness) { m_supportedRobustness = WTFMove(supportedRobustness); }
 
     MediaKeysRequirement distinctiveIdentifiersRequirement() const { return m_distinctiveIdentifiersRequirement; }
     void setDistinctiveIdentifiersRequirement(MediaKeysRequirement requirement) { m_distinctiveIdentifiersRequirement = requirement; }
@@ -75,15 +85,15 @@ public:
 
     void unregister();
 
-    bool hasSessionWithID(const String& id) { return m_sessions.contains(id); }
-    void removeSessionWithID(const String& id) { m_sessions.remove(id); }
-    void addKeysToSessionWithID(const String& id, Vector<Ref<FragmentedSharedBuffer>>&&);
-    const Vector<Ref<FragmentedSharedBuffer>>* keysForSessionWithID(const String& id) const;
-    Vector<Ref<FragmentedSharedBuffer>> removeKeysFromSessionWithID(const String& id);
+    bool hasSessionWithID(const String& id);
+    void removeSessionWithID(const String& id);
+    void addKeysToSessionWithID(const String& id, Vector<Ref<SharedBuffer>>&&);
+    const Vector<Ref<SharedBuffer>>* keysForSessionWithID(const String& id) const;
+    Vector<Ref<SharedBuffer>> removeKeysFromSessionWithID(const String& id);
 
 private:
     MockCDMFactory();
-    std::unique_ptr<CDMPrivate> createCDM(const String&) final;
+    std::unique_ptr<CDMPrivate> createCDM(const String&, const String& mediaKeysHashSalt, const CDMPrivateClient&) final;
     bool supportsKeySystem(const String&) final;
 
     MediaKeysRequirement m_distinctiveIdentifiersRequirement { MediaKeysRequirement::Optional };
@@ -96,15 +106,16 @@ private:
     bool m_canCreateInstances { true };
     bool m_supportsServerCertificates { true };
     bool m_supportsSessions { true };
-    HashMap<String, Vector<Ref<FragmentedSharedBuffer>>> m_sessions;
+    HashMap<String, Vector<Ref<SharedBuffer>>> m_sessions;
 };
 
 class MockCDM : public CDMPrivate {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(MockCDM);
 public:
-    MockCDM(WeakPtr<MockCDMFactory>);
+    MockCDM(WeakPtr<MockCDMFactory>, const String&);
 
     MockCDMFactory* factory() { return m_factory.get(); }
+    const String& mediaKeysHashSalt() const { return m_mediaKeysHashSalt; }
 
 private:
     friend class MockCDMInstance;
@@ -121,11 +132,12 @@ private:
     void loadAndInitialize() final;
     bool supportsServerCertificates() const final;
     bool supportsSessions() const final;
-    bool supportsInitData(const AtomString&, const FragmentedSharedBuffer&) const final;
-    RefPtr<FragmentedSharedBuffer> sanitizeResponse(const FragmentedSharedBuffer&) const final;
+    bool supportsInitData(const AtomString&, const SharedBuffer&) const final;
+    RefPtr<SharedBuffer> sanitizeResponse(const SharedBuffer&) const final;
     std::optional<String> sanitizeSessionId(const String&) const final;
 
     WeakPtr<MockCDMFactory> m_factory;
+    String m_mediaKeysHashSalt;
 };
 
 class MockCDMInstance : public CDMInstance, public CanMakeWeakPtr<MockCDMInstance> {
@@ -139,7 +151,7 @@ public:
 private:
     ImplementationType implementationType() const final { return ImplementationType::Mock; }
     void initializeWithConfiguration(const MediaKeySystemConfiguration&, AllowDistinctiveIdentifiers, AllowPersistentState, SuccessCallback&&) final;
-    void setServerCertificate(Ref<FragmentedSharedBuffer>&&, SuccessCallback&&) final;
+    void setServerCertificate(Ref<SharedBuffer>&&, SuccessCallback&&) final;
     void setStorageDirectory(const String&) final;
     const String& keySystem() const final;
     RefPtr<CDMInstanceSession> createSession() final;
@@ -154,8 +166,8 @@ public:
     MockCDMInstanceSession(WeakPtr<MockCDMInstance>&&);
 
 private:
-    void requestLicense(LicenseType, const AtomString& initDataType, Ref<FragmentedSharedBuffer>&& initData, LicenseCallback&&) final;
-    void updateLicense(const String&, LicenseType, Ref<FragmentedSharedBuffer>&&, LicenseUpdateCallback&&) final;
+    void requestLicense(LicenseType, KeyGroupingStrategy, const AtomString& initDataType, Ref<SharedBuffer>&& initData, LicenseCallback&&) final;
+    void updateLicense(const String&, LicenseType, Ref<SharedBuffer>&&, LicenseUpdateCallback&&) final;
     void loadSession(LicenseType, const String&, const String&, LoadSessionCallback&&) final;
     void closeSession(const String&, CloseSessionCallback&&) final;
     void removeSessionData(const String&, LicenseType, RemoveSessionDataCallback&&) final;

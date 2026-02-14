@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,16 +25,17 @@
 
 package javafx.scene.control.skin;
 
-import com.sun.javafx.scene.control.LambdaMultiplePropertyChangeListenerHandler;
-import com.sun.javafx.scene.control.Properties;
-import com.sun.javafx.scene.control.TabObservableList;
-import com.sun.javafx.util.Utils;
+import static com.sun.javafx.scene.control.skin.resources.ControlResources.getString;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import javafx.animation.Animation;
 import javafx.animation.Interpolator;
 import javafx.animation.KeyFrame;
 import javafx.animation.KeyValue;
 import javafx.animation.Timeline;
 import javafx.animation.Transition;
+import javafx.application.Platform;
 import javafx.beans.InvalidationListener;
 import javafx.beans.Observable;
 import javafx.beans.WeakInvalidationListener;
@@ -51,11 +52,12 @@ import javafx.css.PseudoClass;
 import javafx.css.Styleable;
 import javafx.css.StyleableObjectProperty;
 import javafx.css.StyleableProperty;
+import javafx.css.converter.EnumConverter;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.geometry.Bounds;
 import javafx.geometry.HPos;
-import javafx.geometry.NodeOrientation;
+import javafx.geometry.Orientation;
 import javafx.geometry.Point2D;
 import javafx.geometry.Pos;
 import javafx.geometry.Side;
@@ -91,16 +93,11 @@ import javafx.scene.shape.Rectangle;
 import javafx.scene.transform.Rotate;
 import javafx.util.Duration;
 import javafx.util.Pair;
-
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
-
-import javafx.css.converter.EnumConverter;
+import com.sun.javafx.scene.control.LambdaMultiplePropertyChangeListenerHandler;
+import com.sun.javafx.scene.control.Properties;
+import com.sun.javafx.scene.control.TabObservableList;
 import com.sun.javafx.scene.control.behavior.TabPaneBehavior;
-
-import static com.sun.javafx.scene.control.skin.resources.ControlResources.getString;
+import com.sun.javafx.util.Utils;
 
 /**
  * Default skin implementation for the {@link TabPane} control.
@@ -296,7 +293,11 @@ public class TabPaneSkin extends SkinBase<TabPane> {
         // The TabPane can only be as wide as it widest content width.
         double maxw = 0.0;
         for (TabContentRegion contentRegion: tabContentRegions) {
-            maxw = Math.max(maxw, snapSizeX(contentRegion.prefWidth(-1)));
+            double dependentHeight = contentRegion.getContentBias() == Orientation.VERTICAL
+                ? Math.max(0, contentRegion.prefHeight(-1) - topInset - bottomInset)
+                : -1;
+
+            maxw = Math.max(maxw, snapSizeX(contentRegion.prefWidth(dependentHeight)));
         }
 
         final boolean isHorizontal = isHorizontal();
@@ -314,7 +315,11 @@ public class TabPaneSkin extends SkinBase<TabPane> {
         // The TabPane can only be as high as it highest content height.
         double maxh = 0.0;
         for (TabContentRegion contentRegion: tabContentRegions) {
-            maxh = Math.max(maxh, snapSizeY(contentRegion.prefHeight(-1)));
+            double dependentWidth = contentRegion.getContentBias() == Orientation.HORIZONTAL
+                ? Math.max(0, contentRegion.prefWidth(-1) - leftInset - rightInset)
+                : -1;
+
+            maxh = Math.max(maxh, snapSizeY(contentRegion.prefHeight(dependentWidth)));
         }
 
         final boolean isHorizontal = isHorizontal();
@@ -432,7 +437,7 @@ public class TabPaneSkin extends SkinBase<TabPane> {
             }
 
             // we need to size all tabs, even if they aren't visible. For example,
-            // see RT-29167
+            // see JDK-8116643
             tabContent.resize(contentWidth, contentHeight);
             tabContent.relocate(contentStartX, contentStartY);
         }
@@ -524,7 +529,7 @@ public class TabPaneSkin extends SkinBase<TabPane> {
                     }
                 };
 
-                if (closeTabAnimation.get() == TabAnimation.GROW) {
+                if (Platform.isFxApplicationThread() && (closeTabAnimation.get() == TabAnimation.GROW)) {
                     tabRegion.animationState = TabAnimationState.HIDING;
                     Timeline closedTabTimeline = tabRegion.currentAnimation =
                             createTimeline(tabRegion, Duration.millis(ANIMATION_SPEED), 0.0F, cleanup);
@@ -552,7 +557,7 @@ public class TabPaneSkin extends SkinBase<TabPane> {
     private void addTabs(List<? extends Tab> addedList, int from) {
         int i = 0;
 
-        // RT-39984: check if any other tabs are animating - they must be completed first.
+        // JDK-8093620: check if any other tabs are animating - they must be completed first.
         List<Node> headers = new ArrayList<>(tabHeaderArea.headersRegion.getChildren());
         for (Node n : headers) {
             TabHeaderSkin header = (TabHeaderSkin) n;
@@ -560,7 +565,7 @@ public class TabPaneSkin extends SkinBase<TabPane> {
                 stopCurrentAnimation(header.tab);
             }
         }
-        // end of fix for RT-39984
+        // end of fix for JDK-8093620
 
         for (final Tab tab : addedList) {
             stopCurrentAnimation(tab); // Note that this must happen before addTab() call below
@@ -573,7 +578,7 @@ public class TabPaneSkin extends SkinBase<TabPane> {
             addTabContent(tab);
             final TabHeaderSkin tabRegion = tabHeaderArea.getTabHeaderSkin(tab);
             if (tabRegion != null) {
-                if (openTabAnimation.get() == TabAnimation.GROW) {
+                if (Platform.isFxApplicationThread() && (openTabAnimation.get() == TabAnimation.GROW)) {
                     tabRegion.animationState = TabAnimationState.SHOWING;
                     tabRegion.animationTransition.setValue(0.0);
                     tabRegion.setVisible(true);
@@ -610,7 +615,7 @@ public class TabPaneSkin extends SkinBase<TabPane> {
                         // restore old selection, and old tab animation states.
                         int size = c.getTo() - c.getFrom();
                         Tab selTab = tabPane.getSelectionModel().getSelectedItem();
-                        List<Tab> permutatedTabs = new ArrayList<Tab>(size);
+                        List<Tab> permutatedTabs = new ArrayList<>(size);
                         getSkinnable().getSelectionModel().clearSelection();
 
                         // save and set tab animation to none - as it is not a good idea
@@ -671,7 +676,7 @@ public class TabPaneSkin extends SkinBase<TabPane> {
                 }
             }
 
-            // Fix for RT-34692
+            // Fix for JDK-8122662
             getSkinnable().requestLayout();
         };
         weakTabsListener = new WeakListChangeListener<>(tabsListener);
@@ -756,8 +761,8 @@ public class TabPaneSkin extends SkinBase<TabPane> {
         private static final List<CssMetaData<? extends Styleable, ?>> STYLEABLES;
 
         private final static CssMetaData<TabPane,TabAnimation> OPEN_TAB_ANIMATION =
-                new CssMetaData<TabPane, TabPaneSkin.TabAnimation>("-fx-open-tab-animation",
-                    new EnumConverter<TabAnimation>(TabAnimation.class), TabAnimation.GROW) {
+                new CssMetaData<>("-fx-open-tab-animation",
+                    new EnumConverter<>(TabAnimation.class), TabAnimation.GROW) {
 
             @Override public boolean isSettable(TabPane node) {
                 return true;
@@ -770,8 +775,8 @@ public class TabPaneSkin extends SkinBase<TabPane> {
         };
 
         private final static CssMetaData<TabPane,TabAnimation> CLOSE_TAB_ANIMATION =
-                new CssMetaData<TabPane, TabPaneSkin.TabAnimation>("-fx-close-tab-animation",
-                    new EnumConverter<TabAnimation>(TabAnimation.class), TabAnimation.GROW) {
+                new CssMetaData<>("-fx-close-tab-animation",
+                    new EnumConverter<>(TabAnimation.class), TabAnimation.GROW) {
 
             @Override public boolean isSettable(TabPane node) {
                 return true;
@@ -786,7 +791,7 @@ public class TabPaneSkin extends SkinBase<TabPane> {
         static {
 
            final List<CssMetaData<? extends Styleable, ?>> styleables =
-               new ArrayList<CssMetaData<? extends Styleable, ?>>(SkinBase.getClassCssMetaData());
+               new ArrayList<>(SkinBase.getClassCssMetaData());
            styleables.add(OPEN_TAB_ANIMATION);
            styleables.add(CLOSE_TAB_ANIMATION);
            STYLEABLES = Collections.unmodifiableList(styleables);
@@ -936,17 +941,23 @@ public class TabPaneSkin extends SkinBase<TabPane> {
             // Scrolling the mouse wheel downwards results in the tabs scrolling left (i.e. exposing the right-most tabs)
             // Scrolling the mouse wheel upwards results in the tabs scrolling right (i.e. exposing th left-most tabs)
             addEventHandler(ScrollEvent.SCROLL, (ScrollEvent e) -> {
+                double dx = e.getDeltaX();
+                double dy = e.getDeltaY();
+
                 Side side = getSkinnable().getSide();
                 side = side == null ? Side.TOP : side;
                 switch (side) {
                     default:
                     case TOP:
                     case BOTTOM:
-                        setScrollOffset(scrollOffset + e.getDeltaY());
+                        // Consider vertical scroll events (dy > dx) from mouse wheel and trackpad,
+                        // and horizontal scroll events from a trackpad (dx > dy)
+                        dx = Math.abs(dy) > Math.abs(dx) ? dy : dx;
+                        setScrollOffset(scrollOffset + dx);
                         break;
                     case LEFT:
                     case RIGHT:
-                        setScrollOffset(scrollOffset - e.getDeltaY());
+                        setScrollOffset(scrollOffset - dy);
                         break;
                 }
 
@@ -1109,7 +1120,7 @@ public class TabPaneSkin extends SkinBase<TabPane> {
                 // need to make sure the right-most tab is attached to the
                 // right-hand side of the tab header (e.g. if the tab header area width
                 // is expanded), and if it isn't modify the scroll offset to bring
-                // it into line. See RT-35194 for a test case.
+                // it into line. See JDK-8095332 for a test case.
                 actualNewScrollOffset = visibleWidth - offset;
             } else if (newScrollOffset > 0) {
                 // need to prevent the left-most tab from becoming detached
@@ -1263,7 +1274,7 @@ public class TabPaneSkin extends SkinBase<TabPane> {
 
         private LambdaMultiplePropertyChangeListenerHandler listener = new LambdaMultiplePropertyChangeListenerHandler();
 
-        private final ListChangeListener<String> styleClassListener = new ListChangeListener<String>() {
+        private final ListChangeListener<String> styleClassListener = new ListChangeListener<>() {
             @Override
             public void onChanged(Change<? extends String> c) {
                 getStyleClass().setAll(tab.getStyleClass());
@@ -1400,7 +1411,7 @@ public class TabPaneSkin extends SkinBase<TabPane> {
                                 /*baseline ignored*/0, HPos.CENTER, VPos.CENTER);
                     }
 
-                    // Magic numbers regretfully introduced for RT-28944 (so that
+                    // Magic numbers regretfully introduced for JDK-8124860 (so that
                     // the focus rect appears as expected on Windows and Mac).
                     // In short we use the vPadding to shift the focus rect down
                     // into the content area (whereas previously it was being clipped
@@ -2027,6 +2038,7 @@ public class TabPaneSkin extends SkinBase<TabPane> {
                 completeHeaderReordering();
             });
         }
+        @Override
         protected void interpolate(double frac) {
             dropAnimHeader.setLayoutX(dropHeaderSourceX + dropHeaderTransitionX * frac);
         }
@@ -2043,6 +2055,7 @@ public class TabPaneSkin extends SkinBase<TabPane> {
                 resetDrag();
             });
         }
+        @Override
         protected void interpolate(double frac) {
             dragTabHeader.setLayoutX(dragHeaderSourceX + dragHeaderTransitionX * frac);
         }
@@ -2062,6 +2075,7 @@ public class TabPaneSkin extends SkinBase<TabPane> {
     }
 
     private ListChangeListener childListener = new ListChangeListener<Node>() {
+        @Override
         public void onChanged(Change<? extends Node> change) {
             while (change.next()) {
                 if (change.wasAdded()) {
@@ -2102,14 +2116,12 @@ public class TabPaneSkin extends SkinBase<TabPane> {
 
     private void handleHeaderMousePressed(MouseEvent event) {
         if (event.getButton().equals(MouseButton.PRIMARY)) {
-            ((StackPane) event.getSource()).setMouseTransparent(true);
             startDrag(event);
         }
     }
 
     private void handleHeaderMouseReleased(MouseEvent event) {
         if (event.getButton().equals(MouseButton.PRIMARY)) {
-            ((StackPane) event.getSource()).setMouseTransparent(false);
             stopDrag();
             event.consume();
         }
@@ -2144,7 +2156,7 @@ public class TabPaneSkin extends SkinBase<TabPane> {
         if (dragState == DragState.NONE) {
             return;
         }
-        int dragDirection;
+        int dragDirection = 0;
         double dragHeaderNewLayoutX;
         Bounds dragHeaderBounds;
         Bounds dropHeaderBounds;
@@ -2155,12 +2167,12 @@ public class TabPaneSkin extends SkinBase<TabPane> {
         if (dragDelta > 0) {
             // Dragging the tab header towards higher indexed tab headers inside headersRegion.
             dragDirection = MIN_TO_MAX;
-        } else {
+        } else if (dragDelta < 0) {
             // Dragging the tab header towards lower indexed tab headers inside headersRegion.
             dragDirection = MAX_TO_MIN;
         }
         // Stop dropHeaderAnim if direction of drag is changed
-        if (prevDragDirection != dragDirection) {
+        if (dragDirection != 0 && prevDragDirection != dragDirection) {
             stopAnim(dropHeaderAnim);
             prevDragDirection = dragDirection;
         }

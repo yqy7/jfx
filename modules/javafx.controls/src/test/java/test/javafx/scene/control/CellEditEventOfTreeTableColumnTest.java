@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,16 +25,11 @@
 
 package test.javafx.scene.control;
 
-import java.util.stream.Collectors;
-
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-
+import static javafx.scene.control.TreeTableColumn.editAnyEvent;
 import static javafx.scene.control.TreeTableColumn.editCommitEvent;
-import static javafx.scene.control.TreeTableColumn.*;
-import static org.junit.Assert.*;
-
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import java.util.stream.Collectors;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.event.Event;
@@ -43,6 +38,9 @@ import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTableColumn.CellEditEvent;
 import javafx.scene.control.TreeTablePosition;
 import javafx.scene.control.TreeTableView;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * Test cell edit event for TableColumn: must not throw NPE in accessors (JDK-8269871).
@@ -74,32 +72,32 @@ public class CellEditEventOfTreeTableColumnTest {
     @Test
     public void testNullTablePositionGetTableView() {
         CellEditEvent<String, String> ev = new CellEditEvent<>(table, null, editAnyEvent(), null);
-        assertNull("treeTable must be null if pos is null", ev.getTreeTableView());
+        assertNull(ev.getTreeTableView(), "treeTable must be null if pos is null");
     }
 
     @Test
     public void testNullTablePositionGetTableColumn() {
         CellEditEvent<String, String> ev = new CellEditEvent<>(table, null, editAnyEvent(), null);
-        assertNull("column must be null for null pos", ev.getTableColumn());
+        assertNull(ev.getTableColumn(), "column must be null for null pos");
     }
 
     @Test
     public void testNullTablePositionGetOldValue() {
         CellEditEvent<String, String> ev = new CellEditEvent<>(table, null, editAnyEvent(), null);
-        assertNull("oldValue must be null for null pos", ev.getOldValue());
+        assertNull(ev.getOldValue(), "oldValue must be null for null pos");
     }
 
     @Test
     public void testNullTablePositionGetRowValue() {
         CellEditEvent<String, String> ev = new CellEditEvent<>(table, null, editAnyEvent(), null);
-        assertNull("rowValue must be null for null pos", ev.getRowValue());
+        assertNull(ev.getRowValue(), "rowValue must be null for null pos");
     }
 
     @Test
     public void testNullTablePositionGetNewValue() {
         String editedValue = "edited";
         CellEditEvent<String, String> ev = new CellEditEvent<>(table, null, editAnyEvent(), editedValue);
-        assertEquals("editedValue must be available for null pos", editedValue, ev.getNewValue());
+        assertEquals(editedValue, ev.getNewValue(), "editedValue must be available for null pos");
     }
 
     @Test
@@ -107,14 +105,14 @@ public class CellEditEventOfTreeTableColumnTest {
         String editedValue = "edited";
         TreeTablePosition<String, String> pos = new TreeTablePosition<>(null, 1, editingColumn);
         CellEditEvent<String, String> ev = new CellEditEvent<>(table, pos, editAnyEvent(), editedValue);
-        assertNull("rowValue must be null for null pos", ev.getRowValue());
+        assertNull(ev.getRowValue(), "rowValue must be null for null pos");
     }
 
 // ------------- event source
 
     @Test
     public void testNullTable() {
-        new CellEditEvent<Object, Object>(null, // null table must not throw NPE
+        new CellEditEvent<>(null, // null table must not throw NPE
                 new TreeTablePosition<>(null, -1, null), editAnyEvent(), null);
     }
 
@@ -145,7 +143,7 @@ public class CellEditEventOfTreeTableColumnTest {
         TreeItem<String> rowValue = table.getTreeItem(editingRow);
         String oldValue = rowValue.getValue();
         TreeTablePosition<String, String> pos = new TreeTablePosition<>(table, editingRow, editingColumn);
-        CellEditEvent<String,String> ev = new CellEditEvent<String, String>(source, pos, editAnyEvent(), editedValue);
+        CellEditEvent<String,String> ev = new CellEditEvent<>(source, pos, editAnyEvent(), editedValue);
         if (source != null) {
             assertEquals(source, ev.getSource());
         }
@@ -168,7 +166,8 @@ public class CellEditEventOfTreeTableColumnTest {
 
 //------------ init
 
-    @Before public void setup() {
+    @BeforeEach
+    public void setup() {
         Thread.currentThread().setUncaughtExceptionHandler((thread, throwable) -> {
             if (throwable instanceof RuntimeException) {
                 throw (RuntimeException)throwable;
@@ -181,15 +180,14 @@ public class CellEditEventOfTreeTableColumnTest {
         root.setExpanded(true);
         ObservableList<String> model = FXCollections.observableArrayList("Four", "Five", "Fear");
         root.getChildren().addAll(model.stream().map(TreeItem::new).collect(Collectors.toList()));
-        table = new TreeTableView<String>(root);
+        table = new TreeTableView<>(root);
         editingColumn = new TreeTableColumn<>("TEST");
         table.getColumns().addAll(editingColumn);
         editingColumn.setCellValueFactory(e -> e.getValue().valueProperty());
     }
 
-    @After
+    @AfterEach
     public void cleanup() {
         Thread.currentThread().setUncaughtExceptionHandler(null);
     }
-
 }

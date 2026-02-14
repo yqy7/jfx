@@ -25,22 +25,24 @@
 #include "ColorComponents.h"
 #include "ColorTypes.h"
 #include "FilterEffectApplier.h"
+#include "PixelBuffer.h"
 #include <JavaScriptCore/Forward.h>
+#include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
 
 class FEMorphology;
-enum class MorphologyOperatorType;
+enum class MorphologyOperatorType : uint8_t;
 
 class FEMorphologySoftwareApplier final : public FilterEffectConcreteApplier<FEMorphology> {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(FEMorphologySoftwareApplier);
     using Base = FilterEffectConcreteApplier<FEMorphology>;
 
 public:
     using Base::Base;
 
 private:
-    bool apply(const Filter&, const FilterImageVector& inputs, FilterImage& result) const final;
+    bool apply(const Filter&, std::span<const Ref<FilterImage>> inputs, FilterImage& result) const final;
 
     using ColumnExtrema = Vector<ColorComponents<uint8_t, 4>, 16>;
 
@@ -48,8 +50,8 @@ private:
         MorphologyOperatorType type;
         int radiusX;
         int radiusY;
-        const Uint8ClampedArray* srcPixelArray;
-        Uint8ClampedArray* dstPixelArray;
+        const PixelBuffer* srcPixelBuffer;
+        PixelBuffer* dstPixelBuffer;
         int width;
         int height;
     };
@@ -65,7 +67,7 @@ private:
 
     static inline ColorComponents<uint8_t, 4> makeColorComponentsfromPixelValue(PackedColor::RGBA pixel) { return asColorComponents(asSRGBA(pixel).resolved()); }
     static inline ColorComponents<uint8_t, 4> minOrMax(const ColorComponents<uint8_t, 4>& a, const ColorComponents<uint8_t, 4>& b, MorphologyOperatorType);
-    static inline ColorComponents<uint8_t, 4> columnExtremum(const Uint8ClampedArray& srcPixelArray, int x, int yStart, int yEnd, int width, MorphologyOperatorType);
+    static inline ColorComponents<uint8_t, 4> columnExtremum(const PixelBuffer& srcPixelBuffer, int x, int yStart, int yEnd, int width, MorphologyOperatorType);
     static inline ColorComponents<uint8_t, 4> kernelExtremum(const ColumnExtrema& kernel, MorphologyOperatorType);
 
     static void applyPlatformGeneric(const PaintingData&, int startY, int endY);

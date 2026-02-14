@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2018-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -76,7 +76,7 @@ void ApplicationCacheResourceLoader::cancel(Error error)
     }
 }
 
-void ApplicationCacheResourceLoader::responseReceived(CachedResource& resource, const ResourceResponse& response, CompletionHandler<void()>&& completionHandler)
+void ApplicationCacheResourceLoader::responseReceived(const CachedResource& resource, const ResourceResponse& response, CompletionHandler<void()>&& completionHandler)
 {
     ASSERT_UNUSED(resource, &resource == m_resource);
     CompletionHandlerCallingScope completionHandlerCaller(WTFMove(completionHandler));
@@ -87,7 +87,7 @@ void ApplicationCacheResourceLoader::responseReceived(CachedResource& resource, 
     }
 
     if (response.httpStatusCode() == 304) {
-        notifyFinished(*m_resource, { });
+        notifyFinished(*m_resource, { }, LoadWillContinueInAnotherProcess::No);
         return;
     }
 
@@ -96,12 +96,12 @@ void ApplicationCacheResourceLoader::responseReceived(CachedResource& resource, 
         return;
     }
 
-    m_applicationCacheResource = ApplicationCacheResource::create(m_resource->url(), response, m_type);
+    m_applicationCacheResource = ApplicationCacheResource::create(URL { m_resource->url() }, ResourceResponse { response }, m_type);
 }
 
 void ApplicationCacheResourceLoader::dataReceived(CachedResource&, const SharedBuffer& buffer)
 {
-    m_applicationCacheResource->append(buffer);
+    protectedApplicationCacheResource()->append(buffer);
 }
 
 void ApplicationCacheResourceLoader::redirectReceived(CachedResource&, ResourceRequest&& newRequest, const ResourceResponse&, CompletionHandler<void(ResourceRequest&&)>&& callback)
@@ -117,7 +117,7 @@ void ApplicationCacheResourceLoader::redirectReceived(CachedResource&, ResourceR
     callback(WTFMove(newRequest));
 }
 
-void ApplicationCacheResourceLoader::notifyFinished(CachedResource& resource, const NetworkLoadMetrics&)
+void ApplicationCacheResourceLoader::notifyFinished(CachedResource& resource, const NetworkLoadMetrics&, LoadWillContinueInAnotherProcess)
 {
     Ref protectedThis { *this };
 

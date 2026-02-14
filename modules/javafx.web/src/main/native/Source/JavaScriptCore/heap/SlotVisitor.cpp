@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -42,8 +42,13 @@
 #include <wtf/ListDump.h>
 #include <wtf/Lock.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/TZoneMallocInlines.h>
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 namespace JSC {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(SlotVisitor);
 
 #if ENABLE(GC_VALIDATION)
 static void validate(JSCell* cell)
@@ -57,26 +62,25 @@ static void validate(JSCell* cell)
 
     // Both the cell's structure, and the cell's structure's structure should be the Structure Structure.
     // I hate this sentence.
-    VM& vm = cell->vm();
-    if (cell->structure()->structure()->JSCell::classInfo(vm) != cell->structure()->JSCell::classInfo(vm)) {
+    if (cell->structure()->structure()->JSCell::classInfo() != cell->structure()->JSCell::classInfo()) {
         const char* parentClassName = 0;
         const char* ourClassName = 0;
-        if (cell->structure()->structure() && cell->structure()->structure()->JSCell::classInfo(vm))
-            parentClassName = cell->structure()->structure()->JSCell::classInfo(vm)->className;
-        if (cell->structure()->JSCell::classInfo(vm))
-            ourClassName = cell->structure()->JSCell::classInfo(vm)->className;
+        if (cell->structure()->structure() && cell->structure()->structure()->JSCell::classInfo())
+            parentClassName = cell->structure()->structure()->JSCell::classInfo()->className;
+        if (cell->structure()->JSCell::classInfo())
+            ourClassName = cell->structure()->JSCell::classInfo()->className;
         dataLogF("parent structure (%p <%s>) of cell at %p doesn't match cell's structure (%p <%s>)\n",
             cell->structure()->structure(), parentClassName, cell, cell->structure(), ourClassName);
         CRASH();
     }
 
     // Make sure we can walk the ClassInfo chain
-    const ClassInfo* info = cell->classInfo(vm);
+    const ClassInfo* info = cell->classInfo();
     do { } while ((info = info->parentClass));
 }
 #endif
 
-SlotVisitor::SlotVisitor(Heap& heap, CString codeName)
+SlotVisitor::SlotVisitor(JSC::Heap& heap, CString codeName)
     : Base(heap, codeName, heap.m_opaqueRoots)
     , m_markingVersion(MarkedSpace::initialVersion)
 #if ASSERT_ENABLED
@@ -158,7 +162,7 @@ void SlotVisitor::appendJSCellOrAuxiliary(HeapCell* heapCell)
 #endif
                     out.print("Object contents:");
                     for (unsigned i = 0; i < 2; ++i)
-                        out.print(" ", format("0x%016llx", bitwise_cast<uint64_t*>(jsCell)[i]));
+                        out.print(" ", format("0x%016llx", std::bit_cast<uint64_t*>(jsCell)[i]));
                     out.print("\n");
                     CellContainer container = jsCell->cellContainer();
                     out.print("Is marked: ", container.isMarked(jsCell), "\n");
@@ -223,7 +227,7 @@ void SlotVisitor::appendJSCellOrAuxiliary(HeapCell* heapCell)
 
 void SlotVisitor::appendSlow(JSCell* cell, Dependency dependency)
 {
-    if (UNLIKELY(m_heapAnalyzer))
+    if (m_heapAnalyzer) [[unlikely]]
         m_heapAnalyzer->analyzeEdge(m_currentCell, cell, rootMarkReason());
 
     appendHiddenSlowImpl(cell, dependency);
@@ -277,8 +281,8 @@ ALWAYS_INLINE void SlotVisitor::appendToMarkStack(ContainerType& container, JSCe
 {
     ASSERT(m_heap.isMarked(cell));
 #if CPU(X86_64)
-    if (UNLIKELY(Options::dumpZappedCellCrashData())) {
-        if (UNLIKELY(cell->isZapped()))
+    if (Options::dumpZappedCellCrashData()) [[unlikely]] {
+        if (cell->isZapped()) [[unlikely]]
             reportZappedCellAndCrash(m_heap, cell);
     }
 #endif
@@ -294,7 +298,7 @@ ALWAYS_INLINE void SlotVisitor::appendToMarkStack(ContainerType& container, JSCe
 
 void SlotVisitor::markAuxiliary(const void* base)
 {
-    HeapCell* cell = bitwise_cast<HeapCell*>(base);
+    HeapCell* cell = std::bit_cast<HeapCell*>(base);
 
     ASSERT(cell->heap() == heap());
 
@@ -382,21 +386,21 @@ ALWAYS_INLINE void SlotVisitor::visitChildren(const JSCell* cell)
         // FIXME: This could be so much better.
         // https://bugs.webkit.org/show_bug.cgi?id=162462
 #if CPU(X86_64)
-        if (UNLIKELY(Options::dumpZappedCellCrashData())) {
-            Structure* structure = cell->structure(vm());
-            if (LIKELY(structure)) {
-                const MethodTable* methodTable = &structure->classInfo()->methodTable;
+        if (Options::dumpZappedCellCrashData()) [[unlikely]] {
+            Structure* structure = cell->structure();
+            if (structure) [[likely]] {
+                const MethodTable* methodTable = &structure->classInfoForCells()->methodTable;
                 methodTable->visitChildren(const_cast<JSCell*>(cell), *this);
                 break;
             }
             reportZappedCellAndCrash(m_heap, const_cast<JSCell*>(cell));
         }
 #endif
-        cell->methodTable(vm())->visitChildren(const_cast<JSCell*>(cell), *this);
+        cell->methodTable()->visitChildren(const_cast<JSCell*>(cell), *this);
         break;
     }
 
-    if (UNLIKELY(m_heapAnalyzer)) {
+    if (m_heapAnalyzer) [[unlikely]] {
         if (m_isFirstVisit)
             m_heapAnalyzer->analyzeNode(const_cast<JSCell*>(cell));
     }
@@ -816,3 +820,5 @@ void SlotVisitor::addParallelConstraintTask(RefPtr<SharedTask<void(SlotVisitor&)
 }
 
 } // namespace JSC
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

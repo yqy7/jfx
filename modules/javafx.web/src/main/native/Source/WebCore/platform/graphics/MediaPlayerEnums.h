@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2020 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,13 +25,12 @@
 
 #pragma once
 
+#include <wtf/OptionSet.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
-class MediaPlayerEnums {
-public:
-    enum class NetworkState : uint8_t {
+enum class MediaPlayerNetworkState : uint8_t {
         Empty,
         Idle,
         Loading,
@@ -39,56 +38,50 @@ public:
         FormatError,
         NetworkError,
         DecodeError
-    };
+};
 
-    enum class ReadyState : uint8_t {
+enum class MediaPlayerReadyState : uint8_t {
         HaveNothing,
         HaveMetadata,
         HaveCurrentData,
         HaveFutureData,
         HaveEnoughData
-    };
+};
 
-    enum class MovieLoadType : uint8_t {
+enum class MediaPlayerMovieLoadType : uint8_t {
         Unknown,
         Download,
         StoredStream,
-        LiveStream
-    };
+    LiveStream,
+    HttpLiveStream,
+};
 
-    enum class Preload : uint8_t {
+enum class MediaPlayerPreload : uint8_t {
         None,
         MetaData,
         Auto
-    };
+};
 
-    enum class VideoGravity : uint8_t {
+enum class MediaPlayerVideoGravity : uint8_t {
         Resize,
         ResizeAspect,
         ResizeAspectFill
-    };
+};
 
-    enum class SupportsType : uint8_t {
+enum class MediaPlayerSupportsType : uint8_t {
         IsNotSupported,
         IsSupported,
         MayBeSupported
-    };
+};
 
-    enum {
-        VideoFullscreenModeNone = 0,
-        VideoFullscreenModeStandard = 1 << 0,
-        VideoFullscreenModePictureInPicture = 1 << 1,
-    };
-    typedef uint32_t VideoFullscreenMode;
-
-    enum class BufferingPolicy : uint8_t {
+enum class MediaPlayerBufferingPolicy : uint8_t {
         Default,
         LimitReadAhead,
         MakeResourcesPurgeable,
         PurgeResources,
-    };
+};
 
-    enum class MediaEngineIdentifier : uint8_t {
+enum class MediaPlayerMediaEngineIdentifier : uint8_t {
         AVFoundation,
         AVFoundationMSE,
         AVFoundationMediaStream,
@@ -98,26 +91,72 @@ public:
         HolePunch,
         MediaFoundation,
         MockMSE,
-    };
+        CocoaWebM
+};
 
-    enum class WirelessPlaybackTargetType : uint8_t {
+enum class MediaPlayerWirelessPlaybackTargetType : uint8_t {
         TargetTypeNone,
         TargetTypeAirPlay,
         TargetTypeTVOut
-    };
+};
 
-    enum class PitchCorrectionAlgorithm : uint8_t {
+enum class MediaPlayerPitchCorrectionAlgorithm : uint8_t {
         BestAllAround,
         BestForMusic,
         BestForSpeech,
-    };
 };
 
+enum class MediaPlayerNeedsRenderingModeChanged : bool {
+    No,
+    Yes,
+};
+
+enum class MediaPlayerSoundStageSize : uint8_t {
+    Auto,
+    Small,
+    Medium,
+    Large,
+};
+
+class MediaPlayerEnums {
+public:
+    using NetworkState = MediaPlayerNetworkState;
+    using ReadyState = MediaPlayerReadyState;
+    using MovieLoadType = MediaPlayerMovieLoadType;
+    using Preload = MediaPlayerPreload;
+    using VideoGravity = MediaPlayerVideoGravity;
+    using SupportsType = MediaPlayerSupportsType;
+    using BufferingPolicy = MediaPlayerBufferingPolicy;
+    using MediaEngineIdentifier = MediaPlayerMediaEngineIdentifier;
+    using WirelessPlaybackTargetType = MediaPlayerWirelessPlaybackTargetType;
+    using PitchCorrectionAlgorithm = MediaPlayerPitchCorrectionAlgorithm;
+    using NeedsRenderingModeChanged = MediaPlayerNeedsRenderingModeChanged;
+    using SoundStageSize = MediaPlayerSoundStageSize;
+
+    enum {
+        VideoFullscreenModeNone = 0,
+        VideoFullscreenModeStandard = 1 << 0,
+        VideoFullscreenModePictureInPicture = 1 << 1,
+        VideoFullscreenModeInWindow = 1 << 2,
+        VideoFullscreenModeAllValidBitsMask = (VideoFullscreenModeStandard | VideoFullscreenModePictureInPicture | VideoFullscreenModeInWindow)
+    };
+    typedef uint32_t VideoFullscreenMode;
+};
+
+WEBCORE_EXPORT WTF::TextStream& operator<<(WTF::TextStream&, MediaPlayerEnums::VideoGravity);
 WEBCORE_EXPORT String convertEnumerationToString(MediaPlayerEnums::ReadyState);
 String convertEnumerationToString(MediaPlayerEnums::NetworkState);
 String convertEnumerationToString(MediaPlayerEnums::Preload);
 String convertEnumerationToString(MediaPlayerEnums::SupportsType);
 String convertEnumerationToString(MediaPlayerEnums::BufferingPolicy);
+
+enum class VideoMediaSampleRendererPreference : uint8_t {
+    PrefersDecompressionSession = 1 << 0,
+    ProtectedFallbackDisabled = 1 << 1,
+    UseDecompressionSessionForProtectedContent = 1 << 2,
+    UseStereoDecoding = 1 << 3,
+};
+using VideoMediaSampleRendererPreferences = OptionSet<VideoMediaSampleRendererPreference>;
 
 } // namespace WebCore
 
@@ -149,109 +188,6 @@ struct LogArgument<WebCore::MediaPlayerEnums::BufferingPolicy> {
     {
         return convertEnumerationToString(policy);
     }
-};
-
-template<> struct EnumTraits<WebCore::MediaPlayerEnums::NetworkState> {
-    using values = EnumValues<
-        WebCore::MediaPlayerEnums::NetworkState,
-        WebCore::MediaPlayerEnums::NetworkState::Empty,
-        WebCore::MediaPlayerEnums::NetworkState::Idle,
-        WebCore::MediaPlayerEnums::NetworkState::Loading,
-        WebCore::MediaPlayerEnums::NetworkState::Loaded,
-        WebCore::MediaPlayerEnums::NetworkState::FormatError,
-        WebCore::MediaPlayerEnums::NetworkState::NetworkError,
-        WebCore::MediaPlayerEnums::NetworkState::DecodeError
-    >;
-};
-
-template<> struct EnumTraits<WebCore::MediaPlayerEnums::ReadyState> {
-    using values = EnumValues<
-        WebCore::MediaPlayerEnums::ReadyState,
-        WebCore::MediaPlayerEnums::ReadyState::HaveNothing,
-        WebCore::MediaPlayerEnums::ReadyState::HaveMetadata,
-        WebCore::MediaPlayerEnums::ReadyState::HaveCurrentData,
-        WebCore::MediaPlayerEnums::ReadyState::HaveFutureData,
-        WebCore::MediaPlayerEnums::ReadyState::HaveEnoughData
-    >;
-};
-
-template<> struct EnumTraits<WebCore::MediaPlayerEnums::MovieLoadType> {
-    using values = EnumValues<
-        WebCore::MediaPlayerEnums::MovieLoadType,
-        WebCore::MediaPlayerEnums::MovieLoadType::Unknown,
-        WebCore::MediaPlayerEnums::MovieLoadType::Download,
-        WebCore::MediaPlayerEnums::MovieLoadType::StoredStream,
-        WebCore::MediaPlayerEnums::MovieLoadType::LiveStream
-    >;
-};
-
-template<> struct EnumTraits<WebCore::MediaPlayerEnums::Preload> {
-    using values = EnumValues<
-        WebCore::MediaPlayerEnums::Preload,
-        WebCore::MediaPlayerEnums::Preload::None,
-        WebCore::MediaPlayerEnums::Preload::MetaData,
-        WebCore::MediaPlayerEnums::Preload::Auto
-    >;
-};
-
-template<> struct EnumTraits<WebCore::MediaPlayerEnums::VideoGravity> {
-    using values = EnumValues<
-        WebCore::MediaPlayerEnums::VideoGravity,
-        WebCore::MediaPlayerEnums::VideoGravity::Resize,
-        WebCore::MediaPlayerEnums::VideoGravity::ResizeAspect,
-        WebCore::MediaPlayerEnums::VideoGravity::ResizeAspectFill
-    >;
-};
-
-template<> struct EnumTraits<WebCore::MediaPlayerEnums::SupportsType> {
-    using values = EnumValues<
-        WebCore::MediaPlayerEnums::SupportsType,
-        WebCore::MediaPlayerEnums::SupportsType::IsNotSupported,
-        WebCore::MediaPlayerEnums::SupportsType::IsSupported,
-        WebCore::MediaPlayerEnums::SupportsType::MayBeSupported
-    >;
-};
-
-template<> struct EnumTraits<WebCore::MediaPlayerEnums::BufferingPolicy> {
-    using values = EnumValues<
-        WebCore::MediaPlayerEnums::BufferingPolicy,
-        WebCore::MediaPlayerEnums::BufferingPolicy::Default,
-        WebCore::MediaPlayerEnums::BufferingPolicy::LimitReadAhead,
-        WebCore::MediaPlayerEnums::BufferingPolicy::MakeResourcesPurgeable,
-        WebCore::MediaPlayerEnums::BufferingPolicy::PurgeResources
-        >;
-    };
-
-template<> struct EnumTraits<WebCore::MediaPlayerEnums::MediaEngineIdentifier> {
-    using values = EnumValues<
-        WebCore::MediaPlayerEnums::MediaEngineIdentifier,
-        WebCore::MediaPlayerEnums::MediaEngineIdentifier::AVFoundation,
-        WebCore::MediaPlayerEnums::MediaEngineIdentifier::AVFoundationMSE,
-        WebCore::MediaPlayerEnums::MediaEngineIdentifier::AVFoundationMediaStream,
-        WebCore::MediaPlayerEnums::MediaEngineIdentifier::GStreamer,
-        WebCore::MediaPlayerEnums::MediaEngineIdentifier::GStreamerMSE,
-        WebCore::MediaPlayerEnums::MediaEngineIdentifier::HolePunch,
-        WebCore::MediaPlayerEnums::MediaEngineIdentifier::MediaFoundation,
-        WebCore::MediaPlayerEnums::MediaEngineIdentifier::MockMSE
-    >;
-};
-
-template<> struct EnumTraits<WebCore::MediaPlayerEnums::WirelessPlaybackTargetType> {
-using values = EnumValues<
-    WebCore::MediaPlayerEnums::WirelessPlaybackTargetType,
-    WebCore::MediaPlayerEnums::WirelessPlaybackTargetType::TargetTypeNone,
-    WebCore::MediaPlayerEnums::WirelessPlaybackTargetType::TargetTypeAirPlay,
-    WebCore::MediaPlayerEnums::WirelessPlaybackTargetType::TargetTypeTVOut
-    >;
-};
-
-template<> struct EnumTraits<WebCore::MediaPlayerEnums::PitchCorrectionAlgorithm> {
-using values = EnumValues<
-    WebCore::MediaPlayerEnums::PitchCorrectionAlgorithm,
-    WebCore::MediaPlayerEnums::PitchCorrectionAlgorithm::BestAllAround,
-    WebCore::MediaPlayerEnums::PitchCorrectionAlgorithm::BestForMusic,
-    WebCore::MediaPlayerEnums::PitchCorrectionAlgorithm::BestForSpeech
-    >;
 };
 
 }; // namespace WTF

@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "ShareableResource.h"
 #include "SharedBuffer.h"
 
 namespace WebCore {
@@ -49,6 +50,7 @@ public:
 
     String toString() const;
     const FragmentedSharedBuffer* buffer() const { return m_buffer.get().get(); }
+    RefPtr<const FragmentedSharedBuffer> protectedBuffer() const { return m_buffer.get(); }
 
     ScriptBuffer isolatedCopy() const { return ScriptBuffer(m_buffer ? RefPtr<FragmentedSharedBuffer>(m_buffer.copy()) : nullptr); }
     explicit operator bool() const { return !!m_buffer; }
@@ -56,12 +58,21 @@ public:
 
     WEBCORE_EXPORT bool containsSingleFileMappedSegment() const;
     void append(const String&);
+    void append(const FragmentedSharedBuffer&);
+
+#if ENABLE(SHAREABLE_RESOURCE) && PLATFORM(COCOA)
+    using IPCData = Variant<ShareableResourceHandle, RefPtr<FragmentedSharedBuffer>>;
+#else
+    using IPCData = RefPtr<FragmentedSharedBuffer>;
+#endif
+
+    WEBCORE_EXPORT static std::optional<ScriptBuffer> fromIPCData(IPCData&&);
+    WEBCORE_EXPORT IPCData ipcData() const;
 
 private:
     SharedBufferBuilder m_buffer; // Contains the UTF-8 encoded script.
 };
 
 bool operator==(const ScriptBuffer&, const ScriptBuffer&);
-bool operator!=(const ScriptBuffer&, const ScriptBuffer&);
 
 } // namespace WebCore

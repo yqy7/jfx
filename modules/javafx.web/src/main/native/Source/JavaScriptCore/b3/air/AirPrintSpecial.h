@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,6 +30,8 @@
 #include "AirInst.h"
 #include "AirSpecial.h"
 #include "MacroAssemblerPrinter.h"
+#include <wtf/SequesteredMalloc.h>
+#include <wtf/TZoneMalloc.h>
 
 namespace JSC {
 
@@ -69,7 +71,7 @@ inline void appendAirArgs(B3::Air::Inst& inst, T&& t, Arguments&&... others)
     appendAirArgs(inst, std::forward<Arguments>(others)...);
 }
 
-void printAirArg(PrintStream&, Context&);
+[[noreturn]] void printAirArg(PrintStream&, Context&);
 
 // Printer<Arg&> is only a place-holder which PrintSpecial::generate() will later
 // replace with a Printer for a register, constant, etc. as appropriate.
@@ -92,6 +94,7 @@ struct Printer<Reg> : public PrintRecord {
 namespace B3 { namespace Air {
 
 class PrintSpecial final : public Special {
+    WTF_MAKE_SEQUESTERED_ARENA_ALLOCATED(PrintSpecial);
 public:
     PrintSpecial(Printer::PrintRecordList*);
     ~PrintSpecial() final;
@@ -106,10 +109,10 @@ private:
     bool isValid(Inst&) final;
     bool admitsStack(Inst&, unsigned argIndex) final;
     bool admitsExtendedOffsetAddr(Inst&, unsigned) final;
-    void reportUsedRegisters(Inst&, const RegisterSet&) final;
+    void reportUsedRegisters(Inst&, const RegisterSetBuilder&) final;
     MacroAssembler::Jump generate(Inst&, CCallHelpers&, GenerationContext&) final;
-    RegisterSet extraEarlyClobberedRegs(Inst&) final;
-    RegisterSet extraClobberedRegs(Inst&) final;
+    RegisterSetBuilder extraEarlyClobberedRegs(Inst&) final;
+    RegisterSetBuilder extraClobberedRegs(Inst&) final;
 
     void dumpImpl(PrintStream&) const final;
     void deepDumpImpl(PrintStream&) const final;

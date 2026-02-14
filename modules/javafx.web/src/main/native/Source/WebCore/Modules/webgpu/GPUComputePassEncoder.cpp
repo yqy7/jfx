@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2021-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,8 +30,15 @@
 #include "GPUBuffer.h"
 #include "GPUComputePipeline.h"
 #include "GPUQuerySet.h"
+#include "WebGPUDevice.h"
 
 namespace WebCore {
+
+GPUComputePassEncoder::GPUComputePassEncoder(Ref<WebGPU::ComputePassEncoder>&& backing, WebGPU::Device& device)
+    : m_backing(WTFMove(backing))
+    , m_device(&device)
+{
+}
 
 String GPUComputePassEncoder::label() const
 {
@@ -40,56 +47,65 @@ String GPUComputePassEncoder::label() const
 
 void GPUComputePassEncoder::setLabel(String&& label)
 {
-    m_backing->setLabel(WTFMove(label));
+    protectedBacking()->setLabel(WTFMove(label));
 }
 
 void GPUComputePassEncoder::setPipeline(const GPUComputePipeline& computePipeline)
 {
-    m_backing->setPipeline(computePipeline.backing());
+    protectedBacking()->setPipeline(computePipeline.backing());
 }
 
-void GPUComputePassEncoder::dispatch(GPUSize32 workgroupCountX, GPUSize32 workgroupCountY, GPUSize32 workgroupCountZ)
+void GPUComputePassEncoder::dispatchWorkgroups(GPUSize32 workgroupCountX, std::optional<GPUSize32> workgroupCountY, std::optional<GPUSize32> workgroupCountZ)
 {
-    m_backing->dispatch(workgroupCountX, workgroupCountY, workgroupCountZ);
+    // FIXME: https://bugs.webkit.org/show_bug.cgi?id=240219 we should be able to specify the
+    // default values via the idl file
+    protectedBacking()->dispatch(workgroupCountX, workgroupCountY.value_or(1), workgroupCountZ.value_or(1));
 }
 
-void GPUComputePassEncoder::dispatchIndirect(const GPUBuffer& indirectBuffer, GPUSize64 indirectOffset)
+void GPUComputePassEncoder::dispatchWorkgroupsIndirect(const GPUBuffer& indirectBuffer, GPUSize64 indirectOffset)
 {
-    m_backing->dispatchIndirect(indirectBuffer.backing(), indirectOffset);
+    protectedBacking()->dispatchIndirect(indirectBuffer.backing(), indirectOffset);
 }
 
 void GPUComputePassEncoder::end()
 {
-    m_backing->end();
+    protectedBacking()->end();
+    if (RefPtr device = m_device.get())
+        m_backing = device->invalidComputePassEncoder();
 }
 
-void GPUComputePassEncoder::setBindGroup(GPUIndex32 index, const GPUBindGroup& bindGroup,
+void GPUComputePassEncoder::setBindGroup(GPUIndex32 index, const GPUBindGroup* bindGroup,
     std::optional<Vector<GPUBufferDynamicOffset>>&& dynamicOffsets)
 {
-    m_backing->setBindGroup(index, bindGroup.backing(), WTFMove(dynamicOffsets));
+    protectedBacking()->setBindGroup(index, bindGroup ? &bindGroup->backing() : nullptr, WTFMove(dynamicOffsets));
 }
 
-void GPUComputePassEncoder::setBindGroup(GPUIndex32 index, const GPUBindGroup& bindGroup,
+ExceptionOr<void> GPUComputePassEncoder::setBindGroup(GPUIndex32 index, const GPUBindGroup* bindGroup,
     const JSC::Uint32Array& dynamicOffsetsData,
     GPUSize64 dynamicOffsetsDataStart,
     GPUSize32 dynamicOffsetsDataLength)
 {
-    m_backing->setBindGroup(index, bindGroup.backing(), dynamicOffsetsData.data(), dynamicOffsetsData.length(), dynamicOffsetsDataStart, dynamicOffsetsDataLength);
+    auto offset = checkedSum<uint64_t>(dynamicOffsetsDataStart, dynamicOffsetsDataLength);
+    if (offset.hasOverflowed() || offset > dynamicOffsetsData.length())
+        return Exception { ExceptionCode::RangeError, "dynamic offsets overflowed"_s };
+
+    protectedBacking()->setBindGroup(index, bindGroup ? &bindGroup->backing() : nullptr, dynamicOffsetsData.typedSpan(), dynamicOffsetsDataStart, dynamicOffsetsDataLength);
+    return { };
 }
 
 void GPUComputePassEncoder::pushDebugGroup(String&& groupLabel)
 {
-    m_backing->pushDebugGroup(WTFMove(groupLabel));
+    protectedBacking()->pushDebugGroup(WTFMove(groupLabel));
 }
 
 void GPUComputePassEncoder::popDebugGroup()
 {
-    m_backing->popDebugGroup();
+    protectedBacking()->popDebugGroup();
 }
 
 void GPUComputePassEncoder::insertDebugMarker(String&& markerLabel)
 {
-    m_backing->insertDebugMarker(WTFMove(markerLabel));
+    protectedBacking()->insertDebugMarker(WTFMove(markerLabel));
 }
 
 }

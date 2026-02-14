@@ -25,8 +25,7 @@
 
 #pragma once
 
-#if ENABLE(CSS_TYPED_OM)
-
+#include "CSSCustomPropertyValue.h"
 #include "CSSImageValue.h"
 #include "CSSPropertyNames.h"
 #include "CSSStyleValue.h"
@@ -39,24 +38,24 @@ namespace WebCore {
 
 template<typename T> class ExceptionOr;
 struct CSSParserContext;
+class CSSUnparsedValue;
 class Document;
 class StylePropertyShorthand;
 
 class CSSStyleValueFactory {
 public:
-
-    static ExceptionOr<Ref<CSSStyleValue>> reifyValue(Ref<CSSValue>&&, Document* = nullptr);
-
-    static ExceptionOr<void> extractCSSValues(Vector<Ref<CSSValue>>&, const CSSPropertyID&, const String&);
-    static ExceptionOr<void> extractShorthandCSSValues(Vector<Ref<CSSValue>>&, const CSSPropertyID&, const String&);
-    static ExceptionOr<void> extractCustomCSSValues(Vector<Ref<CSSValue>>&, const String&, const String&);
-
-    static ExceptionOr<Vector<Ref<CSSStyleValue>>> parseStyleValue(const String&, const String&, bool);
+    static ExceptionOr<Ref<CSSStyleValue>> reifyValue(Document&, const CSSValue&, std::optional<CSSPropertyID>);
+    static ExceptionOr<Vector<Ref<CSSStyleValue>>> parseStyleValue(Document&, const AtomString&, const String&, bool parseMultiple);
+    static RefPtr<CSSStyleValue> constructStyleValueForShorthandSerialization(Document&, const String&);
+    static ExceptionOr<Vector<Ref<CSSStyleValue>>> vectorFromStyleValuesOrStrings(Document&, const AtomString& property, FixedVector<Variant<RefPtr<CSSStyleValue>, String>>&&);
 
 protected:
     CSSStyleValueFactory() = delete;
+
+private:
+    static ExceptionOr<RefPtr<CSSValue>> extractCSSValue(Document&, const CSSPropertyID&, const String&);
+    static ExceptionOr<RefPtr<CSSStyleValue>> extractShorthandCSSValues(Document&, const CSSPropertyID&, const String&);
+    static ExceptionOr<Ref<CSSUnparsedValue>> extractCustomCSSValues(const String&);
 };
 
 } // namespace WebCore
-
-#endif

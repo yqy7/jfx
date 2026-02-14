@@ -36,7 +36,7 @@ namespace WTF {
 
 template<typename Key, typename Value>
 class IndexMap {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(IndexMap);
 public:
     IndexMap() = default;
     IndexMap(IndexMap&&) = default;
@@ -46,8 +46,8 @@ public:
 
     template<typename... Args>
     explicit IndexMap(size_t size, Args&&... args)
+        : m_vector(size, Value(std::forward<Args>(args)...))
     {
-        m_vector.fill(Value(std::forward<Args>(args)...), size);
     }
 
     template<typename... Args>

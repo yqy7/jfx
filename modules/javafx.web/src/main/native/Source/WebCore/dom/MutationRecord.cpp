@@ -35,6 +35,7 @@
 #include "CharacterData.h"
 #include "JSNode.h"
 #include "StaticNodeList.h"
+#include "WebCoreOpaqueRootInlines.h"
 #include <wtf/NeverDestroyed.h>
 #include <wtf/StdLibExtras.h>
 
@@ -47,7 +48,7 @@ static void visitNodeList(JSC::AbstractSlotVisitor& visitor, NodeList& nodeList)
     ASSERT(!nodeList.isLiveNodeList());
     unsigned length = nodeList.length();
     for (unsigned i = 0; i < length; ++i)
-        visitor.addOpaqueRoot(root(nodeList.item(i)));
+        addWebCoreOpaqueRoot(visitor, nodeList.item(i));
 }
 
 class ChildListRecord final : public MutationRecord {
@@ -71,14 +72,14 @@ private:
 
     void visitNodesConcurrently(JSC::AbstractSlotVisitor& visitor) const final
     {
-        visitor.addOpaqueRoot(root(m_target.ptr()));
+        addWebCoreOpaqueRoot(visitor, m_target.get());
         if (m_addedNodes)
             visitNodeList(visitor, *m_addedNodes);
         if (m_removedNodes)
             visitNodeList(visitor, *m_removedNodes);
     }
 
-    Ref<ContainerNode> m_target;
+    const Ref<ContainerNode> m_target;
     RefPtr<NodeList> m_addedNodes;
     RefPtr<NodeList> m_removedNodes;
     RefPtr<Node> m_previousSibling;
@@ -108,10 +109,10 @@ private:
 
     void visitNodesConcurrently(JSC::AbstractSlotVisitor& visitor) const final
     {
-        visitor.addOpaqueRoot(root(m_target.ptr()));
+        addWebCoreOpaqueRoot(visitor, m_target.get());
     }
 
-    Ref<Node> m_target;
+    const Ref<Node> m_target;
     String m_oldValue;
     RefPtr<NodeList> m_addedNodes;
     RefPtr<NodeList> m_removedNodes;
@@ -170,24 +171,24 @@ private:
         m_record->visitNodesConcurrently(visitor);
     }
 
-    Ref<MutationRecord> m_record;
+    const Ref<MutationRecord> m_record;
 };
 
 const AtomString& ChildListRecord::type()
 {
-    static MainThreadNeverDestroyed<const AtomString> childList("childList", AtomString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> childList("childList"_s);
     return childList;
 }
 
 const AtomString& AttributesRecord::type()
 {
-    static MainThreadNeverDestroyed<const AtomString> attributes("attributes", AtomString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> attributes("attributes"_s);
     return attributes;
 }
 
 const AtomString& CharacterDataRecord::type()
 {
-    static MainThreadNeverDestroyed<const AtomString> characterData("characterData", AtomString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> characterData("characterData"_s);
     return characterData;
 }
 

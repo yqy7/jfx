@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011, Google Inc. All rights reserved.
+ * Copyright (C) 2011 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,15 @@
 #define AudioSourceProviderClient_h
 
 #include <wtf/WeakPtr.h>
+
+namespace WebCore {
+class AudioSourceProviderClient;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::AudioSourceProviderClient> : std::true_type { };
+}
 
 namespace WebCore {
 

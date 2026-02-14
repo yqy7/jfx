@@ -81,7 +81,7 @@ pas_segregated_shared_handle* pas_segregated_shared_view_commit_page(
     pas_segregated_heap* heap,
     pas_segregated_shared_page_directory* shared_page_directory,
     pas_segregated_partial_view* partial_view,
-    pas_segregated_page_config* page_config_ptr)
+    const pas_segregated_page_config* page_config_ptr)
 {
     pas_segregated_directory* directory;
     pas_segregated_shared_handle* handle;
@@ -205,7 +205,7 @@ static bool compute_summary_for_each_live_object_callback(
     pas_range range,
     void* arg)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
 
     compute_summary_data* data;
     unsigned index;
@@ -254,9 +254,9 @@ static bool compute_summary_for_each_live_object_callback(
 }
 
 static pas_heap_summary compute_summary(pas_segregated_shared_view* view,
-                                        pas_segregated_page_config* page_config_ptr)
+                                        const pas_segregated_page_config* page_config_ptr)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
 
     pas_segregated_page_config page_config;
     pas_segregated_page* page;
@@ -281,7 +281,7 @@ static pas_heap_summary compute_summary(pas_segregated_shared_view* view,
     end_of_page = page_config.base.page_size;
 
     if (verbose)
-        pas_log("index = %d, bump_offset = %lu/%lu.\n", view->index, end_of_payload, end_of_page);
+        pas_log("index = %d, bump_offset = %zu/%zu.\n", view->index, end_of_payload, end_of_page);
 
     PAS_ASSERT(start_of_payload >= start_of_page);
     PAS_ASSERT(end_of_payload >= start_of_payload);
@@ -359,7 +359,7 @@ static pas_heap_summary compute_summary(pas_segregated_shared_view* view,
 
 pas_heap_summary
 pas_segregated_shared_view_compute_summary(pas_segregated_shared_view* view,
-                                           pas_segregated_page_config* page_config)
+                                           const pas_segregated_page_config* page_config)
 {
     pas_heap_summary result;
 

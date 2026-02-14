@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,8 +25,6 @@
 
 package com.sun.prism.impl.ps;
 
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import com.sun.javafx.font.FontResource;
 import com.sun.javafx.font.FontStrike;
 import com.sun.javafx.font.Metrics;
@@ -95,6 +93,7 @@ public abstract class BaseShaderGraphics
         return isComplexPaint;
     }
 
+    @Override
     public void getPaintShaderTransform(Affine3D ret) {
         ret.setTransform(getTransformNoClone());
     }
@@ -103,6 +102,7 @@ public abstract class BaseShaderGraphics
         return externalShader;
     }
 
+    @Override
     public void setExternalShader(Shader shader) {
         this.externalShader = shader;
         context.setExternalShader(this, shader);
@@ -121,8 +121,10 @@ public abstract class BaseShaderGraphics
 
     private NGLightBase lights[] = null;
 
+    @Override
     public void setLights(NGLightBase lights[]) { this.lights = lights; }
 
+    @Override
     public final NGLightBase[] getLights() { return this.lights; }
 
     @Override
@@ -247,7 +249,7 @@ public abstract class BaseShaderGraphics
             dy2 += transY;
         }
 
-        Texture textures[] = ((MultiTexture)tex).getTextures();
+        Texture textures[] = tex.getTextures();
         Shader shader = context.validateTextureOp(this, xform, textures, tex.getPixelFormat());
 
         if (null == shader) {
@@ -261,31 +263,31 @@ public abstract class BaseShaderGraphics
             Texture crTex = textures[PixelFormat.YCBCR_PLANE_CHROMARED];
 
             // sampler scaling factors
-            float imgWidth = (float)tex.getContentWidth();
-            float imgHeight = (float)tex.getContentHeight();
+            float imgWidth = tex.getContentWidth();
+            float imgHeight = tex.getContentHeight();
             float lumaScaleX, lumaScaleY;
             float alphaScaleX, alphaScaleY;
             float cbScaleX, cbScaleY;
             float crScaleX, crScaleY;
 
-            lumaScaleX = calculateScaleFactor(imgWidth, (float)lumaTex.getPhysicalWidth());
-            lumaScaleY = calculateScaleFactor(imgHeight, (float)lumaTex.getPhysicalHeight());
+            lumaScaleX = calculateScaleFactor(imgWidth, lumaTex.getPhysicalWidth());
+            lumaScaleY = calculateScaleFactor(imgHeight, lumaTex.getPhysicalHeight());
 
             if (textures.length > 3) {
                 Texture alphaTex = textures[PixelFormat.YCBCR_PLANE_ALPHA];
-                alphaScaleX = calculateScaleFactor(imgWidth, (float)alphaTex.getPhysicalWidth());
-                alphaScaleY = calculateScaleFactor(imgHeight, (float)alphaTex.getPhysicalHeight());
+                alphaScaleX = calculateScaleFactor(imgWidth, alphaTex.getPhysicalWidth());
+                alphaScaleY = calculateScaleFactor(imgHeight, alphaTex.getPhysicalHeight());
             } else {
                 alphaScaleX = alphaScaleY = 0f;
             }
 
-            float chromaWidth = (float)Math.floor((double)imgWidth/2.0);
-            float chromaHeight = (float)Math.floor((double)imgHeight/2.0);
+            float chromaWidth = (float)Math.floor(imgWidth/2.0);
+            float chromaHeight = (float)Math.floor(imgHeight/2.0);
 
-            cbScaleX = calculateScaleFactor(chromaWidth, (float)cbTex.getPhysicalWidth());
-            cbScaleY = calculateScaleFactor(chromaHeight, (float)cbTex.getPhysicalHeight());
-            crScaleX = calculateScaleFactor(chromaWidth, (float)crTex.getPhysicalWidth());
-            crScaleY = calculateScaleFactor(chromaHeight, (float)crTex.getPhysicalHeight());
+            cbScaleX = calculateScaleFactor(chromaWidth, cbTex.getPhysicalWidth());
+            cbScaleY = calculateScaleFactor(chromaHeight, cbTex.getPhysicalHeight());
+            crScaleX = calculateScaleFactor(chromaWidth, crTex.getPhysicalWidth());
+            crScaleY = calculateScaleFactor(chromaHeight, crTex.getPhysicalHeight());
 
             shader.setConstant("lumaAlphaScale", lumaScaleX, lumaScaleY, alphaScaleX, alphaScaleY);
             shader.setConstant("cbCrScale", cbScaleX, cbScaleY, crScaleX, crScaleY);
@@ -303,6 +305,7 @@ public abstract class BaseShaderGraphics
         }
     }
 
+    @Override
     public void drawTextureRaw2(Texture src1, Texture src2,
                                 float dx1, float dy1, float dx2, float dy2,
                                 float t1x1, float t1y1, float t1x2, float t1y2,
@@ -326,6 +329,7 @@ public abstract class BaseShaderGraphics
                    t2x1, t2y1, t2x2, t2y2);
     }
 
+    @Override
     public void drawMappedTextureRaw2(Texture src1, Texture src2,
                                       float dx1, float dy1, float dx2, float dy2,
                                       float t1x11, float t1y11, float t1x21, float t1y21,
@@ -353,6 +357,7 @@ public abstract class BaseShaderGraphics
                          t2x12, t2y12, t2x22, t2y22);
     }
 
+    @Override
     public void drawPixelsMasked(RTTexture imgtex, RTTexture masktex,
                                  int dx, int dy, int dw, int dh,
                                  int ix, int iy, int mx, int my)
@@ -382,6 +387,7 @@ public abstract class BaseShaderGraphics
                    mx1, my1, mx2, my2);
     }
 
+    @Override
     public void maskInterpolatePixels(RTTexture imgtex, RTTexture masktex,
                                       int dx, int dy, int dw, int dh,
                                       int ix, int iy, int mx, int my)
@@ -526,8 +532,7 @@ public abstract class BaseShaderGraphics
 
     private static final float FRINGE_FACTOR;
     static {
-        @SuppressWarnings("removal")
-        String v = (String) AccessController.doPrivileged((PrivilegedAction) () -> System.getProperty("prism.primshaderpad"));
+        String v = System.getProperty("prism.primshaderpad");
         if (v == null) {
             FRINGE_FACTOR = -0.5f;
         } else {
@@ -1502,6 +1507,7 @@ public abstract class BaseShaderGraphics
         return true;
     }
 
+    @Override
     public void fillRect(float x, float y, float w, float h) {
         if (w <= 0 || h <= 0) {
             return;
@@ -1527,6 +1533,7 @@ public abstract class BaseShaderGraphics
                                  MaskType.FILL_PGRAM, null);
     }
 
+    @Override
     public void fillEllipse(float x, float y, float w, float h) {
         if (w <= 0 || h <= 0) {
             return;
@@ -1554,6 +1561,7 @@ public abstract class BaseShaderGraphics
                                  MaskType.FILL_ELLIPSE, null);
     }
 
+    @Override
     public void fillRoundRect(float x, float y, float w, float h,
                               float arcw, float arch)
     {
@@ -1577,6 +1585,7 @@ public abstract class BaseShaderGraphics
                                  MaskType.FILL_ROUNDRECT, null);
     }
 
+    @Override
     public void fillQuad(float x1, float y1, float x2, float y2) {
         float bx, by, bw, bh;
         if (x1 <= x2) {
@@ -1637,7 +1646,7 @@ public abstract class BaseShaderGraphics
 
     private static final double SQRT_2 = Math.sqrt(2.0);
     private static boolean canUseStrokeShader(BasicStroke bs) {
-        // RT-27378
+        // JDK-8090624
         // TODO: Expand the cases that renderGeneralRoundRect() can handle...
         return (!bs.isDashed() &&
                 (bs.getType() == BasicStroke.TYPE_INNER ||
@@ -1646,6 +1655,7 @@ public abstract class BaseShaderGraphics
                   bs.getMiterLimit() >= SQRT_2)));
     }
 
+    @Override
     public void blit(RTTexture srcTex, RTTexture dstTex,
                      int srcX0, int srcY0, int srcX1, int srcY1,
                      int dstX0, int dstY0, int dstX1, int dstY1) {
@@ -1658,6 +1668,7 @@ public abstract class BaseShaderGraphics
                 dstX0, dstY0, dstX1, dstY1);
     }
 
+    @Override
     public void drawRect(float x, float y, float w, float h) {
         if (w < 0 || h < 0) {
             return;
@@ -1697,7 +1708,7 @@ public abstract class BaseShaderGraphics
         // otherwise it will not be approximated by a "parallel ellipse"
         // very well and we should just use shape rendering.
 
-        // RT-27378
+        // JDK-8090624
         // TODO: Implement better "distance to ellipse" formulas in the shaders
         float inset = stroke.getLineWidth() *
             (1f - getStrokeExpansionFactor(stroke));
@@ -1710,6 +1721,7 @@ public abstract class BaseShaderGraphics
                 (arcw * 2f > arch && arch * 2f > arcw));
     }
 
+    @Override
     public void drawEllipse(float x, float y, float w, float h) {
         if (w < 0 || h < 0) {
             return;
@@ -1725,6 +1737,7 @@ public abstract class BaseShaderGraphics
         renderShape(scratchEllipse, stroke, x, y, w, h);
     }
 
+    @Override
     public void drawRoundRect(float x, float y, float w, float h,
                               float arcw, float arch)
     {
@@ -1745,6 +1758,7 @@ public abstract class BaseShaderGraphics
         renderShape(scratchRRect, stroke, x, y, w, h);
     }
 
+    @Override
     public void drawLine(float x1, float y1, float x2, float y2) {
         float bx, by, bw, bh;
         if (x1 <= x2) {
@@ -1762,7 +1776,7 @@ public abstract class BaseShaderGraphics
             bh = y1 - y2;
         }
 
-        // RT-27378
+        // JDK-8090624
         // TODO: casting down to floats everywhere here; evaluate later
         // to see if this is enough precision...
         // TODO: stroke normalization control?
@@ -1920,6 +1934,7 @@ public abstract class BaseShaderGraphics
 
     private boolean lcdSampleInvalid = false;
 
+    @Override
     public void setNodeBounds(RectBounds bounds) {
         nodeBounds = bounds;
         lcdSampleInvalid = bounds != null;
@@ -1963,9 +1978,14 @@ public abstract class BaseShaderGraphics
         lcdSampleInvalid = false;
     }
 
+    @Override
     public void drawString(GlyphList gl, FontStrike strike, float x, float y,
                            Color selectColor, int selectStart, int selectEnd) {
 
+        if (strike.getFontResource().isColorGlyph(gl.getGlyphCode(0))) {
+            drawColorGlyph(gl, strike, x, y, selectColor, selectStart, selectEnd);
+            return;
+        }
         if (isComplexPaint ||
             paint.getType().isImagePattern() ||
             strike.drawAsShapes())
@@ -1993,9 +2013,10 @@ public abstract class BaseShaderGraphics
 
         CompositeMode blendMode = getCompositeMode();
         // LCD support requires several attributes to function:
-        // FontStrike supports LCD, SRC_OVER CompositeMode and Paint is a COLOR
+        // FontStrike supports LCD, SRC_OVER CompositeMode and Paint is an opaque COLOR
         boolean lcdSupported = blendMode == CompositeMode.SRC_OVER &&
                                textColor != null &&
+                               textColor.getAlpha() == 1.0 &&
                                xform.is2D() &&
                                !getRenderTarget().isMSAA();
 
@@ -2101,7 +2122,7 @@ public abstract class BaseShaderGraphics
                                                 context.getLCDBuffer(),
                                                 cacheTex, false, textColor);
 
-            float unitXCoord = 1.0f/((float)cacheTex.getPhysicalWidth());
+            float unitXCoord = 1.0f / cacheTex.getPhysicalWidth();
             shader.setConstant("gamma", gamma, invgamma, unitXCoord);
             setCompositeMode(blendMode); // Restore composite mode
         } else {
@@ -2132,12 +2153,14 @@ public abstract class BaseShaderGraphics
         context.getVertexBuffer().addQuad(bx, by, bx + bw, by + bh, tx1, ty1, tx2, ty2);
     }
 
+    @Override
     public boolean canReadBack() {
         RenderTarget rt = getRenderTarget();
         return rt instanceof ReadbackRenderTarget &&
             ((ReadbackRenderTarget) rt).getBackBuffer() != null;
     }
 
+    @Override
     public RTTexture readBack(Rectangle view) {
         RenderTarget rt = getRenderTarget();
         context.flushVertexBuffer();
@@ -2165,12 +2188,14 @@ public abstract class BaseShaderGraphics
         return lcdrtt;
     }
 
+    @Override
     public void releaseReadBackBuffer(RTTexture rtt) {
         // This will be needed when we track LCD buffer locks and uses.
-        // (See RT-29488)
+        // (See JDK-8091015)
 //        context.releaseLCDBuffer();
     }
 
+    @Override
     public void setup3DRendering() {
         context.setRenderTarget(this);
     }

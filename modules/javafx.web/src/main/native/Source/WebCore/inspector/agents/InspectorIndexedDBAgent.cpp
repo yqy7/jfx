@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2012 Google Inc. All rights reserved.
- * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -34,13 +34,11 @@
 
 #include "AddEventListenerOptions.h"
 #include "DOMStringList.h"
-#include "DOMWindow.h"
 #include "Document.h"
 #include "Event.h"
 #include "EventListener.h"
 #include "EventNames.h"
 #include "EventTarget.h"
-#include "Frame.h"
 #include "IDBBindingUtilities.h"
 #include "IDBCursor.h"
 #include "IDBCursorWithValue.h"
@@ -57,6 +55,9 @@
 #include "InspectorPageAgent.h"
 #include "InstrumentingAgents.h"
 #include "JSDOMWindowCustom.h"
+#include "LocalDOMWindow.h"
+#include "LocalFrame.h"
+#include "LocalFrameInlines.h"
 #include "SecurityOrigin.h"
 #include "WindowOrWorkerGlobalScopeIndexedDatabase.h"
 #include <JavaScriptCore/HeapInlines.h>
@@ -66,12 +67,15 @@
 #include <JavaScriptCore/InspectorFrontendRouter.h>
 #include <wtf/JSONValues.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/Vector.h>
-#include <wtf/text/StringConcatenateNumbers.h>
+#include <wtf/text/MakeString.h>
 
 namespace WebCore {
 
 using namespace Inspector;
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(InspectorIndexedDBAgent);
 
 namespace {
 
@@ -83,9 +87,9 @@ public:
     void start(IDBFactory*, SecurityOrigin*, const String& databaseName);
     virtual void execute(IDBDatabase&) = 0;
     virtual BackendDispatcher::CallbackBase& requestCallback() = 0;
-    ScriptExecutionContext* context() const { return m_context; }
+    ScriptExecutionContext* context() const { return m_context.get(); }
 private:
-    ScriptExecutionContext* m_context;
+    WeakPtr<ScriptExecutionContext> m_context;
 };
 
 class OpenDatabaseCallback final : public EventListener {
@@ -95,15 +99,10 @@ public:
         return adoptRef(*new OpenDatabaseCallback(executableWithDatabase));
     }
 
-    bool operator==(const EventListener& other) const final
-    {
-        return this == &other;
-    }
-
     void handleEvent(ScriptExecutionContext&, Event& event) final
     {
         if (event.type() != eventNames().successEvent) {
-            m_executableWithDatabase->requestCallback().sendFailure("Unexpected event type.");
+            m_executableWithDatabase->requestCallback().sendFailure("Unexpected event type."_s);
             return;
         }
 
@@ -111,13 +110,13 @@ public:
 
         auto result = request.result();
         if (result.hasException()) {
-            m_executableWithDatabase->requestCallback().sendFailure("Could not get result in callback.");
+            m_executableWithDatabase->requestCallback().sendFailure("Could not get result in callback."_s);
             return;
         }
 
         auto resultValue = result.releaseReturnValue();
         if (!std::holds_alternative<RefPtr<IDBDatabase>>(resultValue)) {
-            m_executableWithDatabase->requestCallback().sendFailure("Unexpected result type.");
+            m_executableWithDatabase->requestCallback().sendFailure("Unexpected result type."_s);
             return;
         }
 
@@ -130,19 +129,19 @@ private:
     OpenDatabaseCallback(ExecutableWithDatabase& executableWithDatabase)
         : EventListener(EventListener::CPPEventListenerType)
         , m_executableWithDatabase(executableWithDatabase) { }
-    Ref<ExecutableWithDatabase> m_executableWithDatabase;
+    const Ref<ExecutableWithDatabase> m_executableWithDatabase;
 };
 
 void ExecutableWithDatabase::start(IDBFactory* idbFactory, SecurityOrigin*, const String& databaseName)
 {
     if (!context()) {
-        requestCallback().sendFailure("Could not open database.");
+        requestCallback().sendFailure("Could not open database."_s);
         return;
     }
 
     auto result = idbFactory->open(*context(), databaseName, std::nullopt);
     if (result.hasException()) {
-        requestCallback().sendFailure("Could not open database.");
+        requestCallback().sendFailure("Could not open database."_s);
         return;
     }
 
@@ -150,24 +149,24 @@ void ExecutableWithDatabase::start(IDBFactory* idbFactory, SecurityOrigin*, cons
 }
 
 
-static Ref<Protocol::IndexedDB::KeyPath> keyPathFromIDBKeyPath(const std::optional<IDBKeyPath>& idbKeyPath)
+static Ref<Inspector::Protocol::IndexedDB::KeyPath> keyPathFromIDBKeyPath(const std::optional<IDBKeyPath>& idbKeyPath)
 {
     if (!idbKeyPath)
-        return Protocol::IndexedDB::KeyPath::create().setType(Protocol::IndexedDB::KeyPath::Type::Null).release();
+        return Inspector::Protocol::IndexedDB::KeyPath::create().setType(Inspector::Protocol::IndexedDB::KeyPath::Type::Null).release();
 
     auto visitor = WTF::makeVisitor([](const String& string) {
-        auto keyPath = Protocol::IndexedDB::KeyPath::create().setType(Protocol::IndexedDB::KeyPath::Type::String).release();
+        auto keyPath = Inspector::Protocol::IndexedDB::KeyPath::create().setType(Inspector::Protocol::IndexedDB::KeyPath::Type::String).release();
         keyPath->setString(string);
         return keyPath;
     }, [](const Vector<String>& vector) {
         auto array = JSON::ArrayOf<String>::create();
         for (auto& string : vector)
             array->addItem(string);
-        auto keyPath = Protocol::IndexedDB::KeyPath::create().setType(Protocol::IndexedDB::KeyPath::Type::Array).release();
+        auto keyPath = Inspector::Protocol::IndexedDB::KeyPath::create().setType(Inspector::Protocol::IndexedDB::KeyPath::Type::Array).release();
         keyPath->setArray(WTFMove(array));
         return keyPath;
     });
-    return std::visit(visitor, idbKeyPath.value());
+    return WTF::visit(visitor, idbKeyPath.value());
 }
 
 static RefPtr<IDBTransaction> transactionForDatabase(IDBDatabase* idbDatabase, const String& objectStoreName, IDBTransactionMode mode = IDBTransactionMode::Readonly)
@@ -209,17 +208,17 @@ public:
             return;
 
         auto& databaseInfo = database.info();
-        auto objectStores = JSON::ArrayOf<Protocol::IndexedDB::ObjectStore>::create();
+        auto objectStores = JSON::ArrayOf<Inspector::Protocol::IndexedDB::ObjectStore>::create();
         auto objectStoreNames = databaseInfo.objectStoreNames();
         for (auto& name : objectStoreNames) {
             auto* objectStoreInfo = databaseInfo.infoForExistingObjectStore(name);
             if (!objectStoreInfo)
                 continue;
 
-            auto indexes = JSON::ArrayOf<Protocol::IndexedDB::ObjectStoreIndex>::create();
+            auto indexes = JSON::ArrayOf<Inspector::Protocol::IndexedDB::ObjectStoreIndex>::create();
 
             for (auto& indexInfo : objectStoreInfo->indexMap().values()) {
-                auto objectStoreIndex = Protocol::IndexedDB::ObjectStoreIndex::create()
+                auto objectStoreIndex = Inspector::Protocol::IndexedDB::ObjectStoreIndex::create()
                     .setName(indexInfo.name())
                     .setKeyPath(keyPathFromIDBKeyPath(indexInfo.keyPath()))
                     .setUnique(indexInfo.unique())
@@ -228,7 +227,7 @@ public:
                 indexes->addItem(WTFMove(objectStoreIndex));
             }
 
-            auto objectStore = Protocol::IndexedDB::ObjectStore::create()
+            auto objectStore = Inspector::Protocol::IndexedDB::ObjectStore::create()
                 .setName(objectStoreInfo->name())
                 .setKeyPath(keyPathFromIDBKeyPath(objectStoreInfo->keyPath()))
                 .setAutoIncrement(objectStoreInfo->autoIncrement())
@@ -237,7 +236,7 @@ public:
             objectStores->addItem(WTFMove(objectStore));
         }
 
-        auto result = Protocol::IndexedDB::DatabaseWithObjectStores::create()
+        auto result = Inspector::Protocol::IndexedDB::DatabaseWithObjectStores::create()
             .setName(databaseInfo.name())
             .setVersion(databaseInfo.version())
             .setObjectStores(WTFMove(objectStores))
@@ -250,43 +249,43 @@ private:
     DatabaseLoader(ScriptExecutionContext* context, Ref<IndexedDBBackendDispatcherHandler::RequestDatabaseCallback>&& requestCallback)
         : ExecutableWithDatabase(context)
         , m_requestCallback(WTFMove(requestCallback)) { }
-    Ref<IndexedDBBackendDispatcherHandler::RequestDatabaseCallback> m_requestCallback;
+    const Ref<IndexedDBBackendDispatcherHandler::RequestDatabaseCallback> m_requestCallback;
 };
 
 static RefPtr<IDBKey> idbKeyFromInspectorObject(Ref<JSON::Object>&& key)
 {
-    auto typeString = key->getString(Protocol::IndexedDB::Key::typeKey);
+    auto typeString = key->getString("type"_s);
     if (!typeString)
         return nullptr;
 
-    auto type = Protocol::Helpers::parseEnumValueFromString<Protocol::IndexedDB::Key::Type>(typeString);
+    auto type = Inspector::Protocol::Helpers::parseEnumValueFromString<Inspector::Protocol::IndexedDB::Key::Type>(typeString);
     if (!type)
         return nullptr;
 
     switch (*type) {
-    case Protocol::IndexedDB::Key::Type::Number: {
-        auto number = key->getDouble(Protocol::IndexedDB::Key::numberKey);
+    case Inspector::Protocol::IndexedDB::Key::Type::Number: {
+        auto number = key->getDouble("number"_s);
         if (!number)
             return nullptr;
         return IDBKey::createNumber(*number);
     }
 
-    case Protocol::IndexedDB::Key::Type::String: {
-        auto string = key->getString(Protocol::IndexedDB::Key::stringKey);
+    case Inspector::Protocol::IndexedDB::Key::Type::String: {
+        auto string = key->getString("string"_s);
         if (!string)
             return nullptr;
         return IDBKey::createString(string);
     }
 
-    case Protocol::IndexedDB::Key::Type::Date: {
-        auto date = key->getDouble(Protocol::IndexedDB::Key::dateKey);
+    case Inspector::Protocol::IndexedDB::Key::Type::Date: {
+        auto date = key->getDouble("date"_s);
         if (!date)
             return nullptr;
         return IDBKey::createDate(*date);
     }
 
-    case Protocol::IndexedDB::Key::Type::Array: {
-        auto array = key->getArray(Protocol::IndexedDB::Key::arrayKey);
+    case Inspector::Protocol::IndexedDB::Key::Type::Array: {
+        auto array = key->getArray("array"_s);
         if (!array)
             return nullptr;
 
@@ -308,24 +307,24 @@ static RefPtr<IDBKey> idbKeyFromInspectorObject(Ref<JSON::Object>&& key)
 static RefPtr<IDBKeyRange> idbKeyRangeFromKeyRange(JSON::Object& keyRange)
 {
     RefPtr<IDBKey> idbLower;
-    if (auto lower = keyRange.getObject(Protocol::IndexedDB::KeyRange::lowerKey)) {
+    if (auto lower = keyRange.getObject("lower"_s)) {
         idbLower = idbKeyFromInspectorObject(lower.releaseNonNull());
         if (!idbLower)
             return nullptr;
     }
 
     RefPtr<IDBKey> idbUpper;
-    if (auto upper = keyRange.getObject(Protocol::IndexedDB::KeyRange::upperKey)) {
+    if (auto upper = keyRange.getObject("upper"_s)) {
         idbUpper = idbKeyFromInspectorObject(upper.releaseNonNull());
         if (!idbUpper)
             return nullptr;
     }
 
-    auto lowerOpen = keyRange.getBoolean(Protocol::IndexedDB::KeyRange::lowerOpenKey);
+    auto lowerOpen = keyRange.getBoolean("lowerOpen"_s);
     if (!lowerOpen)
         return nullptr;
 
-    auto upperOpen = keyRange.getBoolean(Protocol::IndexedDB::KeyRange::upperOpenKey);
+    auto upperOpen = keyRange.getBoolean("upperOpen"_s);
     if (!upperOpen)
         return nullptr;
 
@@ -341,15 +340,10 @@ public:
 
     ~OpenCursorCallback() override = default;
 
-    bool operator==(const EventListener& other) const override
-    {
-        return this == &other;
-    }
-
     void handleEvent(ScriptExecutionContext& context, Event& event) override
     {
         if (event.type() != eventNames().successEvent) {
-            m_requestCallback->sendFailure("Unexpected event type.");
+            m_requestCallback->sendFailure("Unexpected event type."_s);
             return;
         }
 
@@ -357,7 +351,7 @@ public:
 
         auto result = request.result();
         if (result.hasException()) {
-            m_requestCallback->sendFailure("Could not get result in callback.");
+            m_requestCallback->sendFailure("Could not get result in callback."_s);
             return;
         }
 
@@ -371,7 +365,7 @@ public:
 
         if (m_skipCount) {
             if (cursor->advance(m_skipCount).hasException())
-                m_requestCallback->sendFailure("Could not advance cursor.");
+                m_requestCallback->sendFailure("Could not advance cursor."_s);
             m_skipCount = 0;
             return;
         }
@@ -383,7 +377,7 @@ public:
 
         // Continue cursor before making injected script calls, otherwise transaction might be finished.
         if (cursor->continueFunction(nullptr).hasException()) {
-            m_requestCallback->sendFailure("Could not continue cursor.");
+            m_requestCallback->sendFailure("Could not continue cursor."_s);
             return;
         }
 
@@ -401,7 +395,7 @@ public:
         if (!value)
             return;
 
-        auto dataEntry = Protocol::IndexedDB::DataEntry::create()
+        auto dataEntry = Inspector::Protocol::IndexedDB::DataEntry::create()
             .setKey(key.releaseNonNull())
             .setPrimaryKey(primaryKey.releaseNonNull())
             .setValue(value.releaseNonNull())
@@ -421,14 +415,14 @@ private:
         : EventListener(EventListener::CPPEventListenerType)
         , m_injectedScript(injectedScript)
         , m_requestCallback(WTFMove(requestCallback))
-        , m_result(JSON::ArrayOf<Protocol::IndexedDB::DataEntry>::create())
+        , m_result(JSON::ArrayOf<Inspector::Protocol::IndexedDB::DataEntry>::create())
         , m_skipCount(skipCount)
         , m_pageSize(pageSize)
     {
     }
     InjectedScript m_injectedScript;
-    Ref<IndexedDBBackendDispatcherHandler::RequestDataCallback> m_requestCallback;
-    Ref<JSON::ArrayOf<Protocol::IndexedDB::DataEntry>> m_result;
+    const Ref<IndexedDBBackendDispatcherHandler::RequestDataCallback> m_requestCallback;
+    Ref<JSON::ArrayOf<Inspector::Protocol::IndexedDB::DataEntry>> m_result;
     int m_skipCount;
     unsigned m_pageSize;
 };
@@ -449,13 +443,13 @@ public:
 
         auto idbTransaction = transactionForDatabase(&database, m_objectStoreName);
         if (!idbTransaction) {
-            m_requestCallback->sendFailure("Could not get transaction");
+            m_requestCallback->sendFailure("Could not get transaction"_s);
             return;
         }
 
         auto idbObjectStore = objectStoreForTransaction(idbTransaction.get(), m_objectStoreName);
         if (!idbObjectStore) {
-            m_requestCallback->sendFailure("Could not get object store");
+            m_requestCallback->sendFailure("Could not get object store"_s);
             return;
         }
 
@@ -464,7 +458,7 @@ public:
         if (!m_indexName.isEmpty()) {
             auto idbIndex = indexForObjectStore(idbObjectStore.get(), m_indexName);
             if (!idbIndex) {
-                m_requestCallback->sendFailure("Could not get index");
+                m_requestCallback->sendFailure("Could not get index"_s);
                 return;
             }
 
@@ -478,7 +472,7 @@ public:
         }
 
         if (!idbRequest) {
-            m_requestCallback->sendFailure("Could not open cursor to populate database data");
+            m_requestCallback->sendFailure("Could not open cursor to populate database data"_s);
             return;
         }
 
@@ -496,11 +490,11 @@ public:
         , m_idbKeyRange(WTFMove(idbKeyRange))
         , m_skipCount(skipCount)
         , m_pageSize(pageSize) { }
-    Ref<IndexedDBBackendDispatcherHandler::RequestDataCallback> m_requestCallback;
+    const Ref<IndexedDBBackendDispatcherHandler::RequestDataCallback> m_requestCallback;
     InjectedScript m_injectedScript;
     String m_objectStoreName;
     String m_indexName;
-    RefPtr<IDBKeyRange> m_idbKeyRange;
+    const RefPtr<IDBKeyRange> m_idbKeyRange;
     int m_skipCount;
     unsigned m_pageSize;
 };
@@ -517,7 +511,7 @@ InspectorIndexedDBAgent::InspectorIndexedDBAgent(PageAgentContext& context)
 
 InspectorIndexedDBAgent::~InspectorIndexedDBAgent() = default;
 
-void InspectorIndexedDBAgent::didCreateFrontendAndBackend(Inspector::FrontendRouter*, Inspector::BackendDispatcher*)
+void InspectorIndexedDBAgent::didCreateFrontendAndBackend()
 {
 }
 
@@ -526,17 +520,17 @@ void InspectorIndexedDBAgent::willDestroyFrontendAndBackend(Inspector::Disconnec
     disable();
 }
 
-Protocol::ErrorStringOr<void> InspectorIndexedDBAgent::enable()
+Inspector::Protocol::ErrorStringOr<void> InspectorIndexedDBAgent::enable()
 {
     return { };
 }
 
-Protocol::ErrorStringOr<void> InspectorIndexedDBAgent::disable()
+Inspector::Protocol::ErrorStringOr<void> InspectorIndexedDBAgent::disable()
 {
     return { };
 }
 
-static Protocol::ErrorStringOr<Document*> documentFromFrame(Frame* frame)
+static Inspector::Protocol::ErrorStringOr<Document*> documentFromFrame(LocalFrame* frame)
 {
     Document* document = frame ? frame->document() : nullptr;
     if (!document)
@@ -545,35 +539,35 @@ static Protocol::ErrorStringOr<Document*> documentFromFrame(Frame* frame)
     return document;
 }
 
-static Protocol::ErrorStringOr<IDBFactory*> IDBFactoryFromDocument(Document* document)
+static Inspector::Protocol::ErrorStringOr<IDBFactory*> IDBFactoryFromDocument(Document* document)
 {
-    DOMWindow* domWindow = document->domWindow();
-    if (!domWindow)
+    RefPtr window = document->window();
+    if (!window)
         return makeUnexpected("Missing window for given document"_s);
 
-    IDBFactory* idbFactory = WindowOrWorkerGlobalScopeIndexedDatabase::indexedDB(*domWindow);
+    IDBFactory* idbFactory = WindowOrWorkerGlobalScopeIndexedDatabase::indexedDB(*window);
     if (!idbFactory)
         makeUnexpected("Missing IndexedDB factory of window for given document"_s);
 
     return idbFactory;
 }
 
-static bool getDocumentAndIDBFactoryFromFrameOrSendFailure(Frame* frame, Document*& out_document, IDBFactory*& out_idbFactory, BackendDispatcher::CallbackBase& callback)
+static bool getDocumentAndIDBFactoryFromFrameOrSendFailure(LocalFrame* frame, Document*& outDocument, IDBFactory*& outIDBFactory, BackendDispatcher::CallbackBase& callback)
 {
-    Protocol::ErrorStringOr<Document*> document = documentFromFrame(frame);
+    Inspector::Protocol::ErrorStringOr<Document*> document = documentFromFrame(frame);
     if (!document.has_value()) {
         callback.sendFailure(document.error());
         return false;
     }
 
-    Protocol::ErrorStringOr<IDBFactory*> idbFactory = IDBFactoryFromDocument(document.value());
+    Inspector::Protocol::ErrorStringOr<IDBFactory*> idbFactory = IDBFactoryFromDocument(document.value());
     if (!idbFactory.has_value()) {
         callback.sendFailure(idbFactory.error());
         return false;
     }
 
-    out_document = document.value();
-    out_idbFactory = idbFactory.value();
+    outDocument = document.value();
+    outIDBFactory = idbFactory.value();
     return true;
 }
 
@@ -643,17 +637,12 @@ public:
 
     ~ClearObjectStoreListener() override = default;
 
-    bool operator==(const EventListener& other) const override
-    {
-        return this == &other;
-    }
-
     void handleEvent(ScriptExecutionContext&, Event& event) override
     {
         if (!m_requestCallback->isActive())
             return;
         if (event.type() != eventNames().completeEvent) {
-            m_requestCallback->sendFailure("Unexpected event type.");
+            m_requestCallback->sendFailure("Unexpected event type."_s);
             return;
         }
 
@@ -666,7 +655,7 @@ private:
     {
     }
 
-    Ref<IndexedDBBackendDispatcherHandler::ClearObjectStoreCallback> m_requestCallback;
+    const Ref<IndexedDBBackendDispatcherHandler::ClearObjectStoreCallback> m_requestCallback;
 };
 
 class ClearObjectStore final : public ExecutableWithDatabase {
@@ -690,13 +679,13 @@ public:
 
         auto idbTransaction = transactionForDatabase(&database, m_objectStoreName, IDBTransactionMode::Readwrite);
         if (!idbTransaction) {
-            m_requestCallback->sendFailure("Could not get transaction");
+            m_requestCallback->sendFailure("Could not get transaction"_s);
             return;
         }
 
         auto idbObjectStore = objectStoreForTransaction(idbTransaction.get(), m_objectStoreName);
         if (!idbObjectStore) {
-            m_requestCallback->sendFailure("Could not get object store");
+            m_requestCallback->sendFailure("Could not get object store"_s);
             return;
         }
 
@@ -704,7 +693,7 @@ public:
         auto result = idbObjectStore->clear();
         ASSERT(!result.hasException());
         if (result.hasException()) {
-            m_requestCallback->sendFailure(makeString("Could not clear object store '", m_objectStoreName, "': ", static_cast<int>(result.releaseException().code())));
+            m_requestCallback->sendFailure(makeString("Could not clear object store '"_s, m_objectStoreName, "': "_s, static_cast<int>(result.releaseException().code())));
             return;
         }
 
@@ -714,7 +703,7 @@ public:
     BackendDispatcher::CallbackBase& requestCallback() override { return m_requestCallback.get(); }
 private:
     const String m_objectStoreName;
-    Ref<IndexedDBBackendDispatcherHandler::ClearObjectStoreCallback> m_requestCallback;
+    const Ref<IndexedDBBackendDispatcherHandler::ClearObjectStoreCallback> m_requestCallback;
 };
 
 } // anonymous namespace

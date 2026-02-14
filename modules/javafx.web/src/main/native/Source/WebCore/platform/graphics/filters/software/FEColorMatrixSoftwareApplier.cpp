@@ -3,7 +3,7 @@
  * Copyright (C) 2004, 2005 Rob Buis <buis@kde.org>
  * Copyright (C) 2005 Eric Seidel <eric@webkit.org>
  * Copyright (C) 2009 Dirk Schulze <krit@webkit.org>
- * Copyright (C) 2021 Apple Inc.  All rights reserved.
+ * Copyright (C) 2021-2022 Apple Inc.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -29,6 +29,7 @@
 #include "ImageBuffer.h"
 #include "PixelBuffer.h"
 #include <wtf/MathExtras.h>
+#include <wtf/TZoneMallocInlines.h>
 
 #if USE(ACCELERATE)
 #include <Accelerate/Accelerate.h>
@@ -36,13 +37,15 @@
 
 namespace WebCore {
 
+WTF_MAKE_TZONE_ALLOCATED_IMPL(FEColorMatrixSoftwareApplier);
+
 FEColorMatrixSoftwareApplier::FEColorMatrixSoftwareApplier(const FEColorMatrix& effect)
     : Base(effect)
 {
-    if (m_effect.type() == FECOLORMATRIX_TYPE_SATURATE)
-        FEColorMatrix::calculateSaturateComponents(m_components, m_effect.values()[0]);
-    else if (m_effect.type() == FECOLORMATRIX_TYPE_HUEROTATE)
-        FEColorMatrix::calculateHueRotateComponents(m_components, m_effect.values()[0]);
+    if (m_effect->type() == ColorMatrixType::FECOLORMATRIX_TYPE_SATURATE)
+        FEColorMatrix::calculateSaturateComponents(m_components, m_effect->values()[0]);
+    else if (m_effect->type() == ColorMatrixType::FECOLORMATRIX_TYPE_HUEROTATE)
+        FEColorMatrix::calculateHueRotateComponents(m_components, m_effect->values()[0]);
 }
 
 inline void FEColorMatrixSoftwareApplier::matrix(float& red, float& green, float& blue, float& alpha) const
@@ -52,7 +55,7 @@ inline void FEColorMatrixSoftwareApplier::matrix(float& red, float& green, float
     float b = blue;
     float a = alpha;
 
-    const auto& values = m_effect.values();
+    const auto& values = m_effect->values();
 
     red   = values[ 0] * r + values[ 1] * g + values[ 2] * b + values[ 3] * a + values[ 4] * 255;
     green = values[ 5] * r + values[ 6] * g + values[ 7] * b + values[ 8] * a + values[ 9] * 255;
@@ -83,32 +86,28 @@ inline void FEColorMatrixSoftwareApplier::luminance(float& red, float& green, fl
 #if USE(ACCELERATE)
 void FEColorMatrixSoftwareApplier::applyPlatformAccelerated(PixelBuffer& pixelBuffer) const
 {
-    auto& pixelArray = pixelBuffer.data();
+    auto* pixelBytes = pixelBuffer.bytes().data();
     auto bufferSize = pixelBuffer.size();
-
-    ASSERT(pixelArray.length() == bufferSize.area() * 4);
-
     const int32_t divisor = 256;
-    uint8_t* data = pixelArray.data();
 
     vImage_Buffer src;
     src.width = bufferSize.width();
     src.height = bufferSize.height();
     src.rowBytes = bufferSize.width() * 4;
-    src.data = data;
+    src.data = pixelBytes;
 
     vImage_Buffer dest;
     dest.width = bufferSize.width();
     dest.height = bufferSize.height();
     dest.rowBytes = bufferSize.width() * 4;
-    dest.data = data;
+    dest.data = pixelBytes;
 
-    switch (m_effect.type()) {
-    case FECOLORMATRIX_TYPE_UNKNOWN:
+    switch (m_effect->type()) {
+    case ColorMatrixType::FECOLORMATRIX_TYPE_UNKNOWN:
         break;
 
-    case FECOLORMATRIX_TYPE_MATRIX: {
-        const auto& values = m_effect.values();
+    case ColorMatrixType::FECOLORMATRIX_TYPE_MATRIX: {
+        const auto& values = m_effect->values();
 
         const int16_t matrix[4 * 4] = {
             static_cast<int16_t>(roundf(values[ 0] * divisor)),
@@ -135,8 +134,8 @@ void FEColorMatrixSoftwareApplier::applyPlatformAccelerated(PixelBuffer& pixelBu
         break;
     }
 
-    case FECOLORMATRIX_TYPE_SATURATE:
-    case FECOLORMATRIX_TYPE_HUEROTATE: {
+    case ColorMatrixType::FECOLORMATRIX_TYPE_SATURATE:
+    case ColorMatrixType::FECOLORMATRIX_TYPE_HUEROTATE: {
         const int16_t matrix[4 * 4] = {
             static_cast<int16_t>(roundf(m_components[0] * divisor)),
             static_cast<int16_t>(roundf(m_components[3] * divisor)),
@@ -161,7 +160,7 @@ void FEColorMatrixSoftwareApplier::applyPlatformAccelerated(PixelBuffer& pixelBu
         vImageMatrixMultiply_ARGB8888(&src, &dest, matrix, divisor, nullptr, nullptr, kvImageNoFlags);
         break;
     }
-    case FECOLORMATRIX_TYPE_LUMINANCETOALPHA: {
+    case ColorMatrixType::FECOLORMATRIX_TYPE_LUMINANCETOALPHA: {
         const int16_t matrix[4 * 4] = {
             0,
             0,
@@ -192,53 +191,52 @@ void FEColorMatrixSoftwareApplier::applyPlatformAccelerated(PixelBuffer& pixelBu
 
 void FEColorMatrixSoftwareApplier::applyPlatformUnaccelerated(PixelBuffer& pixelBuffer) const
 {
-    auto& pixelArray = pixelBuffer.data();
-    unsigned pixelArrayLength = pixelArray.length();
+    auto pixelByteLength = pixelBuffer.bytes().size();
 
-    switch (m_effect.type()) {
-    case FECOLORMATRIX_TYPE_UNKNOWN:
+    switch (m_effect->type()) {
+    case ColorMatrixType::FECOLORMATRIX_TYPE_UNKNOWN:
         break;
 
-    case FECOLORMATRIX_TYPE_MATRIX:
-        for (unsigned pixelByteOffset = 0; pixelByteOffset < pixelArrayLength; pixelByteOffset += 4) {
-            float red = pixelArray.item(pixelByteOffset);
-            float green = pixelArray.item(pixelByteOffset + 1);
-            float blue = pixelArray.item(pixelByteOffset + 2);
-            float alpha = pixelArray.item(pixelByteOffset + 3);
+    case ColorMatrixType::FECOLORMATRIX_TYPE_MATRIX:
+        for (unsigned pixelByteOffset = 0; pixelByteOffset < pixelByteLength; pixelByteOffset += 4) {
+            float red = pixelBuffer.item(pixelByteOffset);
+            float green = pixelBuffer.item(pixelByteOffset + 1);
+            float blue = pixelBuffer.item(pixelByteOffset + 2);
+            float alpha = pixelBuffer.item(pixelByteOffset + 3);
             matrix(red, green, blue, alpha);
-            pixelArray.set(pixelByteOffset, red);
-            pixelArray.set(pixelByteOffset + 1, green);
-            pixelArray.set(pixelByteOffset + 2, blue);
-            pixelArray.set(pixelByteOffset + 3, alpha);
+            pixelBuffer.set(pixelByteOffset, red);
+            pixelBuffer.set(pixelByteOffset + 1, green);
+            pixelBuffer.set(pixelByteOffset + 2, blue);
+            pixelBuffer.set(pixelByteOffset + 3, alpha);
         }
         break;
 
-    case FECOLORMATRIX_TYPE_SATURATE:
-    case FECOLORMATRIX_TYPE_HUEROTATE:
-        for (unsigned pixelByteOffset = 0; pixelByteOffset < pixelArrayLength; pixelByteOffset += 4) {
-            float red = pixelArray.item(pixelByteOffset);
-            float green = pixelArray.item(pixelByteOffset + 1);
-            float blue = pixelArray.item(pixelByteOffset + 2);
-            float alpha = pixelArray.item(pixelByteOffset + 3);
+    case ColorMatrixType::FECOLORMATRIX_TYPE_SATURATE:
+    case ColorMatrixType::FECOLORMATRIX_TYPE_HUEROTATE:
+        for (unsigned pixelByteOffset = 0; pixelByteOffset < pixelByteLength; pixelByteOffset += 4) {
+            float red = pixelBuffer.item(pixelByteOffset);
+            float green = pixelBuffer.item(pixelByteOffset + 1);
+            float blue = pixelBuffer.item(pixelByteOffset + 2);
+            float alpha = pixelBuffer.item(pixelByteOffset + 3);
             saturateAndHueRotate(red, green, blue);
-            pixelArray.set(pixelByteOffset, red);
-            pixelArray.set(pixelByteOffset + 1, green);
-            pixelArray.set(pixelByteOffset + 2, blue);
-            pixelArray.set(pixelByteOffset + 3, alpha);
+            pixelBuffer.set(pixelByteOffset, red);
+            pixelBuffer.set(pixelByteOffset + 1, green);
+            pixelBuffer.set(pixelByteOffset + 2, blue);
+            pixelBuffer.set(pixelByteOffset + 3, alpha);
         }
         break;
 
-    case FECOLORMATRIX_TYPE_LUMINANCETOALPHA:
-        for (unsigned pixelByteOffset = 0; pixelByteOffset < pixelArrayLength; pixelByteOffset += 4) {
-            float red = pixelArray.item(pixelByteOffset);
-            float green = pixelArray.item(pixelByteOffset + 1);
-            float blue = pixelArray.item(pixelByteOffset + 2);
-            float alpha = pixelArray.item(pixelByteOffset + 3);
+    case ColorMatrixType::FECOLORMATRIX_TYPE_LUMINANCETOALPHA:
+        for (unsigned pixelByteOffset = 0; pixelByteOffset < pixelByteLength; pixelByteOffset += 4) {
+            float red = pixelBuffer.item(pixelByteOffset);
+            float green = pixelBuffer.item(pixelByteOffset + 1);
+            float blue = pixelBuffer.item(pixelByteOffset + 2);
+            float alpha = pixelBuffer.item(pixelByteOffset + 3);
             luminance(red, green, blue, alpha);
-            pixelArray.set(pixelByteOffset, red);
-            pixelArray.set(pixelByteOffset + 1, green);
-            pixelArray.set(pixelByteOffset + 2, blue);
-            pixelArray.set(pixelByteOffset + 3, alpha);
+            pixelBuffer.set(pixelByteOffset, red);
+            pixelBuffer.set(pixelByteOffset + 1, green);
+            pixelBuffer.set(pixelByteOffset + 2, blue);
+            pixelBuffer.set(pixelByteOffset + 3, alpha);
         }
         break;
     }
@@ -247,11 +245,11 @@ void FEColorMatrixSoftwareApplier::applyPlatformUnaccelerated(PixelBuffer& pixel
 void FEColorMatrixSoftwareApplier::applyPlatform(PixelBuffer& pixelBuffer) const
 {
 #if USE(ACCELERATE)
-    const auto& values = m_effect.values();
+    const auto& values = m_effect->values();
 
     // vImageMatrixMultiply_ARGB8888 takes a 4x4 matrix, if any value in the last column of the FEColorMatrix 5x4 matrix
     // is not zero, fall back to non-vImage code.
-    if (m_effect.type() != FECOLORMATRIX_TYPE_MATRIX || (!values[4] && !values[9] && !values[14] && !values[19])) {
+    if (m_effect->type() != ColorMatrixType::FECOLORMATRIX_TYPE_MATRIX || (!values[4] && !values[9] && !values[14] && !values[19])) {
         applyPlatformAccelerated(pixelBuffer);
         return;
     }
@@ -259,15 +257,15 @@ void FEColorMatrixSoftwareApplier::applyPlatform(PixelBuffer& pixelBuffer) const
     applyPlatformUnaccelerated(pixelBuffer);
 }
 
-bool FEColorMatrixSoftwareApplier::apply(const Filter&, const FilterImageVector& inputs, FilterImage& result) const
+bool FEColorMatrixSoftwareApplier::apply(const Filter&, std::span<const Ref<FilterImage>> inputs, FilterImage& result) const
 {
     auto& input = inputs[0].get();
 
-    auto resultImage = result.imageBuffer();
+    RefPtr resultImage = result.imageBuffer();
     if (!resultImage)
         return false;
 
-    auto inputImage = input.imageBuffer();
+    RefPtr inputImage = input.imageBuffer();
     if (inputImage) {
         auto inputImageRect = input.absoluteImageRectRelativeTo(result);
         resultImage->context().drawImageBuffer(*inputImage, inputImageRect);

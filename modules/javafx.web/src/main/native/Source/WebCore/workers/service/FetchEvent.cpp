@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,23 +26,25 @@
 #include "config.h"
 #include "FetchEvent.h"
 
-#include "CachedResourceRequestInitiators.h"
+#include "CachedResourceRequestInitiatorTypes.h"
+#include "DOMPromiseProxy.h"
+#include "EventNames.h"
+#include "FetchRequest.h"
 #include "JSDOMPromise.h"
 #include "JSFetchResponse.h"
 #include "Logging.h"
-#include <wtf/IsoMallocInlines.h>
-
-#if ENABLE(SERVICE_WORKER)
+#include <wtf/TZoneMallocInlines.h>
+#include <wtf/text/MakeString.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(FetchEvent);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(FetchEvent);
 
 Ref<FetchEvent> FetchEvent::createForTesting(ScriptExecutionContext& context)
 {
     FetchEvent::Init init;
     init.request = FetchRequest::create(context, { }, FetchHeaders::create(FetchHeaders::Guard::Immutable, { }), { }, { }, { });
-    return FetchEvent::create(*context.globalObject(), "fetch", WTFMove(init), Event::IsTrusted::Yes);
+    return FetchEvent::create(*context.globalObject(), eventNames().fetchEvent, WTFMove(init), Event::IsTrusted::Yes);
 }
 
 static inline Ref<DOMPromise> retrieveHandledPromise(JSC::JSGlobalObject& globalObject, RefPtr<DOMPromise>&& promise)
@@ -58,7 +60,7 @@ static inline Ref<DOMPromise> retrieveHandledPromise(JSC::JSGlobalObject& global
 }
 
 FetchEvent::FetchEvent(JSC::JSGlobalObject& globalObject, const AtomString& type, Init&& initializer, IsTrusted isTrusted)
-    : ExtendableEvent(type, initializer, isTrusted)
+    : ExtendableEvent(EventInterfaceType::FetchEvent, type, initializer, isTrusted)
     , m_request(initializer.request.releaseNonNull())
     , m_clientId(WTFMove(initializer.clientId))
     , m_resultingClientId(WTFMove(initializer.resultingClientId))
@@ -76,23 +78,23 @@ FetchEvent::~FetchEvent()
 
 ResourceError FetchEvent::createResponseError(const URL& url, const String& errorMessage, ResourceError::IsSanitized isSanitized)
 {
-    return ResourceError { errorDomainWebKitServiceWorker, 0, url, makeString("FetchEvent.respondWith received an error: ", errorMessage), ResourceError::Type::General, isSanitized };
+    return ResourceError { errorDomainWebKitServiceWorker, 0, url, makeString("FetchEvent.respondWith received an error: "_s, errorMessage), ResourceError::Type::General, isSanitized };
 
 }
 
 ExceptionOr<void> FetchEvent::respondWith(Ref<DOMPromise>&& promise)
 {
     if (!isBeingDispatched())
-        return Exception { InvalidStateError, "Event is not being dispatched"_s };
+        return Exception { ExceptionCode::InvalidStateError, "Event is not being dispatched"_s };
 
     if (m_respondWithEntered)
-        return Exception { InvalidStateError, "Event respondWith flag is set"_s };
+        return Exception { ExceptionCode::InvalidStateError, "Event respondWith flag is set"_s };
 
-    m_respondPromise = WTFMove(promise);
-    addExtendLifetimePromise(*m_respondPromise);
+    m_respondPromise = promise.copyRef();
+    addExtendLifetimePromise(promise.get());
 
-    auto isRegistered = m_respondPromise->whenSettled([this, protectedThis = Ref { *this }] {
-        promiseIsSettled();
+    auto isRegistered = promise->whenSettled([protectedThis = Ref { *this }] {
+        protectedThis->promiseIsSettled();
     });
 
     stopPropagation();
@@ -129,14 +131,15 @@ void FetchEvent::processResponse(Expected<Ref<FetchResponse>, std::optional<Reso
 
 void FetchEvent::promiseIsSettled()
 {
-    if (m_respondPromise->status() == DOMPromise::Status::Rejected) {
-        auto reason = m_respondPromise->result().toWTFString(m_respondPromise->globalObject());
+    Ref respondPromise = *m_respondPromise;
+    if (respondPromise->status() == DOMPromise::Status::Rejected) {
+        auto reason = respondPromise->result().toWTFString(respondPromise->globalObject());
         respondWithError(createResponseError(m_request->url(), reason, ResourceError::IsSanitized::Yes));
         return;
     }
 
-    ASSERT(m_respondPromise->status() == DOMPromise::Status::Fulfilled);
-    auto response = JSFetchResponse::toWrapped(m_respondPromise->globalObject()->vm(), m_respondPromise->result());
+    ASSERT(respondPromise->status() == DOMPromise::Status::Fulfilled);
+    RefPtr response = JSFetchResponse::toWrapped(respondPromise->globalObject()->vm(), respondPromise->result());
     if (!response) {
         respondWithError(createResponseError(m_request->url(), "Returned response is null."_s, ResourceError::IsSanitized::Yes));
         return;
@@ -162,32 +165,46 @@ FetchEvent::PreloadResponsePromise& FetchEvent::preloadResponse(ScriptExecutionC
             }
             return *m_preloadResponsePromise;
         }
-
-        auto request = FetchRequest::create(context, { }, FetchHeaders::create(), ResourceRequest { m_request->internalRequest() } , FetchOptions { m_request->fetchOptions() }, String { m_request->internalRequestReferrer() });
-        request->setNavigationPreloadIdentifier(m_navigationPreloadIdentifier);
-        FetchResponse::fetch(context, request.get(), [protectedThis = Ref { *this }](auto&& result) {
-            if (result.hasException()) {
-                protectedThis->m_preloadResponsePromise->reject(result.releaseException());
-                return;
-            }
-
-            Ref response = result.releaseReturnValue();
-            auto* context = response->scriptExecutionContext();
-            if (!context)
-                return;
-            auto* globalObject = context->globalObject();
-            if (!globalObject)
-                return;
-
-            auto& vm = globalObject->vm();
-            JSC::JSLockHolder lock(vm);
-            JSC::Strong<JSC::Unknown> value { vm, toJS(globalObject, JSC::jsCast<JSDOMGlobalObject*>(globalObject), response.get()) };
-            protectedThis->m_preloadResponsePromise->resolve(value);
-        }, cachedResourceRequestInitiators().navigation);
     }
     return *m_preloadResponsePromise;
 }
 
-} // namespace WebCore
+void FetchEvent::navigationPreloadIsReady(ResourceResponse&& response)
+{
+    ASSERT(!response.isRedirected());
 
-#endif // ENABLE(SERVICE_WORKER)
+    auto* globalObject = m_handled->globalObject();
+    RefPtr context = globalObject ? globalObject->scriptExecutionContext() : nullptr;
+    if (!context)
+        return;
+
+    if (!m_preloadResponsePromise)
+        m_preloadResponsePromise = makeUnique<PreloadResponsePromise>();
+
+    auto request = FetchRequest::create(*context, { }, FetchHeaders::create(), ResourceRequest { m_request->internalRequest() } , FetchOptions { m_request->fetchOptions() }, String { m_request->internalRequestReferrer() });
+    request->setNavigationPreloadIdentifier(m_navigationPreloadIdentifier);
+
+    auto fetchResponse = FetchResponse::createFetchResponse(*context, request.get(), { });
+    fetchResponse->setReceivedInternalResponse(response, FetchOptions::Credentials::Include);
+    fetchResponse->setIsNavigationPreload(true);
+
+    auto& vm = globalObject->vm();
+    JSC::JSLockHolder lock(vm);
+    JSC::Strong<JSC::Unknown> value { vm, toJS(globalObject, JSC::jsCast<JSDOMGlobalObject*>(globalObject), fetchResponse.get()) };
+    m_preloadResponsePromise->resolve(value);
+
+    // We postpone the load to leave some time for the service worker to use the preload before loading it.
+    context->postTask([fetchResponse = WTFMove(fetchResponse), request = WTFMove(request)](auto& context) {
+        if (!fetchResponse->isUsedForPreload())
+            fetchResponse->startLoader(context, request.get(), cachedResourceRequestInitiatorTypes().navigation);
+    });
+}
+
+void FetchEvent::navigationPreloadFailed(ResourceError&& error)
+{
+    if (!m_preloadResponsePromise)
+        m_preloadResponsePromise = makeUnique<PreloadResponsePromise>();
+    m_preloadResponsePromise->reject(Exception { ExceptionCode::TypeError, error.sanitizedDescription() });
+}
+
+} // namespace WebCore

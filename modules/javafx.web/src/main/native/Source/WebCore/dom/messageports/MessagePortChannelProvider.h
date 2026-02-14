@@ -30,12 +30,21 @@
 #include <wtf/Vector.h>
 
 namespace WebCore {
+class MessagePortChannelProvider;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::MessagePortChannelProvider> : std::true_type { };
+}
+
+namespace WebCore {
 
 class ScriptExecutionContext;
 struct MessagePortIdentifier;
 struct MessageWithMessagePorts;
 
-class MessagePortChannelProvider {
+class MessagePortChannelProvider : public CanMakeWeakPtr<MessagePortChannelProvider> {
 public:
     static MessagePortChannelProvider& fromContext(ScriptExecutionContext&);
     static MessagePortChannelProvider& singleton();
@@ -44,7 +53,7 @@ public:
     virtual ~MessagePortChannelProvider() { }
 
     // Operations that WebProcesses perform
-    virtual void createNewMessagePortChannel(const MessagePortIdentifier& local, const MessagePortIdentifier& remote) = 0;
+    virtual void createNewMessagePortChannel(const MessagePortIdentifier& local, const MessagePortIdentifier& remote, bool siteIsolationEnabled) = 0;
     virtual void entangleLocalPortInThisProcessToRemote(const MessagePortIdentifier& local, const MessagePortIdentifier& remote) = 0;
     virtual void messagePortDisentangled(const MessagePortIdentifier& local) = 0;
     virtual void messagePortClosed(const MessagePortIdentifier& local) = 0;
@@ -52,27 +61,6 @@ public:
     virtual void takeAllMessagesForPort(const MessagePortIdentifier&, CompletionHandler<void(Vector<MessageWithMessagePorts>&&, CompletionHandler<void()>&&)>&&) = 0;
 
     virtual void postMessageToRemote(MessageWithMessagePorts&&, const MessagePortIdentifier& remoteTarget) = 0;
-
-    enum class HasActivity {
-        Yes,
-        No,
-    };
-    virtual void checkRemotePortForActivity(const MessagePortIdentifier& remoteTarget, CompletionHandler<void(HasActivity)>&& callback) = 0;
-
-private:
-
 };
 
 } // namespace WebCore
-
-namespace WTF {
-
-template<> struct EnumTraits<WebCore::MessagePortChannelProvider::HasActivity> {
-    using values = EnumValues<
-        WebCore::MessagePortChannelProvider::HasActivity,
-        WebCore::MessagePortChannelProvider::HasActivity::No,
-        WebCore::MessagePortChannelProvider::HasActivity::Yes
-    >;
-};
-
-}

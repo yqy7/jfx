@@ -30,11 +30,12 @@
 
 #include <string>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/text/ASCIILiteral.h>
 
 namespace WebCore {
 namespace ContentExtensions {
 
-const char* WebKitContentBlockerDomain = "WebKitContentBlockerDomain";
+ASCIILiteral WebKitContentBlockerDomain = "WebKitContentBlockerDomain"_s;
 
 const std::error_category& contentExtensionErrorCategory()
 {
@@ -77,6 +78,8 @@ const std::error_category& contentExtensionErrorCategory()
                 return "Invalid list of if-domain, unless-domain, if-top-url, or unless-top-url conditions.";
             case ContentExtensionError::JSONTooManyRules:
                 return "Too many rules in JSON array.";
+            case ContentExtensionError::JSONInvalidRequestMethod:
+                return "The request-method string must be \"get\", \"head\", \"options\", \"trace\", \"put\", \"delete\", \"post\", \"patch\", or \"connect\".";
             case ContentExtensionError::JSONDomainNotLowerCaseASCII:
                 return "Domains must be lower case ASCII. Use punycode to encode non-ASCII characters.";
             case ContentExtensionError::JSONMultipleConditions:
@@ -125,6 +128,8 @@ const std::error_category& contentExtensionErrorCategory()
                 return "A modify-headers operation of \"set\" or \"append\" must have a value";
             case ContentExtensionError::JSONModifyHeadersNotArray:
                 return "A headers member must be an array";
+            case ContentExtensionError::JSONModifyHeadersInvalidPriority:
+                return "A priority must be a positive integer";
             }
 
             return std::string();

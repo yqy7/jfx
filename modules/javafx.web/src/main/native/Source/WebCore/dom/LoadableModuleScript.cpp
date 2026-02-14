@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple, Inc. All Rights Reserved.
+ * Copyright (C) 2016 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,21 +27,22 @@
 #include "LoadableModuleScript.h"
 
 #include "Document.h"
-#include "Frame.h"
+#include "Element.h"
+#include "LocalFrame.h"
 #include "ModuleFetchParameters.h"
 #include "ScriptController.h"
 #include "ScriptElement.h"
 
 namespace WebCore {
 
-Ref<LoadableModuleScript> LoadableModuleScript::create(const AtomString& nonce, const AtomString& integrity, ReferrerPolicy policy, const AtomString& crossOriginMode, const String& charset, const AtomString& initiatorName, bool isInUserAgentShadowTree)
+Ref<LoadableModuleScript> LoadableModuleScript::create(const AtomString& nonce, const AtomString& integrity, ReferrerPolicy policy, RequestPriority fetchPriority, const AtomString& crossOriginMode, const AtomString& charset, const AtomString& initiatorType, bool isInUserAgentShadowTree)
 {
-    return adoptRef(*new LoadableModuleScript(nonce, integrity, policy, crossOriginMode, charset, initiatorName, isInUserAgentShadowTree));
+    return adoptRef(*new LoadableModuleScript(nonce, integrity, policy, fetchPriority, crossOriginMode, charset, initiatorType, isInUserAgentShadowTree));
 }
 
-LoadableModuleScript::LoadableModuleScript(const AtomString& nonce, const AtomString& integrity, ReferrerPolicy policy, const AtomString& crossOriginMode, const String& charset, const AtomString& initiatorName, bool isInUserAgentShadowTree)
-    : LoadableScript(nonce, policy, crossOriginMode, charset, initiatorName, isInUserAgentShadowTree)
-    , m_parameters(ModuleFetchParameters::create(integrity, /* isTopLevelModule */ true))
+LoadableModuleScript::LoadableModuleScript(const AtomString& nonce, const AtomString& integrity, ReferrerPolicy policy, RequestPriority fetchPriority, const AtomString& crossOriginMode, const AtomString& charset, const AtomString& initiatorType, bool isInUserAgentShadowTree)
+    : LoadableScript(nonce, policy, fetchPriority, crossOriginMode, charset, initiatorType, isInUserAgentShadowTree)
+    , m_parameters(ModuleFetchParameters::create(JSC::ScriptFetchParameters::Type::JavaScript, integrity, /* isTopLevelModule */ true))
 {
 }
 
@@ -52,9 +53,14 @@ bool LoadableModuleScript::isLoaded() const
     return m_isLoaded;
 }
 
-std::optional<LoadableScript::Error> LoadableModuleScript::error() const
+bool LoadableModuleScript::hasError() const
 {
-    return m_error;
+    return !!m_error;
+}
+
+std::optional<LoadableScript::Error> LoadableModuleScript::takeError()
+{
+    return std::exchange(m_error, std::nullopt);
 }
 
 bool LoadableModuleScript::wasCanceled() const
@@ -64,7 +70,7 @@ bool LoadableModuleScript::wasCanceled() const
 
 void LoadableModuleScript::notifyLoadCompleted(UniquedStringImpl& moduleKey)
 {
-    m_moduleKey = &moduleKey;
+    m_moduleKey = moduleKey;
     m_isLoaded = true;
     notifyClientFinished();
 }

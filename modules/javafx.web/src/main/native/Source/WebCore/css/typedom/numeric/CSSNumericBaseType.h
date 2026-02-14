@@ -25,11 +25,12 @@
 
 #pragma once
 
-#if ENABLE(CSS_TYPED_OM)
+#include <array>
+#include <wtf/text/ASCIILiteral.h>
 
 namespace WebCore {
 
-enum class CSSNumericBaseType: uint8_t {
+enum class CSSNumericBaseType : uint8_t {
     Length,
     Angle,
     Time,
@@ -39,6 +40,38 @@ enum class CSSNumericBaseType: uint8_t {
     Percent,
 };
 
-} // namespace WebCore
+constexpr std::array<CSSNumericBaseType, 7> eachBaseType()
+{
+    return {
+        CSSNumericBaseType::Length,
+        CSSNumericBaseType::Angle,
+        CSSNumericBaseType::Time,
+        CSSNumericBaseType::Frequency,
+        CSSNumericBaseType::Resolution,
+        CSSNumericBaseType::Flex,
+        CSSNumericBaseType::Percent
+    };
+}
 
-#endif
+constexpr ASCIILiteral debugString(CSSNumericBaseType type)
+{
+    switch (type) {
+    case CSSNumericBaseType::Length:
+        return "length"_s;
+    case CSSNumericBaseType::Angle:
+        return "angle"_s;
+    case CSSNumericBaseType::Time:
+        return "time"_s;
+    case CSSNumericBaseType::Frequency:
+        return "frequency"_s;
+    case CSSNumericBaseType::Resolution:
+        return "resolution"_s;
+    case CSSNumericBaseType::Flex:
+        return "flex"_s;
+    case CSSNumericBaseType::Percent:
+        return "percent"_s;
+    }
+    return "invalid"_s;
+}
+
+} // namespace WebCore

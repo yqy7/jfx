@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -59,7 +59,7 @@ polyline.getPoints().addAll(new Double[]{
 </PRE>
  * @since JavaFX 2.0
  */
-public  class Polyline extends Shape {
+public non-sealed class Polyline extends Shape {
     static {
         PolylineHelper.setPolylineAccessor(new PolylineHelper.PolylineAccessor() {
             @Override
@@ -131,7 +131,7 @@ public  class Polyline extends Shape {
      *
      * @defaultValue empty
      */
-    private final ObservableList<Double> points = new TrackableObservableList<Double>() {
+    private final ObservableList<Double> points = new TrackableObservableList<>() {
         @Override
         protected void onChanged(Change<Double> c) {
             NodeHelper.markDirty(Polyline.this, DirtyBits.NODE_GEOMETRY);

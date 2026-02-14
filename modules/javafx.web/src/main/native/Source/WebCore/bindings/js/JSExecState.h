@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2010 Google Inc. All rights reserved.
- * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,6 +31,7 @@
 #include "ThreadGlobalData.h"
 #include <JavaScriptCore/CatchScope.h>
 #include <JavaScriptCore/Completion.h>
+#include <JavaScriptCore/JSMicrotask.h>
 #include <JavaScriptCore/Microtask.h>
 #include <wtf/ForbidHeapAllocation.h>
 #include <wtf/MainThread.h>
@@ -113,22 +114,18 @@ public:
         return profiledEvaluate(lexicalGlobalObject, reason, source, thisValue, unused);
     }
 
-    static void runTask(JSC::JSGlobalObject* lexicalGlobalObject, JSC::Microtask& task)
-    {
-        JSExecState currentState(lexicalGlobalObject);
-        task.run(lexicalGlobalObject);
-    }
+    static void runTask(JSC::JSGlobalObject*, JSC::QueuedTask&);
 
-    static JSC::JSInternalPromise& loadModule(JSC::JSGlobalObject& lexicalGlobalObject, const String& moduleName, JSC::JSValue parameters, JSC::JSValue scriptFetcher)
+    static JSC::JSInternalPromise* loadModule(JSC::JSGlobalObject& lexicalGlobalObject, const URL& topLevelModuleURL, JSC::JSValue parameters, JSC::JSValue scriptFetcher)
     {
         JSExecState currentState(&lexicalGlobalObject);
-        return *JSC::loadModule(&lexicalGlobalObject, moduleName, parameters, scriptFetcher);
+        return JSC::loadModule(&lexicalGlobalObject, JSC::Identifier::fromString(lexicalGlobalObject.vm(), topLevelModuleURL.string()), parameters, scriptFetcher);
     }
 
-    static JSC::JSInternalPromise& loadModule(JSC::JSGlobalObject& lexicalGlobalObject, const JSC::SourceCode& sourceCode, JSC::JSValue scriptFetcher)
+    static JSC::JSInternalPromise* loadModule(JSC::JSGlobalObject& lexicalGlobalObject, const JSC::SourceCode& sourceCode, JSC::JSValue scriptFetcher)
     {
         JSExecState currentState(&lexicalGlobalObject);
-        return *JSC::loadModule(&lexicalGlobalObject, sourceCode, scriptFetcher);
+        return JSC::loadModule(&lexicalGlobalObject, sourceCode, scriptFetcher);
     }
 
     static JSC::JSValue linkAndEvaluateModule(JSC::JSGlobalObject& lexicalGlobalObject, const JSC::Identifier& moduleKey, JSC::JSValue scriptFetcher, NakedPtr<JSC::Exception>& returnedException)
@@ -139,7 +136,7 @@ public:
         {
             JSExecState currentState(&lexicalGlobalObject);
             returnValue = JSC::linkAndEvaluateModule(&lexicalGlobalObject, moduleKey, scriptFetcher);
-            if (UNLIKELY(scope.exception())) {
+            if (scope.exception()) [[unlikely]] {
                 returnedException = scope.exception();
                 if (!vm.hasPendingTerminationException())
                     scope.clearException();
@@ -184,7 +181,7 @@ private:
         threadGlobalData().setCurrentState(lexicalGlobalObject);
     }
 
-    JSC::JSGlobalObject* m_previousState;
+    JSC::JSGlobalObject* const m_previousState;
     JSC::JSLockHolder m_lock;
 
     static void didLeaveScriptContext(JSC::JSGlobalObject*);
@@ -211,7 +208,7 @@ public:
     }
 
 private:
-    JSC::JSGlobalObject* m_previousState;
+    JSC::JSGlobalObject* const m_previousState;
     CustomElementReactionStack m_customElementReactionStack;
 };
 
@@ -219,5 +216,6 @@ JSC::JSValue functionCallHandlerFromAnyThread(JSC::JSGlobalObject*, JSC::JSValue
 JSC::JSValue evaluateHandlerFromAnyThread(JSC::JSGlobalObject*, const JSC::SourceCode&, JSC::JSValue thisValue, NakedPtr<JSC::Exception>& returnedException);
 
 ScriptExecutionContext* executionContext(JSC::JSGlobalObject*);
+RefPtr<ScriptExecutionContext> protectedExecutionContext(JSC::JSGlobalObject*);
 
 } // namespace WebCore

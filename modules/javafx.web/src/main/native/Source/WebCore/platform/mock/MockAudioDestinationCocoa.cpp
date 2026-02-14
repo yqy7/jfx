@@ -28,17 +28,21 @@
 
 #if ENABLE(WEB_AUDIO)
 
+#include "AudioUtilitiesCocoa.h"
 #include "CAAudioStreamDescription.h"
 #include "WebAudioBufferList.h"
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
+WTF_MAKE_TZONE_ALLOCATED_IMPL(MockAudioDestinationCocoa);
+
 const int kRenderBufferSize = 128;
 
-MockAudioDestinationCocoa::MockAudioDestinationCocoa(AudioIOCallback& callback, float sampleRate)
-    : AudioDestinationCocoa(callback, 2, sampleRate)
-    , m_workQueue(WorkQueue::create("MockAudioDestinationCocoa Render Queue"))
-    , m_timer(RunLoop::current(), this, &MockAudioDestinationCocoa::tick)
+MockAudioDestinationCocoa::MockAudioDestinationCocoa(const CreationOptions& options)
+    : AudioDestinationCocoa(options)
+    , m_workQueue(WorkQueue::create("MockAudioDestinationCocoa Render Queue"_s))
+    , m_timer(RunLoop::currentSingleton(), "MockAudioDestinationCocoa::Timer"_s, this, &MockAudioDestinationCocoa::tick)
 {
 }
 
@@ -67,9 +71,7 @@ void MockAudioDestinationCocoa::stopRendering(CompletionHandler<void(bool)>&& co
 void MockAudioDestinationCocoa::tick()
 {
     m_workQueue->dispatch([this, protectedThis = Ref { *this }, sampleRate = sampleRate(), numberOfFramesToProcess = m_numberOfFramesToProcess] {
-        AudioStreamBasicDescription streamFormat;
-        getAudioStreamBasicDescription(streamFormat);
-
+        AudioStreamBasicDescription streamFormat = audioStreamBasicDescriptionForAudioBus(m_outputBus);
         WebAudioBufferList webAudioBufferList { streamFormat, numberOfFramesToProcess };
         render(0., 0, numberOfFramesToProcess, webAudioBufferList.list());
     });

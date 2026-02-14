@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,8 @@
  */
 package test.robot.javafx.scene;
 
-import com.sun.javafx.PlatformUtil;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import java.util.concurrent.CountDownLatch;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.scene.Scene;
@@ -35,19 +36,13 @@ import javafx.scene.robot.Robot;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.stage.WindowEvent;
-
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import static org.junit.Assert.fail;
-import static org.junit.Assume.assumeTrue;
-
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.PlatformUtil;
 import test.util.Util;
 
 public class DatePickerTest {
@@ -79,7 +74,7 @@ public class DatePickerTest {
         mouseClick(datePicker.getLayoutX() + datePicker.getWidth() - 15,
                     datePicker.getLayoutY() + datePicker.getHeight() / 2);
         Thread.sleep(400); // DatePicker takes some time to display the calendar popup.
-        waitForLatch(onShownLatch, 10, "Failed to show Calendar popup.");
+        Util.waitForLatch(onShownLatch, 10, "Failed to show Calendar popup.");
     }
 
     private void clickDatePickerCalendarPopup(int yFactor) throws Exception {
@@ -87,7 +82,7 @@ public class DatePickerTest {
         mouseClick(datePicker.getLayoutX() + datePicker.getWidth() / 2,
                     datePicker.getLayoutY() + datePicker.getHeight() * yFactor);
         Thread.sleep(400);
-        waitForLatch(onActionLatch, 10, "Failed to receive onAction call.");
+        Util.waitForLatch(onActionLatch, 10, "Failed to receive onAction call.");
     }
 
     // This test is for verifying a specific behavior.
@@ -114,27 +109,27 @@ public class DatePickerTest {
             datePicker.show();
             root.getChildren().add(datePicker);
         });
-        waitForLatch(onShownLatch, 10, "Failed to show calendar popup.");
+        Util.waitForLatch(onShownLatch, 10, "Failed to show calendar popup.");
         Thread.sleep(400); // DatePicker takes some time to display the calendar popup.
         // 2.
-        Assert.assertEquals("DatePicker calendar popup should be shown once.", 1, onShownCount);
+        Assertions.assertEquals(1, onShownCount, "DatePicker calendar popup should be shown once.");
 
         // 2.1
         clickDatePickerCalendarPopup(5);
-        Assert.assertEquals("DatePicker calendar popup should be clicked once.", 1, onActionCount);
+        Assertions.assertEquals(1, onActionCount, "DatePicker calendar popup should be clicked once.");
 
         // 3.
         showDatePickerCalendarPopup();
         // 4.
-        Assert.assertEquals("DatePicker calendar popup should have been shown two times.", 2, onShownCount);
+        Assertions.assertEquals(2, onShownCount, "DatePicker calendar popup should have been shown two times.");
 
         // 4.1
         clickDatePickerCalendarPopup(6);
-        Assert.assertEquals("DatePicker calendar popup have been clicked two times.", 2, onActionCount);
+        Assertions.assertEquals(2, onActionCount, "DatePicker calendar popup have been clicked two times.");
 
         // 5.
         showDatePickerCalendarPopup();
-        Assert.assertEquals("DatePicker calendar popup should have been shown three times.", 3, onShownCount);
+        Assertions.assertEquals(3, onShownCount, "DatePicker calendar popup should have been shown three times.");
 
         // 6.
         Util.runAndWait(() -> {
@@ -145,10 +140,10 @@ public class DatePickerTest {
 
         // 7.
         clickDatePickerCalendarPopup(5);
-        Assert.assertEquals("DatePicker calendar popup should have been clicked three times.", 3, onActionCount);
+        Assertions.assertEquals(3, onActionCount, "DatePicker calendar popup should have been clicked three times.");
     }
 
-    @After
+    @AfterEach
     public void resetUI() {
         Platform.runLater(() -> {
             datePicker.setOnShown(null);
@@ -157,7 +152,7 @@ public class DatePickerTest {
         });
     }
 
-    @Before
+    @BeforeEach
     public void setupUI() {
         Platform.runLater(() -> {
             datePicker = new DatePicker();
@@ -173,18 +168,14 @@ public class DatePickerTest {
         });
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() throws Exception {
-        new Thread(() -> Application.launch(TestApp.class, (String[])null)).start();
-        waitForLatch(startupLatch, 10, "FX runtime failed to start.");
+        Util.launch(startupLatch, TestApp.class);
     }
 
-    @AfterClass
+    @AfterAll
     public static void exit() {
-        Platform.runLater(() -> {
-            stage.hide();
-        });
-        Platform.exit();
+        Util.shutdown();
     }
 
     public static class TestApp extends Application {
@@ -201,9 +192,5 @@ public class DatePickerTest {
             stage.setAlwaysOnTop(true);
             stage.show();
         }
-    }
-
-    public static void waitForLatch(CountDownLatch latch, int seconds, String msg) throws Exception {
-        Assert.assertTrue("Timeout: " + msg, latch.await(seconds, TimeUnit.SECONDS));
     }
 }

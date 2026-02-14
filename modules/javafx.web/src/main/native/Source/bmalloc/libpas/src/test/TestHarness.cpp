@@ -228,14 +228,12 @@ BootJITHeap::BootJITHeap()
         "boot-jit-heap",
         [] () {
 #if PAS_ENABLE_JIT
-            constexpr unsigned numRegions = 10;
+            constexpr unsigned numRegions = 50;
 
             for (unsigned i = numRegions; i--;) {
-                size_t size =
-                    pas_round_up_to_power_of_2(5000000, pas_page_malloc_alignment());
-
-                void* base = valloc(size);
-
+                size_t pageSize = pas_page_malloc_alignment();
+                size_t size = pas_round_up_to_power_of_2(5000000, pageSize);
+                void* base = aligned_alloc(pageSize, size);
                 jit_heap_add_fresh_memory(
                     pas_range_create(reinterpret_cast<uintptr_t>(base),
                                      reinterpret_cast<uintptr_t>(base) + size));
@@ -353,8 +351,10 @@ int resultPipe[2];
 void addBitfieldVectorTests();
 void addBitfitTests();
 void addBitvectorTests();
+void addBmallocTests();
 void addCartesianTreeTests();
 void addCoalignTests();
+void addEnumerationTests();
 void addExpendableMemoryTests();
 void addExtendedGCDTests();
 void addHashtableTests();
@@ -374,6 +374,7 @@ void addMinHeapTests();
 void addPGMTests();
 void addRaceTests();
 void addRedBlackTreeTests();
+void addScavengerExternalWorkTests();
 void addTLCDecommitTests();
 void addTSDTests();
 void addThingyAndUtilityHeapAllocationTests();
@@ -721,8 +722,10 @@ int main(int argc, char** argv)
     ADD_SUITE(BitfieldVector);
     ADD_SUITE(Bitfit);
     ADD_SUITE(Bitvector);
+    ADD_SUITE(Bmalloc);
     ADD_SUITE(CartesianTree);
     ADD_SUITE(Coalign);
+    ADD_SUITE(Enumeration);
     ADD_SUITE(ExpendableMemory);
     ADD_SUITE(ExtendedGCD);
     ADD_SUITE(Hashtable);

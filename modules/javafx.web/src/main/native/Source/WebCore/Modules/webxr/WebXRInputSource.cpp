@@ -36,23 +36,23 @@
 #include "WebXRFrame.h"
 #include "WebXRSession.h"
 #include "XRInputSourceEvent.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(WebXRInputSource);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(WebXRInputSource);
 
-Ref<WebXRInputSource> WebXRInputSource::create(Document& document, WebXRSession& session, double timestamp, const PlatformXR::Device::FrameData::InputSource& source)
+Ref<WebXRInputSource> WebXRInputSource::create(Document& document, WebXRSession& session, double timestamp, const PlatformXR::FrameData::InputSource& source)
 {
     return adoptRef(*new WebXRInputSource(document, session, timestamp, source));
 }
 
-WebXRInputSource::WebXRInputSource(Document& document, WebXRSession& session, double timestamp, const PlatformXR::Device::FrameData::InputSource& source)
+WebXRInputSource::WebXRInputSource(Document& document, WebXRSession& session, double timestamp, const PlatformXR::FrameData::InputSource& source)
     : m_session(session)
     , m_targetRaySpace(WebXRInputSpace::create(document, session, source.pointerOrigin))
     , m_connectTime(timestamp)
 #if ENABLE(GAMEPAD)
-    , m_gamepad(Gamepad::create(WebXRGamepad(timestamp, timestamp, source)))
+    , m_gamepad(Gamepad::create(&document, WebXRGamepad(timestamp, timestamp, source)))
 #endif
 {
     update(timestamp, source);
@@ -65,7 +65,7 @@ WebXRSession* WebXRInputSource::session()
     return m_session.get();
 }
 
-void WebXRInputSource::update(double timestamp, const PlatformXR::Device::FrameData::InputSource& source)
+void WebXRInputSource::update(double timestamp, const PlatformXR::FrameData::InputSource& source)
 {
     RefPtr session = m_session.get();
     if (!session)
@@ -79,7 +79,7 @@ void WebXRInputSource::update(double timestamp, const PlatformXR::Device::FrameD
     if (auto gripOrigin = source.gripOrigin) {
         if (m_gripSpace)
             m_gripSpace->setPose(*gripOrigin);
-        else if (auto* document = downcast<Document>(session->scriptExecutionContext()))
+        else if (RefPtr document = downcast<Document>(session->scriptExecutionContext()))
             m_gripSpace = WebXRInputSpace::create(*document, *session, *gripOrigin);
     } else
         m_gripSpace = nullptr;
@@ -88,21 +88,24 @@ void WebXRInputSource::update(double timestamp, const PlatformXR::Device::FrameD
 #endif
 
 #if ENABLE(WEBXR_HANDS)
-    if (source.simulateHand) {
-        // FIXME: This currently creates an object just for use in testing.
-        // The real implementation will use actual data and only be visible
-        // if hand-tracking was requested at session start.
-        if (!m_hand)
+    if (source.handJoints) {
+        // https://www.w3.org/TR/webxr-hand-input-1/#xrinputsource-interface
+        // If the XRInputSource belongs to an XRSession that has not been requested
+        // with the "hand-tracking" feature descriptor, hand MUST be null.
+        if (!m_hand && session->isHandTrackingEnabled())
             m_hand = WebXRHand::create(*this);
-    } else
-        m_hand = nullptr;
-#endif
 
+        if (m_hand)
+            m_hand->updateFromInputSource(source);
+
+        return;
+    }
+#endif
 }
 
 bool WebXRInputSource::requiresInputSourceChange(const InputSource& source)
 {
-    return m_source.handeness != source.handeness
+    return m_source.handedness != source.handedness
         || m_source.targetRayMode != source.targetRayMode
         || m_source.profiles != source.profiles
         || static_cast<bool>(m_gripSpace) != source.gripOrigin.has_value();
@@ -133,8 +136,11 @@ void WebXRInputSource::pollEvents(Vector<Ref<XRInputSourceEvent>>& events)
     if (!m_connected) {
         // A user agent MUST dispatch a selectend event on an XRSession when one of its XRInputSources ends
         // when an XRInputSource that has begun a primary select action is disconnected.
-        if (m_selectStarted)
+        if (m_selectStarted) {
+            if (targetRayMode() == PlatformXR::XRTargetRayMode::TransientPointer)
+                events.append(createEvent(eventNames().selectEvent));
             events.append(createEvent(eventNames().selectendEvent));
+        }
 
         // A user agent MUST dispatch a squeezeend event on an XRSession when one of its XRInputSources ends
         // when an XRInputSource that has begun a primary squeeze action is disconnected.

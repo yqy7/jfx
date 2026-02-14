@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,10 +28,8 @@ package javafx.scene.chart;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-
 import javafx.animation.FadeTransition;
 import javafx.animation.ParallelTransition;
-import javafx.application.Platform;
 import javafx.beans.NamedArg;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -41,15 +39,19 @@ import javafx.scene.Node;
 import javafx.scene.layout.StackPane;
 import javafx.scene.shape.Ellipse;
 import javafx.util.Duration;
-
 import com.sun.javafx.charts.Legend.LegendItem;
 
 /**
  * Chart type that plots bubbles for the data points in a series. The extra value property of Data is used to represent
  * the radius of the bubble it should be a java.lang.Number.
+ *
+ * @param <X> the X axis value type
+ * @param <Y> the Y axis value type
  * @since JavaFX 2.0
  */
 public class BubbleChart<X,Y> extends XYChart<X,Y> {
+
+    private ParallelTransition parallelTransition;
 
     // -------------- CONSTRUCTORS ----------------------------------------------
 
@@ -121,7 +123,7 @@ public class BubbleChart<X,Y> extends XYChart<X,Y> {
                         }
                         ellipse.setRadiusX(getDoubleValue(item.getExtraValue(), 1) * ((getXAxis() instanceof NumberAxis) ? Math.abs(((NumberAxis)getXAxis()).getScale()) : 1));
                         ellipse.setRadiusY(getDoubleValue(item.getExtraValue(), 1) * ((getYAxis() instanceof NumberAxis) ? Math.abs(((NumberAxis)getYAxis()).getScale()) : 1));
-                        // Note: workaround for RT-7689 - saw this in ProgressControlSkin
+                        // Note: workaround for JDK-8109535 - saw this in ProgressControlSkin
                         // The region doesn't update itself when the shape is mutated in place, so we
                         // null out and then restore the shape in order to force invalidation.
                         region.setShape(null);
@@ -195,8 +197,8 @@ public class BubbleChart<X,Y> extends XYChart<X,Y> {
     @Override protected  void seriesRemoved(final Series<X,Y> series) {
         // remove all bubble nodes
         if (shouldAnimate()) {
-            ParallelTransition pt = new ParallelTransition();
-            pt.setOnFinished(event -> {
+            parallelTransition = new ParallelTransition();
+            parallelTransition.setOnFinished(event -> {
                 removeSeriesFromDisplay(series);
             });
             for (XYChart.Data<X,Y> d : series.getData()) {
@@ -208,9 +210,9 @@ public class BubbleChart<X,Y> extends XYChart<X,Y> {
                     getPlotChildren().remove(bubble);
                     bubble.setOpacity(1.0);
                 });
-                pt.getChildren().add(ft);
+                parallelTransition.getChildren().add(ft);
             }
-            pt.play();
+            parallelTransition.play();
         } else {
             for (XYChart.Data<X,Y> d : series.getData()) {
                 final Node bubble = d.getNode();
@@ -219,6 +221,18 @@ public class BubbleChart<X,Y> extends XYChart<X,Y> {
             removeSeriesFromDisplay(series);
         }
 
+    }
+
+    /** {@inheritDoc} */
+    @Override void seriesBeingRemovedIsAdded(Series<X,Y> series) {
+        if (parallelTransition != null) {
+            parallelTransition.setOnFinished(null);
+            parallelTransition.stop();
+            parallelTransition = null;
+            getPlotChildren().remove(series.getNode());
+            for (Data<X,Y> d:series.getData()) getPlotChildren().remove(d.getNode());
+            removeSeriesFromDisplay(series);
+        }
     }
 
     /**
@@ -253,7 +267,7 @@ public class BubbleChart<X,Y> extends XYChart<X,Y> {
             };
             bubble.setAccessibleRole(AccessibleRole.TEXT);
             bubble.setAccessibleRoleDescription("Bubble");
-            bubble.focusTraversableProperty().bind(Platform.accessibilityActiveProperty());
+            bubble.setFocusTraversable(isAccessibilityActive());
             item.setNode(bubble);
         }
         // set bubble styles
@@ -274,8 +288,8 @@ public class BubbleChart<X,Y> extends XYChart<X,Y> {
         final Axis<Y> ya = getYAxis();
         List<X> xData = null;
         List<Y> yData = null;
-        if(xa.isAutoRanging()) xData = new ArrayList<X>();
-        if(ya.isAutoRanging()) yData = new ArrayList<Y>();
+        if(xa.isAutoRanging()) xData = new ArrayList<>();
+        if(ya.isAutoRanging()) yData = new ArrayList<>();
         final boolean xIsCategory = xa instanceof CategoryAxis;
         final boolean yIsCategory = ya instanceof CategoryAxis;
         if(xData != null || yData != null) {

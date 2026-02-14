@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -124,10 +124,10 @@ class IosSystemClipboard extends SystemClipboard {
                         }
                         itemFirst.put(mimeToUtf(mime), string);
                     } else {
-                        // http://javafx-jira.kenai.com/browse/RT-14593
+                        // JDK-8091740
                         // temporary code, DelayedCallback trips over this
                         // by reusing (incorrectly) text mime type
-                        System.err.println("DelayedCallback not implemented yet: RT-14593");
+                        System.err.println("DelayedCallback not implemented yet: JDK-8091740");
                         Thread.dumpStack();
                     }
                 } else if (mime.equals(FILE_LIST_TYPE)) {
@@ -151,7 +151,7 @@ class IosSystemClipboard extends SystemClipboard {
                         }
                     }
                 } else {
-                    // custom client mime type - pass through (RT-14592)
+                    // custom client mime type - pass through (JDK-8089912)
                     if (itemFirst == null) {
                         itemFirst = new HashMap();
                     }
@@ -193,7 +193,7 @@ class IosSystemClipboard extends SystemClipboard {
         String[][] utfs = this.pasteboard.getUTFs();
         if (mimeType.equals(URI_TYPE) == true) {
             if (utfs != null) {
-                java.util.ArrayList<String> list = new java.util.ArrayList<String>();
+                java.util.ArrayList<String> list = new java.util.ArrayList<>();
                 for (int i=0; i<utfs.length; i++) {
                     String url = this.pasteboard.getItemStringForUTF(i, mimeToUtf(URI_TYPE));
 
@@ -208,7 +208,7 @@ class IosSystemClipboard extends SystemClipboard {
             }
         } else if (mimeType.equals(RAW_IMAGE_TYPE) == true) {
             if (utfs != null) {
-                java.util.ArrayList<Pixels> list = new java.util.ArrayList<Pixels>();
+                java.util.ArrayList<Pixels> list = new java.util.ArrayList<>();
                 for (int i=0; i<utfs.length; i++) {
                     Object data = this.pasteboard.getItemAsRawImage(i);
                     if (data != null) {
@@ -225,7 +225,7 @@ class IosSystemClipboard extends SystemClipboard {
                         (mimeType.equals(HTML_TYPE) == true) ||
                             (mimeType.equals(RTF_TYPE) == true)) {
             if (utfs != null) {
-                java.util.ArrayList<String> list = new java.util.ArrayList<String>();
+                java.util.ArrayList<String> list = new java.util.ArrayList<>();
                 for (int i=0; i<utfs.length; i++) {
                     String item = this.pasteboard.getItemStringForUTF(i, mimeToUtf(mimeType));
                     if (item != null) {
@@ -240,7 +240,7 @@ class IosSystemClipboard extends SystemClipboard {
         } else if (mimeType.equals(FILE_LIST_TYPE) == true) {
             // synthesize the list from individual URLs
             if (utfs != null) {
-                java.util.ArrayList<String> list = new java.util.ArrayList<String>();
+                java.util.ArrayList<String> list = new java.util.ArrayList<>();
                 for (int i=0; i<utfs.length; i++) {
                     String file = this.pasteboard.getItemStringForUTF(i, IosPasteboard.UtfFileUrl); // explicitly ask for urls
                     if (file != null) {
@@ -255,11 +255,11 @@ class IosSystemClipboard extends SystemClipboard {
             }
         } else {
             if (utfs != null) {
-                java.util.ArrayList<ByteBuffer> list = new java.util.ArrayList<ByteBuffer>();
+                java.util.ArrayList<ByteBuffer> list = new java.util.ArrayList<>();
                 for (int i=0; i<utfs.length; i++) {
                     byte data[] = this.pasteboard.getItemBytesForUTF(i, mimeToUtf(mimeType));
                     if (data != null) {
-                        // http://javafx-jira.kenai.com/browse/RT-14592
+                        // JDK-8089912
                         // custom data - currently we wrap it up in ByteBuffer
                         ByteBuffer bb = ByteBuffer.wrap(data);
                         list.add(bb);
@@ -284,7 +284,7 @@ class IosSystemClipboard extends SystemClipboard {
     protected String[] mimesFromSystem() {
         String[][] all = this.pasteboard.getUTFs();
 
-        java.util.ArrayList<String> mimes = new java.util.ArrayList<String>();
+        java.util.ArrayList<String> mimes = new java.util.ArrayList<>();
 
         if (all != null) {
             for (int i=0; i<all.length; i++) {

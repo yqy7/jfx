@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,28 +25,32 @@
 
 package test.memoryleak;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import java.lang.ref.WeakReference;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import javafx.application.Platform;
 import javafx.concurrent.Worker;
-import javafx.scene.paint.Color;
 import javafx.scene.Scene;
+import javafx.scene.paint.Color;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
-import junit.framework.AssertionFailedError;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import netscape.javascript.JSObject;
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
 import test.util.Util;
 
-import static org.junit.Assert.*;
-import static test.util.Util.TIMEOUT;
-
+@Timeout(value=20000, unit=TimeUnit.MILLISECONDS)
 public class JSCallbackMemoryTest {
 
     private static final String html = "<!DOCTYPE html>" +
@@ -180,17 +184,13 @@ public class JSCallbackMemoryTest {
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void doSetupOnce() throws Exception {
 
         Platform.setImplicitExit(false);
-        Platform.startup(() -> {
+        Util.startup(launchLatch, () -> {
             launchLatch.countDown();
         });
-
-        if (!launchLatch.await(TIMEOUT, TimeUnit.MILLISECONDS)) {
-            fail("Timeout waiting for Platform to start");
-        }
 
         Util.runAndWait(() -> {
             primarystage = new Stage();
@@ -207,12 +207,12 @@ public class JSCallbackMemoryTest {
         });
     }
 
-    @AfterClass
+    @AfterAll
     public static void doTeardownOnce() {
-        Platform.exit();
+        Util.shutdown();
     }
 
-    @After
+    @AfterEach
     public void doTeardown() {
         Util.runAndWait(() -> {
             if (stages != null) {
@@ -251,16 +251,15 @@ public class JSCallbackMemoryTest {
             } else if (encounteredException instanceof RuntimeException) {
                 throw (RuntimeException) encounteredException;
             } else {
-                AssertionFailedError err = new AssertionFailedError("Unknown execution exception");
-                err.initCause(encounteredException.getCause());
-                throw err;
+                fail(encounteredException);
             }
         }
     }
 
     // ========================== TEST CASES ==========================
 
-    @Test(timeout = 20000) public void testJsCallbackLeak() throws Exception {
+    @Test
+    public void testJsCallbackLeak() throws Exception {
         final CountDownLatch latch = new CountDownLatch(NUM_STAGES);
 
         Util.runAndWait(() -> {
@@ -303,7 +302,7 @@ public class JSCallbackMemoryTest {
         try {
             latch.await();
         } catch (InterruptedException ex) {
-            throw new AssertionFailedError("Unexpected exception: " + ex);
+            fail(ex);
         }
 
         checkEncounteredException();
@@ -327,10 +326,11 @@ public class JSCallbackMemoryTest {
             Util.sleep(SLEEP_TIME);
         }
 
-        assertTrue("All Stages are null", isAllStagesNull());
+        assertTrue(isAllStagesNull(), "All Stages are null");
     }
 
-    @Test(timeout = 20000) public void testJsCallbackFunction() throws Exception {
+    @Test
+    public void testJsCallbackFunction() throws Exception {
         final CountDownLatch latch = new CountDownLatch(NUM_STAGES);
 
         Util.runAndWait(() -> {
@@ -373,7 +373,7 @@ public class JSCallbackMemoryTest {
         try {
             latch.await();
         } catch (InterruptedException ex) {
-            throw new AssertionFailedError("Unexpected exception: " + ex);
+            fail(ex);
         }
 
         checkEncounteredException();
@@ -388,10 +388,11 @@ public class JSCallbackMemoryTest {
             Util.sleep(SLEEP_TIME);
         }
 
-        assertTrue("All Button Callback return true", isAllCallbackStatusTrue());
+        assertTrue(isAllCallbackStatusTrue(), "All Button Callback return true");
     }
 
-    @Test(timeout = 20000) public void testJsCallbackReleaseFunction() throws Exception {
+    @Test
+    public void testJsCallbackReleaseFunction() throws Exception {
         final CountDownLatch latch = new CountDownLatch(NUM_STAGES);
 
         Util.runAndWait(() -> {
@@ -442,7 +443,7 @@ public class JSCallbackMemoryTest {
         try {
             latch.await();
         } catch (InterruptedException ex) {
-            throw new AssertionFailedError("Unexpected exception: " + ex);
+            fail(ex);
         }
 
         checkEncounteredException();
@@ -460,7 +461,8 @@ public class JSCallbackMemoryTest {
         assertFalse(unexpectedCallback);
     }
 
-    @Test(timeout = 20000) public void testJsCallbackConsoleFunction() throws Exception {
+    @Test
+    public void testJsCallbackConsoleFunction() throws Exception {
         final CountDownLatch latch = new CountDownLatch(NUM_STAGES);
 
         Util.runAndWait(() -> {
@@ -505,7 +507,7 @@ public class JSCallbackMemoryTest {
         try {
             latch.await();
         } catch (InterruptedException ex) {
-            throw new AssertionFailedError("Unexpected exception: " + ex);
+            fail(ex);
         }
 
         checkEncounteredException();
@@ -513,7 +515,8 @@ public class JSCallbackMemoryTest {
         System.gc();
     }
 
-    @Test(timeout = 20000) public void testJsCallbackStrongRefPrimitiveArrayFunction() throws Exception {
+    @Test
+    public void testJsCallbackStrongRefPrimitiveArrayFunction() throws Exception {
         final CountDownLatch latch = new CountDownLatch(NUM_STAGES);
 
         Util.runAndWait(() -> {
@@ -558,7 +561,7 @@ public class JSCallbackMemoryTest {
         try {
             latch.await();
         } catch (InterruptedException ex) {
-            throw new AssertionFailedError("Unexpected exception: " + ex);
+            fail(ex);
         }
 
         checkEncounteredException();
@@ -573,10 +576,11 @@ public class JSCallbackMemoryTest {
             Util.sleep(GCWAIT_TIME);
         }
 
-        assertTrue("All Button Callback return true", isAllCallbackStatusTrue());
+        assertTrue(isAllCallbackStatusTrue(), "All Button Callback return true");
     }
 
-    @Test(timeout = 20000) public void testJsCallbackLocalPrimitiveArrayFunctionWithGC() throws Exception {
+    @Test
+    public void testJsCallbackLocalPrimitiveArrayFunctionWithGC() throws Exception {
         final CountDownLatch latch1 = new CountDownLatch(NUM_STAGES);
         final CountDownLatch latch2 = new CountDownLatch(1);
 
@@ -623,7 +627,7 @@ public class JSCallbackMemoryTest {
         try {
             latch1.await();
         } catch (InterruptedException ex) {
-            throw new AssertionFailedError("Unexpected exception: " + ex);
+            fail(ex);
         }
 
         checkEncounteredException();
@@ -643,13 +647,14 @@ public class JSCallbackMemoryTest {
         try {
             latch2.await();
         } catch (InterruptedException ex) {
-            throw new AssertionFailedError("Unexpected exception: " + ex);
+            fail(ex);
         }
 
         assertFalse(unexpectedCallback);
     }
 
-    @Test(timeout = 20000) public void testJsCallbackStrongRefObjectArrayFunction() throws Exception {
+    @Test
+    public void testJsCallbackStrongRefObjectArrayFunction() throws Exception {
         final CountDownLatch latch = new CountDownLatch(NUM_STAGES);
 
         Util.runAndWait(() -> {
@@ -694,7 +699,7 @@ public class JSCallbackMemoryTest {
         try {
             latch.await();
         } catch (InterruptedException ex) {
-            throw new AssertionFailedError("Unexpected exception: " + ex);
+            fail(ex);
         }
 
         checkEncounteredException();
@@ -709,11 +714,12 @@ public class JSCallbackMemoryTest {
             Util.sleep(GCWAIT_TIME);
         }
 
-        assertTrue("All Button Callback return true", isAllCallbackStatusTrue());
+        assertTrue(isAllCallbackStatusTrue(), "All Button Callback return true");
 
     }
 
-    @Test(timeout = 20000) public void testJsCallbackLocalObjectArrayFunctionWithGC() throws Exception {
+    @Test
+    public void testJsCallbackLocalObjectArrayFunctionWithGC() throws Exception {
         final CountDownLatch latch1 = new CountDownLatch(NUM_STAGES);
         final CountDownLatch latch2 = new CountDownLatch(1);
 
@@ -759,7 +765,7 @@ public class JSCallbackMemoryTest {
         try {
             latch1.await();
         } catch (InterruptedException ex) {
-            throw new AssertionFailedError("Unexpected exception: " + ex);
+            fail(ex);
         }
 
         checkEncounteredException();
@@ -779,7 +785,7 @@ public class JSCallbackMemoryTest {
         try {
             latch2.await();
         } catch (InterruptedException ex) {
-            throw new AssertionFailedError("Unexpected exception: " + ex);
+            fail(ex);
         }
 
         assertFalse(unexpectedCallback);

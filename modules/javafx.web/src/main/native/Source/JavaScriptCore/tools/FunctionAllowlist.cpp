@@ -32,6 +32,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <wtf/SafeStrerror.h>
+#include <wtf/text/MakeString.h>
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 namespace JSC {
 
@@ -44,7 +47,7 @@ FunctionAllowlist::FunctionAllowlist(const char* filename)
     if (!f) {
         if (errno == ENOENT) {
             m_hasActiveAllowlist = true;
-            m_entries.add(filename);
+            m_entries.add(String::fromLatin1(filename));
         } else
             dataLogF("Failed to open file %s. Did you add the file-read-data entitlement to WebProcess.sb? Error code: %s\n", filename, safeStrerror(errno).data());
         return;
@@ -60,7 +63,7 @@ FunctionAllowlist::FunctionAllowlist(const char* filename)
 
         // Get rid of newlines at the ends of the strings.
         size_t length = strlen(line);
-        if (line[length - 1] == '\n') {
+        if (length && line[length - 1] == '\n') {
             line[length - 1] = '\0';
             length--;
         }
@@ -69,7 +72,7 @@ FunctionAllowlist::FunctionAllowlist(const char* filename)
         if (!length)
             continue;
 
-        m_entries.add(String(line, length));
+        m_entries.add(String(unsafeMakeSpan(line, length)));
     }
 
     int result = fclose(f);
@@ -85,26 +88,36 @@ bool FunctionAllowlist::contains(CodeBlock* codeBlock) const
     if (m_entries.isEmpty())
         return false;
 
-    String name = String::fromUTF8(codeBlock->inferredName());
+    String name = String::fromUTF8(codeBlock->inferredName().span());
     if (m_entries.contains(name))
         return true;
 
-    String hash = String::fromUTF8(codeBlock->hashAsStringIfPossible());
+    String hash = makeString(codeBlock->hash());
     if (m_entries.contains(hash))
         return true;
 
-    return m_entries.contains(name + '#' + hash);
+    return m_entries.contains(makeString(name, '#', hash));
 }
 
 bool FunctionAllowlist::shouldDumpWasmFunction(uint32_t index) const
 {
     if (!m_hasActiveAllowlist)
         return false;
+    return containsWasmFunction(index);
+}
+
+bool FunctionAllowlist::containsWasmFunction(uint32_t index) const
+{
+    if (!m_hasActiveAllowlist)
+        return true;
+
     if (m_entries.isEmpty())
         return false;
     return m_entries.contains(String::number(index));
 }
 
 } // namespace JSC
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
 
 #endif // ENABLE(JIT)

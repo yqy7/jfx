@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,8 @@
 
 package test.javafx.binding;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import javafx.beans.binding.Binding;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.ObjectProperty;
@@ -35,7 +37,7 @@ public class When_Object_Test extends WhenTestBase<Object, ObjectProperty<Object
     public When_Object_Test() {
         super(
             new Object(), new Object(), new Object(), new Object(),
-            new SimpleObjectProperty<Object>(), new SimpleObjectProperty<Object>()
+            new SimpleObjectProperty<>(), new SimpleObjectProperty<>()
         );
     }
 
@@ -75,6 +77,6 @@ public class When_Object_Test extends WhenTestBase<Object, ObjectProperty<Object
     }
     @Override
     public void check(Object expected, Binding<Object> binding) {
-        org.junit.Assert.assertEquals(expected, binding.getValue());
+        assertEquals(expected, binding.getValue());
     }
 }

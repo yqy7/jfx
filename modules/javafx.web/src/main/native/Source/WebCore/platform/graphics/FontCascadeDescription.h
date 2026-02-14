@@ -26,7 +26,6 @@
 
 #include "CSSValueKeywords.h"
 #include "FontDescription.h"
-#include <variant>
 #include <wtf/RefCountedFixedVector.h>
 
 #if PLATFORM(COCOA)
@@ -34,6 +33,10 @@
 #else
 #include "FontFamilySpecificationNull.h"
 #endif
+
+namespace WTF {
+class TextStream;
+}
 
 namespace WebCore {
 
@@ -43,14 +46,15 @@ typedef FontFamilySpecificationCoreText FontFamilyPlatformSpecification;
 typedef FontFamilySpecificationNull FontFamilyPlatformSpecification;
 #endif
 
-typedef std::variant<AtomString, FontFamilyPlatformSpecification> FontFamilySpecification;
+typedef Variant<AtomString, FontFamilyPlatformSpecification> FontFamilySpecification;
+
+class Font;
 
 class FontCascadeDescription : public FontDescription {
 public:
     WEBCORE_EXPORT FontCascadeDescription();
 
     bool operator==(const FontCascadeDescription&) const;
-    bool operator!=(const FontCascadeDescription& other) const { return !(*this == other); }
 
     unsigned familyCount() const { return m_families->size(); }
     const AtomString& firstFamily() const { return familyAt(0); }
@@ -79,10 +83,11 @@ public:
     CSSValueID keywordSizeAsIdentifier() const
     {
         CSSValueID identifier = m_keywordSize ? static_cast<CSSValueID>(CSSValueXxSmall + m_keywordSize - 1) : CSSValueInvalid;
-        ASSERT(identifier == CSSValueInvalid || (identifier >= CSSValueXxSmall && identifier <= CSSValueWebkitXxxLarge));
+        ASSERT(identifier == CSSValueInvalid || (identifier >= CSSValueXxSmall && identifier <= CSSValueXxxLarge));
         return identifier;
     }
     FontSmoothingMode fontSmoothing() const { return static_cast<FontSmoothingMode>(m_fontSmoothing); }
+    FontSmoothingMode usedFontSmoothing() const;
     bool isSpecifiedFont() const { return m_isSpecifiedFont; }
 
     void setOneFamily(const AtomString& family) { ASSERT(m_families->size() == 1); m_families.get()[0] = family; }
@@ -99,8 +104,8 @@ public:
     }
     void setKeywordSizeFromIdentifier(CSSValueID identifier)
     {
-        ASSERT(!identifier || (identifier >= CSSValueXxSmall && identifier <= CSSValueWebkitXxxLarge));
-        static_assert(CSSValueWebkitXxxLarge - CSSValueXxSmall + 1 == 8, "Maximum keyword size should be 8.");
+        ASSERT(!identifier || (identifier >= CSSValueXxSmall && identifier <= CSSValueXxxLarge));
+        static_assert(CSSValueXxxLarge - CSSValueXxSmall + 1 == 8, "Maximum keyword size should be 8.");
         setKeywordSize(identifier ? identifier - CSSValueXxSmall + 1 : 0);
     }
     void setFontSmoothing(FontSmoothingMode smoothing) { m_fontSmoothing = static_cast<unsigned>(smoothing); }
@@ -118,22 +123,32 @@ public:
     }
 #endif
 
+    WEBCORE_EXPORT void resolveFontSizeAdjustFromFontIfNeeded(const Font&);
+
     // Initial values for font properties.
     static std::optional<FontSelectionValue> initialItalic() { return std::nullopt; }
     static FontStyleAxis initialFontStyleAxis() { return FontStyleAxis::slnt; }
     static FontSelectionValue initialWeight() { return normalWeightValue(); }
-    static FontSelectionValue initialStretch() { return normalStretchValue(); }
+    static FontSelectionValue initialWidth() { return normalWidthValue(); }
     static FontSmallCaps initialSmallCaps() { return FontSmallCaps::Off; }
     static Kerning initialKerning() { return Kerning::Auto; }
     static FontSmoothingMode initialFontSmoothing() { return FontSmoothingMode::AutoSmoothing; }
     static TextRenderingMode initialTextRenderingMode() { return TextRenderingMode::AutoTextRendering; }
-    static FontSynthesis initialFontSynthesis() { return FontSynthesisWeight | FontSynthesisStyle | FontSynthesisSmallCaps; }
+    static FontSynthesisLonghandValue initialFontSynthesisWeight() { return FontSynthesisLonghandValue::Auto; }
+    static FontSynthesisLonghandValue initialFontSynthesisStyle() { return FontSynthesisLonghandValue::Auto; }
+    static FontSynthesisLonghandValue initialFontSynthesisSmallCaps() { return FontSynthesisLonghandValue::Auto; }
     static FontVariantPosition initialVariantPosition() { return FontVariantPosition::Normal; }
     static FontVariantCaps initialVariantCaps() { return FontVariantCaps::Normal; }
-    static FontVariantAlternates initialVariantAlternates() { return FontVariantAlternates::Normal; }
+    static FontVariantAlternates initialVariantAlternates() { return FontVariantAlternates::Normal(); }
+    static FontVariantEmoji initialVariantEmoji() { return FontVariantEmoji::Normal; }
     static FontOpticalSizing initialOpticalSizing() { return FontOpticalSizing::Enabled; }
     static const AtomString& initialSpecifiedLocale() { return nullAtom(); }
     static FontPalette initialFontPalette() { return { FontPalette::Type::Normal, nullAtom() }; }
+    static FontSizeAdjust initialFontSizeAdjust() { return { FontSizeAdjust::Metric::ExHeight }; }
+    static TextSpacingTrim initialTextSpacingTrim() { return { }; }
+    static TextAutospace initialTextAutospace() { return { }; }
+    static FontFeatureSettings initialFeatureSettings() { return { }; }
+    static FontVariationSettings initialVariationSettings() { return { }; }
 
 private:
     Ref<RefCountedFixedVector<AtomString>> m_families;
@@ -154,8 +169,8 @@ private:
 
 inline bool FontCascadeDescription::operator==(const FontCascadeDescription& other) const
 {
-    return FontDescription::operator==(other)
-        && m_families.get() == other.m_families.get()
+    return static_cast<const FontDescription&>(*this) == static_cast<const FontDescription&>(other)
+        && arePointingToEqualData(m_families, other.m_families)
         && m_specifiedSize == other.m_specifiedSize
         && m_isAbsoluteSize == other.m_isAbsoluteSize
         && m_kerning == other.m_kerning
@@ -163,5 +178,7 @@ inline bool FontCascadeDescription::operator==(const FontCascadeDescription& oth
         && m_fontSmoothing == other.m_fontSmoothing
         && m_isSpecifiedFont == other.m_isSpecifiedFont;
 }
+
+WTF::TextStream& operator<<(WTF::TextStream&, const FontCascadeDescription&);
 
 }

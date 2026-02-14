@@ -26,8 +26,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-enum FetchRequestDestination { "", "audio", "audioworklet", "document", "embed", "font", "image", "iframe", "manifest", "model", "object", "paintworklet", "report", "script", "serviceworker", "sharedworker", "style", "track", "video", "worker", "xslt" };
-
 typedef (FetchRequest or USVString) RequestInfo;
 
 [
@@ -51,12 +49,13 @@ typedef (FetchRequest or USVString) RequestInfo;
     readonly attribute FetchRequestCache cache;
     readonly attribute FetchRequestRedirect redirect;
     readonly attribute DOMString integrity;
-    [EnabledAtRuntime=FetchAPIKeepAliveEnabled] readonly attribute boolean keepalive;
+    readonly attribute boolean keepalive;
     // FIXME: Implement 'isReloadNavigation'.
     // readonly attribute boolean isReloadNavigation;
     // FIXME: Implement 'isHistoryNavigation'.
     // readonly attribute boolean isHistoryNavigation;
     readonly attribute AbortSignal signal;
+    [EnabledBySetting=LocalNetworkAccessEnabled] readonly attribute IPAddressSpace? targetAddressSpace;
 
     [NewObject] FetchRequest clone();
 };

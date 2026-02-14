@@ -37,13 +37,17 @@
 #include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
 
+#if ENABLE(WEBXR_HANDS)
+#include "FakeXRJointStateInit.h"
+#endif
+
 namespace WebCore {
 
 class WebFakeXRInputController final : public RefCounted<WebFakeXRInputController> {
 public:
     static Ref<WebFakeXRInputController> create(PlatformXR::InputSourceHandle, const FakeXRInputSourceInit&);
 
-    void setHandedness(XRHandedness handeness) { m_handeness = handeness; }
+    void setHandedness(XRHandedness handedness) { m_handedness = handedness; }
     void setTargetRayMode(XRTargetRayMode mode) { m_targetRayMode = mode; }
     void setProfiles(Vector<String>&& profiles) { m_profiles = WTFMove(profiles); }
     void setGripOrigin(FakeXRRigidTransformInit gripOrigin, bool emulatedPosition = false);
@@ -58,29 +62,33 @@ public:
     void updateButtonState(const FakeXRButtonStateInit&);
     bool isConnected() const { return m_connected; }
 
-    PlatformXR::Device::FrameData::InputSource getFrameData();
+#if ENABLE(WEBXR_HANDS)
+    void updateHandJoints(const Vector<FakeXRJointStateInit>&);
+#endif
+
+    PlatformXR::FrameData::InputSource getFrameData();
 
 private:
     WebFakeXRInputController(PlatformXR::InputSourceHandle, const FakeXRInputSourceInit&);
 
     struct ButtonOrPlaceholder {
-        std::optional<PlatformXR::Device::FrameData::InputSourceButton> button;
+        std::optional<PlatformXR::FrameData::InputSourceButton> button;
         std::optional<Vector<float>> axes;
     };
     ButtonOrPlaceholder getButtonOrPlaceholder(FakeXRButtonStateInit::Type) const;
 
     PlatformXR::InputSourceHandle m_handle { 0 };
-    XRHandedness m_handeness { XRHandedness::None };
+    XRHandedness m_handedness { XRHandedness::None };
     XRTargetRayMode m_targetRayMode { XRTargetRayMode::Gaze };
     Vector<String> m_profiles;
-    PlatformXR::Device::FrameData::InputSourcePose m_pointerOrigin;
-    std::optional<PlatformXR::Device::FrameData::InputSourcePose> m_gripOrigin;
+    PlatformXR::FrameData::InputSourcePose m_pointerOrigin;
+    std::optional<PlatformXR::FrameData::InputSourcePose> m_gripOrigin;
     HashMap<FakeXRButtonStateInit::Type, FakeXRButtonStateInit, IntHash<FakeXRButtonStateInit::Type>, WTF::StrongEnumHashTraits<FakeXRButtonStateInit::Type>> m_buttons;
     bool m_connected { true };
     bool m_primarySelected { false };
     bool m_simulateSelect { false };
 #if ENABLE(WEBXR_HANDS)
-    bool m_simulateHand { false };
+    std::optional<PlatformXR::FrameData::HandJointsVector> m_handJoints;
 #endif
 };
 

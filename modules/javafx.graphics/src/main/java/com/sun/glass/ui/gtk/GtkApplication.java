@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,96 +36,53 @@ import com.sun.glass.ui.Size;
 import com.sun.glass.ui.Timer;
 import com.sun.glass.ui.View;
 import com.sun.glass.ui.Window;
+import com.sun.javafx.application.preferences.PreferenceMapping;
 import com.sun.javafx.util.Logging;
 import com.sun.glass.utils.NativeLibLoader;
 import com.sun.prism.impl.PrismSettings;
 import com.sun.javafx.logging.PlatformLogger;
+import javafx.scene.paint.Color;
 
 import java.io.File;
-import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.function.Supplier;
 import java.lang.annotation.Native;
+
 
 final class GtkApplication extends Application implements
                                     InvokeLaterDispatcher.InvokeLaterSubmitter {
-    private static final String SWT_INTERNAL_CLASS =
-            "org.eclipse.swt.internal.gtk.OS";
     private static final int forcedGtkVersion;
-    private static boolean gtk2WarningIssued = false;
-    private static final String GTK2_ALREADY_LOADED_WARNING =
-        "WARNING: Found GTK 2 library already loaded";
-    private static final String GTK2_SPECIFIED_WARNING =
-        "WARNING: A command line option has enabled the GTK 2 library";
-    private static final String GTK2_FALLBACK_WARNING =
-        "WARNING: Using GTK 2 library because GTK 3 cannot be loaded ";
-    private static final String GTK2_DEPRECATION_WARNING =
-        "WARNING: The JavaFX GTK 2 library is deprecated and will be removed in a future release";
+    private static boolean gtkVersionWarningIssued = false;
+    private static final String GTK2_REMOVED_WARNING =
+            "WARNING: A command line option tried to select the GTK 2 library, which was removed from JavaFX.";
 
+    private static final String GTK_INVALID_VERSION_WARNING =
+            "WARNING: A command line option tried to select an invalid GTK library version.";
+    private static final String GTK3_FALLBACK_WARNING = "WARNING: The GTK 3 library will be used instead.";
+
+    private static native int _openURI(String uri);
 
     static  {
-        //check for SWT-GTK lib presence
-        @SuppressWarnings("removal")
-        Class<?> OS = AccessController.
-                doPrivileged((PrivilegedAction<Class<?>>) () -> {
-                    try {
-                        return Class.forName(SWT_INTERNAL_CLASS, true,
-                                ClassLoader.getSystemClassLoader());
-                    } catch (Exception e) {}
-                    try {
-                        return Class.forName(SWT_INTERNAL_CLASS, true,
-                                Thread.currentThread().getContextClassLoader());
-                    } catch (Exception e) {}
-                    return null;
-                });
-        if (OS != null) {
+        String gtkVersion = System.getProperty("org.eclipse.swt.internal.gtk.version");
+        if (gtkVersion != null && gtkVersion.contains(".")) {
             PlatformLogger logger = Logging.getJavaFXLogger();
-            logger.fine("SWT-GTK library found. Try to obtain GTK version.");
-            @SuppressWarnings("removal")
-            Method method = AccessController.
-                    doPrivileged((PrivilegedAction<Method>) () -> {
-                        try {
-                            return OS.getMethod("gtk_major_version");
-                        } catch (Exception e) {
-                            return null;
-                        }
-                    });
-            int ver = 0;
-            if (method != null) {
-                try {
-                    ver = ((Number)method.invoke(OS)).intValue();
-                } catch (Exception e) {
-                    logger.warning("Method gtk_major_version() of " +
-                         "the org.eclipse.swt.internal.gtk.OS class " +
-                         "returns error. SWT GTK version cannot be detected. " +
-                         "GTK3 will be used as default.");
-                    ver = 3;
-                }
+            logger.fine(String.format("SWT-GTK library found. Gtk Version = %s.", gtkVersion));
+            String[] vers = gtkVersion.split("\\.");
+            int ver = Integer.parseInt(vers[0]);
+
+            if (ver != 3) {
+                throw new UnsupportedOperationException("SWT-GTK uses unsupported major GTK version " + ver + " .");
             }
-            if (ver < 2 || ver > 3) {
-                logger.warning("SWT-GTK uses unsupported major GTK version "
-                        + ver + ". GTK3 will be used as default.");
-                ver = 3;
-            }
+
             forcedGtkVersion = ver;
-            if (ver == 2 && !gtk2WarningIssued) {
-                System.err.println(GTK2_ALREADY_LOADED_WARNING);
-                System.err.println(GTK2_DEPRECATION_WARNING);
-                gtk2WarningIssued = true;
-            }
         } else {
             forcedGtkVersion = 0;
         }
 
-        @SuppressWarnings("removal")
-        var dummy = AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            Application.loadNativeLibrary();
-            return null;
-        });
+        Application.loadNativeLibrary();
     }
 
     public static  int screen = -1;
@@ -161,34 +118,30 @@ final class GtkApplication extends Application implements
 
     GtkApplication() {
 
-        @SuppressWarnings("removal")
-        final int gtkVersion = forcedGtkVersion == 0 ?
-            AccessController.doPrivileged((PrivilegedAction<Integer>) () -> {
+        int gtkVersion = forcedGtkVersion == 0 ?
+            ((Supplier<Integer>) () -> {
                 String v = System.getProperty("jdk.gtk.version","3");
-                int ret = 0;
-                if ("3".equals(v) || v.startsWith("3.")) {
-                    ret = 3;
-                } else if ("2".equals(v) || v.startsWith("2.")) {
-                    ret = 2;
-                }
-                return ret;
-            }) : forcedGtkVersion;
+                return Character.getNumericValue(v.charAt(0));
+            }).get() : forcedGtkVersion;
 
-        if (gtkVersion == 2 && !gtk2WarningIssued) {
-            System.err.println(GTK2_SPECIFIED_WARNING);
-            System.err.println(GTK2_DEPRECATION_WARNING);
-            gtk2WarningIssued = true;
+        if (gtkVersion != 3) {
+            if (!gtkVersionWarningIssued) {
+                if (gtkVersion == 2) {
+                    System.err.println(GTK2_REMOVED_WARNING);
+                } else {
+                    System.err.println(GTK_INVALID_VERSION_WARNING);
+                }
+            }
+
+            System.err.println(GTK3_FALLBACK_WARNING);
+            gtkVersionWarningIssued = true;
+            gtkVersion = 3;
         }
 
-        @SuppressWarnings("removal")
-        boolean gtkVersionVerbose =
-                AccessController.doPrivileged((PrivilegedAction<Boolean>) () -> {
-            return Boolean.getBoolean("jdk.gtk.verbose");
-        });
+        boolean gtkVersionVerbose = Boolean.getBoolean("jdk.gtk.verbose");
         if (PrismSettings.allowHiDPIScaling) {
-            @SuppressWarnings("removal")
-            float tmp = AccessController.doPrivileged((PrivilegedAction<Float>) () ->
-                    getFloat("glass.gtk.uiScale", -1.0f, "Forcing UI scaling factor: "));
+            float tmp =
+                getFloat("glass.gtk.uiScale", -1.0f, "Forcing UI scaling factor: ");
             overrideUIScale = tmp;
         } else {
             overrideUIScale = -1.0f;
@@ -196,45 +149,25 @@ final class GtkApplication extends Application implements
 
         int libraryToLoad = _queryLibrary(gtkVersion, gtkVersionVerbose);
 
-        @SuppressWarnings("removal")
-        var dummy = AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            if (libraryToLoad == QUERY_NO_DISPLAY) {
-                throw new UnsupportedOperationException("Unable to open DISPLAY");
-            } else if (libraryToLoad == QUERY_USE_CURRENT) {
-                if (gtkVersionVerbose) {
-                    System.out.println("Glass GTK library to load is already loaded");
-                }
-            } else if (libraryToLoad == QUERY_LOAD_GTK2) {
-                if (gtkVersionVerbose) {
-                    System.out.println("Glass GTK library to load is glassgtk2");
-                }
-                NativeLibLoader.loadLibrary("glassgtk2");
-                if (!gtk2WarningIssued) {
-                    System.err.println(GTK2_FALLBACK_WARNING);
-                    System.err.println(GTK2_DEPRECATION_WARNING);
-                    gtk2WarningIssued = true;
-                }
-            } else if (libraryToLoad == QUERY_LOAD_GTK3) {
-                if (gtkVersionVerbose) {
-                    System.out.println("Glass GTK library to load is glassgtk3");
-                }
-                NativeLibLoader.loadLibrary("glassgtk3");
-            } else {
-                throw new UnsupportedOperationException("Internal Error");
+        if (libraryToLoad == QUERY_NO_DISPLAY) {
+            throw new UnsupportedOperationException("Unable to open DISPLAY");
+        } else if (libraryToLoad == QUERY_USE_CURRENT) {
+            if (gtkVersionVerbose) {
+                System.out.println("Glass GTK library to load is already loaded");
             }
-            return null;
-        });
-
-        int version = _initGTK(gtkVersion, gtkVersionVerbose, overrideUIScale);
-
-        if (version == -1) {
-            throw new RuntimeException("Error loading GTK libraries");
+        } else if (libraryToLoad == QUERY_LOAD_GTK3) {
+            if (gtkVersionVerbose) {
+                System.out.println("Glass GTK library to load is glassgtk3");
+            }
+            NativeLibLoader.loadLibrary("glassgtk3");
+        } else {
+            throw new UnsupportedOperationException("Unable to load glass GTK library.");
         }
 
+        _initGTK(gtkVersion, gtkVersionVerbose, overrideUIScale);
+
         // Embedded in SWT, with shared event thread
-        @SuppressWarnings("removal")
-        boolean isEventThread = AccessController
-                .doPrivileged((PrivilegedAction<Boolean>) () -> Boolean.getBoolean("javafx.embed.isEventThread"));
+        boolean isEventThread = Boolean.getBoolean("javafx.embed.isEventThread");
         if (!isEventThread) {
             invokeLaterDispatcher = new InvokeLaterDispatcher(this);
             invokeLaterDispatcher.start();
@@ -246,7 +179,6 @@ final class GtkApplication extends Application implements
     @Native private static final int QUERY_ERROR = -2;
     @Native private static final int QUERY_NO_DISPLAY = -1;
     @Native private static final int QUERY_USE_CURRENT = 1;
-    @Native private static final int QUERY_LOAD_GTK2 = 2;
     @Native private static final int QUERY_LOAD_GTK3 = 3;
     /*
      * check the system and return an indication of which library to load
@@ -254,7 +186,7 @@ final class GtkApplication extends Application implements
      */
     private static native int _queryLibrary(int version, boolean verbose);
 
-    private static native int _initGTK(int version, boolean verbose, float overrideUIScale);
+    private static native void _initGTK(int version, boolean verbose, float overrideUIScale);
 
     private void initDisplay() {
         Map ds = getDeviceDetails();
@@ -284,8 +216,7 @@ final class GtkApplication extends Application implements
             eventProc = result == null ? 0 : result;
         }
 
-        @SuppressWarnings("removal")
-        final boolean disableGrab = AccessController.doPrivileged((PrivilegedAction<Boolean>) () -> Boolean.getBoolean("sun.awt.disablegrab") ||
+        final boolean disableGrab = (Boolean.getBoolean("sun.awt.disablegrab") ||
                Boolean.getBoolean("glass.disableGrab"));
 
         _init(eventProc, disableGrab);
@@ -294,9 +225,7 @@ final class GtkApplication extends Application implements
     @Override
     protected void runLoop(final Runnable launchable) {
         // Embedded in SWT, with shared event thread
-        @SuppressWarnings("removal")
-        final boolean isEventThread = AccessController
-            .doPrivileged((PrivilegedAction<Boolean>) () -> Boolean.getBoolean("javafx.embed.isEventThread"));
+        final boolean isEventThread = Boolean.getBoolean("javafx.embed.isEventThread");
 
         if (isEventThread) {
             init();
@@ -305,16 +234,13 @@ final class GtkApplication extends Application implements
             return;
         }
 
-        @SuppressWarnings("removal")
-        final boolean noErrorTrap = AccessController
-            .doPrivileged((PrivilegedAction<Boolean>) () -> Boolean.getBoolean("glass.noErrorTrap"));
+        final boolean noErrorTrap = Boolean.getBoolean("glass.noErrorTrap");
 
-        @SuppressWarnings("removal")
         final Thread toolkitThread =
-            AccessController.doPrivileged((PrivilegedAction<Thread>) () -> new Thread(() -> {
+            new Thread(() -> {
                 init();
                 _runLoop(launchable, noErrorTrap);
-            }, "GtkNativeMainLoopThread"));
+            }, "GtkNativeMainLoopThread");
         setEventThread(toolkitThread);
         toolkitThread.start();
     }
@@ -494,6 +420,11 @@ final class GtkApplication extends Application implements
     }
 
     @Override
+    protected void _showDocument(String uri) {
+        _openURI(uri);
+    }
+
+    @Override
     protected native long staticView_getMultiClickTime();
 
     @Override
@@ -515,9 +446,57 @@ final class GtkApplication extends Application implements
     }
 
     @Override
-    protected native int _getKeyCodeForChar(char c);
+    protected boolean _supportsExtendedWindows() {
+        return true;
+    }
+
+    @Override
+    protected native int _getKeyCodeForChar(char c, int hint);
 
     @Override
     protected native int _isKeyLocked(int keyCode);
 
+    @Override
+    public native Map<String, Object> getPlatformPreferences();
+
+    @Override
+    public Map<String, PreferenceMapping<?, ?>> getPlatformKeyMappings() {
+        return Map.of(
+            "GTK.theme_fg_color", new PreferenceMapping<>("foregroundColor", Color.class),
+            "GTK.theme_bg_color", new PreferenceMapping<>("backgroundColor", Color.class),
+            "GTK.theme_selected_bg_color", new PreferenceMapping<>("accentColor", Color.class),
+            "GTK.enable_animations", new PreferenceMapping<>("reducedMotion", Boolean.class, b -> !b),
+            "GTK.overlay_scrolling", new PreferenceMapping<>("persistentScrollBars", Boolean.class, b -> !b),
+            "GTK.network_metered", new PreferenceMapping<>("reducedData", Boolean.class)
+        );
+    }
+
+    // This list needs to be kept in sync with PlatformSupport.cpp in the Glass toolkit for GTK.
+    @Override
+    public Map<String, Class<?>> getPlatformKeys() {
+        return Map.ofEntries(
+            Map.entry("GTK.theme_name", String.class),
+            Map.entry("GTK.theme_fg_color", Color.class),
+            Map.entry("GTK.theme_bg_color", Color.class),
+            Map.entry("GTK.theme_base_color", Color.class),
+            Map.entry("GTK.theme_selected_bg_color", Color.class),
+            Map.entry("GTK.theme_selected_fg_color", Color.class),
+            Map.entry("GTK.theme_unfocused_fg_color", Color.class),
+            Map.entry("GTK.theme_unfocused_bg_color", Color.class),
+            Map.entry("GTK.theme_unfocused_base_color", Color.class),
+            Map.entry("GTK.theme_unfocused_selected_bg_color", Color.class),
+            Map.entry("GTK.theme_unfocused_selected_fg_color", Color.class),
+            Map.entry("GTK.insensitive_bg_color", Color.class),
+            Map.entry("GTK.insensitive_fg_color", Color.class),
+            Map.entry("GTK.insensitive_base_color", Color.class),
+            Map.entry("GTK.borders", Color.class),
+            Map.entry("GTK.unfocused_borders", Color.class),
+            Map.entry("GTK.warning_color", Color.class),
+            Map.entry("GTK.error_color", Color.class),
+            Map.entry("GTK.success_color", Color.class),
+            Map.entry("GTK.enable_animations", Boolean.class),
+            Map.entry("GTK.overlay_scrolling", Boolean.class),
+            Map.entry("GTK.network_metered", Boolean.class)
+        );
+    }
 }

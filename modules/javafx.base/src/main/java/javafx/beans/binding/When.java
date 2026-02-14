@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -84,7 +84,7 @@ public class When {
         private final WeakReference<Binding<?>> ref;
 
         private WhenListener(Binding<?> binding, ObservableBooleanValue condition, ObservableValue<?> thenValue, ObservableValue<?> otherwiseValue) {
-            this.ref = new WeakReference<Binding<?>>(binding);
+            this.ref = new WeakReference<>(binding);
             this.condition = condition;
             this.thenValue = thenValue;
             this.otherwiseValue = otherwiseValue;
@@ -807,6 +807,8 @@ public class When {
     /**
      * An intermediate class needed while assembling the ternary expression. It
      * should not be used in another context.
+     *
+     * @param <T> the type of the object being built
      * @since JavaFX 2.0
      */
     public class ObjectConditionBuilder<T> {
@@ -836,9 +838,9 @@ public class When {
                 throw new NullPointerException("Value needs to be specified");
             }
             if (trueResult != null)
-                return new ObjectCondition<T>(trueResult, otherwiseValue);
+                return new ObjectCondition<>(trueResult, otherwiseValue);
             else
-                return new ObjectCondition<T>(trueResultValue, otherwiseValue);
+                return new ObjectCondition<>(trueResultValue, otherwiseValue);
         }
 
         /**
@@ -851,9 +853,9 @@ public class When {
          */
         public ObjectBinding<T> otherwise(final T otherwiseValue) {
             if (trueResult != null)
-                return new ObjectCondition<T>(trueResult, otherwiseValue);
+                return new ObjectCondition<>(trueResult, otherwiseValue);
             else
-                return new ObjectCondition<T>(trueResultValue, otherwiseValue);
+                return new ObjectCondition<>(trueResultValue, otherwiseValue);
         }
     }
 
@@ -870,7 +872,7 @@ public class When {
         if (thenValue == null) {
             throw new NullPointerException("Value needs to be specified");
         }
-        return new ObjectConditionBuilder<T>(thenValue);
+        return new ObjectConditionBuilder<>(thenValue);
     }
 
     /**
@@ -883,7 +885,7 @@ public class When {
      * @return the intermediate result which still requires the otherwise-branch
      */
     public <T> ObjectConditionBuilder<T> then(final T thenValue) {
-        return new ObjectConditionBuilder<T>(thenValue);
+        return new ObjectConditionBuilder<>(thenValue);
     }
 
 }

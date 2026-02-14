@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,9 @@
  */
 package test.robot.javafx.scene;
 
-import com.sun.javafx.PlatformUtil;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.scene.Scene;
@@ -34,19 +36,15 @@ import javafx.scene.robot.Robot;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.stage.WindowEvent;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
-
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-import static org.junit.Assert.fail;
-import static org.junit.Assume.assumeTrue;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.PlatformUtil;
+import test.util.Util;
 
 public class AfterModalClosedTest {
-    static CountDownLatch startupLatch;
+    static CountDownLatch startupLatch = new CountDownLatch(1);
     static volatile Stage stage;
     private Robot robot;
     private int x, y;
@@ -77,23 +75,20 @@ public class AfterModalClosedTest {
         }
     }
 
-    @BeforeClass
-    public static void initFX() {
-        startupLatch = new CountDownLatch(1);
-        new Thread(() -> Application.launch(TestApp.class, (String[])null)).start();
-        try {
-            if (!startupLatch.await(15, TimeUnit.SECONDS)) {
-                fail("Timeout waiting for FX runtime to start");
-            }
-        } catch (InterruptedException ex) {
-            fail("Unexpected exception: " + ex);
-        }
+    @BeforeAll
+    public static void initFX() throws InterruptedException {
+        Util.launch(startupLatch, TestApp.class);
+    }
+
+    @AfterAll
+    public static void teardown() {
+        Util.shutdown();
     }
 
     @Test
     public void testResizability() throws Exception {
         assumeTrue(Boolean.getBoolean("unstable.test")); // JDK-8176776
-        Assert.assertTrue(stage.isResizable());
+        Assertions.assertTrue(stage.isResizable());
         CountDownLatch resizeLatch = new CountDownLatch(2);
         Platform.runLater(() -> {
             stage.widthProperty().addListener((ov, o, n) -> {
@@ -121,12 +116,6 @@ public class AfterModalClosedTest {
             robot.mouseRelease(MouseButton.PRIMARY);
         });
         resizeLatch.await(5, TimeUnit.SECONDS);
-        Assert.assertTrue("Window is not resized", w && h);
-    }
-
-    @AfterClass
-    public static void teardown() {
-        Platform.runLater(stage::hide);
-        Platform.exit();
+        Assertions.assertTrue(w && h, "Window is not resized");
     }
 }

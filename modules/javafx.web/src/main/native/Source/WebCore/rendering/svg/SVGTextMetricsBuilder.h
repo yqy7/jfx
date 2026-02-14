@@ -22,6 +22,7 @@
 #include "SVGTextLayoutAttributes.h"
 #include "TextRun.h"
 #include "WidthIterator.h"
+#include "platform/graphics/ComplexTextController.h"
 
 namespace WebCore {
 
@@ -34,7 +35,7 @@ class SVGTextMetricsBuilder {
     WTF_MAKE_NONCOPYABLE(SVGTextMetricsBuilder);
 public:
     SVGTextMetricsBuilder();
-    void measureTextRenderer(RenderSVGInlineText&);
+    void measureTextRenderer(RenderSVGText&, RenderSVGInlineText* stopAtLeaf);
     void buildMetricsAndLayoutAttributes(RenderSVGText&, RenderSVGInlineText* stopAtLeaf, SVGCharacterDataMap& allCharactersMap);
 
 private:
@@ -44,13 +45,14 @@ private:
     bool currentCharacterStartsSurrogatePair() const;
 
     void initializeMeasurementWithTextRenderer(RenderSVGInlineText&);
-    void walkTree(RenderElement&, RenderSVGInlineText* stopAtLeaf, MeasureTextData*);
-    void measureTextRenderer(RenderSVGInlineText&, MeasureTextData*);
+    void walkTree(RenderElement&, RenderSVGInlineText* stopAtLeaf, MeasureTextData&);
+    std::tuple<unsigned, char16_t> measureTextRenderer(RenderSVGInlineText&, const MeasureTextData&, std::tuple<unsigned, char16_t>);
 
-    RenderSVGInlineText* m_text;
+    SingleThreadWeakPtr<RenderSVGInlineText> m_text;
     TextRun m_run;
     unsigned m_textPosition;
-    bool m_isComplexText;
+    bool m_isComplexText { false };
+    bool m_canUseSimplifiedTextMeasuring { false };
     SVGTextMetrics m_currentMetrics;
     float m_totalWidth;
 
@@ -59,6 +61,10 @@ private:
 
     // Complex text only.
     SVGTextMetrics m_complexStartToCurrentMetrics;
+
+#if PLATFORM(COCOA)
+    std::unique_ptr<ComplexTextController> m_complexTextController;
+#endif
 };
 
 } // namespace WebCore

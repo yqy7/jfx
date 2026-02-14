@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,26 +27,31 @@
 
 #include "AbstractWorker.h"
 #include "ActiveDOMObject.h"
-#include "BlobURL.h"
 #include "SharedWorkerKey.h"
 #include "SharedWorkerObjectIdentifier.h"
+#include "URLKeepingBlobAlive.h"
+#include <wtf/Identified.h>
 #include <wtf/MonotonicTime.h>
 
 namespace WebCore {
 
 class MessagePort;
 class ResourceError;
+class ResourceMonitor;
+class TrustedScriptURL;
 
 struct WorkerOptions;
 
-class SharedWorker final : public AbstractWorker, public ActiveDOMObject {
-    WTF_MAKE_ISO_ALLOCATED(SharedWorker);
+class SharedWorker final : public AbstractWorker, public ActiveDOMObject, public Identified<SharedWorkerObjectIdentifier> {
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(SharedWorker);
 public:
-    static ExceptionOr<Ref<SharedWorker>> create(Document&, String&& scriptURL, std::optional<std::variant<String, WorkerOptions>>&&);
+    static ExceptionOr<Ref<SharedWorker>> create(Document&, Variant<RefPtr<TrustedScriptURL>, String>&&, std::optional<Variant<String, WorkerOptions>>&&);
     ~SharedWorker();
 
+    void ref() const final { AbstractWorker::ref(); }
+    void deref() const final { AbstractWorker::deref(); }
+
     static SharedWorker* fromIdentifier(SharedWorkerObjectIdentifier);
-    SharedWorkerObjectIdentifier identifier() const { return m_identifier; }
     MessagePort& port() const { return m_port.get(); }
 
     const String& identifierForInspector() const { return m_identifierForInspector; }
@@ -56,24 +61,32 @@ public:
     // EventTarget.
     ScriptExecutionContext* scriptExecutionContext() const final;
 
+    void reportNetworkUsage(size_t bytesTransferredOverNetworkDelta);
+
 private:
     SharedWorker(Document&, const SharedWorkerKey&, Ref<MessagePort>&&);
 
     // EventTarget.
-    EventTargetInterface eventTargetInterface() const final;
+    enum EventTargetInterfaceType eventTargetInterface() const final;
 
     // ActiveDOMObject.
-    const char* activeDOMObjectName() const final;
     void stop() final;
     bool virtualHasPendingActivity() const final;
-
+    void suspend(ReasonForSuspension) final;
+    void resume() final;
 
     SharedWorkerKey m_key;
-    SharedWorkerObjectIdentifier m_identifier;
-    Ref<MessagePort> m_port;
+    const Ref<MessagePort> m_port;
     String m_identifierForInspector;
-    BlobURLHandle m_blobURLExtension;
+    URLKeepingBlobAlive m_blobURLExtension;
+    size_t m_bytesTransferredOverNetwork { 0 };
+
+#if ENABLE(CONTENT_EXTENSIONS)
+    RefPtr<ResourceMonitor> m_resourceMonitor;
+#endif
+
     bool m_isActive { true };
+    bool m_isSuspendedForBackForwardCache { false };
 };
 
 } // namespace WebCore

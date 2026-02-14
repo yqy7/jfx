@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,17 +28,18 @@ package test.javafx.beans.property;
 import javafx.beans.property.DoubleProperty;
 import javafx.beans.property.DoublePropertyBase;
 import javafx.beans.property.SimpleDoubleProperty;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import test.javafx.beans.InvalidationListenerMock;
 import test.javafx.beans.value.ChangeListenerMock;
 import javafx.beans.value.ObservableDoubleValueStub;
 import javafx.beans.value.ObservableValueStub;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class DoublePropertyBaseTest {
 
@@ -52,11 +53,11 @@ public class DoublePropertyBaseTest {
     private InvalidationListenerMock invalidationListener;
     private ChangeListenerMock<Number> changeListener;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         property = new DoublePropertyMock();
         invalidationListener = new InvalidationListenerMock();
-        changeListener = new ChangeListenerMock<Number>(UNDEFINED);
+        changeListener = new ChangeListenerMock<>(UNDEFINED);
     }
 
     private void attachInvalidationListener() {
@@ -202,12 +203,15 @@ public class DoublePropertyBaseTest {
         changeListener.check(property, Math.PI, -Math.PI, 2);
     }
 
-    @Test(expected=RuntimeException.class)
+    @Test
     public void testSetBoundValue() {
-        final DoubleProperty v = new SimpleDoubleProperty(Math.PI);
-        property.bind(v);
-        property.set(Math.PI);
+        assertThrows(RuntimeException.class, () -> {
+            final DoubleProperty v = new SimpleDoubleProperty(Math.PI);
+            property.bind(v);
+            property.set(Math.PI);
+        });
     }
+
 
     @Test
     public void testLazyBind() {
@@ -278,7 +282,7 @@ public class DoublePropertyBaseTest {
         final double value1 = Math.PI;
         final double value2 = Math.E;
         attachInvalidationListener();
-        final ObservableValueStub<Number> v = new ObservableValueStub<Number>(value1);
+        final ObservableValueStub<Number> v = new ObservableValueStub<>(value1);
 
         property.bind(v);
         assertEquals(value1, property.get(), EPSILON);
@@ -318,7 +322,7 @@ public class DoublePropertyBaseTest {
         final double value1 = Math.PI;
         final double value2 = Math.E;
         attachChangeListener();
-        final ObservableValueStub<Number> v = new ObservableValueStub<Number>(value1);
+        final ObservableValueStub<Number> v = new ObservableValueStub<>(value1);
 
         property.bind(v);
         assertEquals(value1, property.get(), EPSILON);
@@ -353,10 +357,13 @@ public class DoublePropertyBaseTest {
         changeListener.check(property, value1, 0.0, 1);
     }
 
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testBindToNull() {
-        property.bind(null);
+        assertThrows(NullPointerException.class, () -> {
+            property.bind(null);
+        });
     }
+
 
     @Test
     public void testRebind() {
@@ -429,7 +436,7 @@ public class DoublePropertyBaseTest {
         final double value2 = Math.E;
 
         attachInvalidationListener();
-        final ObservableValueStub<Number> v = new ObservableValueStub<Number>(value1);
+        final ObservableValueStub<Number> v = new ObservableValueStub<>(value1);
         property.bind(v);
         property.unbind();
         assertEquals(value1, property.get(), EPSILON);

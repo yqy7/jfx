@@ -21,12 +21,13 @@
 
 #include "DOMMimeType.h"
 #include "Navigator.h"
-#include <wtf/IsoMallocInlines.h>
+#include <ranges>
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/AtomString.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(DOMPlugin);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(DOMPlugin);
 
 Ref<DOMPlugin> DOMPlugin::create(Navigator& navigator, const PluginInfo& info)
 {
@@ -38,7 +39,7 @@ static Vector<Ref<DOMMimeType>> makeMimeTypes(Navigator& navigator, const Plugin
     auto types = info.mimes.map([&](auto& type) {
         return DOMMimeType::create(navigator, type, self);
     });
-    std::sort(types.begin(), types.end(), [](const Ref<DOMMimeType>& a, const Ref<DOMMimeType>& b) {
+    std::ranges::sort(types, [](auto& a, auto& b) {
         return codePointCompareLessThan(a->type(), b->type());
     });
 
@@ -90,9 +91,14 @@ RefPtr<DOMMimeType> DOMPlugin::namedItem(const AtomString& propertyName)
     return nullptr;
 }
 
+bool DOMPlugin::isSupportedPropertyName(const AtomString& propertyName) const
+{
+    return m_mimeTypes.containsIf([&](auto& type) { return type->type() == propertyName; });
+}
+
 Vector<AtomString> DOMPlugin::supportedPropertyNames() const
 {
-    return m_mimeTypes.map([](auto& type) -> AtomString {
+    return m_mimeTypes.map([](auto& type) {
         return type->type();
     });
 }

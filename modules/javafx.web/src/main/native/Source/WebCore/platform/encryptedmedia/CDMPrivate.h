@@ -33,6 +33,15 @@
 #include <wtf/Forward.h>
 #include <wtf/WeakPtr.h>
 
+namespace WebCore {
+class CDMPrivate;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::CDMPrivate> : std::true_type { };
+}
+
 #if !RELEASE_LOG_DISABLED
 namespace WTF {
 class Logger;
@@ -44,19 +53,31 @@ namespace WebCore {
 struct CDMKeySystemConfiguration;
 struct CDMMediaCapability;
 struct CDMRestrictions;
+class SharedBuffer;
+
+enum class CDMPrivateLocalStorageAccess : bool {
+    NotAllowed,
+    Allowed,
+};
+
+class CDMPrivateClient {
+public:
+    virtual ~CDMPrivateClient() = default;
+
+#if !RELEASE_LOG_DISABLED
+    virtual const Logger& logger() const = 0;
+#endif
+};
 
 class CDMPrivate : public CanMakeWeakPtr<CDMPrivate> {
 public:
     WEBCORE_EXPORT virtual ~CDMPrivate();
 
 #if !RELEASE_LOG_DISABLED
-    virtual void setLogger(Logger&, const void*) { };
+    virtual void setLogIdentifier(uint64_t) { };
 #endif
 
-    enum class LocalStorageAccess : bool {
-        NotAllowed,
-        Allowed,
-    };
+    using LocalStorageAccess = CDMPrivateLocalStorageAccess;
 
     using SupportedConfigurationCallback = Function<void(std::optional<CDMKeySystemConfiguration>)>;
     WEBCORE_EXPORT virtual void getSupportedConfiguration(CDMKeySystemConfiguration&& candidateConfiguration, LocalStorageAccess, SupportedConfigurationCallback&&);
@@ -73,8 +94,8 @@ public:
     virtual void loadAndInitialize() = 0;
     virtual bool supportsServerCertificates() const = 0;
     virtual bool supportsSessions() const = 0;
-    virtual bool supportsInitData(const AtomString&, const FragmentedSharedBuffer&) const = 0;
-    virtual RefPtr<FragmentedSharedBuffer> sanitizeResponse(const FragmentedSharedBuffer&) const = 0;
+    virtual bool supportsInitData(const AtomString&, const SharedBuffer&) const = 0;
+    virtual RefPtr<SharedBuffer> sanitizeResponse(const SharedBuffer&) const = 0;
     virtual std::optional<String> sanitizeSessionId(const String&) const = 0;
 
 protected:

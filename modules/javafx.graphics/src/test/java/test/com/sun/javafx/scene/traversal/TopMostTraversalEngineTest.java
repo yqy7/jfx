@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,11 +27,9 @@ package test.com.sun.javafx.scene.traversal;
 
 import com.sun.javafx.scene.ParentHelper;
 import com.sun.javafx.scene.traversal.Algorithm;
-import com.sun.javafx.scene.traversal.ContainerTabOrder;
 import com.sun.javafx.scene.traversal.ContainerTabOrderShim;
 import com.sun.javafx.scene.traversal.Direction;
 import com.sun.javafx.scene.traversal.ParentTraversalEngine;
-import com.sun.javafx.scene.traversal.TopMostTraversalEngine;
 import com.sun.javafx.scene.traversal.TopMostTraversalEngineShim;
 import com.sun.javafx.scene.traversal.TraversalContext;
 import com.sun.javafx.scene.traversal.TraversalMethod;
@@ -40,17 +38,17 @@ import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.ParentShim;
 import javafx.scene.shape.Rectangle;
-import org.junit.Before;
-import org.junit.Test;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class TopMostTraversalEngineTest {
     private TopMostTraversalEngineShim engine;
     private Group root;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         root = new Group();
         engine = new TopMostTraversalEngineShim(new ContainerTabOrderShim()) {

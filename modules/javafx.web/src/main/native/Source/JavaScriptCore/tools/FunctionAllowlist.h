@@ -38,9 +38,10 @@ public:
 
     bool contains(CodeBlock*) const;
     bool shouldDumpWasmFunction(uint32_t) const;
+    bool containsWasmFunction(uint32_t) const;
 
 private:
-    HashSet<String> m_entries;
+    UncheckedKeyHashSet<String> m_entries;
     bool m_hasActiveAllowlist { false };
 };
 

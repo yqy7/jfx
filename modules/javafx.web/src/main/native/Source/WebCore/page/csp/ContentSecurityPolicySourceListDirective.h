@@ -28,16 +28,18 @@
 
 #include "ContentSecurityPolicyDirective.h"
 #include "ContentSecurityPolicySourceList.h"
+#include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
 
 class ContentSecurityPolicyDirectiveList;
 
 class ContentSecurityPolicySourceListDirective : public ContentSecurityPolicyDirective {
+    WTF_MAKE_TZONE_ALLOCATED(ContentSecurityPolicySourceListDirective);
 public:
     ContentSecurityPolicySourceListDirective(const ContentSecurityPolicyDirectiveList&, const String& name, const String& value);
 
-    enum class ShouldAllowEmptyURLIfSourceListIsNotNone { No, Yes };
+    enum class ShouldAllowEmptyURLIfSourceListIsNotNone : bool { No, Yes };
     bool allows(const URL&, bool didReceiveRedirectResponse, ShouldAllowEmptyURLIfSourceListIsNotNone);
     bool allows(const Vector<ContentSecurityPolicyHash>&) const;
     bool containsAllHashes(const Vector<ContentSecurityPolicyHash>&) const;
@@ -45,9 +47,11 @@ public:
     bool allows(const String& nonce) const;
     bool allowInline() const { return m_sourceList.allowInline(); }
     bool allowEval() const { return m_sourceList.allowEval(); }
+    bool allowTrustedEval() const { return m_sourceList.allowTrustedEval(); }
     bool allowWasmEval() const { return m_sourceList.allowWasmEval(); }
     bool allowNonParserInsertedScripts() const { return m_sourceList.allowNonParserInsertedScripts(); }
     bool shouldReportSample() const { return m_sourceList.shouldReportSample(); }
+    HashAlgorithmSet reportHash() const { return m_sourceList.reportHash(); }
 
     OptionSet<ContentSecurityPolicyHashAlgorithm> hashAlgorithmsUsed() const { return m_sourceList.hashAlgorithmsUsed(); }
 

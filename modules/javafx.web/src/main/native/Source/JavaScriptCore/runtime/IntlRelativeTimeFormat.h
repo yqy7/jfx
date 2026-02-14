@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2020 Sony Interactive Entertainment Inc.
- * Copyright (C) 2020-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2020-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,7 +38,7 @@ class IntlRelativeTimeFormat final : public JSNonFinalObject {
 public:
     using Base = JSNonFinalObject;
 
-    static constexpr bool needsDestruction = true;
+    static constexpr DestructionMode needsDestruction = NeedsDestruction;
 
     static void destroy(JSCell* cell)
     {
@@ -56,6 +56,8 @@ public:
 
     DECLARE_INFO;
 
+    DECLARE_VISIT_CHILDREN;
+
     void initializeRelativeTimeFormat(JSGlobalObject*, JSValue locales, JSValue options);
     JSValue format(JSGlobalObject*, double, StringView unitString) const;
     JSValue formatToParts(JSGlobalObject*, double, StringView unitString) const;
@@ -63,8 +65,7 @@ public:
 
 private:
     IntlRelativeTimeFormat(VM&, Structure*);
-    void finishCreation(VM&);
-    DECLARE_VISIT_CHILDREN;
+    DECLARE_DEFAULT_FINISH_CREATION;
 
     static Vector<String> localeData(const String&, RelevantExtensionKey);
 

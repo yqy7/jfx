@@ -40,7 +40,7 @@ class SSALoweringPhase : public Phase {
 
 public:
     SSALoweringPhase(Graph& graph)
-        : Phase(graph, "SSA lowering")
+        : Phase(graph, "SSA lowering"_s)
         , m_insertionSet(graph)
     {
     }
@@ -91,6 +91,14 @@ private:
             break;
         }
 
+        case StringCharCodeAt: {
+            lowerStringBoundsCheck(m_graph.child(m_node, 0), m_graph.child(m_node, 1), m_graph.child(m_node, 2));
+            break;
+        }
+
+        case EnumeratorPutByVal:
+            break;
+
         case PutByVal:
         case PutByValDirect: {
             Edge base = m_graph.varArgChild(m_node, 0);
@@ -106,12 +114,19 @@ private:
                         m_nodeIndex, SpecInt52Any, GetTypedArrayLengthAsInt52, m_node->origin,
                         OpInfo(m_node->arrayMode().asWord()), base, storage);
                     length->setResult(NodeResultInt52);
+                    // GetTypedArrayLengthAsInt52 says write(MiscFields) to model concurrent updates. But this does not mean that
+                    // we cannot exit after running GetTypedArrayLengthAsInt52 since exit state is still intact after that.
+                    // To teach DFG / FTL about it, we insert ExitOK node here to make subsequent nodes valid for exits.
+                    if (m_node->arrayMode().mayBeResizableOrGrowableSharedTypedArray())
+                        m_insertionSet.insertNode(m_nodeIndex, SpecNone, ExitOK, m_node->origin.withExitOK(true));
                     m_graph.varArgChild(m_node, 4) = Edge(length, Int52RepUse);
                 } else {
 #endif
                     Node* length = m_insertionSet.insertNode(
                         m_nodeIndex, SpecInt32Only, GetArrayLength, m_node->origin,
                         OpInfo(m_node->arrayMode().asWord()), base, storage);
+                    if (m_node->arrayMode().mayBeResizableOrGrowableSharedTypedArray())
+                        m_insertionSet.insertNode(m_nodeIndex, SpecNone, ExitOK, m_node->origin.withExitOK(true));
                     m_graph.varArgChild(m_node, 4) = Edge(length, KnownInt32Use);
 #if USE(LARGE_TYPED_ARRAYS)
                 }
@@ -148,33 +163,45 @@ private:
             break;
         }
 
-        Node* checkInBounds;
+        Node* checkInBounds = nullptr;
+        if (op == GetArrayLength && m_node->arrayMode().isSomeTypedArrayView()) {
 #if USE(LARGE_TYPED_ARRAYS)
-        if ((op == GetArrayLength) && m_node->arrayMode().isSomeTypedArrayView() && (m_node->arrayMode().mayBeLargeTypedArray() || m_graph.hasExitSite(m_node->origin.semantic, Overflow))) {
+            if (m_node->arrayMode().mayBeLargeTypedArray() || m_graph.hasExitSite(m_node->origin.semantic, Overflow)) {
             Node* length = m_insertionSet.insertNode(
                 m_nodeIndex, SpecInt52Any, GetTypedArrayLengthAsInt52, m_node->origin,
                 OpInfo(m_node->arrayMode().asWord()), Edge(base.node(), KnownCellUse), storage);
+            if (m_node->arrayMode().mayBeResizableOrGrowableSharedTypedArray())
+                m_insertionSet.insertNode(m_nodeIndex, SpecNone, ExitOK, m_node->origin.withExitOK(true));
             // The return type is a dummy since this node does not actually return anything.
-            checkInBounds = m_insertionSet.insertNode(
-                m_nodeIndex, SpecInt32Only, CheckInBoundsInt52, m_node->origin,
-                index, Edge(length, Int52RepUse));
-        } else {
+                checkInBounds = m_insertionSet.insertNode(m_nodeIndex, SpecInt32Only, CheckInBoundsInt52, m_node->origin, index, Edge(length, Int52RepUse));
+            }
 #endif
+        }
+
+        if (!checkInBounds) {
             Node* length = m_insertionSet.insertNode(
                 m_nodeIndex, SpecInt32Only, op, m_node->origin,
                 OpInfo(m_node->arrayMode().asWord()), Edge(base.node(), KnownCellUse), storage);
-            checkInBounds = m_insertionSet.insertNode(
-                m_nodeIndex, SpecInt32Only, CheckInBounds, m_node->origin,
-                index, Edge(length, KnownInt32Use));
-#if USE(LARGE_TYPED_ARRAYS)
+            if (m_node->arrayMode().mayBeResizableOrGrowableSharedTypedArray())
+                m_insertionSet.insertNode(m_nodeIndex, SpecNone, ExitOK, m_node->origin.withExitOK(true));
+            checkInBounds = m_insertionSet.insertNode(m_nodeIndex, SpecInt32Only, CheckInBounds, m_node->origin, index, Edge(length, KnownInt32Use));
         }
-#endif
-
 
         AdjacencyList adjacencyList = m_graph.copyVarargChildren(m_node);
         m_graph.m_varArgChildren.append(Edge(checkInBounds, UntypedUse));
         adjacencyList.setNumChildren(adjacencyList.numChildren() + 1);
         m_node->children = adjacencyList;
+        return true;
+    }
+
+    bool lowerStringBoundsCheck(Edge base, Edge index, Edge& checkInBoundsEdge)
+    {
+        if (!m_node->arrayMode().isInBounds())
+            return false;
+
+        Node* length = m_insertionSet.insertNode(m_nodeIndex, SpecInt32Only, GetArrayLength, m_node->origin, OpInfo(m_node->arrayMode().asWord()), Edge(base.node(), KnownCellUse));
+        Node* checkInBounds = m_insertionSet.insertNode(m_nodeIndex, SpecInt32Only, CheckInBounds, m_node->origin, index, Edge(length, KnownInt32Use));
+        checkInBoundsEdge = Edge(checkInBounds, UntypedUse);
         return true;
     }
 

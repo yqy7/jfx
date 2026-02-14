@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,21 +29,25 @@ import com.sun.javafx.scene.SceneHelper;
 import test.com.sun.javafx.pgstub.StubScene;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Random;
 import javafx.event.Event;
 import javafx.scene.Group;
 import javafx.scene.Scene;
 import javafx.scene.shape.Rectangle;
 import javafx.stage.Stage;
-import javafx.event.EventHandler;
 import javafx.geometry.Point3D;
 import javafx.scene.ParentShim;
 import javafx.scene.input.PickResult;
 import javafx.scene.input.TouchEvent;
 import javafx.scene.input.TouchPoint;
-import org.junit.Assert;
-import org.junit.Test;
-import static org.junit.Assert.*;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class TouchEventTest {
     private static final int SANE_BENCHMARK_CYCLES = 1000000;
@@ -185,22 +189,22 @@ public class TouchEventTest {
             touched++;
             switch(touched) {
                 case 1:
-                    Assert.assertEquals(true, event.isShiftDown());
-                    Assert.assertEquals(false, event.isControlDown());
-                    Assert.assertEquals(true, event.isAltDown());
-                    Assert.assertEquals(false, event.isMetaDown());
+                    assertEquals(true, event.isShiftDown());
+                    assertEquals(false, event.isControlDown());
+                    assertEquals(true, event.isAltDown());
+                    assertEquals(false, event.isMetaDown());
                     break;
                 case 2:
-                    Assert.assertEquals(false, event.isShiftDown());
-                    Assert.assertEquals(true, event.isControlDown());
-                    Assert.assertEquals(false, event.isAltDown());
-                    Assert.assertEquals(true, event.isMetaDown());
+                    assertEquals(false, event.isShiftDown());
+                    assertEquals(true, event.isControlDown());
+                    assertEquals(false, event.isAltDown());
+                    assertEquals(true, event.isMetaDown());
                     break;
                 case 3:
-                    Assert.assertEquals(false, event.isShiftDown());
-                    Assert.assertEquals(true, event.isControlDown());
-                    Assert.assertEquals(true, event.isAltDown());
-                    Assert.assertEquals(false, event.isMetaDown());
+                    assertEquals(false, event.isShiftDown());
+                    assertEquals(true, event.isControlDown());
+                    assertEquals(true, event.isAltDown());
+                    assertEquals(false, event.isMetaDown());
                     break;
                 default:
                     fail("Wrong touch point id " + event.getTouchPoint().getId());
@@ -239,22 +243,22 @@ public class TouchEventTest {
             touched++;
             switch(touched) {
                 case 1:
-                    Assert.assertEquals(1, event.getTouchCount());
-                    Assert.assertEquals(1, event.getTouchPoints().size());
+                    assertEquals(1, event.getTouchCount());
+                    assertEquals(1, event.getTouchPoints().size());
                     break;
                 case 2:
                 case 3:
-                    Assert.assertEquals(2, event.getTouchCount());
-                    Assert.assertEquals(2, event.getTouchPoints().size());
+                    assertEquals(2, event.getTouchCount());
+                    assertEquals(2, event.getTouchPoints().size());
                     break;
                 case 4:
                 case 5:
-                    Assert.assertEquals(2, event.getTouchCount());
-                    Assert.assertEquals(2, event.getTouchPoints().size());
+                    assertEquals(2, event.getTouchCount());
+                    assertEquals(2, event.getTouchPoints().size());
                     break;
                 case 6:
-                    Assert.assertEquals(1, event.getTouchCount());
-                    Assert.assertEquals(1, event.getTouchPoints().size());
+                    assertEquals(1, event.getTouchCount());
+                    assertEquals(1, event.getTouchPoints().size());
                     break;
                 default:
                     fail("Wrong touch point id " + event.getTouchPoint().getId());
@@ -303,18 +307,18 @@ public class TouchEventTest {
             touched++;
             switch(touched) {
                 case 1:
-                    Assert.assertEquals(1, event.getEventSetId());
+                    assertEquals(1, event.getEventSetId());
                     break;
                 case 2:
                 case 3:
-                    Assert.assertEquals(2, event.getEventSetId());
+                    assertEquals(2, event.getEventSetId());
                     break;
                 case 4:
                 case 5:
-                    Assert.assertEquals(3, event.getEventSetId());
+                    assertEquals(3, event.getEventSetId());
                     break;
                 case 6:
-                    Assert.assertEquals(4, event.getEventSetId());
+                    assertEquals(4, event.getEventSetId());
                     break;
                 default:
                     fail("Wrong touch point id " + event.getTouchPoint().getId());
@@ -363,18 +367,18 @@ public class TouchEventTest {
             touched++;
             switch(event.getTouchPoint().getId()) {
                 case 1:
-                    Assert.assertEquals(110.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(110.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(110.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(110.0, event.getTouchPoint().getY(), 0.0001);
                     assertEquals(1, touched);
                     break;
                 case 2:
-                    Assert.assertEquals(120.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(120.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(120.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(120.0, event.getTouchPoint().getY(), 0.0001);
                     assertEquals(2, touched);
                     break;
                 case 3:
-                    Assert.assertEquals(130.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(130.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(130.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(130.0, event.getTouchPoint().getY(), 0.0001);
                     assertEquals(3, touched);
                     break;
                 default:
@@ -406,18 +410,18 @@ public class TouchEventTest {
             touched++;
             switch(event.getTouchPoint().getId()) {
                 case 1:
-                    Assert.assertEquals(110.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(110.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(110.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(110.0, event.getTouchPoint().getY(), 0.0001);
                     assertEquals(1, touched);
                     break;
                 case 2:
-                    Assert.assertEquals(120.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(120.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(120.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(120.0, event.getTouchPoint().getY(), 0.0001);
                     assertEquals(2, touched);
                     break;
                 case 3:
-                    Assert.assertEquals(130.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(130.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(130.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(130.0, event.getTouchPoint().getY(), 0.0001);
                     assertEquals(3, touched);
                     break;
                 default:
@@ -463,24 +467,24 @@ public class TouchEventTest {
             touched++;
             switch(event.getTouchPoint().getId()) {
                 case 1:
-                    Assert.assertEquals(110.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(110.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(1, event.getTouchPoints().get(0).getId());
-                    Assert.assertEquals(2, event.getTouchPoints().get(1).getId());
+                    assertEquals(110.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(110.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(1, event.getTouchPoints().get(0).getId());
+                    assertEquals(2, event.getTouchPoints().get(1).getId());
                     assertEquals(1, touched);
                     break;
                 case 2:
-                    Assert.assertEquals(120.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(120.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(1, event.getTouchPoints().get(0).getId());
-                    Assert.assertEquals(2, event.getTouchPoints().get(1).getId());
+                    assertEquals(120.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(120.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(1, event.getTouchPoints().get(0).getId());
+                    assertEquals(2, event.getTouchPoints().get(1).getId());
                     assertEquals(2, touched);
                     break;
                 case 3:
-                    Assert.assertEquals(130.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(130.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(1, event.getTouchPoints().get(0).getId());
-                    Assert.assertEquals(3, event.getTouchPoints().get(1).getId());
+                    assertEquals(130.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(130.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(1, event.getTouchPoints().get(0).getId());
+                    assertEquals(3, event.getTouchPoints().get(1).getId());
                     assertEquals(3, touched);
                     break;
                 default:
@@ -526,17 +530,17 @@ public class TouchEventTest {
             touched++;
             switch(event.getTouchPoint().getId()) {
                 case 1:
-                    Assert.assertEquals(110.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(110.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(1, event.getTouchPoints().get(0).getId());
-                    Assert.assertEquals(2, event.getTouchPoints().get(1).getId());
+                    assertEquals(110.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(110.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(1, event.getTouchPoints().get(0).getId());
+                    assertEquals(2, event.getTouchPoints().get(1).getId());
                     assertEquals(1, touched);
                     break;
                 case 2:
-                    Assert.assertEquals(120.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(120.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(1, event.getTouchPoints().get(0).getId());
-                    Assert.assertEquals(2, event.getTouchPoints().get(1).getId());
+                    assertEquals(120.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(120.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(1, event.getTouchPoints().get(0).getId());
+                    assertEquals(2, event.getTouchPoints().get(1).getId());
                     assertEquals(2, touched);
                     break;
                 default:
@@ -548,17 +552,17 @@ public class TouchEventTest {
             touched++;
             switch(event.getTouchPoint().getId()) {
                 case 1:
-                    Assert.assertEquals(120.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(120.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(1, event.getTouchPoints().get(0).getId());
-                    Assert.assertEquals(2, event.getTouchPoints().get(1).getId());
+                    assertEquals(120.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(120.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(1, event.getTouchPoints().get(0).getId());
+                    assertEquals(2, event.getTouchPoints().get(1).getId());
                     assertEquals(3, touched);
                     break;
                 case 2:
-                    Assert.assertEquals(110.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(110.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(1, event.getTouchPoints().get(0).getId());
-                    Assert.assertEquals(2, event.getTouchPoints().get(1).getId());
+                    assertEquals(110.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(110.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(1, event.getTouchPoints().get(0).getId());
+                    assertEquals(2, event.getTouchPoints().get(1).getId());
                     assertEquals(4, touched);
                     break;
                 default:
@@ -596,24 +600,24 @@ public class TouchEventTest {
             touched++;
             switch(event.getTouchPoint().getId()) {
                 case 1:
-                    Assert.assertEquals(110.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(110.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(1, event.getTouchPoints().get(0).getId());
-                    Assert.assertEquals(2, event.getTouchPoints().get(1).getId());
+                    assertEquals(110.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(110.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(1, event.getTouchPoints().get(0).getId());
+                    assertEquals(2, event.getTouchPoints().get(1).getId());
                     assertEquals(1, touched);
                     break;
                 case 2:
-                    Assert.assertEquals(120.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(120.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(1, event.getTouchPoints().get(0).getId());
-                    Assert.assertEquals(2, event.getTouchPoints().get(1).getId());
+                    assertEquals(120.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(120.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(1, event.getTouchPoints().get(0).getId());
+                    assertEquals(2, event.getTouchPoints().get(1).getId());
                     assertEquals(2, touched);
                     break;
                 case 3:
-                    Assert.assertEquals(160.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(160.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(2, event.getTouchPoints().get(0).getId());
-                    Assert.assertEquals(3, event.getTouchPoints().get(1).getId());
+                    assertEquals(160.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(160.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(2, event.getTouchPoints().get(0).getId());
+                    assertEquals(3, event.getTouchPoints().get(1).getId());
                     assertEquals(3, touched);
                     break;
                 default:
@@ -625,17 +629,17 @@ public class TouchEventTest {
             touched++;
             switch(event.getTouchPoint().getId()) {
                 case 2:
-                    Assert.assertEquals(120.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(120.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(2, event.getTouchPoints().get(0).getId());
-                    Assert.assertEquals(3, event.getTouchPoints().get(1).getId());
+                    assertEquals(120.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(120.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(2, event.getTouchPoints().get(0).getId());
+                    assertEquals(3, event.getTouchPoints().get(1).getId());
                     assertEquals(4, touched);
                     break;
                 case 3:
-                    Assert.assertEquals(160.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(160.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(2, event.getTouchPoints().get(0).getId());
-                    Assert.assertEquals(3, event.getTouchPoints().get(1).getId());
+                    assertEquals(160.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(160.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(2, event.getTouchPoints().get(0).getId());
+                    assertEquals(3, event.getTouchPoints().get(1).getId());
                     assertEquals(5, touched);
                     break;
                 default:
@@ -690,23 +694,23 @@ public class TouchEventTest {
             switch(touched) {
                 case 1:
                 case 2:
-                    Assert.assertEquals(1, event.getEventSetId());
-                    Assert.assertEquals(touched, event.getTouchPoint().getId());
+                    assertEquals(1, event.getEventSetId());
+                    assertEquals(touched, event.getTouchPoint().getId());
                     break;
                 case 3:
                 case 4:
-                    Assert.assertEquals(2, event.getEventSetId());
-                    Assert.assertEquals(touched - 2, event.getTouchPoint().getId());
+                    assertEquals(2, event.getEventSetId());
+                    assertEquals(touched - 2, event.getTouchPoint().getId());
                     break;
                 case 5:
                 case 6:
-                    Assert.assertEquals(1, event.getEventSetId());
-                    Assert.assertEquals(touched - 4, event.getTouchPoint().getId());
+                    assertEquals(1, event.getEventSetId());
+                    assertEquals(touched - 4, event.getTouchPoint().getId());
                     break;
                 case 7:
                 case 8:
-                    Assert.assertEquals(2, event.getEventSetId());
-                    Assert.assertEquals(touched - 6, event.getTouchPoint().getId());
+                    assertEquals(2, event.getEventSetId());
+                    assertEquals(touched - 6, event.getTouchPoint().getId());
                     break;
                 default:
                     fail("Wrong touch point id " + event.getTouchPoint().getId());
@@ -842,16 +846,16 @@ public class TouchEventTest {
         touched = 0;
         rect.addEventHandler(TouchEvent.ANY, event -> {
             touched++;
-            Assert.assertEquals(110, event.getTouchPoint().getX(), 0.00001);
-            Assert.assertEquals(110, event.getTouchPoint().getY(), 0.00001);
-            Assert.assertEquals(0, event.getTouchPoint().getZ(), 0.00001);
+            assertEquals(110, event.getTouchPoint().getX(), 0.00001);
+            assertEquals(110, event.getTouchPoint().getY(), 0.00001);
+            assertEquals(0, event.getTouchPoint().getZ(), 0.00001);
         });
 
         scene.addEventHandler(TouchEvent.ANY, event -> {
             touched++;
-            Assert.assertEquals(110, event.getTouchPoint().getX(), 0.00001);
-            Assert.assertEquals(110, event.getTouchPoint().getY(), 0.00001);
-            Assert.assertEquals(50, event.getTouchPoint().getZ(), 0.00001);
+            assertEquals(110, event.getTouchPoint().getX(), 0.00001);
+            assertEquals(110, event.getTouchPoint().getY(), 0.00001);
+            assertEquals(50, event.getTouchPoint().getZ(), 0.00001);
         });
 
         ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
@@ -1049,22 +1053,22 @@ public class TouchEventTest {
             touched++;
             switch(touched) {
                 case 1:
-                    Assert.assertEquals(1, event.getTouchPoint().getId());
-                    Assert.assertEquals(150.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(155.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(150.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(155.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1150.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1155.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(1, event.getTouchPoint().getId());
+                    assertEquals(150.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(155.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(150.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(155.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1150.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1155.0, event.getTouchPoint().getScreenY(), 0.0001);
                     break;
                 case 3:
-                    Assert.assertEquals(1, event.getTouchPoint().getId());
-                    Assert.assertEquals(250.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(255.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(250.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(255.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1250.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1255.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(1, event.getTouchPoint().getId());
+                    assertEquals(250.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(255.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(250.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(255.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1250.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1255.0, event.getTouchPoint().getScreenY(), 0.0001);
                     break;
                 default:
                     fail("Wrong touch point delivery");
@@ -1075,22 +1079,22 @@ public class TouchEventTest {
             touched++;
             switch(touched) {
                 case 2:
-                    Assert.assertEquals(2, event.getTouchPoint().getId());
-                    Assert.assertEquals(260.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(265.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(260.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(265.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1260.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1265.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(2, event.getTouchPoint().getId());
+                    assertEquals(260.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(265.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(260.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(265.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1260.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1265.0, event.getTouchPoint().getScreenY(), 0.0001);
                     break;
                 case 4:
-                    Assert.assertEquals(2, event.getTouchPoint().getId());
-                    Assert.assertEquals(160.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(165.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(160.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(165.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1160.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1165.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(2, event.getTouchPoint().getId());
+                    assertEquals(160.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(165.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(160.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(165.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1160.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1165.0, event.getTouchPoint().getScreenY(), 0.0001);
                     break;
                 default:
                     fail("Wrong touch point delivery");
@@ -1130,23 +1134,23 @@ public class TouchEventTest {
             touched++;
             switch(touched) {
                 case 1:
-                    Assert.assertEquals(1, event.getTouchPoint().getId());
-                    Assert.assertEquals(150.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(155.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(150.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(155.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1150.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1155.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(1, event.getTouchPoint().getId());
+                    assertEquals(150.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(155.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(150.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(155.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1150.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1155.0, event.getTouchPoint().getScreenY(), 0.0001);
                     event.getTouchPoint().ungrab();
                     break;
                 case 4:
-                    Assert.assertEquals(2, event.getTouchPoint().getId());
-                    Assert.assertEquals(160.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(165.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(160.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(165.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1160.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1165.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(2, event.getTouchPoint().getId());
+                    assertEquals(160.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(165.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(160.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(165.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1160.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1165.0, event.getTouchPoint().getScreenY(), 0.0001);
                     break;
                 default:
                     fail("Wrong touch point delivery");
@@ -1157,23 +1161,23 @@ public class TouchEventTest {
             touched++;
             switch(touched) {
                 case 2:
-                    Assert.assertEquals(2, event.getTouchPoint().getId());
-                    Assert.assertEquals(260.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(265.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(260.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(265.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1260.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1265.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(2, event.getTouchPoint().getId());
+                    assertEquals(260.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(265.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(260.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(265.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1260.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1265.0, event.getTouchPoint().getScreenY(), 0.0001);
                     event.getTouchPoint().ungrab();
                     break;
                 case 3:
-                    Assert.assertEquals(1, event.getTouchPoint().getId());
-                    Assert.assertEquals(250.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(255.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(250.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(255.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1250.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1255.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(1, event.getTouchPoint().getId());
+                    assertEquals(250.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(255.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(250.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(255.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1250.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1255.0, event.getTouchPoint().getScreenY(), 0.0001);
                     break;
                 default:
                     fail("Wrong touch point delivery");
@@ -1213,32 +1217,32 @@ public class TouchEventTest {
             touched++;
             switch(touched) {
                 case 1:
-                    Assert.assertEquals(1, event.getTouchPoint().getId());
-                    Assert.assertEquals(150.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(155.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(150.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(155.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1150.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1155.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(1, event.getTouchPoint().getId());
+                    assertEquals(150.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(155.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(150.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(155.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1150.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1155.0, event.getTouchPoint().getScreenY(), 0.0001);
                     event.getTouchPoints().get(1).grab(rect1);
                     break;
                 case 3:
-                    Assert.assertEquals(1, event.getTouchPoint().getId());
-                    Assert.assertEquals(250.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(255.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(250.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(255.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1250.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1255.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(1, event.getTouchPoint().getId());
+                    assertEquals(250.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(255.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(250.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(255.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1250.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1255.0, event.getTouchPoint().getScreenY(), 0.0001);
                     break;
                 case 4:
-                    Assert.assertEquals(2, event.getTouchPoint().getId());
-                    Assert.assertEquals(160.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(165.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(160.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(165.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1160.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1165.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(2, event.getTouchPoint().getId());
+                    assertEquals(160.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(165.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(160.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(165.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1160.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1165.0, event.getTouchPoint().getScreenY(), 0.0001);
                     break;
                 default:
                     fail("Wrong touch point delivery");
@@ -1249,13 +1253,13 @@ public class TouchEventTest {
             touched++;
             switch(touched) {
                 case 2:
-                    Assert.assertEquals(2, event.getTouchPoint().getId());
-                    Assert.assertEquals(260.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(265.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(260.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(265.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1260.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1265.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(2, event.getTouchPoint().getId());
+                    assertEquals(260.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(265.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(260.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(265.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1260.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1265.0, event.getTouchPoint().getScreenY(), 0.0001);
                     break;
                 default:
                     fail("Wrong touch point delivery");
@@ -1295,32 +1299,32 @@ public class TouchEventTest {
             touched++;
             switch(touched) {
                 case 1:
-                    Assert.assertEquals(1, event.getTouchPoint().getId());
-                    Assert.assertEquals(150.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(155.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(150.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(155.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1150.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1155.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(1, event.getTouchPoint().getId());
+                    assertEquals(150.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(155.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(150.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(155.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1150.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1155.0, event.getTouchPoint().getScreenY(), 0.0001);
                     event.getTouchPoints().get(1).grab();
                     break;
                 case 3:
-                    Assert.assertEquals(1, event.getTouchPoint().getId());
-                    Assert.assertEquals(250.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(255.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(250.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(255.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1250.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1255.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(1, event.getTouchPoint().getId());
+                    assertEquals(250.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(255.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(250.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(255.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1250.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1255.0, event.getTouchPoint().getScreenY(), 0.0001);
                     break;
                 case 4:
-                    Assert.assertEquals(2, event.getTouchPoint().getId());
-                    Assert.assertEquals(160.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(165.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(160.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(165.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1160.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1165.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(2, event.getTouchPoint().getId());
+                    assertEquals(160.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(165.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(160.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(165.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1160.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1165.0, event.getTouchPoint().getScreenY(), 0.0001);
                     break;
                 default:
                     fail("Wrong touch point delivery");
@@ -1331,13 +1335,13 @@ public class TouchEventTest {
             touched++;
             switch(touched) {
                 case 2:
-                    Assert.assertEquals(2, event.getTouchPoint().getId());
-                    Assert.assertEquals(260.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(265.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(260.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(265.0, event.getTouchPoint().getSceneY(), 0.0001);
-                    Assert.assertEquals(1260.0, event.getTouchPoint().getScreenX(), 0.0001);
-                    Assert.assertEquals(1265.0, event.getTouchPoint().getScreenY(), 0.0001);
+                    assertEquals(2, event.getTouchPoint().getId());
+                    assertEquals(260.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(265.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(260.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(265.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(1260.0, event.getTouchPoint().getScreenX(), 0.0001);
+                    assertEquals(1265.0, event.getTouchPoint().getScreenY(), 0.0001);
                     break;
                 default:
                     fail("Wrong touch point delivery");
@@ -1376,23 +1380,23 @@ public class TouchEventTest {
             touched++;
             switch(touched) {
                 case 1:
-                    Assert.assertEquals(115.0, event.getTouchPoint().getX(), 0.0001);
-                    Assert.assertEquals(125.0, event.getTouchPoint().getY(), 0.0001);
-                    Assert.assertEquals(130.0, event.getTouchPoint().getSceneX(), 0.0001);
-                    Assert.assertEquals(130.0, event.getTouchPoint().getSceneY(), 0.0001);
+                    assertEquals(115.0, event.getTouchPoint().getX(), 0.0001);
+                    assertEquals(125.0, event.getTouchPoint().getY(), 0.0001);
+                    assertEquals(130.0, event.getTouchPoint().getSceneX(), 0.0001);
+                    assertEquals(130.0, event.getTouchPoint().getSceneY(), 0.0001);
                     break;
                 case 2:
                 case 3:
                 case 4:
                 case 5:
-                    Assert.assertEquals(115.0, event.getTouchPoints().get(0).getX(), 0.0001);
-                    Assert.assertEquals(125.0, event.getTouchPoints().get(0).getY(), 0.0001);
-                    Assert.assertEquals(130.0, event.getTouchPoints().get(0).getSceneX(), 0.0001);
-                    Assert.assertEquals(130.0, event.getTouchPoints().get(0).getSceneY(), 0.0001);
-                    Assert.assertEquals(125.0, event.getTouchPoints().get(1).getX(), 0.0001);
-                    Assert.assertEquals(135.0, event.getTouchPoints().get(1).getY(), 0.0001);
-                    Assert.assertEquals(140.0, event.getTouchPoints().get(1).getSceneX(), 0.0001);
-                    Assert.assertEquals(140.0, event.getTouchPoints().get(1).getSceneY(), 0.0001);
+                    assertEquals(115.0, event.getTouchPoints().get(0).getX(), 0.0001);
+                    assertEquals(125.0, event.getTouchPoints().get(0).getY(), 0.0001);
+                    assertEquals(130.0, event.getTouchPoints().get(0).getSceneX(), 0.0001);
+                    assertEquals(130.0, event.getTouchPoints().get(0).getSceneY(), 0.0001);
+                    assertEquals(125.0, event.getTouchPoints().get(1).getX(), 0.0001);
+                    assertEquals(135.0, event.getTouchPoints().get(1).getY(), 0.0001);
+                    assertEquals(140.0, event.getTouchPoints().get(1).getSceneX(), 0.0001);
+                    assertEquals(140.0, event.getTouchPoints().get(1).getSceneY(), 0.0001);
                     break;
                 default:
                     fail("Wrong touch point id " + event.getTouchPoint().getId());
@@ -1446,89 +1450,99 @@ public class TouchEventTest {
         ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
     }
 
-    @Test(expected=RuntimeException.class)
+    @Test
     public void shouldThrowREOnWrongSmallId() {
-        Scene scene = createScene();
-        Rectangle rect =
-                (Rectangle) scene.getRoot().getChildrenUnmodifiable().get(0);
+        assertThrows(RuntimeException.class, () -> {
+            Scene scene = createScene();
+            Rectangle rect =
+                    (Rectangle) scene.getRoot().getChildrenUnmodifiable().get(0);
 
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
-                System.currentTimeMillis(), 1, true, false, false, false, false);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
-                TouchPoint.State.PRESSED, 1, 110, 110, 110, 110);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
+                    System.currentTimeMillis(), 1, true, false, false, false, false);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
+                    TouchPoint.State.PRESSED, 1, 110, 110, 110, 110);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
 
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
-                System.currentTimeMillis(), 1, true, false, false, false, false);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
-                TouchPoint.State.MOVED, 2, 110, 110, 110, 110);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
+                    System.currentTimeMillis(), 1, true, false, false, false, false);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
+                    TouchPoint.State.MOVED, 2, 110, 110, 110, 110);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
+        });
     }
 
-    @Test(expected=RuntimeException.class)
+    @Test
     public void shouldThrowREOnWrongLargeId() {
-        Scene scene = createScene();
-        Rectangle rect =
-                (Rectangle) scene.getRoot().getChildrenUnmodifiable().get(0);
+        assertThrows(RuntimeException.class, () -> {
+            Scene scene = createScene();
+            Rectangle rect =
+                    (Rectangle) scene.getRoot().getChildrenUnmodifiable().get(0);
 
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
-                System.currentTimeMillis(), 1, true, false, false, false, false);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
-                TouchPoint.State.PRESSED, 1368, 110, 110, 110, 110);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
+                    System.currentTimeMillis(), 1, true, false, false, false, false);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
+                    TouchPoint.State.PRESSED, 1368, 110, 110, 110, 110);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
 
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
-                System.currentTimeMillis(), 1, true, false, false, false, false);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
-                TouchPoint.State.MOVED, 127, 110, 110, 110, 110);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
+                    System.currentTimeMillis(), 1, true, false, false, false, false);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
+                    TouchPoint.State.MOVED, 127, 110, 110, 110, 110);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
+        });
     }
 
-    @Test(expected=RuntimeException.class)
+    @Test
     public void shouldThrowREOnBigTPNumber() {
-        Scene scene = createScene();
-        Rectangle rect =
-                (Rectangle) scene.getRoot().getChildrenUnmodifiable().get(0);
+        assertThrows(RuntimeException.class, () -> {
+            Scene scene = createScene();
+            Rectangle rect =
+                    (Rectangle) scene.getRoot().getChildrenUnmodifiable().get(0);
 
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
-                System.currentTimeMillis(), 1, true, false, false, false, false);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
-                TouchPoint.State.PRESSED, 1368, 110, 110, 110, 110);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
-                TouchPoint.State.PRESSED, 1, 110, 110, 110, 110);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
+                    System.currentTimeMillis(), 1, true, false, false, false, false);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
+                    TouchPoint.State.PRESSED, 1368, 110, 110, 110, 110);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
+                    TouchPoint.State.PRESSED, 1, 110, 110, 110, 110);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
+        });
     }
 
-    @Test(expected=RuntimeException.class)
+    @Test
     public void shouldThrowREOnSmallTPNumber() {
-        Scene scene = createScene();
-        Rectangle rect =
-                (Rectangle) scene.getRoot().getChildrenUnmodifiable().get(0);
+        assertThrows(RuntimeException.class, () -> {
+            Scene scene = createScene();
+            Rectangle rect =
+                    (Rectangle) scene.getRoot().getChildrenUnmodifiable().get(0);
 
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
-                System.currentTimeMillis(), 2, true, false, false, false, false);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
-                TouchPoint.State.PRESSED, 1368, 110, 110, 110, 110);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
+                    System.currentTimeMillis(), 2, true, false, false, false, false);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
+                    TouchPoint.State.PRESSED, 1368, 110, 110, 110, 110);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
+        });
     }
 
-    @Test(expected=RuntimeException.class)
+    @Test
     public void shouldThrowREOnLostRelease() {
-        Scene scene = createScene();
-        Rectangle rect =
-                (Rectangle) scene.getRoot().getChildrenUnmodifiable().get(0);
+        assertThrows(RuntimeException.class, () -> {
+            Scene scene = createScene();
+            Rectangle rect =
+                    (Rectangle) scene.getRoot().getChildrenUnmodifiable().get(0);
 
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
-                System.currentTimeMillis(), 1, true, false, false, false, false);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
-                TouchPoint.State.PRESSED, 1368, 110, 110, 110, 110);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
+                    System.currentTimeMillis(), 1, true, false, false, false, false);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
+                    TouchPoint.State.PRESSED, 1368, 110, 110, 110, 110);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
 
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
-                System.currentTimeMillis(), 1, true, false, false, false, false);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
-                TouchPoint.State.PRESSED, 1, 110, 110, 110, 110);
-        ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventBegin(
+                    System.currentTimeMillis(), 1, true, false, false, false, false);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventNext(
+                    TouchPoint.State.PRESSED, 1, 110, 110, 110, 110);
+            ((StubScene) SceneHelper.getPeer(scene)).getListener().touchEventEnd();
+        });
     }
 
     private Scene createScene() {

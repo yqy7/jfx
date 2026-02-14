@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2022 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2016-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,18 +46,15 @@ public:
 
     DECLARE_INFO;
 
-    static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
-    {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(InternalFunctionType, StructureFlags), info());
-    }
+    inline static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
-    void finishCreation(VM&, ProxyObject*);
+    void finishCreation(VM&);
     DECLARE_VISIT_CHILDREN;
     JSValue proxy() { return m_proxy.get(); }
     void setProxyToNull(VM& vm) { return m_proxy.set(vm, this, jsNull()); }
 
 private:
-    ProxyRevoke(VM&, Structure*);
+    ProxyRevoke(VM&, Structure*, ProxyObject*);
 
     WriteBarrier<Unknown> m_proxy;
 };

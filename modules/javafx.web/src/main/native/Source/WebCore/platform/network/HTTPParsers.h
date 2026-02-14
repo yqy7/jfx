@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2006 Alexey Proskuryakov (ap@webkit.org)
  * Copyright (C) 2009 Google Inc. All rights reserved.
- * Copyright (C) 2011 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2011 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,9 +36,10 @@
 
 namespace WebCore {
 
-typedef HashSet<String, ASCIICaseInsensitiveHash> HTTPHeaderSet;
+using HTTPHeaderSet = HashSet<String, ASCIICaseInsensitiveHash>;
 
-enum class HTTPHeaderName;
+class ResourceResponse;
+enum class HTTPHeaderName : uint16_t;
 
 enum class XSSProtectionDisposition {
     Invalid,
@@ -69,6 +70,15 @@ enum class CrossOriginResourcePolicy : uint8_t {
     Invalid
 };
 
+enum class ClearSiteDataValue : uint8_t {
+    Cache = 1 << 0,
+    Cookies = 1 << 1,
+    ExecutionContexts = 1 << 2,
+    Storage = 1 << 3,
+};
+
+enum class RangeAllowWhitespace : bool { No, Yes };
+
 bool isValidReasonPhrase(const String&);
 bool isValidHTTPHeaderValue(const String&);
 bool isValidAcceptHeaderValue(const String&);
@@ -79,29 +89,36 @@ WEBCORE_EXPORT bool isValidUserAgentHeaderValue(const String&);
 bool isValidHTTPToken(const String&);
 bool isValidHTTPToken(StringView);
 std::optional<WallTime> parseHTTPDate(const String&);
-String filenameFromHTTPContentDisposition(const String&);
+StringView filenameFromHTTPContentDisposition(StringView value LIFETIME_BOUND);
 WEBCORE_EXPORT String extractMIMETypeFromMediaType(const String&);
-String extractCharsetFromMediaType(const String&);
+WEBCORE_EXPORT StringView extractCharsetFromMediaType(StringView mediaType LIFETIME_BOUND);
 XSSProtectionDisposition parseXSSProtectionHeader(const String& header, String& failureReason, unsigned& failurePosition, String& reportURL);
 AtomString extractReasonPhraseFromHTTPStatusLine(const String&);
-WEBCORE_EXPORT XFrameOptionsDisposition parseXFrameOptionsHeader(const String&);
-std::optional<std::pair<StringView, HashMap<String, String>>> parseStructuredFieldValue(StringView header);
+WEBCORE_EXPORT XFrameOptionsDisposition parseXFrameOptionsHeader(StringView);
+WEBCORE_EXPORT OptionSet<ClearSiteDataValue> parseClearSiteDataHeader(const ResourceResponse&);
 
-// -1 could be set to one of the return parameters to indicate the value is not specified.
-WEBCORE_EXPORT bool parseRange(const String&, long long& rangeOffset, long long& rangeEnd, long long& rangeSuffixLength);
+// One of the HTTPRange bounds could be set to std::nullopt but not both of them.
+struct HTTPRange {
+    std::optional<uint64_t> start;
+    std::optional<uint64_t> end;
+};
+WEBCORE_EXPORT std::optional<HTTPRange> parseRange(StringView, RangeAllowWhitespace);
 
 ContentTypeOptionsDisposition parseContentTypeOptionsHeader(StringView header);
 
 // Parsing Complete HTTP Messages.
-size_t parseHTTPHeader(const uint8_t* data, size_t length, String& failureReason, StringView& nameStr, String& valueStr, bool strict = true);
-size_t parseHTTPRequestBody(const uint8_t* data, size_t length, Vector<uint8_t>& body);
+size_t parseHTTPHeader(std::span<const uint8_t> data, String& failureReason, StringView& nameStr, String& valueStr, bool strict = true);
+size_t parseHTTPRequestBody(std::span<const uint8_t> data, Vector<uint8_t>& body);
+
+std::optional<uint64_t> parseContentLength(StringView);
 
 // HTTP Header routine as per https://fetch.spec.whatwg.org/#terminology-headers
+bool isForbiddenHeader(const String& name, StringView value);
 bool isForbiddenHeaderName(const String&);
 bool isNoCORSSafelistedRequestHeaderName(const String&);
 bool isPriviledgedNoCORSRequestHeaderName(const String&);
 bool isForbiddenResponseHeaderName(const String&);
-bool isForbiddenMethod(const String&);
+bool isForbiddenMethod(StringView);
 bool isSimpleHeader(const String& name, const String& value);
 bool isCrossOriginSafeHeader(HTTPHeaderName, const HTTPHeaderSet&);
 bool isCrossOriginSafeHeader(const String&, const HTTPHeaderSet&);
@@ -112,22 +129,6 @@ bool isSafeMethod(const String&);
 
 WEBCORE_EXPORT CrossOriginResourcePolicy parseCrossOriginResourcePolicyHeader(StringView);
 
-inline bool isHTTPSpace(UChar character)
-{
-    return character <= ' ' && (character == ' ' || character == '\n' || character == '\t' || character == '\r');
-}
-
-// Strip leading and trailing whitespace as defined in https://fetch.spec.whatwg.org/#concept-header-value-normalize.
-inline String stripLeadingAndTrailingHTTPSpaces(const String& string)
-{
-    return string.stripLeadingAndTrailingCharacters(isHTTPSpace);
-}
-
-inline StringView stripLeadingAndTrailingHTTPSpaces(StringView string)
-{
-    return string.stripLeadingAndTrailingMatchedCharacters(isHTTPSpace);
-}
-
 template<class HashType>
 bool addToAccessControlAllowList(const String& string, unsigned start, unsigned end, HashSet<String, HashType>& set)
 {
@@ -136,7 +137,7 @@ bool addToAccessControlAllowList(const String& string, unsigned start, unsigned 
         return true;
 
     // Skip white space from start.
-    while (start <= end && isHTTPSpace((*stringImpl)[start]))
+    while (start <= end && isASCIIWhitespaceWithoutFF((*stringImpl)[start]))
         ++start;
 
     // only white space
@@ -144,7 +145,7 @@ bool addToAccessControlAllowList(const String& string, unsigned start, unsigned 
         return true;
 
     // Skip white space from end.
-    while (end && isHTTPSpace((*stringImpl)[end]))
+    while (end && isASCIIWhitespaceWithoutFF((*stringImpl)[end]))
         --end;
 
     auto token = string.substring(start, end - start + 1);

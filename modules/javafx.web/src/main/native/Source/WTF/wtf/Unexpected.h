@@ -73,7 +73,7 @@ inline namespace fundamentals_v3 {
 
 template<class E>
 class unexpected {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(unexpected);
 public:
     unexpected() = delete;
     template <class U = E>
@@ -88,7 +88,6 @@ private:
 };
 
 template<class E> constexpr bool operator==(const unexpected<E>& lhs, const unexpected<E>& rhs) { return lhs.value() == rhs.value(); }
-template<class E> constexpr bool operator!=(const unexpected<E>& lhs, const unexpected<E>& rhs) { return lhs.value() != rhs.value(); }
 
 }}} // namespace std::experimental::fundamentals_v3
 

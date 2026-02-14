@@ -53,8 +53,6 @@ public:
 
     WTF_EXPORT_PRIVATE void dump(PrintStream&) const;
 
-    struct MarkableTraits;
-
 private:
     friend class GenericTimeMixin<WallTime>;
     constexpr WallTime(double rawValue)
@@ -64,10 +62,11 @@ private:
 };
 static_assert(sizeof(WallTime) == sizeof(double));
 
-struct WallTime::MarkableTraits {
+template<>
+struct MarkableTraits<WallTime> {
     static bool isEmptyValue(WallTime time)
     {
-        return std::isnan(time.m_value);
+        return time.isNaN();
     }
 
     static constexpr WallTime emptyValue()
@@ -76,28 +75,8 @@ struct WallTime::MarkableTraits {
     }
 };
 
-WTF_EXPORT_PRIVATE void sleep(WallTime);
 WTF_EXPORT_PRIVATE Int128 currentTimeInNanoseconds();
 
 } // namespace WTF
-
-namespace std {
-
-inline bool isnan(WTF::WallTime time)
-{
-    return std::isnan(time.secondsSinceEpoch().value());
-}
-
-inline bool isinf(WTF::WallTime time)
-{
-    return std::isinf(time.secondsSinceEpoch().value());
-}
-
-inline bool isfinite(WTF::WallTime time)
-{
-    return std::isfinite(time.secondsSinceEpoch().value());
-}
-
-} // namespace std
 
 using WTF::WallTime;

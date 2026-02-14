@@ -26,6 +26,8 @@
 #include "config.h"
 #include "TimeRanges.h"
 
+#include "ExceptionOr.h"
+
 namespace WebCore {
 
 Ref<TimeRanges> TimeRanges::create()
@@ -62,7 +64,7 @@ ExceptionOr<double> TimeRanges::start(unsigned index) const
     bool valid;
     MediaTime result = m_ranges.start(index, valid);
     if (!valid)
-        return Exception { IndexSizeError };
+        return Exception { ExceptionCode::IndexSizeError };
     return result.toDouble();
 }
 
@@ -71,7 +73,7 @@ ExceptionOr<double> TimeRanges::end(unsigned index) const
     bool valid;
     MediaTime result = m_ranges.end(index, valid);
     if (!valid)
-        return Exception { IndexSizeError };
+        return Exception { ExceptionCode::IndexSizeError };
     return result.toDouble();
 }
 
@@ -100,9 +102,9 @@ unsigned TimeRanges::length() const
     return m_ranges.length();
 }
 
-void TimeRanges::add(double start, double end)
+void TimeRanges::add(double start, double end, AddTimeRangeOption addTimeRangeOption)
 {
-    m_ranges.add(MediaTime::createWithDouble(start), MediaTime::createWithDouble(end));
+    m_ranges.add(MediaTime::createWithDouble(start), MediaTime::createWithDouble(end), addTimeRangeOption);
 }
 
 bool TimeRanges::contain(double time) const

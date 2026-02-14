@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -52,7 +52,7 @@ void jit_type_dump(const pas_heap_type* type, pas_stream* stream)
     pas_stream_printf(stream, "JIT");
 }
 
-pas_heap_config jit_heap_config = JIT_HEAP_CONFIG;
+const pas_heap_config jit_heap_config = JIT_HEAP_CONFIG;
 
 pas_simple_large_free_heap jit_fresh_memory_heap = PAS_SIMPLE_LARGE_FREE_HEAP_INITIALIZER;
 
@@ -244,7 +244,7 @@ void jit_medium_destroy_page_header(
 }
 
 pas_aligned_allocation_result jit_aligned_allocator(
-    size_t size, pas_alignment alignment, pas_large_heap* large_heap, pas_heap_config* config)
+    size_t size, pas_alignment alignment, pas_large_heap* large_heap, const pas_heap_config* config)
 {
     pas_aligned_allocation_result result;
     size_t aligned_size;
@@ -276,42 +276,47 @@ pas_aligned_allocation_result jit_aligned_allocator(
 void* jit_prepare_to_enumerate(pas_enumerator* enumerator)
 {
     pas_basic_heap_config_enumerator_data* result;
-    pas_heap_config** configs;
-    pas_heap_config* config;
-    jit_heap_config_root_data* root_data;
 
-    configs = (pas_heap_config**)pas_enumerator_read(
-        enumerator, enumerator->root->heap_configs,
-        sizeof(pas_heap_config*) * pas_heap_config_kind_num_kinds);
-    if (!configs)
+    pas_heap_config* config_ptr;
+    jit_heap_config_root_data* root_data_ptr;
+    jit_heap_config_root_data root_data;
+    pas_page_header_table small_page_header_table;
+    pas_page_header_table medium_page_header_table;
+
+    if (!pas_enumerator_copy_remote(
+            enumerator, &config_ptr, enumerator->root->heap_configs + pas_heap_config_kind_jit, sizeof(pas_heap_config*)))
         return NULL;
 
-    config = (pas_heap_config*)pas_enumerator_read(
-        enumerator, configs[pas_heap_config_kind_jit], sizeof(pas_heap_config));
-    if (!config)
+    if (!pas_enumerator_copy_remote(
+            enumerator, &root_data_ptr, &config_ptr->root_data, sizeof(jit_heap_config_root_data*)))
         return NULL;
 
-    root_data = (jit_heap_config_root_data*)pas_enumerator_read(
-        enumerator, config->root_data, sizeof(jit_heap_config_root_data));
-    if (!root_data)
+    if (!pas_enumerator_copy_remote(
+            enumerator, &root_data, root_data_ptr, sizeof(jit_heap_config_root_data)))
         return NULL;
 
-    result = (pas_basic_heap_config_enumerator_data*)pas_enumerator_allocate(enumerator, sizeof(pas_basic_heap_config_enumerator_data));
+    result = pas_enumerator_allocate(enumerator, sizeof(pas_basic_heap_config_enumerator_data));
 
     pas_ptr_hash_map_construct(&result->page_header_table);
 
-    if (!pas_basic_heap_config_enumerator_data_add_page_header_table(
-            result,
-            enumerator,
-            (pas_page_header_table*)pas_enumerator_read(
-                enumerator, root_data->small_page_header_table, sizeof(pas_page_header_table))))
+    if (!pas_enumerator_copy_remote(
+            enumerator, &small_page_header_table, root_data.small_page_header_table, sizeof(pas_page_header_table)))
         return NULL;
 
     if (!pas_basic_heap_config_enumerator_data_add_page_header_table(
             result,
             enumerator,
-            (pas_page_header_table*)pas_enumerator_read(
-                enumerator, root_data->medium_page_header_table, sizeof(pas_page_header_table))))
+            &small_page_header_table))
+        return NULL;
+
+    if (!pas_enumerator_copy_remote(
+            enumerator, &medium_page_header_table, root_data.medium_page_header_table, sizeof(pas_page_header_table)))
+        return NULL;
+
+    if (!pas_basic_heap_config_enumerator_data_add_page_header_table(
+            result,
+            enumerator,
+            &medium_page_header_table))
         return NULL;
 
     return result;
@@ -349,7 +354,7 @@ void jit_heap_config_dump_shared_page_directory_arg(
 {
     PAS_UNUSED_PARAM(stream);
     PAS_UNUSED_PARAM(directory);
-    PAS_ASSERT(!"Should not be reached");
+    PAS_ASSERT_NOT_REACHED();
 }
 
 void jit_heap_config_add_fresh_memory(pas_range range)

@@ -31,17 +31,25 @@
 
 namespace WebCore {
 
-Ref<FEDisplacementMap> FEDisplacementMap::create(ChannelSelectorType xChannelSelector, ChannelSelectorType yChannelSelector, float scale)
+Ref<FEDisplacementMap> FEDisplacementMap::create(ChannelSelectorType xChannelSelector, ChannelSelectorType yChannelSelector, float scale, DestinationColorSpace colorSpace)
 {
-    return adoptRef(*new FEDisplacementMap(xChannelSelector, yChannelSelector, scale));
+    return adoptRef(*new FEDisplacementMap(xChannelSelector, yChannelSelector, scale, colorSpace));
 }
 
-FEDisplacementMap::FEDisplacementMap(ChannelSelectorType xChannelSelector, ChannelSelectorType yChannelSelector, float scale)
-    : FilterEffect(FilterEffect::Type::FEDisplacementMap)
+FEDisplacementMap::FEDisplacementMap(ChannelSelectorType xChannelSelector, ChannelSelectorType yChannelSelector, float scale, DestinationColorSpace colorSpace)
+    : FilterEffect(FilterEffect::Type::FEDisplacementMap, colorSpace)
     , m_xChannelSelector(xChannelSelector)
     , m_yChannelSelector(yChannelSelector)
     , m_scale(scale)
 {
+}
+
+bool FEDisplacementMap::operator==(const FEDisplacementMap& other) const
+{
+    return FilterEffect::operator==(other)
+        && m_xChannelSelector == other.m_xChannelSelector
+        && m_yChannelSelector == other.m_yChannelSelector
+        && m_scale == other.m_scale;
 }
 
 bool FEDisplacementMap::setXChannelSelector(const ChannelSelectorType xChannelSelector)
@@ -68,12 +76,12 @@ bool FEDisplacementMap::setScale(float scale)
     return true;
 }
 
-FloatRect FEDisplacementMap::calculateImageRect(const Filter& filter, const FilterImageVector&, const FloatRect& primitiveSubregion) const
+FloatRect FEDisplacementMap::calculateImageRect(const Filter& filter, std::span<const FloatRect>, const FloatRect& primitiveSubregion) const
 {
     return filter.maxEffectRect(primitiveSubregion);
 }
 
-const DestinationColorSpace& FEDisplacementMap::resultColorSpace(const FilterImageVector& inputs) const
+const DestinationColorSpace& FEDisplacementMap::resultColorSpace(std::span<const Ref<FilterImage>> inputs) const
 {
     // Spec: The 'color-interpolation-filters' property only applies to the 'in2' source image
     // and does not apply to the 'in' source image. The 'in' source image must remain in its
@@ -82,7 +90,7 @@ const DestinationColorSpace& FEDisplacementMap::resultColorSpace(const FilterIma
     return inputs[0]->colorSpace();
 }
 
-void FEDisplacementMap::transformInputsColorSpace(const FilterImageVector& inputs) const
+void FEDisplacementMap::transformInputsColorSpace(std::span<const Ref<FilterImage>> inputs) const
 {
     // Do not transform the first primitive input, as per the spec.
     ASSERT(inputs.size() == 2);
@@ -97,20 +105,20 @@ std::unique_ptr<FilterEffectApplier> FEDisplacementMap::createSoftwareApplier() 
 static TextStream& operator<<(TextStream& ts, const ChannelSelectorType& type)
 {
     switch (type) {
-    case CHANNEL_UNKNOWN:
-        ts << "UNKNOWN";
+    case ChannelSelectorType::CHANNEL_UNKNOWN:
+        ts << "UNKNOWN"_s;
         break;
-    case CHANNEL_R:
-        ts << "RED";
+    case ChannelSelectorType::CHANNEL_R:
+        ts << "RED"_s;
         break;
-    case CHANNEL_G:
-        ts << "GREEN";
+    case ChannelSelectorType::CHANNEL_G:
+        ts << "GREEN"_s;
         break;
-    case CHANNEL_B:
-        ts << "BLUE";
+    case ChannelSelectorType::CHANNEL_B:
+        ts << "BLUE"_s;
         break;
-    case CHANNEL_A:
-        ts << "ALPHA";
+    case ChannelSelectorType::CHANNEL_A:
+        ts << "ALPHA"_s;
         break;
     }
     return ts;
@@ -118,14 +126,14 @@ static TextStream& operator<<(TextStream& ts, const ChannelSelectorType& type)
 
 TextStream& FEDisplacementMap::externalRepresentation(TextStream& ts, FilterRepresentation representation) const
 {
-    ts << indent << "[feDisplacementMap";
+    ts << indent << "[feDisplacementMap"_s;
     FilterEffect::externalRepresentation(ts, representation);
 
-    ts << " scale=\"" << m_scale << "\"";
-    ts << " xChannelSelector=\"" << m_xChannelSelector << "\"";
-    ts << " yChannelSelector=\"" << m_yChannelSelector << "\"";
+    ts << " scale=\"" << m_scale << '"';
+    ts << " xChannelSelector=\"" << m_xChannelSelector << '"';
+    ts << " yChannelSelector=\"" << m_yChannelSelector << '"';
 
-    ts << "]\n";
+    ts << "]\n"_s;
     return ts;
 }
 

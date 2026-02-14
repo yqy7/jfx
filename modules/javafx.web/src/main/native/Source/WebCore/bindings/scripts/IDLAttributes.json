@@ -35,6 +35,7 @@
         },
         "CEReactions": {
             "contextsAllowed": ["attribute", "operation"],
+            "values": ["Needed", "NotNeeded"],
             "standard": {
                 "url": "https://html.spec.whatwg.org/multipage/custom-elements.html#cereactions"
             }
@@ -104,6 +105,10 @@
         "CustomDeleteProperty": {
             "contextsAllowed": ["interface"]
         },
+        "CustomEnabledBy": {
+            "contextsAllowed": ["attribute", "operation"],
+            "values": ["*"]
+        },
         "CustomGetCallData": {
             "contextsAllowed": ["interface"]
         },
@@ -129,9 +134,6 @@
             "contextsAllowed": ["interface"]
         },
         "CustomPreventExtensions": {
-            "contextsAllowed": ["interface"]
-        },
-        "CustomPushEventHandlerScope": {
             "contextsAllowed": ["interface"]
         },
         "CustomPut": {
@@ -176,7 +178,7 @@
             "values": ["*"],
             "supportsConjunction": true
         },
-        "EnabledAtRuntime": {
+        "EnabledByDeprecatedGlobalSetting": {
             "contextsAllowed": ["interface", "namespace", "dictionary", "enum", "attribute", "operation", "constant", "iterable", "includes"],
             "values": ["*"],
             "supportsConjunction": true
@@ -190,7 +192,7 @@
             "contextsAllowed": ["attribute", "interface"]
         },
         "EnabledForWorld": {
-            "contextsAllowed": ["attribute", "operation"],
+            "contextsAllowed": ["attribute", "operation", "interface"],
             "values": ["*"],
             "supportsConjunction": true
         },
@@ -198,6 +200,14 @@
             "contextsAllowed": ["type"],
             "standard": {
                 "url": "https://webidl.spec.whatwg.org/#EnforceRange"
+            }
+        },
+        "Enumerated": {
+            "contextsAllowed": ["attribute"],
+            "values": ["*"],
+            "notes": "Specifies that an attribute is limited to known values, e.g., [Reflect, Enumerated=AttributeValues] where AttributeValues is an enum",
+            "standard": {
+                "url": "https://html.spec.whatwg.org/#keywords-and-enumerated-attributes"
             }
         },
         "Exception": {
@@ -233,7 +243,7 @@
             "values": ["*"]
         },
         "GenerateIsReachable": {
-            "contextsAllowed": ["interface"],
+            "contextsAllowed": ["interface", "callback-function"],
             "values": ["", "Impl", "ImplWebGLRenderingContext", "ImplCanvasBase", "ImplDocument", "ImplElementRoot", "ImplOwnerNodeRoot", "ImplScriptExecutionContext", "ReachableFromDOMWindow", "ReachableFromNavigator"]
         },
         "Global": {
@@ -262,14 +272,18 @@
             "contextsAllowed": ["interface", "namespace"],
             "values": ["*"]
         },
+        "InvalidValueDefault": {
+            "contextsAllowed": ["enum"],
+            "values": ["*"],
+            "standard": {
+                "url": "https://html.spec.whatwg.org/#keywords-and-enumerated-attributes"
+            }
+        },
         "IsImmutablePrototypeExoticObject": {
             "contextsAllowed": ["interface"]
         },
         "IsImmutablePrototypeExoticObjectOnPrototype": {
             "contextsAllowed": ["interface"]
-        },
-        "IsWeakCallback": {
-            "contextsAllowed": ["callback-function", "interface"]
         },
         "JSBuiltin": {
             "contextsAllowed": ["interface", "attribute", "operation"]
@@ -290,7 +304,7 @@
             "contextsAllowed": ["interface", "dictionary", "callback-function"]
         },
         "JSGenerateToNativeObject": {
-            "contextsAllowed": ["interface"]
+            "contextsAllowed": ["interface", "dictionary"]
         },
         "JSLegacyParent": {
             "contextsAllowed": ["interface"],
@@ -317,8 +331,7 @@
             "contextsAllowed": ["attribute"],
             "standard": {
                 "url": "https://webidl.spec.whatwg.org/#LegacyLenientSetter"
-            },
-            "unsupported": true
+            }
         },
         "LegacyLenientThis": {
             "contextsAllowed": ["attribute"],
@@ -380,6 +393,13 @@
         "MasqueradesAsUndefined": {
             "contextsAllowed": ["interface"]
         },
+        "MissingValueDefault": {
+            "contextsAllowed": ["enum"],
+            "values": ["*"],
+            "standard": {
+                "url": "https://html.spec.whatwg.org/#keywords-and-enumerated-attributes"
+            }
+        },
         "NewImpurePropertyFiresWatchpoints": {
             "contextsAllowed": ["interface"]
         },
@@ -396,9 +416,8 @@
             "contextsAllowed": ["type"],
             "values": ["*"]
         },
-        "PassContext": {
-            "contextsAllowed": ["operation"],
-            "notes" : "Only used by WebKitTestRunner and DumpRenderTree"
+        "BypassDocumentFullyActiveCheck": {
+            "contextsAllowed": ["type"]
         },
         "Plugin": {
             "contextsAllowed": ["interface"],
@@ -420,9 +439,31 @@
                 "url": "https://webidl.spec.whatwg.org/#PutForwards"
             }
         },
+        "RaisesException": {
+            "contextsAllowed": ["operation"],
+            "notes": "Should only be used on indexed getters that have to throw an exception in some cases"
+        },
         "Reflect": {
             "contextsAllowed": ["attribute"],
-            "values": ["*"]
+            "values": ["*"],
+            "standard": {
+                "url": "https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#xattr-reflect"
+            }
+        },
+        "ReflectURL": {
+            "contextsAllowed": ["attribute"],
+            "values": ["*"],
+            "standard": {
+                "url": "https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#xattr-reflecturl"
+            }
+        },
+        "ReflectSetter": {
+            "contextsAllowed": ["attribute"],
+            "values": ["*"],
+            "notes": "Variant of Reflect that relies on C++ implementation for the getter, but automatically generates the setter",
+            "standard": {
+                "url": "https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#xattr-reflectsetter"
+            }
         },
         "Replaceable": {
             "contextsAllowed": ["attribute"],
@@ -439,19 +480,14 @@
         "RequiresExistingAtomString": {
             "contextsAllowed": ["type"]
         },
-        "RethrowException": {
-            "contextsAllowed": ["operation", "callback-function"]
-        },
         "ReturnsOwnPromise": {
+            "contextsAllowed": ["operation"]
+        },
+        "ReturnsPromisePair": {
             "contextsAllowed": ["operation"]
         },
         "ReturnValue": {
             "contextsAllowed": ["argument"]
-        },
-        "RuntimeConditionallyReadWrite": {
-            "contextsAllowed": ["attribute"],
-            "values": ["*"],
-            "supportsConjunction": true
         },
         "SameObject": {
             "contextsAllowed": ["attribute"],
@@ -461,7 +497,7 @@
             "unsupported": true
         },
         "SecureContext": {
-            "contextsAllowed": ["interface", "dictionary", "enum", "attribute", "operation", "constant"],
+            "contextsAllowed": ["interface", "namespace", "dictionary", "enum", "attribute", "operation", "constant"],
             "standard": {
                 "url": "https://webidl.spec.whatwg.org/#SecureContext"
             }
@@ -478,10 +514,13 @@
             "values": ["CurrentScriptExecutionContext", "CurrentGlobalObject", "ActiveWindow", "FirstWindow", "PropertyName"],
             "supportsConjunction": true
         },
-        "SettingsConditionallyReadWrite": {
+        "EnabledConditionallyReadWriteBySetting": {
             "contextsAllowed": ["attribute"],
             "values": ["*"],
             "supportsConjunction": true
+        },
+        "SkipCallbackInvokeCheck": {
+            "contextsAllowed": ["operation", "callback-function"]
         },
         "SkipVTableValidation": {
             "contextsAllowed": ["interface"]

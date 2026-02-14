@@ -29,7 +29,9 @@
 
 namespace WebCore {
 
-enum FrameIdentifierType { };
+struct FrameIdentifierType;
 using FrameIdentifier = ObjectIdentifier<FrameIdentifierType>;
+
+WEBCORE_EXPORT FrameIdentifier generateFrameIdentifier();
 
 }

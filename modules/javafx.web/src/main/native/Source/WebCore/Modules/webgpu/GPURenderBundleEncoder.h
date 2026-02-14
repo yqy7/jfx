@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,9 +28,9 @@
 #include "GPUIndexFormat.h"
 #include "GPUIntegralTypes.h"
 #include "GPURenderBundleDescriptor.h"
+#include "WebGPURenderBundleEncoder.h"
 #include <JavaScriptCore/Uint32Array.h>
 #include <optional>
-#include <pal/graphics/WebGPU/WebGPURenderBundleEncoder.h>
 #include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
@@ -42,10 +42,11 @@ class GPUBindGroup;
 class GPUBuffer;
 class GPURenderBundle;
 class GPURenderPipeline;
+template<typename> class ExceptionOr;
 
 class GPURenderBundleEncoder : public RefCounted<GPURenderBundleEncoder> {
 public:
-    static Ref<GPURenderBundleEncoder> create(Ref<PAL::WebGPU::RenderBundleEncoder>&& backing)
+    static Ref<GPURenderBundleEncoder> create(Ref<WebGPU::RenderBundleEncoder>&& backing)
     {
         return adoptRef(*new GPURenderBundleEncoder(WTFMove(backing)));
     }
@@ -55,23 +56,23 @@ public:
 
     void setPipeline(const GPURenderPipeline&);
 
-    void setIndexBuffer(const GPUBuffer&, GPUIndexFormat, GPUSize64 offset, std::optional<GPUSize64>);
-    void setVertexBuffer(GPUIndex32 slot, const GPUBuffer&, GPUSize64 offset, std::optional<GPUSize64>);
+    void setIndexBuffer(const GPUBuffer&, GPUIndexFormat, std::optional<GPUSize64> offset, std::optional<GPUSize64>);
+    void setVertexBuffer(GPUIndex32 slot, const GPUBuffer*, std::optional<GPUSize64> offset, std::optional<GPUSize64>);
 
-    void draw(GPUSize32 vertexCount, GPUSize32 instanceCount,
-        GPUSize32 firstVertex, GPUSize32 firstInstance);
-    void drawIndexed(GPUSize32 indexCount, GPUSize32 instanceCount,
-        GPUSize32 firstIndex,
-        GPUSignedOffset32 baseVertex,
-        GPUSize32 firstInstance);
+    void draw(GPUSize32 vertexCount, std::optional<GPUSize32> instanceCount,
+        std::optional<GPUSize32> firstVertex, std::optional<GPUSize32> firstInstance);
+    void drawIndexed(GPUSize32 indexCount, std::optional<GPUSize32> instanceCount,
+        std::optional<GPUSize32> firstIndex,
+        std::optional<GPUSignedOffset32> baseVertex,
+        std::optional<GPUSize32> firstInstance);
 
     void drawIndirect(const GPUBuffer& indirectBuffer, GPUSize64 indirectOffset);
     void drawIndexedIndirect(const GPUBuffer& indirectBuffer, GPUSize64 indirectOffset);
 
-    void setBindGroup(GPUIndex32, const GPUBindGroup&,
+    void setBindGroup(GPUIndex32, const GPUBindGroup*,
         std::optional<Vector<GPUBufferDynamicOffset>>&& dynamicOffsets);
 
-    void setBindGroup(GPUIndex32, const GPUBindGroup&,
+    ExceptionOr<void> setBindGroup(GPUIndex32, const GPUBindGroup*,
         const Uint32Array& dynamicOffsetsData,
         GPUSize64 dynamicOffsetsDataStart,
         GPUSize32 dynamicOffsetsDataLength);
@@ -80,18 +81,18 @@ public:
     void popDebugGroup();
     void insertDebugMarker(String&& markerLabel);
 
-    Ref<GPURenderBundle> finish(const std::optional<GPURenderBundleDescriptor>&);
+    ExceptionOr<Ref<GPURenderBundle>> finish(const std::optional<GPURenderBundleDescriptor>&);
 
-    PAL::WebGPU::RenderBundleEncoder& backing() { return m_backing; }
-    const PAL::WebGPU::RenderBundleEncoder& backing() const { return m_backing; }
+    WebGPU::RenderBundleEncoder& backing() { return m_backing; }
+    const WebGPU::RenderBundleEncoder& backing() const { return m_backing; }
 
 private:
-    GPURenderBundleEncoder(Ref<PAL::WebGPU::RenderBundleEncoder>&& backing)
+    GPURenderBundleEncoder(Ref<WebGPU::RenderBundleEncoder>&& backing)
         : m_backing(WTFMove(backing))
     {
     }
 
-    Ref<PAL::WebGPU::RenderBundleEncoder> m_backing;
+    const Ref<WebGPU::RenderBundleEncoder> m_backing;
 };
 
 }

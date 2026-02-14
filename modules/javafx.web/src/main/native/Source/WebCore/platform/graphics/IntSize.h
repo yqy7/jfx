@@ -25,7 +25,10 @@
 
 #pragma once
 
+#include "PlatformExportMacros.h"
 #include <algorithm>
+#include <cmath>
+#include <wtf/CheckedArithmetic.h>
 #include <wtf/JSONValues.h>
 #include <wtf/Forward.h>
 
@@ -34,11 +37,7 @@ typedef struct CGSize CGSize;
 #endif
 
 #if PLATFORM(MAC)
-#ifdef NSGEOMETRY_TYPES_SAME_AS_CGGEOMETRY_TYPES
 typedef struct CGSize NSSize;
-#else
-typedef struct _NSSize NSSize;
-#endif
 #endif
 
 #if PLATFORM(IOS_FAMILY)
@@ -102,6 +101,19 @@ public:
         this->scale(scale, scale);
     }
 
+    constexpr IntSize scaled(float widthScale, float heightScale) const
+    {
+        return {
+            static_cast<int>(static_cast<float>(m_width) * widthScale),
+            static_cast<int>(static_cast<float>(m_height) * heightScale)
+        };
+    }
+
+    constexpr IntSize scaled(float s) const
+    {
+        return scaled(s, s);
+    }
+
     constexpr IntSize expandedTo(const IntSize& other) const
     {
         return IntSize(std::max(m_width, other.m_width), std::max(m_height, other.m_height));
@@ -119,22 +131,26 @@ public:
 
     void clampToMinimumSize(const IntSize& minimumSize)
     {
-        if (m_width < minimumSize.width())
-            m_width = minimumSize.width();
-        if (m_height < minimumSize.height())
-            m_height = minimumSize.height();
+        m_width = std::max(m_width, minimumSize.width());
+        m_height = std::max(m_height, minimumSize.height());
+    }
+
+    void clampToMaximumSize(const IntSize& maximumSize)
+    {
+        m_width = std::min(m_width, maximumSize.width());
+        m_height = std::min(m_height, maximumSize.height());
     }
 
     WEBCORE_EXPORT IntSize constrainedBetween(const IntSize& min, const IntSize& max) const;
 
     template<typename T = CrashOnOverflow> Checked<unsigned, T> area() const
     {
-        return Checked<unsigned, T>(abs(m_width)) * abs(m_height);
+        return Checked<unsigned, T>(std::abs(m_width)) * std::abs(m_height);
     }
 
     uint64_t unclampedArea() const
     {
-        return static_cast<uint64_t>(abs(m_width)) * abs(m_height);
+        return static_cast<uint64_t>(std::abs(m_width)) * std::abs(m_height);
     }
 
     constexpr int diagonalLengthSquared() const
@@ -147,19 +163,16 @@ public:
         return IntSize(m_height, m_width);
     }
 
+    friend constexpr bool operator==(const IntSize&, const IntSize&) = default;
+
 #if USE(CG)
     WEBCORE_EXPORT explicit IntSize(const CGSize&); // don't do this implicitly since it's lossy
     WEBCORE_EXPORT operator CGSize() const;
 #endif
 
-#if PLATFORM(MAC) && !defined(NSGEOMETRY_TYPES_SAME_AS_CGGEOMETRY_TYPES)
-    WEBCORE_EXPORT explicit IntSize(const NSSize &); // don't do this implicitly since it's lossy
-    WEBCORE_EXPORT operator NSSize() const;
-#endif
-
 #if PLATFORM(WIN)
-    IntSize(const SIZE&);
-    operator SIZE() const;
+    WEBCORE_EXPORT IntSize(const SIZE&);
+    WEBCORE_EXPORT operator SIZE() const;
 #endif
 
     String toJSONString() const;
@@ -197,16 +210,6 @@ constexpr IntSize operator-(const IntSize& a, const IntSize& b)
 constexpr IntSize operator-(const IntSize& size)
 {
     return IntSize(-size.width(), -size.height());
-}
-
-constexpr bool operator==(const IntSize& a, const IntSize& b)
-{
-    return a.width() == b.width() && a.height() == b.height();
-}
-
-constexpr bool operator!=(const IntSize& a, const IntSize& b)
-{
-    return a.width() != b.width() || a.height() != b.height();
 }
 
 WEBCORE_EXPORT WTF::TextStream& operator<<(WTF::TextStream&, const IntSize&);

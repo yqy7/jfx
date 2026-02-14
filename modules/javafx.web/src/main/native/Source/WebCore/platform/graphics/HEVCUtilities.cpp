@@ -33,6 +33,7 @@
 #include <wtf/MathExtras.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/SortedArrayMap.h>
+#include <wtf/text/MakeString.h>
 #include <wtf/text/StringToIntegerConversion.h>
 
 namespace WebCore {
@@ -50,7 +51,7 @@ std::optional<AVCParameters> parseAVCCodecParameters(StringView codecString)
 
     // Codec identifier: legal values are specified in ISO/IEC 14496-15:2014, section 8:
     auto codecName = *nextElement;
-    if (codecName != "avc1")
+    if (codecName != "avc1"_s)
         return std::nullopt;
 
     if (++nextElement == codecSplit.end())
@@ -64,9 +65,9 @@ std::optional<AVCParameters> parseAVCCodecParameters(StringView codecString)
     auto profileFlagsAndLevel = parseInteger<uint32_t>(*nextElement, 16);
     if (!profileFlagsAndLevel)
         return std::nullopt;
-    parameters.profileIDC = (*profileFlagsAndLevel & 0xF00) >> 16;
-    parameters.constraintsFlags = (*profileFlagsAndLevel & 0xF0) >> 8;
-    parameters.levelIDC = *profileFlagsAndLevel & 0xF;
+    parameters.profileIDC = (*profileFlagsAndLevel >> 16) & 0xFF;
+    parameters.constraintsFlags = (*profileFlagsAndLevel >> 8) & 0xFF;
+    parameters.levelIDC = *profileFlagsAndLevel & 0xFF;
 
     return parameters;
 }
@@ -74,7 +75,7 @@ std::optional<AVCParameters> parseAVCCodecParameters(StringView codecString)
 String createAVCCodecParametersString(const AVCParameters& parameters)
 {
     // The format of the 'avc1' codec string is specified in ISO/IEC 14496-15:2014, Annex E.2.
-    return makeString("avc1."
+    return makeString("avc1."_s
         , hex(parameters.profileIDC, 2)
         , hex(parameters.constraintsFlags, 2)
         , hex(parameters.levelIDC, 2));
@@ -132,9 +133,9 @@ std::optional<HEVCParameters> parseHEVCCodecParameters(StringView codecString)
 
     // Codec identifier: legal values are specified in ISO/IEC 14496-15:2014, section 8:
     auto codecName = *nextElement;
-    if (codecName == "hvc1")
+    if (codecName == "hvc1"_s)
         parameters.codec = HEVCParameters::Codec::Hvc1;
-    else if (codecName == "hev1")
+    else if (codecName == "hev1"_s)
         parameters.codec = HEVCParameters::Codec::Hev1;
     else
         return std::nullopt;
@@ -202,13 +203,6 @@ std::optional<HEVCParameters> parseHEVCCodecParameters(StringView codecString)
 
 String createHEVCCodecParametersString(const HEVCParameters& parameters)
 {
-    // The format of the 'hevc' codec string is specified in ISO/IEC 14496-15:2014, Annex E.3.
-    char profileSpaceCharacter = 'A' + parameters.generalProfileSpace - 1;
-
-    String profileSpaceString;
-    if (parameters.generalProfileSpace)
-        profileSpaceString.append(profileSpaceCharacter);
-
     // For the second parameter, from ISO/IEC 14496-15:2014, Annex E.3.
     // * the 32 bits of the general_profile_compatibility_flags, but in reverse bit order, i.e. with
     // general_profile_compatibility_flag[ 31 ] as the most significant bit, followed by, general_profile_compatibility_flag[ 30 ],
@@ -226,16 +220,16 @@ String createHEVCCodecParametersString(const HEVCParameters& parameters)
         compatibilityFlags.append(hex(parameters.generalConstraintIndicatorFlags[i], 2));
     }
 
-    return makeString(parameters.codec == HEVCParameters::Codec::Hev1 ? "hev1" : "hvc1"
-        , '.'
-        , profileSpaceString
-        , parameters.generalProfileIDC
-        , '.'
-        , compatFlagParameter
-        , '.'
-        , parameters.generalTierFlag ? 'H' : 'L'
-        , parameters.generalLevelIDC
-        , compatibilityFlags.toString());
+    StringBuilder resultBuilder;
+    resultBuilder.append(parameters.codec == HEVCParameters::Codec::Hev1 ? "hev1"_s : "hvc1"_s, '.');
+    if (parameters.generalProfileSpace) {
+        // The format of the 'hevc' codec string is specified in ISO/IEC 14496-15:2014, Annex E.3.
+        char profileSpaceCharacter = 'A' + parameters.generalProfileSpace - 1;
+        resultBuilder.append(profileSpaceCharacter);
+    }
+    resultBuilder.append(parameters.generalProfileIDC, '.', compatFlagParameter, '.', parameters.generalTierFlag ? 'H' : 'L', parameters.generalLevelIDC);
+    resultBuilder.append(compatibilityFlags);
+    return resultBuilder.toString();
 }
 
 std::optional<HEVCParameters> parseHEVCDecoderConfigurationRecord(FourCC codecCode, const SharedBuffer& buffer)
@@ -248,9 +242,9 @@ std::optional<HEVCParameters> parseHEVCDecoderConfigurationRecord(FourCC codecCo
         return std::nullopt;
 
     HEVCParameters parameters;
-    if (codecCode == "hev1")
+    if (codecCode == std::span { "hev1" })
         parameters.codec = HEVCParameters::Codec::Hev1;
-    else if (codecCode == "hvc1")
+    else if (codecCode == std::span { "hvc1" })
         parameters.codec = HEVCParameters::Codec::Hvc1;
     else
         return std::nullopt;
@@ -297,11 +291,11 @@ std::optional<HEVCParameters> parseHEVCDecoderConfigurationRecord(FourCC codecCo
 
 static std::optional<DoViParameters::Codec> parseDoViCodecType(StringView string)
 {
-    static constexpr std::pair<PackedASCIILowerCodes<uint32_t>, DoViParameters::Codec> typesArray[] = {
-        { "dva1", DoViParameters::Codec::AVC1 },
-        { "dvav", DoViParameters::Codec::AVC3 },
-        { "dvh1", DoViParameters::Codec::HVC1 },
-        { "dvhe", DoViParameters::Codec::HEV1 },
+    static constexpr std::pair<PackedLettersLiteral<uint32_t>, DoViParameters::Codec> typesArray[] = {
+        { "dva1"_s, DoViParameters::Codec::AVC1 },
+        { "dvav"_s, DoViParameters::Codec::AVC3 },
+        { "dvh1"_s, DoViParameters::Codec::HVC1 },
+        { "dvhe"_s, DoViParameters::Codec::HEV1 },
     };
     static constexpr SortedArrayMap typesMap { typesArray };
     return makeOptionalFromPointer(typesMap.tryGet(string));
@@ -310,12 +304,12 @@ static std::optional<DoViParameters::Codec> parseDoViCodecType(StringView string
 static std::optional<uint16_t> profileIDForAlphabeticDoViProfile(StringView profile)
 {
     // See Table 7 of "Dolby Vision Profiles and Levels Version 1.3.2"
-    static constexpr std::pair<PackedASCIILowerCodes<uint64_t>, uint16_t> profilesArray[] = {
-        { "dvav.se", 9 },
-        { "dvhe.dtb", 7 },
-        { "dvhe.dtr", 4 },
-        { "dvhe.st", 8 },
-        { "dvhe.stn", 5 },
+    static constexpr std::pair<PackedLettersLiteral<uint64_t>, uint16_t> profilesArray[] = {
+        { "dvav.se"_s, 9 },
+        { "dvhe.dtb"_s, 7 },
+        { "dvhe.dtr"_s, 4 },
+        { "dvhe.st"_s, 8 },
+        { "dvhe.stn"_s, 5 },
     };
     static constexpr SortedArrayMap profilesMap { profilesArray };
     return makeOptionalFromPointer(profilesMap.tryGet(profile));
@@ -452,7 +446,7 @@ String createDoViCodecParametersString(const DoViParameters& parameters)
 {
     // The format of the DoVi codec string is specified in "Dolby Vision Profiles and Levels Version 1.3.2"
     StringBuilder builder;
-    builder.append("dvh1.");
+    builder.append("dvh1."_s);
     if (parameters.bitstreamProfileID < 10)
         builder.append('0');
     builder.append(parameters.bitstreamProfileID);

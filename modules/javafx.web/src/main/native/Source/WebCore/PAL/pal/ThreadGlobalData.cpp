@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2021 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,27 +29,20 @@
 
 #include "TextCodecICU.h"
 #include <wtf/MainThread.h>
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/ThreadSpecific.h>
 #include <wtf/Threading.h>
 #include <wtf/text/StringImpl.h>
 
 namespace PAL {
 
+WTF_MAKE_TZONE_ALLOCATED_IMPL(ThreadGlobalData);
+
 ThreadGlobalData::ThreadGlobalData()
-    : m_cachedConverterICU(makeUnique<ICUConverterWrapper>())
+    : m_cachedConverterICU(makeUniqueRef<ICUConverterWrapper>())
 {
-    // This constructor will have been called on the main thread before being called on
-    // any other thread, and is only called once per thread - this makes this a convenient
-    // point to call methods that internally perform a one-time initialization that is not
-    // threadsafe.
-    Thread::current();
 }
 
 ThreadGlobalData::~ThreadGlobalData() = default;
-
-void ThreadGlobalData::destroy()
-{
-    m_cachedConverterICU = nullptr;
-}
 
 } // namespace PAL

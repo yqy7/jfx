@@ -29,6 +29,7 @@
 
 #include "ArrayProfile.h"
 #include "SpeculatedType.h"
+#include "StructureSet.h"
 
 namespace JSC {
 
@@ -74,6 +75,7 @@ enum Type : uint8_t {
     Uint8ClampedArray,
     Uint16Array,
     Uint32Array,
+    Float16Array,
     Float32Array,
     Float64Array,
     BigInt64Array,
@@ -85,7 +87,8 @@ enum Class : uint8_t {
     NonArray, // Definitely some object that is not a JSArray.
     OriginalNonArray, // Definitely some object that is not a JSArray, but that object has the original structure.
     Array, // Definitely a JSArray, and may or may not have custom properties or have undergone some other bizarre transitions.
-    OriginalArray, // Definitely a JSArray, and still has one of the primordial JSArray structures for the global object that this code block (possibly inlined code block) belongs to.
+    OriginalArray, // Definitely a JSArray, and still has one of the primordial JSArray structures and/or copy on write structures for the global object that this code block (possibly inlined code block) belongs to.
+    OriginalNonCopyOnWriteArray, // Definitely a JSArray, and still has one of the primordial JSArray structures for the global object that this code block (possibly inlined code block) belongs to.
     OriginalCopyOnWriteArray, // Definitely a copy on write JSArray, and still has one of the primordial JSArray copy on write structures for the global object that this code block (possibly inlined code block) belongs to.
     PossiblyArray // Some object that may or may not be a JSArray.
 };
@@ -103,12 +106,6 @@ enum Conversion : uint8_t {
     Convert
 };
 } // namespace Array
-
-const char* arrayActionToString(Array::Action);
-const char* arrayTypeToString(Array::Type);
-const char* arrayClassToString(Array::Class);
-const char* arraySpeculationToString(Array::Speculation);
-const char* arrayConversionToString(Array::Conversion);
 
 IndexingType toIndexingShape(Array::Type);
 
@@ -128,6 +125,7 @@ public:
         u.asBytes.conversion = Array::AsIs;
         u.asBytes.action = Array::Write;
         u.asBytes.mayBeLargeTypedArray = false;
+        u.asBytes.mayBeResizableOrGrowableSharedTypedArray = false;
     }
 
     explicit ArrayMode(Array::Type type, Array::Action action)
@@ -138,6 +136,18 @@ public:
         u.asBytes.conversion = Array::AsIs;
         u.asBytes.action = action;
         u.asBytes.mayBeLargeTypedArray = false;
+        u.asBytes.mayBeResizableOrGrowableSharedTypedArray = false;
+    }
+
+    ArrayMode(Array::Type type, Array::Action action, Array::Speculation speculation)
+    {
+        u.asBytes.type = type;
+        u.asBytes.arrayClass = Array::NonArray;
+        u.asBytes.speculation = speculation;
+        u.asBytes.conversion = Array::AsIs;
+        u.asBytes.action = action;
+        u.asBytes.mayBeLargeTypedArray = false;
+        u.asBytes.mayBeResizableOrGrowableSharedTypedArray = false;
     }
 
     ArrayMode(Array::Type type, Array::Class arrayClass, Array::Action action)
@@ -148,9 +158,10 @@ public:
         u.asBytes.conversion = Array::AsIs;
         u.asBytes.action = action;
         u.asBytes.mayBeLargeTypedArray = false;
+        u.asBytes.mayBeResizableOrGrowableSharedTypedArray = false;
     }
 
-    ArrayMode(Array::Type type, Array::Class arrayClass, Array::Speculation speculation, Array::Conversion conversion, Array::Action action, bool mayBeLargeTypedArray = false)
+    ArrayMode(Array::Type type, Array::Class arrayClass, Array::Speculation speculation, Array::Conversion conversion, Array::Action action, bool mayBeLargeTypedArray = false, bool mayBeResizableOrGrowableSharedTypedArray = false)
     {
         u.asBytes.type = type;
         u.asBytes.arrayClass = arrayClass;
@@ -158,6 +169,7 @@ public:
         u.asBytes.conversion = conversion;
         u.asBytes.action = action;
         u.asBytes.mayBeLargeTypedArray = mayBeLargeTypedArray;
+        u.asBytes.mayBeResizableOrGrowableSharedTypedArray = mayBeResizableOrGrowableSharedTypedArray;
     }
 
     ArrayMode(Array::Type type, Array::Class arrayClass, Array::Conversion conversion, Array::Action action)
@@ -168,6 +180,7 @@ public:
         u.asBytes.conversion = conversion;
         u.asBytes.action = action;
         u.asBytes.mayBeLargeTypedArray = false;
+        u.asBytes.mayBeResizableOrGrowableSharedTypedArray = false;
     }
 
     Array::Type type() const { return static_cast<Array::Type>(u.asBytes.type); }
@@ -176,6 +189,12 @@ public:
     Array::Conversion conversion() const { return static_cast<Array::Conversion>(u.asBytes.conversion); }
     Array::Action action() const { return static_cast<Array::Action>(u.asBytes.action); }
     bool mayBeLargeTypedArray() const { return u.asBytes.mayBeLargeTypedArray; }
+    bool mayBeResizableOrGrowableSharedTypedArray() const { return u.asBytes.mayBeResizableOrGrowableSharedTypedArray; }
+
+    void setSpeculation(Array::Speculation speculation)
+    {
+        u.asBytes.speculation = speculation;
+    }
 
     unsigned asWord() const { return u.asWord; }
 
@@ -188,27 +207,37 @@ public:
 
     ArrayMode withType(Array::Type type) const
     {
-        return ArrayMode(type, arrayClass(), speculation(), conversion(), action(), mayBeLargeTypedArray());
+        return ArrayMode(type, arrayClass(), speculation(), conversion(), action(), mayBeLargeTypedArray(), mayBeResizableOrGrowableSharedTypedArray());
+    }
+
+    ArrayMode withAction(Array::Action action) const
+    {
+        return ArrayMode(type(), arrayClass(), speculation(), conversion(), action, mayBeLargeTypedArray(), mayBeResizableOrGrowableSharedTypedArray());
     }
 
     ArrayMode withSpeculation(Array::Speculation speculation) const
     {
-        return ArrayMode(type(), arrayClass(), speculation, conversion(), action(), mayBeLargeTypedArray());
+        return ArrayMode(type(), arrayClass(), speculation, conversion(), action(), mayBeLargeTypedArray(), mayBeResizableOrGrowableSharedTypedArray());
     }
 
     ArrayMode withConversion(Array::Conversion conversion) const
     {
-        return ArrayMode(type(), arrayClass(), speculation(), conversion, action(), mayBeLargeTypedArray());
+        return ArrayMode(type(), arrayClass(), speculation(), conversion, action(), mayBeLargeTypedArray(), mayBeResizableOrGrowableSharedTypedArray());
     }
 
     ArrayMode withTypeAndConversion(Array::Type type, Array::Conversion conversion) const
     {
-        return ArrayMode(type, arrayClass(), speculation(), conversion, action(), mayBeLargeTypedArray());
+        return ArrayMode(type, arrayClass(), speculation(), conversion, action(), mayBeLargeTypedArray(), mayBeResizableOrGrowableSharedTypedArray());
     }
 
-    ArrayMode withArrayClassAndSpeculationAndMayBeLargeTypedArray(Array::Class arrayClass, Array::Speculation speculation, bool mayBeLargeTypedArray) const
+    ArrayMode withArrayClassAndSpeculation(Array::Class arrayClass, Array::Speculation speculation, bool mayBeLargeTypedArray, bool mayBeResizableOrGrowableSharedTypedArray) const
     {
-        return ArrayMode(type(), arrayClass, speculation, conversion(), action(), mayBeLargeTypedArray);
+        return ArrayMode(type(), arrayClass, speculation, conversion(), action(), mayBeLargeTypedArray, mayBeResizableOrGrowableSharedTypedArray);
+    }
+
+    ArrayMode withArrayClass(Array::Class arrayClass) const
+    {
+        return ArrayMode(type(), arrayClass, speculation(), conversion(), action(), mayBeLargeTypedArray(), mayBeResizableOrGrowableSharedTypedArray());
     }
 
     static Array::Speculation speculationFromProfile(const ConcurrentJSLocker& locker, ArrayProfile* profile, bool makeSafe)
@@ -231,13 +260,28 @@ public:
         Array::Class myArrayClass;
         if (isJSArray()) {
             if (profile->usesOriginalArrayStructures(locker) && benefitsFromOriginalArray()) {
+                switch (type()) {
+                case Array::Int32:
+                case Array::Double:
+                case Array::Contiguous: {
                 ArrayModes arrayModes = profile->observedArrayModes(locker);
                 if (hasSeenCopyOnWriteArray(arrayModes) && !hasSeenWritableArray(arrayModes))
                     myArrayClass = Array::OriginalCopyOnWriteArray;
                 else if (!hasSeenCopyOnWriteArray(arrayModes) && hasSeenWritableArray(arrayModes))
-                    myArrayClass = Array::OriginalArray;
+                        myArrayClass = Array::OriginalNonCopyOnWriteArray;
                 else
-                    myArrayClass = Array::Array;
+                        myArrayClass = Array::OriginalArray;
+                    break;
+                }
+                case Array::Undecided:
+                case Array::ArrayStorage: {
+                    myArrayClass = Array::OriginalArray;
+                    break;
+                }
+                default:
+                    RELEASE_ASSERT_NOT_REACHED();
+                    break;
+                }
             } else
                 myArrayClass = Array::Array;
         } else
@@ -245,9 +289,9 @@ public:
 
         Array::Speculation speculation = speculationFromProfile(locker, profile, makeSafe);
 
-        bool largeTypedArray = profile->mayBeLargeTypedArray(locker);
-
-        return withArrayClassAndSpeculationAndMayBeLargeTypedArray(myArrayClass, speculation, largeTypedArray);
+        bool mayBeLargeTypedArray = profile->mayBeLargeTypedArray(locker);
+        bool mayBeResizableOrGrowableSharedTypedArray = profile->mayBeResizableOrGrowableSharedTypedArray(locker);
+        return withArrayClassAndSpeculation(myArrayClass, speculation, mayBeLargeTypedArray, mayBeResizableOrGrowableSharedTypedArray);
     }
 
     static constexpr SpeculatedType unusedIndexSpeculatedType = SpecInt32Only;
@@ -277,6 +321,7 @@ public:
         switch (arrayClass()) {
         case Array::Array:
         case Array::OriginalArray:
+        case Array::OriginalNonCopyOnWriteArray:
         case Array::OriginalCopyOnWriteArray:
             return true;
         default:
@@ -286,7 +331,14 @@ public:
 
     bool isJSArrayWithOriginalStructure() const
     {
-        return arrayClass() == Array::OriginalArray || arrayClass() == Array::OriginalCopyOnWriteArray;
+        switch (arrayClass()) {
+        case Array::OriginalArray:
+        case Array::OriginalNonCopyOnWriteArray:
+        case Array::OriginalCopyOnWriteArray:
+            return true;
+        default:
+            return false;
+        }
     }
 
     bool isInBoundsSaneChain() const
@@ -408,6 +460,7 @@ public:
         case Array::Uint8ClampedArray:
         case Array::Uint16Array:
         case Array::Uint32Array:
+        case Array::Float16Array:
         case Array::Float32Array:
         case Array::Float64Array:
         case Array::BigInt64Array:
@@ -440,9 +493,8 @@ public:
         }
     }
 
-    // Returns 0 if this is not OriginalArray.
-    Structure* originalArrayStructure(Graph&, const CodeOrigin&) const;
-    Structure* originalArrayStructure(Graph&, Node*) const;
+    StructureSet originalArrayStructures(Graph&, const CodeOrigin&) const;
+    StructureSet originalArrayStructures(Graph&, Node*) const;
 
     bool doesConversion() const
     {
@@ -492,6 +544,8 @@ public:
             return Uint16ArrayMode;
         case Array::Uint32Array:
             return Uint32ArrayMode;
+        case Array::Float16Array:
+            return Float16ArrayMode;
         case Array::Float32Array:
             return Float32ArrayMode;
         case Array::Float64Array:
@@ -537,13 +591,10 @@ public:
             && arrayClass() == other.arrayClass()
             && speculation() == other.speculation()
             && conversion() == other.conversion()
-            && mayBeLargeTypedArray() == other.mayBeLargeTypedArray();
+            && mayBeLargeTypedArray() == other.mayBeLargeTypedArray()
+            && mayBeResizableOrGrowableSharedTypedArray() == other.mayBeResizableOrGrowableSharedTypedArray();
     }
 
-    bool operator!=(const ArrayMode& other) const
-    {
-        return !(*this == other);
-    }
 private:
     explicit ArrayMode(unsigned word)
     {
@@ -559,11 +610,12 @@ private:
         case Array::OriginalCopyOnWriteArray:
             ASSERT(hasInt32(shape) || hasDouble(shape) || hasContiguous(shape));
             return asArrayModesIgnoringTypedArrays(shape | IsArray) | asArrayModesIgnoringTypedArrays(shape | IsArray | CopyOnWrite);
+        case Array::OriginalArray:
         case Array::Array:
             if (hasInt32(shape) || hasDouble(shape) || hasContiguous(shape))
                 return asArrayModesIgnoringTypedArrays(shape | IsArray) | asArrayModesIgnoringTypedArrays(shape | IsArray | CopyOnWrite);
-            FALLTHROUGH;
-        case Array::OriginalArray:
+            [[fallthrough]];
+        case Array::OriginalNonCopyOnWriteArray:
             return asArrayModesIgnoringTypedArrays(shape | IsArray);
         case Array::PossiblyArray:
             if (hasInt32(shape) || hasDouble(shape) || hasContiguous(shape))
@@ -592,6 +644,7 @@ private:
             uint8_t conversion : 4;
             uint8_t action : 1;
             uint8_t mayBeLargeTypedArray : 1;
+            uint8_t mayBeResizableOrGrowableSharedTypedArray : 1;
         } asBytes;
         unsigned asWord;
     } u;

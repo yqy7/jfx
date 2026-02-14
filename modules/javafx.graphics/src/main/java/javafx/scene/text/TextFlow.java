@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,8 +28,21 @@ package javafx.scene.text;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import javafx.beans.InvalidationListener;
+import javafx.beans.Observable;
 import javafx.beans.property.DoubleProperty;
+import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleObjectProperty;
+import javafx.css.CssMetaData;
+import javafx.css.Styleable;
+import javafx.css.StyleableDoubleProperty;
+import javafx.css.StyleableIntegerProperty;
+import javafx.css.StyleableObjectProperty;
+import javafx.css.StyleableProperty;
+import javafx.css.converter.EnumConverter;
+import javafx.css.converter.SizeConverter;
+import javafx.event.EventHandler;
 import javafx.geometry.HPos;
 import javafx.geometry.Insets;
 import javafx.geometry.NodeOrientation;
@@ -39,59 +52,57 @@ import javafx.scene.AccessibleAttribute;
 import javafx.scene.AccessibleRole;
 import javafx.scene.Node;
 import javafx.scene.layout.Pane;
+import javafx.scene.layout.Region;
 import javafx.scene.shape.PathElement;
-import javafx.css.StyleableDoubleProperty;
-import javafx.css.StyleableObjectProperty;
-import javafx.css.CssMetaData;
-import javafx.css.converter.EnumConverter;
-import javafx.css.converter.SizeConverter;
+import javafx.scene.transform.TransformChangedEvent;
 import com.sun.javafx.geom.BaseBounds;
 import com.sun.javafx.geom.Point2D;
 import com.sun.javafx.geom.RectBounds;
 import com.sun.javafx.scene.text.GlyphList;
+import com.sun.javafx.scene.text.TabAdvancePolicy;
+import com.sun.javafx.scene.text.TextFlowHelper;
 import com.sun.javafx.scene.text.TextLayout;
 import com.sun.javafx.scene.text.TextLayoutFactory;
 import com.sun.javafx.scene.text.TextSpan;
+import com.sun.javafx.text.DefaultTabAdvancePolicy;
+import com.sun.javafx.text.PrismLayoutInfo;
+import com.sun.javafx.text.TextUtils;
 import com.sun.javafx.tk.Toolkit;
-import javafx.beans.property.IntegerProperty;
-import javafx.beans.property.IntegerPropertyBase;
-import javafx.css.Styleable;
-import javafx.css.StyleableIntegerProperty;
-import javafx.css.StyleableProperty;
 
 /**
- * TextFlow is special layout designed to lay out rich text.
- * It can be used to layout several {@link Text} nodes in a single text flow.
- * The TextFlow uses the text and the font of each {@link Text} node inside of it
+ * A specialized layout for rich text.
+ * It can be used to lay out several {@link Text} nodes in a single text flow.
+ * {@code TextFlow} uses the text and the font of each {@code Text} node inside of it,
  * plus its own width and text alignment to determine the location for each child.
- * A single {@link Text} node can span over several lines due to wrapping, and
- * the visual location of {@link Text} node can differ from the logical location
+ * A single {@code Text} node can span over several lines due to wrapping, and
+ * the visual location of the {@code Text} node can differ from the logical location
  * due to bidi reordering.
  *
  * <p>
- * Any Node, other than Text, will be treated as an embedded object in the
+ * Any {@code Node} other than {@code Text} will be treated as an embedded object in the
  * text layout. It will be inserted in the content using its preferred width,
  * height, and baseline offset.
  *
  * <p>
- * When a {@link Text} node is inside of a TextFlow, some of its properties are ignored.
- * For example, the x and y properties of the {@link Text} node are ignored since
+ * When a {@code Text} node is inside a {@code TextFlow}, some of its properties are ignored.
+ * For example, the {@code x} and {@code y} properties of the {@code Text} node are ignored since
  * the location of the node is determined by the parent. Likewise, the wrapping
- * width in the {@link Text} node is ignored since the width used for wrapping
- * is the TextFlow's width. The value of the <code>pickOnBounds</code> property
- * of a {@link Text} is set to <code>false</code> when it is laid out by the
- * TextFlow. This happens because the content of a single {@link Text} node can
- * divided and placed in the different locations on the TextFlow (usually due to
+ * width in the {@code Text} node is ignored since the width used for wrapping
+ * is the {@code TextFlow}'s width. The value of the {@code pickOnBounds} property
+ * of a {@code Text} node is set to {@code false} when it is laid out by the
+ * {@code TextFlow}. This happens because the content of a single {@code Text} node can be
+ * split and placed in different locations in the {@code TextFlow} (usually due to
  * line breaking and bidi reordering).
  *
  * <p>
  * The wrapping width of the layout is determined by the region's current width.
- * It can be specified by the application by setting the textflow's preferred
+ * It can be specified by the application by setting the {@code TextFlow}'s preferred
  * width. If no wrapping is desired, the application can either set the preferred
- * with to Double.MAX_VALUE or Region.USE_COMPUTED_SIZE.
+ * with to {@code Double.MAX_VALUE} or
+ * {@link javafx.scene.layout.Region#USE_COMPUTED_SIZE Region.USE_COMPUTED_SIZE}.
  *
  * <p>
- * Paragraphs are separated by {@code '\n'} present in any Text child.
+ * Paragraphs are separated by {@code '\n'} present in any {@code Text} child.
  *
  * <p>
  * Example of a TextFlow:
@@ -106,18 +117,18 @@ import javafx.css.StyleableProperty;
  * }</pre>
  *
  * <p>
- * TextFlow lays out each managed child regardless of the child's visible property value;
+ * {@code TextFlow} lays out each managed child regardless of the child's visible property value;
  * unmanaged children are ignored for all layout calculations.</p>
  *
  * <p>
- * TextFlow may be styled with backgrounds and borders using CSS.  See
+ * {@code TextFlow} may be styled with backgrounds and borders using CSS. See its
  * {@link javafx.scene.layout.Region Region} superclass for details.</p>
  *
  * <h2>Resizable Range</h2>
  *
  * <p>
- * A textflow's parent will resize the textflow within the textflow's range
- * during layout. By default the textflow computes this range based on its content
+ * A {@code TextFlow}'s parent will resize the {@code TextFlow} within the {@code TextFlow}'s range
+ * during layout. By default, the {@code TextFlow} computes this range based on its content
  * as outlined in the tables below.
  * </p>
  *
@@ -131,24 +142,24 @@ import javafx.css.StyleableProperty;
  * <td>left/right insets plus the width of the text content</td>
  * <td>top/bottom insets plus the height of the text content</td></tr>
  * <tr><th scope="row">maximum</th>
- * <td>Double.MAX_VALUE</td><td>Double.MAX_VALUE</td></tr>
+ * <td>{@code Double.MAX_VALUE}</td><td>{@code Double.MAX_VALUE}</td></tr>
  * </table>
  * <p>
- * A textflow's unbounded maximum width and height are an indication to the parent that
+ * A {@code TextFlow}'s unbounded maximum width and height are an indication to the parent that
  * it may be resized beyond its preferred size to fill whatever space is assigned to it.
  * <p>
- * TextFlow provides properties for setting the size range directly.  These
- * properties default to the sentinel value Region.USE_COMPUTED_SIZE, however the
+ * {@code TextFlow} provides properties for setting the size range directly. These
+ * properties default to the sentinel value {@code Region.USE_COMPUTED_SIZE}, however the
  * application may set them to other values as needed:
  * <pre><code>
  *     <b>textflow.setMaxWidth(500);</b>
  * </code></pre>
  * Applications may restore the computed values by setting these properties back
- * to Region.USE_COMPUTED_SIZE.
+ * to {@code Region.USE_COMPUTED_SIZE}.
  * <p>
- * TextFlow does not clip its content by default, so it is possible that childrens'
- * bounds may extend outside its own bounds if a child's pref size is larger than
- * the space textflow has to allocate for it.</p>
+ * {@code TextFlow} does not clip its content by default, so it is possible that children's
+ * bounds may extend outside of its own bounds if a child's preferred size is larger than
+ * the space the {@code TextFlow} has to allocate for it.</p>
  *
  * @since JavaFX 8.0
  */
@@ -157,6 +168,7 @@ public class TextFlow extends Pane {
     private TextLayout layout;
     private boolean needsContent;
     private boolean inLayout;
+    static { initAccessor(); }
 
     /**
      * Creates an empty TextFlow layout.
@@ -188,23 +200,62 @@ public class TextFlow extends Pane {
     }
 
     /**
-     * Maps local point to index in the content.
+     * Maps local point to {@link HitInfo} in the content.
+     * <p>
+     * NOTE: this method does not take border or padding into account.
      *
      * @param point the specified point to be tested
      * @return a {@code HitInfo} representing the character index found
      * @since 9
+     * @deprecated replaced by {@link #getHitInfo(javafx.geometry.Point2D)}
      */
+    @Deprecated(since="25")
     public final HitInfo hitTest(javafx.geometry.Point2D point) {
         if (point != null) {
             TextLayout layout = getTextLayout();
-            double x = point.getX()/* - getX()*/;
-            double y = point.getY()/* - getY()/* + getYRendering()*/;
-            TextLayout.Hit layoutHit = layout.getHitInfo((float)x, (float)y);
-            return new HitInfo(layoutHit.getCharIndex(), layoutHit.getInsertionIndex(),
-                               layoutHit.isLeading(), null/*getText()*/);
+            double x = point.getX();
+            double y = point.getY();
+            TextLayout.Hit h = layout.getHitInfo((float)x, (float)y);
+            return new HitInfo(h.getCharIndex(), h.getInsertionIndex(), h.isLeading());
         } else {
             return null;
         }
+    }
+
+    /**
+     * Maps local point to {@link HitInfo} in the content.
+     *
+     * @param point the specified point to be tested
+     * @return a {@code HitInfo} representing the character index found
+     * @since 25
+     */
+    public final HitInfo getHitInfo(javafx.geometry.Point2D point) {
+        if (point != null) {
+            TextLayout layout = getTextLayout();
+            double x = point.getX() - snappedLeftInset();
+            double y = point.getY() - snappedTopInset();
+            TextLayout.Hit h = layout.getHitInfo((float)x, (float)y);
+            return new HitInfo(h.getCharIndex(), h.getInsertionIndex(), h.isLeading());
+        } else {
+            return null;
+        }
+    }
+
+    /**
+     * Returns shape of caret in local coordinates.
+     * <p>
+     * NOTE: this method does not take border or padding into account.
+     *
+     * @param charIndex the character index for the caret
+     * @param leading whether the caret is biased on the leading edge of the character
+     * @return an array of {@code PathElement} which can be used to create a {@code Shape}
+     * @since 9
+     * @deprecated replaced by {@link #getCaretShape(int, boolean)}
+     */
+    @Deprecated(since="25")
+    public PathElement[] caretShape(int charIndex, boolean leading) {
+        TextLayout.CaretGeometry g = getTextLayout().getCaretGeometry(charIndex, leading);
+        return TextUtils.getCaretPathElements(g, 0.0, 0.0);
     }
 
     /**
@@ -213,10 +264,33 @@ public class TextFlow extends Pane {
      * @param charIndex the character index for the caret
      * @param leading whether the caret is biased on the leading edge of the character
      * @return an array of {@code PathElement} which can be used to create a {@code Shape}
-     * @since 9
+     * @since 25
      */
-    public PathElement[] caretShape(int charIndex, boolean leading) {
-        return getTextLayout().getCaretShape(charIndex, leading, 0, 0);
+    public PathElement[] getCaretShape(int charIndex, boolean leading) {
+        TextLayout.CaretGeometry g = getTextLayout().getCaretGeometry(charIndex, leading);
+        double dx = snappedLeftInset();
+        double dy = snappedTopInset();
+        return TextUtils.getCaretPathElements(g, dx, dy);
+    }
+
+    /**
+     * Returns shape for the range of the text in local coordinates.
+     * <p>
+     * NOTES:
+     * <ul>
+     * <li>this method does not take border or padding into account
+     * <li>the shapes returned do not include line spacing
+     * </ul>
+     *
+     * @param start the beginning character index for the range
+     * @param end the end character index (non-inclusive) for the range
+     * @return an array of {@code PathElement} which can be used to create a {@code Shape}
+     * @since 9
+     * @deprecated replaced by {@link #getRangeShape(int, int, boolean)}
+     */
+    @Deprecated(since="25")
+    public final PathElement[] rangeShape(int start, int end) {
+        return getRange(start, end, TextLayout.TYPE_TEXT, false, 0.0);
     }
 
     /**
@@ -224,11 +298,56 @@ public class TextFlow extends Pane {
      *
      * @param start the beginning character index for the range
      * @param end the end character index (non-inclusive) for the range
+     * @param includeLineSpacing determines whether the result includes the line spacing
      * @return an array of {@code PathElement} which can be used to create a {@code Shape}
-     * @since 9
+     * @since 25
+     * @see LayoutInfo#getSelectionGeometry(int, int, boolean)
      */
-    public final PathElement[] rangeShape(int start, int end) {
-        return getRange(start, end, TextLayout.TYPE_TEXT);
+    public final PathElement[] getRangeShape(int start, int end, boolean includeLineSpacing) {
+        double lineSpacing = includeLineSpacing ? getLineSpacing() : 0.0;
+        return getRange(start, end, TextLayout.TYPE_TEXT, true, lineSpacing);
+    }
+
+    /**
+     * Returns the shape for the underline in local coordinates.
+     * <p>
+     * NOTE: this method does not take border or padding into account.
+     *
+     * @param start the beginning character index for the range
+     * @param end the end character index (non-inclusive) for the range
+     * @return an array of {@code PathElement} which can be used to create a {@code Shape}
+     * @since 21
+     * @deprecated replaced by {@link #getUnderlineShape(int, int)}
+     */
+    @Deprecated(since="25")
+    public final PathElement[] underlineShape(int start, int end) {
+        return getRange(start, end, TextLayout.TYPE_UNDERLINE, false, 0.0);
+    }
+
+    /**
+     * Returns the shape for the underline in local coordinates.
+     *
+     * @param start the beginning character index for the range
+     * @param end the end character index (non-inclusive) for the range
+     * @return an array of {@code PathElement} which can be used to create a {@code Shape}
+     * @since 25
+     * @see LayoutInfo#getUnderlineGeometry(int, int)
+     */
+    public final PathElement[] getUnderlineShape(int start, int end) {
+        return getRange(start, end, TextLayout.TYPE_UNDERLINE, true, 0.0);
+    }
+
+    /**
+     * Returns the shape for the strike-through in local coordinates.
+     *
+     * @param start the beginning character index for the range
+     * @param end the end character index (non-inclusive) for the range
+     * @return an array of {@code PathElement} which can be used to create a {@code Shape}
+     * @since 25
+     * @see LayoutInfo#getStrikeThroughGeometry(int, int)
+     */
+    public final PathElement[] getStrikeThroughShape(int start, int end) {
+        return getRange(start, end, TextLayout.TYPE_STRIKETHROUGH, true, 0.0);
     }
 
     @Override
@@ -351,9 +470,18 @@ public class TextFlow extends Pane {
         inLayout = false;
     }
 
-    private PathElement[] getRange(int start, int end, int type) {
+    private PathElement[] getRange(int start, int end, int type, boolean accountForInsets, double lineSpacing) {
+        double dx;
+        double dy;
+        if (accountForInsets) {
+            dx = snappedLeftInset();
+            dy = snappedTopInset();
+        } else {
+            dx = 0.0;
+            dy = 0.0;
+        }
         TextLayout layout = getTextLayout();
-        return layout.getRange(start, end, type, 0, 0);
+        return TextUtils.getRange(layout, start, end, type, dx, dy, lineSpacing);
     }
 
     private static class EmbeddedSpan implements TextSpan {
@@ -380,13 +508,20 @@ public class TextFlow extends Pane {
         public Node getNode() {
             return node;
         }
+
+        @Override
+        public Region getLayoutRootRegion() {
+            if (node.getParent() instanceof TextFlow f) {
+                return f;
+            }
+            return null;
+        }
     }
 
     TextLayout getTextLayout() {
         if (layout == null) {
             TextLayoutFactory factory = Toolkit.getToolkit().getTextLayoutFactory();
             layout = factory.createLayout();
-            layout.setTabSize(getTabSize());
             needsContent = true;
         }
         if (needsContent) {
@@ -410,6 +545,7 @@ public class TextFlow extends Pane {
                 }
             }
             layout.setContent(spans);
+            layout.setTabAdvancePolicy(getTabSize(), getTabAdvancePolicy());
             needsContent = false;
         }
         return layout;
@@ -492,6 +628,10 @@ public class TextFlow extends Pane {
      * The size of a tab stop in spaces.
      * Values less than 1 are treated as 1. This value overrides the
      * {@code tabSize} of contained {@link Text} nodes.
+     * <p>
+     * Note that this method should not be used to control the tab placement when multiple {@code Text} nodes
+     * with different fonts are contained within this {@code TextFlow}.
+     * In this case, {@link #setTabStopPolicy(TabStopPolicy)} should be used instead.
      *
      * @defaultValue 8
      *
@@ -507,9 +647,11 @@ public class TextFlow extends Pane {
                 @Override public CssMetaData getCssMetaData() {
                     return StyleableProperties.TAB_SIZE;
                 }
-                @Override protected void invalidated() {
+
+                @Override
+                protected void invalidated() {
                     TextLayout layout = getTextLayout();
-                    if (layout.setTabSize(get())) {
+                    if (layout.setTabAdvancePolicy(getTabSize(), getTabAdvancePolicy())) {
                         requestLayout();
                     }
                 }
@@ -524,6 +666,96 @@ public class TextFlow extends Pane {
 
     public final void setTabSize(int spaces) {
         tabSizeProperty().set(spaces);
+    }
+
+    /**
+     * Determines the tab stop positions within this {@code TextFlow}.
+     * <p>
+     * A non-null {@code TabStopPolicy} overrides values set by {@link #setTabSize(int)},
+     * as well as any values set by {@link Text#setTabSize(int)} in individual {@code Text} instances within
+     * this {@code TextFlow}.
+     *
+     * @defaultValue null
+     *
+     * @since 25
+     */
+    private SimpleObjectProperty<TabStopPolicy> tabStopPolicy;
+
+    public final ObjectProperty<TabStopPolicy> tabStopPolicyProperty() {
+        if (tabStopPolicy == null) {
+            tabStopPolicy = new SimpleObjectProperty<>() {
+
+                class Monitor implements InvalidationListener, EventHandler<TransformChangedEvent> {
+
+                    @Override
+                    public void invalidated(Observable p) {
+                        updateTabAdvancePolicy();
+                    }
+
+                    @Override
+                    public void handle(TransformChangedEvent ev) {
+                        updateTabAdvancePolicy();
+                    }
+                };
+
+                private Monitor monitor = new Monitor();
+                private TabStopPolicy old;
+
+                {
+                    sceneProperty().addListener(monitor);
+                    localToSceneTransformProperty().addListener(monitor);
+                }
+
+                @Override
+                public Object getBean() {
+                    return TextFlow.this;
+                }
+
+                @Override
+                public String getName() {
+                    return "tabStopPolicy";
+                }
+
+                @Override
+                protected void invalidated() {
+                    if (old != null) {
+                        old.tabStops().removeListener(monitor);
+                        old.defaultIntervalProperty().removeListener(monitor);
+                    }
+
+                    TabStopPolicy p = get();
+                    if (p != null) {
+                        // FIX does this create a memory leak?
+                        p.tabStops().addListener(monitor);
+                        p.defaultIntervalProperty().addListener(monitor);
+                    }
+                    old = p;
+                    updateTabAdvancePolicy();
+                }
+
+                private void updateTabAdvancePolicy() {
+                    TextLayout layout = getTextLayout();
+                    if (layout.setTabAdvancePolicy(getTabSize(), getTabAdvancePolicy())) {
+                        requestLayout();
+                    }
+                }
+            };
+        }
+        return tabStopPolicy;
+    }
+
+    public final TabStopPolicy getTabStopPolicy() {
+        return tabStopPolicy == null ? null : tabStopPolicy.get();
+    }
+
+    public final void setTabStopPolicy(TabStopPolicy policy) {
+        tabStopPolicyProperty().set(policy);
+    }
+
+    private TabAdvancePolicy getTabAdvancePolicy() {
+        // isolates the public tab stop policy from the internal tab advance policy
+        TabStopPolicy p = getTabStopPolicy();
+        return p == null ? null : DefaultTabAdvancePolicy.of(this, p);
     }
 
     @Override public final double getBaselineOffset() {
@@ -545,8 +777,8 @@ public class TextFlow extends Pane {
 
         private static final
             CssMetaData<TextFlow, TextAlignment> TEXT_ALIGNMENT =
-                new CssMetaData<TextFlow,TextAlignment>("-fx-text-alignment",
-                new EnumConverter<TextAlignment>(TextAlignment.class),
+                new CssMetaData<>("-fx-text-alignment",
+                new EnumConverter<>(TextAlignment.class),
                 TextAlignment.LEFT) {
 
             @Override public boolean isSettable(TextFlow node) {
@@ -560,7 +792,7 @@ public class TextFlow extends Pane {
 
         private static final
             CssMetaData<TextFlow,Number> LINE_SPACING =
-                new CssMetaData<TextFlow,Number>("-fx-line-spacing",
+                new CssMetaData<>("-fx-line-spacing",
                 SizeConverter.getInstance(), 0) {
 
             @Override public boolean isSettable(TextFlow node) {
@@ -573,7 +805,7 @@ public class TextFlow extends Pane {
         };
 
         private static final CssMetaData<TextFlow, Number> TAB_SIZE =
-                new CssMetaData<TextFlow,Number>("-fx-tab-size",
+                new CssMetaData<>("-fx-tab-size",
                 SizeConverter.getInstance(), TextLayout.DEFAULT_TAB_SIZE) {
 
             @Override
@@ -590,7 +822,7 @@ public class TextFlow extends Pane {
         private static final List<CssMetaData<? extends Styleable, ?>> STYLEABLES;
         static {
             final List<CssMetaData<? extends Styleable, ?>> styleables =
-                new ArrayList<CssMetaData<? extends Styleable, ?>>(Pane.getClassCssMetaData());
+                new ArrayList<>(Pane.getClassCssMetaData());
             styleables.add(TEXT_ALIGNMENT);
             styleables.add(LINE_SPACING);
             styleables.add(TAB_SIZE);
@@ -675,5 +907,44 @@ public class TextFlow extends Pane {
             }
             default: return super.queryAccessibleAttribute(attribute, parameters);
         }
+    }
+
+    private static void initAccessor() {
+        TextFlowHelper.setAccessor(new TextFlowHelper.Accessor() {
+            @Override
+            public TextLayout getTextLayout(TextFlow f) {
+                return f.getTextLayout();
+            }
+        });
+    }
+
+    /**
+     * Returns a copy of the of the text layout geometry for this node. This copy is a snapshot
+     * of the text layout at the time the method is called.
+     * <p>
+     * While there is no general guarantee that successive invocations of this method return the same instance,
+     * it is safe to either cache this object or call this method each time, since the information obtained from
+     * this lightweight object remains valid until the next layout cycle.
+     *
+     * @return a copy of the layout information
+     * @since 25
+     */
+    public final LayoutInfo getLayoutInfo() {
+        return new PrismLayoutInfo(getTextLayout()) {
+            @Override
+            public double lineSpacing() {
+                return getLineSpacing();
+            }
+
+            @Override
+            protected double dx() {
+                return snappedLeftInset();
+            }
+
+            @Override
+            protected double dy() {
+                return snappedTopInset();
+            }
+        };
     }
 }

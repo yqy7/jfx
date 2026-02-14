@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,10 +26,6 @@
 package test.javafx.animation;
 
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -43,7 +39,11 @@ import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.util.Duration;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class KeyFrameTest {
     private static final Duration TIME = Duration.ONE;
@@ -128,22 +128,28 @@ public class KeyFrameTest {
         assertEquals(NAME, kf5.getName());
         assertEquals(ACTION, kf5.getOnFinished());
         assertSetEquals(TWO_KEYVALUES, kf2.getValues());
-    };
+    }
 
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testConstructor_ObservableList_DurationIsNull(){
-        new KeyFrame(null, NAME, ACTION, TWO_KEYVALUES_COL);
-    };
+        assertThrows(NullPointerException.class, () -> {
+            new KeyFrame(null, NAME, ACTION, TWO_KEYVALUES_COL);
+        });
+    }
 
-    @Test(expected=IllegalArgumentException.class)
+    @Test
     public void testConstructor_ObservableList_DurationIsNegative(){
-        new KeyFrame(Duration.millis(-1), NAME, ACTION, TWO_KEYVALUES_COL);
-    };
+        assertThrows(IllegalArgumentException.class, () -> {
+            new KeyFrame(Duration.millis(-1), NAME, ACTION, TWO_KEYVALUES_COL);
+        });
+    }
 
-    @Test(expected=IllegalArgumentException.class)
+    @Test
     public void testConstructor_ObservableList_DuratinIsUnknown(){
-        new KeyFrame(Duration.UNKNOWN, NAME, ACTION, TWO_KEYVALUES_COL);
-    };
+        assertThrows(IllegalArgumentException.class, () -> {
+            new KeyFrame(Duration.UNKNOWN, NAME, ACTION, TWO_KEYVALUES_COL);
+        });
+    }
 
     @Test public void testConstructor_Time_Name_Action_Valus() {
         // no values
@@ -212,20 +218,26 @@ public class KeyFrameTest {
         assertSetEquals(NO_KEYVALUES, kf6.getValues());
     }
 
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testConstructor_KeyValues_DurationIsNull(){
-        new KeyFrame(null, NAME, ACTION, TWO_KEYVALUES);
-    };
+        assertThrows(NullPointerException.class, () -> {
+            new KeyFrame(null, NAME, ACTION, TWO_KEYVALUES);
+        });
+    }
 
-    @Test(expected=IllegalArgumentException.class)
+    @Test
     public void testConstructor_KeyValues_DurationIsNegative(){
-        new KeyFrame(Duration.millis(-1), NAME, ACTION, TWO_KEYVALUES);
-    };
+        assertThrows(IllegalArgumentException.class, () -> {
+            new KeyFrame(Duration.millis(-1), NAME, ACTION, TWO_KEYVALUES);
+        });
+    }
 
-    @Test(expected=IllegalArgumentException.class)
+    @Test
     public void testConstructor_KeyValues_DurationIsUnknown(){
-        new KeyFrame(Duration.UNKNOWN, NAME, ACTION, TWO_KEYVALUES);
-    };
+        assertThrows(IllegalArgumentException.class, () -> {
+            new KeyFrame(Duration.UNKNOWN, NAME, ACTION, TWO_KEYVALUES);
+        });
+    }
 
     @Test public void testConstructor_Time_Action_Valus() {
         final KeyFrame kf0 = new KeyFrame(TIME, ACTION, TWO_KEYVALUES);

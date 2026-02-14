@@ -32,18 +32,37 @@
 
 #include "CSSFontSelector.h"
 #include "Document.h"
+#include "DocumentInlines.h"
 #include "FontCascade.h"
+#include "RenderStyleInlines.h"
+#include "StyleLengthResolution.h"
+#include "StyleResolver.h"
+#include "StyleScope.h"
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/StringHash.h>
 
 namespace WebCore {
 namespace Style {
 
-MatchedDeclarationsCache::MatchedDeclarationsCache()
-    : m_sweepTimer(*this, &MatchedDeclarationsCache::sweep)
+WTF_MAKE_TZONE_ALLOCATED_IMPL(MatchedDeclarationsCache);
+
+MatchedDeclarationsCache::MatchedDeclarationsCache(const Resolver& owner)
+    : m_owner(owner)
+    , m_sweepTimer(*this, &MatchedDeclarationsCache::sweep)
 {
 }
 
 MatchedDeclarationsCache::~MatchedDeclarationsCache() = default;
+
+void MatchedDeclarationsCache::ref() const
+{
+    m_owner->ref();
+}
+
+void MatchedDeclarationsCache::deref() const
+{
+    m_owner->deref();
+}
 
 bool MatchedDeclarationsCache::isCacheable(const Element& element, const RenderStyle& style, const RenderStyle& parentStyle)
 {
@@ -51,17 +70,24 @@ bool MatchedDeclarationsCache::isCacheable(const Element& element, const RenderS
     // Document::setWritingMode/DirectionSetOnDocumentElement. We can't skip the applying by caching.
     if (&element == element.document().documentElement())
         return false;
-    // content:attr() value depends on the element it is being applied to.
-    if (style.hasAttrContent() || (style.styleType() != PseudoId::None && parentStyle.hasAttrContent()))
+    // FIXME: Without the following early return we hit the final assert in
+    // Element::resolvePseudoElementStyle(). Making matchedPseudoElementIds
+    // PseudoElementIdentifier-aware might be a possible solution.
+    if (!style.pseudoElementNameArgument().isNull())
         return false;
-    if (style.hasEffectiveAppearance())
+    // content:attr() value depends on the element it is being applied to.
+    if (style.hasAttrContent() || (style.pseudoElementType() != PseudoId::None && parentStyle.hasAttrContent()))
         return false;
     if (style.zoom() != RenderStyle::initialZoom())
         return false;
-    if (style.writingMode() != RenderStyle::initialWritingMode() || style.direction() != RenderStyle::initialDirection())
+    if (style.writingMode().computedWritingMode() != RenderStyle::initialWritingMode()
+        || style.writingMode().computedTextDirection() != RenderStyle::initialDirection())
         return false;
-    // The cache assumes static knowledge about which properties are inherited.
-    if (style.hasExplicitlyInheritedProperties())
+    if (style.usesContainerUnits())
+        return false;
+    if (style.useTreeCountingFunctions())
+        return false;
+    if (style.usesAnchorFunctions())
         return false;
 
     // Getting computed style after a font environment change but before full style resolution may involve styles with non-current fonts.
@@ -72,39 +98,67 @@ bool MatchedDeclarationsCache::isCacheable(const Element& element, const RenderS
     if (!parentStyle.fontCascade().isCurrent(fontSelector))
         return false;
 
+    if (element.hasRandomCachingKeyMap())
+        return false;
+
+    // FIXME: counter-style: we might need to resolve cache like for fontSelector here (rdar://103018993).
+
     return true;
 }
 
 bool MatchedDeclarationsCache::Entry::isUsableAfterHighPriorityProperties(const RenderStyle& style) const
 {
-    if (style.effectiveZoom() != renderStyle->effectiveZoom())
+    if (style.usedZoom() != renderStyle->usedZoom())
         return false;
 
-    return CSSPrimitiveValue::equalForLengthResolution(style, *renderStyle);
+#if ENABLE(DARK_MODE_CSS)
+    if (style.colorScheme() != renderStyle->colorScheme())
+        return false;
+#endif
+
+    return Style::equalForLengthResolution(style, *renderStyle);
 }
 
-unsigned MatchedDeclarationsCache::computeHash(const MatchResult& matchResult)
+unsigned MatchedDeclarationsCache::computeHash(const MatchResult& matchResult, const Style::CustomPropertyData& inheritedCustomProperties)
 {
-    if (!matchResult.isCacheable)
+    if (matchResult.isCompletelyNonCacheable)
         return 0;
 
-    return WTF::computeHash(matchResult);
+    if (matchResult.userAgentDeclarations.isEmpty() && matchResult.userDeclarations.isEmpty()) {
+        bool allNonCacheable = std::ranges::all_of(matchResult.authorDeclarations, [](auto& matchedProperties) {
+            return matchedProperties.isCacheable != IsCacheable::Yes;
+        });
+        // No point of caching if we are not applying any properties.
+        if (allNonCacheable)
+            return 0;
+    }
+    return WTF::computeHash(matchResult, &inheritedCustomProperties);
 }
 
-const MatchedDeclarationsCache::Entry* MatchedDeclarationsCache::find(unsigned hash, const MatchResult& matchResult)
+std::optional<MatchedDeclarationsCache::Result> MatchedDeclarationsCache::find(unsigned hash, const MatchResult& matchResult, const Style::CustomPropertyData& inheritedCustomProperties, const RenderStyle& parentStyle)
 {
     if (!hash)
-        return nullptr;
+        return std::nullopt;
 
     auto it = m_entries.find(hash);
     if (it == m_entries.end())
-        return nullptr;
+        return std::nullopt;
 
-    auto& entry = it->value;
-    if (matchResult != entry.matchResult)
-        return nullptr;
+    const Entry* partiallyMatchingEntry = nullptr;
+    for (auto& entry : it->value) {
+        if (!matchResult.cacheablePropertiesEqual(*entry.matchResult))
+            continue;
 
-    return &entry;
+    if (&entry.parentRenderStyle->inheritedCustomProperties() != &inheritedCustomProperties)
+            continue;
+
+        if (parentStyle.inheritedEqual(*entry.parentRenderStyle))
+            return std::make_optional(Result { .entry = entry, .inheritedEqual = true });
+        partiallyMatchingEntry = &entry;
+    }
+    if (partiallyMatchingEntry)
+        return std::make_optional(Result { .entry = *partiallyMatchingEntry, .inheritedEqual = false });
+    return std::nullopt;
 }
 
 void MatchedDeclarationsCache::add(const RenderStyle& style, const RenderStyle& parentStyle, unsigned hash, const MatchResult& matchResult)
@@ -118,7 +172,19 @@ void MatchedDeclarationsCache::add(const RenderStyle& style, const RenderStyle& 
     ASSERT(hash);
     // Note that we don't cache the original RenderStyle instance. It may be further modified.
     // The RenderStyle in the cache is really just a holder for the substructures and never used as-is.
-    m_entries.add(hash, Entry { matchResult, RenderStyle::clonePtr(style), RenderStyle::clonePtr(parentStyle) });
+    constexpr unsigned maxEntriesPerHash = 4;
+    auto addResult = m_entries.ensure(hash, [&] {
+        Vector<Entry> newBucket;
+        newBucket.reserveCapacity(maxEntriesPerHash);
+        return newBucket;
+    });
+    if (addResult.iterator->value.size() < maxEntriesPerHash)
+        addResult.iterator->value.append(Entry { &matchResult, RenderStyle::clonePtr(style), RenderStyle::clonePtr(parentStyle) });
+}
+
+void MatchedDeclarationsCache::remove(unsigned hash)
+{
+    m_entries.remove(hash);
 }
 
 void MatchedDeclarationsCache::invalidate()
@@ -126,15 +192,29 @@ void MatchedDeclarationsCache::invalidate()
     m_entries.clear();
 }
 
+template<typename Callback>
+void MatchedDeclarationsCache::removeAllMatching(const Callback& matches)
+{
+    for (auto& [key, bucket] : m_entries)
+        bucket.removeAllMatching(matches);
+    m_entries.removeIf([](auto& keyValue) {
+        return !keyValue.value.size();
+    });
+}
+
 void MatchedDeclarationsCache::clearEntriesAffectedByViewportUnits()
 {
-    m_entries.removeIf([](auto& keyValue) {
-        return keyValue.value.renderStyle->hasViewportUnits();
+    Ref protectedThis { *this };
+
+    removeAllMatching([&] (const Entry& entry) -> bool {
+        return entry.renderStyle->usesViewportUnits();
     });
 }
 
 void MatchedDeclarationsCache::sweep()
 {
+    Ref protectedThis { *this };
+
     // Look for cache entries containing a style declaration with a single ref and remove them.
     // This may happen when an element attribute mutation causes it to generate a new inlineStyle()
     // or presentationalHintStyle(), potentially leaving this cache with the last ref on the old one.
@@ -146,9 +226,9 @@ void MatchedDeclarationsCache::sweep()
         return false;
     };
 
-    m_entries.removeIf([&](auto& keyValue) {
-        auto& matchResult = keyValue.value.matchResult;
-        return hasOneRef(matchResult.userAgentDeclarations) || hasOneRef(matchResult.userDeclarations) || hasOneRef(matchResult.authorDeclarations);
+    removeAllMatching([&] (const Entry& entry) -> bool {
+        auto& matchResult = entry.matchResult;
+        return hasOneRef(matchResult->userAgentDeclarations) || hasOneRef(matchResult->userDeclarations) || hasOneRef(matchResult->authorDeclarations);
     });
 
     m_additionsSinceLastSweep = 0;

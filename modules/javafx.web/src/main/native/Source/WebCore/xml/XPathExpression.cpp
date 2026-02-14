@@ -28,6 +28,8 @@
 #include "XPathExpression.h"
 
 #include "Document.h"
+#include "ExceptionOr.h"
+#include "NodeInlines.h"
 #include "XPathNSResolver.h"
 #include "XPathParser.h"
 #include "XPathResult.h"
@@ -55,18 +57,18 @@ XPathExpression::~XPathExpression() = default;
 ExceptionOr<Ref<XPathResult>> XPathExpression::evaluate(Node& contextNode, unsigned short type, XPathResult*)
 {
     if (!XPath::isValidContextNode(contextNode))
-        return Exception { NotSupportedError };
+        return Exception { ExceptionCode::NotSupportedError };
 
     auto& evaluationContext = XPath::Expression::evaluationContext();
-    evaluationContext.node = &contextNode;
+    evaluationContext.node = contextNode;
     evaluationContext.size = 1;
     evaluationContext.position = 1;
     evaluationContext.hadTypeConversionError = false;
-    auto result = XPathResult::create(contextNode.document(), m_topExpression->evaluate());
+    auto result = XPathResult::create(contextNode.protectedDocument().get(), m_topExpression->evaluate());
     evaluationContext.node = nullptr; // Do not hold a reference to the context node, as this may prevent the whole document from being destroyed in time.
 
     if (evaluationContext.hadTypeConversionError)
-        return Exception { SyntaxError };
+        return Exception { ExceptionCode::SyntaxError };
 
     if (type != XPathResult::ANY_TYPE) {
         auto convertToResult = result->convertTo(type);

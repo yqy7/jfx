@@ -25,11 +25,7 @@
 
 #pragma once
 
-#include "JSGlobalObject.h"
-#include "JSSourceCode.h"
 #include "ParserError.h"
-#include <variant>
-#include <wtf/text/WTFString.h>
 
 namespace JSC {
 
@@ -73,7 +69,7 @@ public:
     JS_EXPORT_PRIVATE String message() const;
 
 private:
-    std::variant<ParserError, StandardError, WriteError> m_error;
+    Variant<ParserError, StandardError, WriteError> m_error;
 };
 
 } // namespace JSC

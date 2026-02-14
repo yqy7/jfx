@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2011 Google Inc. All rights reserved.
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -32,11 +32,12 @@
 #pragma once
 
 #include "InspectorOverlay.h"
-#include "PageDebugger.h"
 #include <JavaScriptCore/InspectorAgentRegistry.h>
 #include <JavaScriptCore/InspectorEnvironment.h>
 #include <wtf/Forward.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/TZoneMalloc.h>
+#include <wtf/WeakRef.h>
 #include <wtf/text/WTFString.h>
 
 namespace Inspector {
@@ -49,36 +50,40 @@ class InspectorAgent;
 namespace WebCore {
 
 class DOMWrapperWorld;
-class Frame;
 class GraphicsContext;
-class InspectorClient;
+class InspectorBackendClient;
 class InspectorDOMAgent;
 class InspectorFrontendClient;
 class InspectorInstrumentation;
 class InspectorPageAgent;
 class InstrumentingAgents;
+class LocalFrame;
 class Node;
 class Page;
+class PageDebugger;
 class WebInjectedScriptManager;
 struct PageAgentContext;
 
-class InspectorController final : public Inspector::InspectorEnvironment {
+class InspectorController final : public Inspector::InspectorEnvironment, public CanMakeWeakPtr<InspectorController> {
     WTF_MAKE_NONCOPYABLE(InspectorController);
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(InspectorController);
 public:
-    InspectorController(Page&, InspectorClient*);
+    InspectorController(Page&, std::unique_ptr<InspectorBackendClient>&&);
     ~InspectorController() override;
+
+    WEBCORE_EXPORT void ref() const;
+    WEBCORE_EXPORT void deref() const;
 
     void inspectedPageDestroyed();
 
-    bool enabled() const;
+    WEBCORE_EXPORT bool enabled() const;
     Page& inspectedPage() const;
 
     WEBCORE_EXPORT void show();
 
     WEBCORE_EXPORT void setInspectorFrontendClient(InspectorFrontendClient*);
     unsigned inspectionLevel() const;
-    void didClearWindowObjectInWorld(Frame&, DOMWrapperWorld&);
+    void didClearWindowObjectInWorld(LocalFrame&, DOMWrapperWorld&);
 
     WEBCORE_EXPORT void dispatchMessageFromFrontend(const String& message);
 
@@ -98,18 +103,18 @@ public:
 
     WEBCORE_EXPORT void setIndicating(bool);
 
-    WEBCORE_EXPORT void willComposite(Frame&);
-    WEBCORE_EXPORT void didComposite(Frame&);
+    WEBCORE_EXPORT void willComposite(LocalFrame&);
+    WEBCORE_EXPORT void didComposite(LocalFrame&);
 
     // Testing support.
-    WEBCORE_EXPORT bool isUnderTest() const;
+    bool isUnderTest() const { return m_isUnderTest; }
     void setIsUnderTest(bool isUnderTest) { m_isUnderTest = isUnderTest; }
     WEBCORE_EXPORT void evaluateForTestInFrontend(const String& script);
     WEBCORE_EXPORT unsigned gridOverlayCount() const;
     WEBCORE_EXPORT unsigned flexOverlayCount() const;
     WEBCORE_EXPORT unsigned paintRectCount() const;
 
-    InspectorClient* inspectorClient() const { return m_inspectorClient; }
+    InspectorBackendClient* inspectorBackendClient() const { return m_inspectorBackendClient.get(); }
     InspectorFrontendClient* inspectorFrontendClient() const { return m_inspectorFrontendClient; }
 
     Inspector::InspectorAgent& ensureInspectorAgent();
@@ -122,8 +127,8 @@ public:
     Inspector::InspectorFunctionCallHandler functionCallHandler() const override;
     Inspector::InspectorEvaluateHandler evaluateHandler() const override;
     void frontendInitialized() override;
-    Stopwatch& executionStopwatch() const final;
-    PageDebugger& debugger() override;
+    WTF::Stopwatch& executionStopwatch() const final;
+    JSC::Debugger* debugger() override;
     JSC::VM& vm() override;
 
 private:
@@ -132,17 +137,17 @@ private:
     PageAgentContext pageAgentContext();
     void createLazyAgents();
 
-    Ref<InstrumentingAgents> m_instrumentingAgents;
-    std::unique_ptr<WebInjectedScriptManager> m_injectedScriptManager;
-    Ref<Inspector::FrontendRouter> m_frontendRouter;
-    Ref<Inspector::BackendDispatcher> m_backendDispatcher;
-    std::unique_ptr<InspectorOverlay> m_overlay;
-    Ref<Stopwatch> m_executionStopwatch;
-    PageDebugger m_debugger;
+    WeakRef<Page> m_page;
+    const Ref<InstrumentingAgents> m_instrumentingAgents;
+    const UniqueRef<WebInjectedScriptManager> m_injectedScriptManager;
+    const Ref<Inspector::FrontendRouter> m_frontendRouter;
+    const Ref<Inspector::BackendDispatcher> m_backendDispatcher;
+    const UniqueRef<InspectorOverlay> m_overlay;
+    const Ref<WTF::Stopwatch> m_executionStopwatch;
+    std::unique_ptr<PageDebugger> m_debugger;
     Inspector::AgentRegistry m_agents;
 
-    Page& m_page;
-    InspectorClient* m_inspectorClient;
+    std::unique_ptr<InspectorBackendClient> m_inspectorBackendClient;
     InspectorFrontendClient* m_inspectorFrontendClient { nullptr };
 
     // Lazy, but also on-demand agents.

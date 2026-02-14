@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,6 +33,8 @@ import javafx.event.EventType;
 /**
  * Event related to {@link ScrollPane} and virtualised controls such as
  * {@link ListView}, {@link TableView}, {@link TreeView} and {@link TreeTableView}.
+ *
+ * @param <T> the scroll-to event type
  * @since JavaFX 8.0
  */
 public class ScrollToEvent<T> extends Event {
@@ -50,7 +52,7 @@ public class ScrollToEvent<T> extends Event {
      * Common supertype for all scroll-to event types.
      */
     public static final EventType<ScrollToEvent> ANY =
-            new EventType<ScrollToEvent> (Event.ANY, "SCROLL_TO");
+            new EventType<> (Event.ANY, "SCROLL_TO");
 
     /**
      * This event occurs if the user requests scrolling a given index into view.
@@ -60,7 +62,7 @@ public class ScrollToEvent<T> extends Event {
         return SCROLL_TO_TOP_INDEX;
     }
     private static final EventType<ScrollToEvent<Integer>> SCROLL_TO_TOP_INDEX =
-            new EventType<ScrollToEvent<Integer>>(ScrollToEvent.ANY, "SCROLL_TO_TOP_INDEX");
+            new EventType<>(ScrollToEvent.ANY, "SCROLL_TO_TOP_INDEX");
 
 
     /**
@@ -78,6 +80,7 @@ public class ScrollToEvent<T> extends Event {
 
     private static final long serialVersionUID = -8557345736849482516L;
 
+    @SuppressWarnings("doclint:missing")
     private final T scrollTarget;
 
     /**

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,27 +25,33 @@
 
 package test.javafx.scene.control;
 
-import javafx.scene.control.skin.MenuButtonSkin;
-import com.sun.javafx.tk.Toolkit;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import javafx.beans.property.SimpleObjectProperty;
+import javafx.event.Event;
+import javafx.event.EventHandler;
+import javafx.event.EventType;
 import javafx.geometry.Side;
-import javafx.scene.Scene;
 import javafx.scene.Group;
-import javafx.scene.control.ContentDisplay;
+import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.skin.MenuButtonSkin;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.Rectangle;
 import javafx.stage.Stage;
-import javafx.event.Event;
-import javafx.event.EventType;
-import javafx.event.EventHandler;
-
-import org.junit.Before;
-import org.junit.Test;
-
-import static org.junit.Assert.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.scene.SceneHelper;
+import com.sun.javafx.tk.Toolkit;
+import test.com.sun.javafx.scene.control.infrastructure.MouseEventGenerator;
 
 /**
  *
@@ -54,7 +60,8 @@ import static org.junit.Assert.*;
 public class MenuButtonTest {
     private MenuButton menuButton;
 
-    @Before public void setup() {
+    @BeforeEach
+    public void setup() {
         menuButton = new MenuButton();
     }
 
@@ -207,7 +214,7 @@ public class MenuButtonTest {
 
     @Test public void popupSideCanBeBound() {
         Side side = Side.TOP;
-        SimpleObjectProperty<Side> other = new SimpleObjectProperty<Side>(menuButton, "popupSide", side);
+        SimpleObjectProperty<Side> other = new SimpleObjectProperty<>(menuButton, "popupSide", side);
         menuButton.popupSideProperty().bind(other);
         assertSame(side, menuButton.getPopupSide());
     }
@@ -329,24 +336,16 @@ public class MenuButtonTest {
         mbtn.hide();
 
         for (int i = 0; i < 5; ++i) {
-            assertEquals("event " + i + " is not of type MenuButton.ON_SHOWN",
-                    MenuButton.ON_SHOWING, onShowingEventTypes[i]);
-            assertEquals("event " + i + " is not of type MenuButton.ON_SHOWN",
-                    MenuButton.ON_SHOWN, onShownEventTypes[i]);
-            assertEquals("event " + i + " is not of type MenuButton.ON_HIDING",
-                    MenuButton.ON_HIDING, onHidingEventTypes[i]);
-            assertEquals("event " + i + " is not of type  MenuButton.ON_HIDDEN",
-                    MenuButton.ON_HIDDEN, onHiddenEventTypes[i]);
+            assertEquals(MenuButton.ON_SHOWING, onShowingEventTypes[i], "event " + i + " is not of type MenuButton.ON_SHOWN");
+            assertEquals(MenuButton.ON_SHOWN, onShownEventTypes[i], "event " + i + " is not of type MenuButton.ON_SHOWN");
+            assertEquals(MenuButton.ON_HIDING, onHidingEventTypes[i], "event " + i + " is not of type MenuButton.ON_HIDING");
+            assertEquals(MenuButton.ON_HIDDEN, onHiddenEventTypes[i], "event " + i + " is not of type  MenuButton.ON_HIDDEN");
         }
 
-        assertEquals("MenuButton.ON_SHOWING event listener should "
-            + "get called 5 times. ", 5, onShowing);
-        assertEquals("MenuButton.ON_SHOWN event listener should "
-            + "get called 5 times. ", 5, onShown);
-        assertEquals("MenuButton.ON_HIDING event listener should "
-            + "get called 5 times. ", 5, onHiding);
-        assertEquals("MenuButton.ON_HIDDEN event listener should "
-            + "get called 5 times. ", 5, onHidden);
+        assertEquals(5, onShowing, "MenuButton.ON_SHOWING event listener should get called 5 times. ");
+        assertEquals(5, onShown, "MenuButton.ON_SHOWN event listener should get called 5 times. ");
+        assertEquals(5, onHiding, "MenuButton.ON_HIDING event listener should get called 5 times. ");
+        assertEquals(5, onHidden, "MenuButton.ON_HIDDEN event listener should get called 5 times. ");
     }
 
     EventType onShowingEventType;
@@ -383,23 +382,15 @@ public class MenuButtonTest {
         mbtn.show();
         mbtn.hide();
 
-        assertEquals("event is not of type MenuButton.ON_SHOWING",
-            MenuButton.ON_SHOWING, onShowingEventType);
-        assertEquals("event is not of type MenuButton.ON_SHOWN",
-            MenuButton.ON_SHOWN, onShownEventType);
-        assertEquals("event is not of type MenuButton.ON_HIDING",
-            MenuButton.ON_HIDING, onHidingEventType);
-        assertEquals("event is not of type MenuButton.ON_HIDDEN",
-            MenuButton.ON_HIDDEN, onHiddenEventType);
+        assertEquals(MenuButton.ON_SHOWING, onShowingEventType, "event is not of type MenuButton.ON_SHOWING");
+        assertEquals(MenuButton.ON_SHOWN, onShownEventType, "event is not of type MenuButton.ON_SHOWN");
+        assertEquals(MenuButton.ON_HIDING, onHidingEventType, "event is not of type MenuButton.ON_HIDING");
+        assertEquals(MenuButton.ON_HIDDEN, onHiddenEventType, "event is not of type MenuButton.ON_HIDDEN");
 
-        assertEquals("MenuButton.ON_SHOWING event listener should "
-            + "get called once.", 1, onShowing);
-        assertEquals("MenuButton.ON_SHOWN event listener should "
-            + "get called once.", 1, onShown);
-        assertEquals("MenuButton.ON_HIDING event listener should "
-            + "get called once.", 1, onHiding);
-        assertEquals("MenuButton.ON_HIDDEN event listener should "
-            + "get called once.", 1, onHidden);
+        assertEquals(1, onShowing, "MenuButton.ON_SHOWING event listener should get called once.");
+        assertEquals(1, onShown, "MenuButton.ON_SHOWN event listener should get called once.");
+        assertEquals(1, onHiding, "MenuButton.ON_HIDING event listener should get called once.");
+        assertEquals(1, onHidden, "MenuButton.ON_HIDDEN event listener should get called once.");
     }
 
     // Test for JDK-8177633
@@ -421,46 +412,30 @@ public class MenuButtonTest {
         mbtn.setOnHiding(handlers[2]);
         mbtn.setOnHidden(handlers[3]);
 
-        assertEquals("getOnShowing() should return same handler as set using "
-            + "setOnShowing()", handlers[0], mbtn.getOnShowing());
-        assertEquals("getOnShown() should return same handler as set using "
-            + "setOnShown()", handlers[1], mbtn.getOnShown());
-        assertEquals("getOnHiding() should return same handler as set using "
-            + "setOnHiding()", handlers[2], mbtn.getOnHiding());
-        assertEquals("getOnHidden() should return same handler as set using "
-            + "setOnHidden()", handlers[3], mbtn.getOnHidden());
+        assertEquals(handlers[0], mbtn.getOnShowing(), "getOnShowing() should return same handler as set using setOnShowing()");
+        assertEquals(handlers[1], mbtn.getOnShown(), "getOnShown() should return same handler as set using setOnShown()");
+        assertEquals(handlers[2], mbtn.getOnHiding(), "getOnHiding() should return same handler as set using setOnHiding()");
+        assertEquals(handlers[3], mbtn.getOnHidden(), "getOnHidden() should return same handler as set using setOnHidden()");
 
-        assertEquals("onShowingProperty().get() should return same handler as "
-            + "set using setOnShowing()", handlers[0], mbtn.onShowingProperty().get());
-        assertEquals("onShownProperty().get() should return same handler as "
-            + "set using setOnShown()", handlers[1], mbtn.onShownProperty().get());
-        assertEquals("onHidingProperty().get() should return same handler as "
-            + "set using setOnHiding()", handlers[2], mbtn.onHidingProperty().get());
-        assertEquals("onHiddenProperty().get() should return same handler as "
-            + "set using setOnHidden()", handlers[3], mbtn.onHiddenProperty().get());
+        assertEquals(handlers[0], mbtn.onShowingProperty().get(), "onShowingProperty().get() should return same handler as set using setOnShowing()");
+        assertEquals(handlers[1], mbtn.onShownProperty().get(), "onShownProperty().get() should return same handler as set using setOnShown()");
+        assertEquals(handlers[2], mbtn.onHidingProperty().get(), "onHidingProperty().get() should return same handler as set using setOnHiding()");
+        assertEquals(handlers[3], mbtn.onHiddenProperty().get(), "onHiddenProperty().get() should return same handler as set using setOnHidden()");
 
         mbtn.setOnShowing(null);
         mbtn.setOnShown(null);
         mbtn.setOnHiding(null);
         mbtn.setOnHidden(null);
 
-        assertEquals("getOnShowing() should return same handler as set using "
-            + "setOnShowing()", null, mbtn.getOnShowing());
-        assertEquals("getOnShown() should return same handler as set using "
-            + "setOnShown()", null, mbtn.getOnShown());
-        assertEquals("getOnHiding() should return same handler as set using "
-            + "setOnHiding()", null, mbtn.getOnHiding());
-        assertEquals("getOnHidden() should return same handler as set using "
-            + "setOnHidden()", null, mbtn.getOnHidden());
+        assertEquals(null, mbtn.getOnShowing(), "getOnShowing() should return same handler as set using setOnShowing()");
+        assertEquals(null, mbtn.getOnShown(), "getOnShown() should return same handler as set using setOnShown()");
+        assertEquals(null, mbtn.getOnHiding(), "getOnHiding() should return same handler as set using setOnHiding()");
+        assertEquals(null, mbtn.getOnHidden(), "getOnHidden() should return same handler as set using setOnHidden()");
 
-        assertEquals("onShowingProperty().get() should return same handler as "
-            + "set using setOnShowing()", null, mbtn.onShowingProperty().get());
-        assertEquals("onShownProperty().get() should return same handler as "
-            + "set using setOnShown()", null, mbtn.onShownProperty().get());
-        assertEquals("onHidingProperty().get() should return same handler as "
-            + "set using setOnHiding()", null, mbtn.onHidingProperty().get());
-        assertEquals("onHiddenProperty().get() should return same handler as "
-            + "set using setOnHidden()", null, mbtn.onHiddenProperty().get());
+        assertEquals(null, mbtn.onShowingProperty().get(), "onShowingProperty().get() should return same handler as set using setOnShowing()");
+        assertEquals(null, mbtn.onShownProperty().get(), "onShownProperty().get() should return same handler as set using setOnShown()");
+        assertEquals(null, mbtn.onHidingProperty().get(), "onHidingProperty().get() should return same handler as set using setOnHiding()");
+        assertEquals(null, mbtn.onHiddenProperty().get(), "onHiddenProperty().get() should return same handler as set using setOnHidden()");
     }
 
     // Test for JDK-8177633
@@ -482,46 +457,30 @@ public class MenuButtonTest {
         mbtn.onHidingProperty().set(handlers[2]);
         mbtn.onHiddenProperty().set(handlers[3]);
 
-        assertEquals("getOnShowing() should return same handler as set using "
-            + "onShowingProperty().set()", handlers[0], mbtn.getOnShowing());
-        assertEquals("getOnShown() should return same handler as set using "
-            + "onShownProperty().set()", handlers[1], mbtn.getOnShown());
-        assertEquals("getOnHiding() should return same handler as set using "
-            + "onHidingProperty().set()", handlers[2], mbtn.getOnHiding());
-        assertEquals("getOnHidden() should return same handler as set using "
-            + "onHiddenProperty().set()", handlers[3], mbtn.getOnHidden());
+        assertEquals(handlers[0], mbtn.getOnShowing(), "getOnShowing() should return same handler as set using onShowingProperty().set()");
+        assertEquals(handlers[1], mbtn.getOnShown(), "getOnShown() should return same handler as set using onShownProperty().set()");
+        assertEquals(handlers[2], mbtn.getOnHiding(), "getOnHiding() should return same handler as set using onHidingProperty().set()");
+        assertEquals(handlers[3], mbtn.getOnHidden(), "getOnHidden() should return same handler as set using onHiddenProperty().set()");
 
-        assertEquals("onShowingProperty().get() should return same handler as "
-            + "set using onShowingProperty().set()", handlers[0], mbtn.onShowingProperty().get());
-        assertEquals("onShownProperty().get() should return same handler as "
-            + "set using onShownProperty().set()", handlers[1], mbtn.onShownProperty().get());
-        assertEquals("onHidingProperty().get() should return same handler as "
-            + "set using onHidingProperty().set()", handlers[2], mbtn.onHidingProperty().get());
-        assertEquals("onHiddenProperty().get() should return same handler as "
-            + "set using onHiddenProperty().set()", handlers[3], mbtn.onHiddenProperty().get());
+        assertEquals(handlers[0], mbtn.onShowingProperty().get(), "onShowingProperty().get() should return same handler as set using onShowingProperty().set()");
+        assertEquals(handlers[1], mbtn.onShownProperty().get(), "onShownProperty().get() should return same handler as set using onShownProperty().set()");
+        assertEquals(handlers[2], mbtn.onHidingProperty().get(), "onHidingProperty().get() should return same handler as set using onHidingProperty().set()");
+        assertEquals(handlers[3], mbtn.onHiddenProperty().get(), "onHiddenProperty().get() should return same handler as set using onHiddenProperty().set()");
 
         mbtn.onShowingProperty().set(null);
         mbtn.onShownProperty().set(null);
         mbtn.onHidingProperty().set(null);
         mbtn.onHiddenProperty().set(null);
 
-        assertEquals("getOnShowing() should return same handler as set using "
-            + "onShowingProperty().set()", null, mbtn.getOnShowing());
-        assertEquals("getOnShown() should return same handler as set using "
-            + "onShownProperty().set()", null, mbtn.getOnShown());
-        assertEquals("getOnHiding() should return same handler as set using "
-            + "onHidingProperty().set()", null, mbtn.getOnHiding());
-        assertEquals("getOnHidden() should return same handler as set using "
-            + "onHiddenProperty().set()", null, mbtn.getOnHidden());
+        assertEquals(null, mbtn.getOnShowing(), "getOnShowing() should return same handler as set using onShowingProperty().set()");
+        assertEquals(null, mbtn.getOnShown(), "getOnShown() should return same handler as set using onShownProperty().set()");
+        assertEquals(null, mbtn.getOnHiding(), "getOnHiding() should return same handler as set using onHidingProperty().set()");
+        assertEquals(null, mbtn.getOnHidden(), "getOnHidden() should return same handler as set using onHiddenProperty().set()");
 
-        assertEquals("onShowingProperty().get() should return same handler as "
-            + "set using onShowingProperty().set()", null, mbtn.onShowingProperty().get());
-        assertEquals("onShownProperty().get() should return same handler as "
-            + "set using onShownProperty().set()", null, mbtn.onShownProperty().get());
-        assertEquals("onHidingProperty().get() should return same handler as "
-            + "set using onHidingProperty().set()", null, mbtn.onHidingProperty().get());
-        assertEquals("onHiddenProperty().get() should return same handler as "
-            + "set using onHiddenProperty().set()", null, mbtn.onHiddenProperty().get());
+        assertEquals(null, mbtn.onShowingProperty().get(), "onShowingProperty().get() should return same handler as set using onShowingProperty().set()");
+        assertEquals(null, mbtn.onShownProperty().get(), "onShownProperty().get() should return same handler as set using onShownProperty().set()");
+        assertEquals(null, mbtn.onHidingProperty().get(), "onHidingProperty().get() should return same handler as set using onHidingProperty().set()");
+        assertEquals(null, mbtn.onHiddenProperty().get(), "onHiddenProperty().get() should return same handler as set using onHiddenProperty().set()");
     }
 
     // Test for JDK-8177633
@@ -545,14 +504,10 @@ public class MenuButtonTest {
         mbtn.show();
         mbtn.hide();
 
-        assertEquals("MenuButton.ON_SHOWING event listener should  "
-            + "get called once.", 1, onShowing);
-        assertEquals("MenuButton.ON_SHOWN event listener should  "
-            + "get called once.", 1, onShown);
-        assertTrue("MenuButton.ON_SHOWING event should be received "
-            + "before MenuButton.ON_SHOWN.", onShowingOrderTest);
-        assertTrue("MenuButton.ON_SHOWN event should be received "
-            + "after MenuButton.ON_SHOWING.", onShownOrderTest);
+        assertEquals(1, onShowing, "MenuButton.ON_SHOWING event listener should get called once.");
+        assertEquals(1, onShown, "MenuButton.ON_SHOWN event listener should get called once.");
+        assertTrue(onShowingOrderTest, "MenuButton.ON_SHOWING event should be received before MenuButton.ON_SHOWN.");
+        assertTrue(onShownOrderTest, "MenuButton.ON_SHOWN event should be received after MenuButton.ON_SHOWING.");
     }
 
     // Test for JDK-8177633
@@ -576,14 +531,10 @@ public class MenuButtonTest {
         mbtn.show();
         mbtn.hide();
 
-        assertEquals("MenuButton.ON_HIDING event listener should "
-            + "get called once.", 1, onHiding);
-        assertEquals("MenuButton.ON_HIDDEN event listener should "
-            + "get called once.", 1, onHidden);
-        assertTrue("MenuButton.ON_HIDING event should be received "
-            + "before MenuButton.ON_HIDDEN.", onHidingOrderTest);
-        assertTrue("MenuButton.ON_HIDDEN event should be received "
-            + "after MenuButton.ON_HIDING.", onHiddenOrderTest);
+        assertEquals(1, onHiding, "MenuButton.ON_HIDING event listener should get called once.");
+        assertEquals(1, onHidden, "MenuButton.ON_HIDDEN event listener should get called once.");
+        assertTrue(onHidingOrderTest, "MenuButton.ON_HIDING event should be received before MenuButton.ON_HIDDEN.");
+        assertTrue(onHiddenOrderTest, "MenuButton.ON_HIDDEN event should be received after MenuButton.ON_HIDING.");
     }
 
     // Test for JDK-8177633
@@ -609,48 +560,91 @@ public class MenuButtonTest {
         });
 
         mbtn.show();
-        assertEquals("MenuButton.ON_SHOWING event listener should "
-            + "get called once.", 1, onShowing);
-        assertEquals("MenuButton.ON_SHOWN event listener should "
-            + "get called once.", 1, onShown);
-        assertEquals("MenuButton.ON_HIDING event should not be "
-            + "received while showing.", 0, onHiding);
-        assertEquals("MenuButton.ON_HIDDEN event should not be "
-            + "received while showing.", 0, onHidden);
+        assertEquals(1, onShowing, "MenuButton.ON_SHOWING event listener should get called once.");
+        assertEquals(1, onShown, "MenuButton.ON_SHOWN event listener should get called once.");
+        assertEquals(0, onHiding, "MenuButton.ON_HIDING event should not be received while showing.");
+        assertEquals(0, onHidden, "MenuButton.ON_HIDDEN event should not be received while showing.");
 
         onShown = 0;
         onShowing = 0;
         mbtn.hide();
-        assertEquals("MenuButton.ON_HIDING event listener should "
-            + "get called once.", 1, onHiding);
-        assertEquals("MenuButton.ON_HIDDEN event listener should "
-            + "get called once.", 1, onHidden);
-        assertEquals("MenuButton.ON_SHOWING event should not be "
-            + "received while hiding.", 0, onShowing);
-        assertEquals("MenuButton.ON_SHOWN event should not be "
-            + "received while showing.", 0, onShown);
+        assertEquals(1, onHiding, "MenuButton.ON_HIDING event listener should get called once.");
+        assertEquals(1, onHidden, "MenuButton.ON_HIDDEN event listener should get called once.");
+        assertEquals(0, onShowing, "MenuButton.ON_SHOWING event should not be received while hiding.");
+        assertEquals(0, onShown, "MenuButton.ON_SHOWN event should not be received while showing.");
     }
 
     // Test for JDK-8177633
     @Test public void test_onShowHidePropertyAttribs() {
         MenuButton mbtn = new MenuButton();
 
-        assertEquals("MenuButton.onShowing name should be \"onShowing\".",
-            "onShowing", mbtn.onShowingProperty().getName());
-        assertEquals("MenuButton.onShown name should be \"onShown\".",
-            "onShown", mbtn.onShownProperty().getName());
-        assertEquals("MenuButton.onHiding name should be \"onHiding\".",
-            "onHiding", mbtn.onHidingProperty().getName());
-        assertEquals("MenuButton.onHidden name should be \"onHidden\".",
-            "onHidden", mbtn.onHiddenProperty().getName());
+        assertEquals("onShowing", mbtn.onShowingProperty().getName(), "MenuButton.onShowing name should be \"onShowing\".");
+        assertEquals("onShown", mbtn.onShownProperty().getName(), "MenuButton.onShown name should be \"onShown\".");
+        assertEquals("onHiding", mbtn.onHidingProperty().getName(), "MenuButton.onHiding name should be \"onHiding\".");
+        assertEquals("onHidden", mbtn.onHiddenProperty().getName(), "MenuButton.onHidden name should be \"onHidden\".");
 
-        assertEquals("MenuButton.onShowing bean should be MenuButton object.",
-            mbtn, mbtn.onShowingProperty().getBean());
-        assertEquals("MenuButton.onShown bean should be MenuButton object.",
-            mbtn, mbtn.onShownProperty().getBean());
-        assertEquals("MenuButton.onHiding bean should be MenuButton object.",
-            mbtn, mbtn.onHidingProperty().getBean());
-        assertEquals("MenuButton.onHidden bean should be MenuButton object.",
-            mbtn, mbtn.onHiddenProperty().getBean());
+        assertEquals(mbtn, mbtn.onShowingProperty().getBean(), "MenuButton.onShowing bean should be MenuButton object.");
+        assertEquals(mbtn, mbtn.onShownProperty().getBean(), "MenuButton.onShown bean should be MenuButton object.");
+        assertEquals(mbtn, mbtn.onHidingProperty().getBean(), "MenuButton.onHiding bean should be MenuButton object.");
+        assertEquals(mbtn, mbtn.onHiddenProperty().getBean(), "MenuButton.onHidden bean should be MenuButton object.");
+    }
+
+    /**
+     * JDK-8295426 menu button popup is not shown on mouse click after skin is
+     * replaced.
+     */
+    @Test
+    public void testMenuButtonPopupAfterSkinReplaced() {
+        MenuItem mi = new MenuItem("MenuItem1");
+
+        MenuButton b = new MenuButton("Menu Button");
+        b.getItems().add(mi);
+
+        VBox root = new VBox();
+        root.getChildren().addAll(b);
+
+        Scene scene = new Scene(root, 800, 600);
+        Stage stage = new Stage();
+        // keep stage at 0,0 so the screen X/Y to be the same as local Node X/Y, for
+        // MouseEventGenerator
+        stage.setX(0);
+        stage.setY(0);
+        stage.setScene(scene);
+        stage.show();
+        stage.requestFocus();
+
+        Toolkit.getToolkit().firePulse();
+
+        MenuButtonSkin skin = (MenuButtonSkin)b.getSkin();
+        assertTrue(skin != null);
+
+        double offset = 15;
+        double x = (b.localToScene(b.getLayoutBounds())).getMinX() + offset;
+        double y = (b.localToScene(b.getLayoutBounds())).getMinY() + offset;
+
+        // click on menu button to show the popup
+        SceneHelper.processMouseEvent(scene, MouseEventGenerator.generateMouseEvent(MouseEvent.MOUSE_PRESSED, x, y));
+        SceneHelper.processMouseEvent(scene, MouseEventGenerator.generateMouseEvent(MouseEvent.MOUSE_RELEASED, x, y));
+        assertTrue(b.isShowing());
+
+        // change the skin
+        b.setSkin(new MenuButtonSkin(b));
+        b.requestFocus();
+        Toolkit.getToolkit().firePulse();
+        assertTrue(b.isFocused());
+
+        // click once more on menu button to hide the popup
+        SceneHelper.processMouseEvent(scene, MouseEventGenerator.generateMouseEvent(MouseEvent.MOUSE_PRESSED, x, y));
+        SceneHelper.processMouseEvent(scene, MouseEventGenerator.generateMouseEvent(MouseEvent.MOUSE_RELEASED, x, y));
+        Toolkit.getToolkit().firePulse();
+        assertFalse(b.isShowing()); // fails JDK-8295426
+
+        // click again to show the popup
+        SceneHelper.processMouseEvent(scene, MouseEventGenerator.generateMouseEvent(MouseEvent.MOUSE_PRESSED, x, y));
+        SceneHelper.processMouseEvent(scene, MouseEventGenerator.generateMouseEvent(MouseEvent.MOUSE_RELEASED, x, y));
+        Toolkit.getToolkit().firePulse();
+        assertTrue(b.isShowing());
+
+        stage.hide();
     }
 }

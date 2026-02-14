@@ -33,10 +33,10 @@ namespace JSC {
 
 class InternalFunctionAllocationProfile {
 public:
-    static inline ptrdiff_t offsetOfStructureID() { return OBJECT_OFFSETOF(InternalFunctionAllocationProfile, m_structureID); }
+    static constexpr ptrdiff_t offsetOfStructureID() { return OBJECT_OFFSETOF(InternalFunctionAllocationProfile, m_structureID); }
 
     Structure* structure() { return m_structureID.get(); }
-    Structure* createAllocationStructureFromBase(VM&, JSGlobalObject*, JSCell* owner, JSObject* prototype, Structure* base);
+    Structure* createAllocationStructureFromBase(VM&, JSGlobalObject*, JSCell* owner, JSObject* prototype, Structure* base, InlineWatchpointSet&);
 
     void clear() { m_structureID.clear(); }
     template<typename Visitor> void visitAggregate(Visitor& visitor) { visitor.append(m_structureID); }
@@ -45,9 +45,9 @@ private:
     WriteBarrierStructureID m_structureID;
 };
 
-inline Structure* InternalFunctionAllocationProfile::createAllocationStructureFromBase(VM& vm, JSGlobalObject* baseGlobalObject, JSCell* owner, JSObject* prototype, Structure* baseStructure)
+inline Structure* InternalFunctionAllocationProfile::createAllocationStructureFromBase(VM& vm, JSGlobalObject* baseGlobalObject, JSCell* owner, JSObject* prototype, Structure* baseStructure, InlineWatchpointSet& watchpointSet)
 {
-    ASSERT(!m_structureID || m_structureID.get()->classInfo() != baseStructure->classInfo() || m_structureID->globalObject() != baseStructure->globalObject());
+    ASSERT(!m_structureID || m_structureID.get()->classInfoForCells() != baseStructure->classInfoForCells() || m_structureID->globalObject() != baseStructure->globalObject());
     ASSERT(baseStructure->hasMonoProto());
 
     Structure* structure;
@@ -56,10 +56,17 @@ inline Structure* InternalFunctionAllocationProfile::createAllocationStructureFr
     if (prototype == baseStructure->storedPrototype())
         structure = baseStructure;
     else
-        structure = vm.structureCache.emptyStructureForPrototypeFromBaseStructure(baseGlobalObject, prototype, baseStructure);
+        structure = baseGlobalObject->structureCache().emptyStructureForPrototypeFromBaseStructure(baseGlobalObject, prototype, baseStructure);
 
     // Ensure that if another thread sees the structure, it will see it properly created.
     WTF::storeStoreFence();
+
+    // It's possible to get here because some JSFunction got passed to two different InternalFunctions. e.g.
+    // function Foo() { }
+    // Reflect.construct(Promise, [], Foo);
+    // Reflect.construct(Int8Array, [], Foo);
+    if (m_structureID && m_structureID.value() != structure->id()) [[unlikely]]
+        watchpointSet.fireAll(vm, "InternalFunctionAllocationProfile rotated to a new structure");
 
     m_structureID.set(vm, owner, structure);
     return structure;

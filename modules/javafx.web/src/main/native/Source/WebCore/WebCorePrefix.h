@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2007, 2013 Apple Inc.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2013 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -35,9 +35,9 @@
 
 #if defined(__APPLE__)
 #ifdef __cplusplus
-#define NULL __null
+#include <cstddef>
 #else
-#define NULL ((void *)0)
+#include <stddef.h>
 #endif
 #endif
 
@@ -73,8 +73,16 @@
 
 #ifdef __cplusplus
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
+#include <functional>
+#include <list>
+#include <memory>
+#include <mutex>
 #include <new>
+#include <string>
+#include <typeinfo>
+#include <wtf/Variant.h>
 #endif
 
 #if defined(__APPLE__)
@@ -123,30 +131,17 @@
 #endif
 #endif
 
-#if PLATFORM(WIN_CAIRO)
+#if PLATFORM(WIN)
 #include <windows.h>
 #else
 
 #if OS(WINDOWS)
-
-#if USE(CG)
-// FIXME <rdar://problem/8208868> Remove support for obsolete ColorSync API, CoreServices header in CoreGraphics
-// We can remove this once the new ColorSync APIs are available in an internal Safari SDK.
-#include <ColorSync/ColorSync.h>
-#ifdef __COLORSYNCDEPRECATED__
-#define COREGRAPHICS_INCLUDES_CORESERVICES_HEADER
-#define OBSOLETE_COLORSYNC_API
-#endif
-#endif
-
-#if USE(CFURLCONNECTION)
-#include <CFNetwork/CFNetwork.h>
-// On Windows, dispatch.h needs to be included before certain CFNetwork headers.
-#include <dispatch/dispatch.h>
-#endif
-
 #include <windows.h>
 #endif // OS(WINDOWS)
+
+#if USE(OS_LOG)
+#include <os/log.h>
+#endif
 
 #if PLATFORM(IOS_FAMILY)
 #include <MobileCoreServices/MobileCoreServices.h>
@@ -175,14 +170,14 @@
 
 #ifdef __cplusplus
 
-#ifdef __OBJC__
-#if !PLATFORM(WIN) && (!PLATFORM(MAC) || __MAC_OS_X_VERSION_MAX_ALLOWED >= 101300)
-#import <wtf/FastMalloc.h>
-#import <wtf/HashMap.h>
-#import <wtf/StdLibExtras.h>
-#import <wtf/text/AtomString.h>
-#import <wtf/text/WTFString.h>
-#endif
+#if !PLATFORM(WIN)
+#include <wtf/FastMalloc.h>
+#include <wtf/HashMap.h>
+#include <wtf/StdLibExtras.h>
+#include <wtf/TZoneMalloc.h>
+#include <wtf/TZoneMallocInlines.h>
+#include <wtf/text/AtomString.h>
+#include <wtf/text/WTFString.h>
 #endif
 
 #define new ("if you use new/delete make sure to include config.h at the top of the file"())
@@ -197,3 +192,4 @@
 #undef try
 #undef catch
 #endif
+

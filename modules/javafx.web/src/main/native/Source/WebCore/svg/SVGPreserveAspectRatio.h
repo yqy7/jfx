@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include "ExceptionOr.h"
 #include "SVGPreserveAspectRatioValue.h"
 #include "SVGValueProperty.h"
 
@@ -54,7 +55,7 @@ public:
     ExceptionOr<void> setAlign(float value)
     {
         if (isReadOnly())
-            return Exception { NoModificationAllowedError };
+            return Exception { ExceptionCode::NoModificationAllowedError };
 
         auto result = m_value.setAlign(value);
         if (result.hasException())
@@ -69,7 +70,7 @@ public:
     ExceptionOr<void> setMeetOrSlice(float value)
     {
         if (isReadOnly())
-            return Exception { NoModificationAllowedError };
+            return Exception { ExceptionCode::NoModificationAllowedError };
 
         auto result = m_value.setMeetOrSlice(value);
         if (result.hasException())

@@ -27,6 +27,19 @@
 
 namespace WebCore {
 
+Ref<SkewTransformOperation> SkewTransformOperation::create(double angleX, double angleY, TransformOperation::Type type)
+{
+    return adoptRef(*new SkewTransformOperation(angleX, angleY, type));
+}
+
+SkewTransformOperation::SkewTransformOperation(double angleX, double angleY, TransformOperation::Type type)
+    : TransformOperation(type)
+    , m_angleX(angleX)
+    , m_angleY(angleY)
+{
+    RELEASE_ASSERT(isSkewTransformOperationType(type));
+}
+
 bool SkewTransformOperation::operator==(const TransformOperation& other) const
 {
     if (!isSameType(other))
@@ -52,7 +65,7 @@ Ref<TransformOperation> SkewTransformOperation::blend(const TransformOperation* 
 
 void SkewTransformOperation::dump(TextStream& ts) const
 {
-    ts << type() << "(" << TextStream::FormatNumberRespectingIntegers(m_angleX) << "deg, " << TextStream::FormatNumberRespectingIntegers(m_angleY) << "deg)";
+    ts << type() << '(' << TextStream::FormatNumberRespectingIntegers(m_angleX) << "deg, "_s << TextStream::FormatNumberRespectingIntegers(m_angleY) << "deg)"_s;
 }
 
 } // namespace WebCore

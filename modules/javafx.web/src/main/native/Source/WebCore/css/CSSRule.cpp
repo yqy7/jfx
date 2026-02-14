@@ -22,19 +22,33 @@
 #include "config.h"
 #include "CSSRule.h"
 
+#include "CSSScopeRule.h"
+#include "CSSStyleRule.h"
 #include "CSSStyleSheet.h"
 #include "StyleRule.h"
 #include "StyleSheetContents.h"
+#include "css/parser/CSSParserEnum.h"
 
 namespace WebCore {
 
-struct SameSizeAsCSSRule : public RefCounted<SameSizeAsCSSRule> {
+struct SameSizeAsCSSRule : public RefCountedAndCanMakeWeakPtr<SameSizeAsCSSRule> {
     virtual ~SameSizeAsCSSRule();
     unsigned char bitfields;
     void* pointerUnion;
 };
 
-COMPILE_ASSERT(sizeof(CSSRule) == sizeof(SameSizeAsCSSRule), CSSRule_should_stay_small);
+static_assert(sizeof(CSSRule) == sizeof(SameSizeAsCSSRule), "CSSRule should stay small");
+
+unsigned short CSSRule::typeForCSSOM() const
+{
+    // "This enumeration is thus frozen in its current state, and no new new values will be
+    // added to reflect additional at-rules; all at-rules beyond the ones listed above will return 0."
+    // https://drafts.csswg.org/cssom/#the-cssrule-interface
+    if (styleRuleType() >= firstUnexposedStyleRuleType)
+        return 0;
+
+    return enumToUnderlyingType(styleRuleType());
+}
 
 ExceptionOr<void> CSSRule::setCssText(const String&)
 {
@@ -43,8 +57,37 @@ ExceptionOr<void> CSSRule::setCssText(const String&)
 
 const CSSParserContext& CSSRule::parserContext() const
 {
-    CSSStyleSheet* styleSheet = parentStyleSheet();
+    RefPtr styleSheet = parentStyleSheet();
     return styleSheet ? styleSheet->contents().parserContext() : strictCSSParserContext();
+}
+
+bool CSSRule::hasStyleRuleAncestor() const
+{
+    RefPtr current = this->parentRule();
+    while (current) {
+        if (current->styleRuleType() == StyleRuleType::Style)
+            return true;
+
+        current = current->parentRule();
+    }
+    return false;
+}
+
+CSSParserEnum::NestedContext CSSRule::nestedContext() const
+{
+    for (RefPtr parentRule = this->parentRule(); parentRule; parentRule = parentRule->parentRule()) {
+        if (is<CSSStyleRule>(*parentRule))
+            return CSSParserEnum::NestedContextType::Style;
+        if (is<CSSScopeRule>(*parentRule))
+            return CSSParserEnum::NestedContextType::Scope;
+    }
+
+    return { };
+}
+
+RefPtr<StyleRuleWithNesting> CSSRule::prepareChildStyleRuleForNesting(StyleRule&)
+{
+    return nullptr;
 }
 
 } // namespace WebCore

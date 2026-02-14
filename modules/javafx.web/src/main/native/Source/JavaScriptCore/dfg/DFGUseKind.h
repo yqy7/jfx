@@ -33,7 +33,7 @@
 
 namespace JSC { namespace DFG {
 
-enum UseKind {
+enum UseKind : uint8_t {
     // The DFG has 3 representations of values used:
 
     // 1. The JSValue representation for a JSValue that must be stored in a GP
@@ -58,6 +58,7 @@ enum UseKind {
     PromiseObjectUse,
     RegExpObjectUse,
     ProxyObjectUse,
+    GlobalProxyUse,
     DerivedArrayUse,
     ObjectOrOtherUse,
     StringIdentUse,
@@ -72,6 +73,8 @@ enum UseKind {
     DateObjectUse,
     MapObjectUse,
     SetObjectUse,
+    MapIteratorObjectUse,
+    SetIteratorObjectUse,
     WeakMapObjectUse,
     WeakSetObjectUse,
     DataViewObjectUse,
@@ -143,6 +146,8 @@ inline SpeculatedType typeFilterFor(UseKind useKind)
         return SpecRegExpObject;
     case ProxyObjectUse:
         return SpecProxyObject;
+    case GlobalProxyUse:
+        return SpecGlobalProxy;
     case DerivedArrayUse:
         return SpecDerivedArray;
     case ObjectOrOtherUse:
@@ -172,6 +177,10 @@ inline SpeculatedType typeFilterFor(UseKind useKind)
         return SpecMapObject;
     case SetObjectUse:
         return SpecSetObject;
+    case MapIteratorObjectUse:
+        return SpecMapIteratorObject;
+    case SetIteratorObjectUse:
+        return SpecSetIteratorObject;
     case WeakMapObjectUse:
         return SpecWeakMapObject;
     case WeakSetObjectUse:
@@ -242,6 +251,17 @@ inline bool isDouble(UseKind kind)
     }
 }
 
+inline bool isInt32(UseKind kind)
+{
+    switch (kind) {
+    case Int32Use:
+    case KnownInt32Use:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // Returns true if the use kind only admits cells, and is therefore appropriate for
 // SpeculateCellOperand in the DFG or lowCell() in the FTL.
 inline bool isCell(UseKind kind)
@@ -256,6 +276,7 @@ inline bool isCell(UseKind kind)
     case RegExpObjectUse:
     case PromiseObjectUse:
     case ProxyObjectUse:
+    case GlobalProxyUse:
     case DerivedArrayUse:
     case StringIdentUse:
     case StringUse:
@@ -267,6 +288,8 @@ inline bool isCell(UseKind kind)
     case DateObjectUse:
     case MapObjectUse:
     case SetObjectUse:
+    case MapIteratorObjectUse:
+    case SetIteratorObjectUse:
     case WeakMapObjectUse:
     case WeakSetObjectUse:
     case DataViewObjectUse:

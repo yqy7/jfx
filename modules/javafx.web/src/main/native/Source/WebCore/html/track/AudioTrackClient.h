@@ -30,6 +30,15 @@
 #include <wtf/WeakPtr.h>
 
 namespace WebCore {
+class AudioTrackClient;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::AudioTrackClient> : std::true_type { };
+}
+
+namespace WebCore {
 
 class AudioTrack;
 
@@ -41,6 +50,7 @@ public:
     virtual void audioTrackKindChanged(AudioTrack&) { }
     virtual void audioTrackLabelChanged(AudioTrack&) { }
     virtual void audioTrackLanguageChanged(AudioTrack&) { }
+    virtual void audioTrackConfigurationChanged(AudioTrack&) { }
     virtual void willRemoveAudioTrack(AudioTrack&) { }
 };
 

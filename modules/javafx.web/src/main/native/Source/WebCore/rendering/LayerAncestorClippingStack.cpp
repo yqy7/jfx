@@ -29,12 +29,15 @@
 #include "GraphicsLayer.h"
 #include "ScrollingConstraints.h"
 #include "ScrollingCoordinator.h"
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/TextStream.h>
 
 namespace WebCore {
 
+WTF_MAKE_TZONE_ALLOCATED_IMPL(LayerAncestorClippingStack);
+
 LayerAncestorClippingStack::LayerAncestorClippingStack(Vector<CompositedClipData>&& clipDataStack)
-    : m_stack(WTF::map(WTFMove(clipDataStack), [](auto&& clipDataEntry) { return ClippingStackEntry { WTFMove(clipDataEntry), 0, nullptr }; }))
+    : m_stack(WTF::map(WTFMove(clipDataStack), [](CompositedClipData&& clipDataEntry) { return ClippingStackEntry { WTFMove(clipDataEntry), std::nullopt, nullptr, nullptr }; }))
 {
 }
 
@@ -66,11 +69,12 @@ void LayerAncestorClippingStack::clear(ScrollingCoordinator* scrollingCoordinato
     for (auto& entry : m_stack) {
         if (entry.overflowScrollProxyNodeID) {
             ASSERT(scrollingCoordinator);
-            scrollingCoordinator->unparentChildrenAndDestroyNode(entry.overflowScrollProxyNodeID);
-            entry.overflowScrollProxyNodeID = 0;
+            scrollingCoordinator->unparentChildrenAndDestroyNode(*entry.overflowScrollProxyNodeID);
+            entry.overflowScrollProxyNodeID = std::nullopt;
         }
 
         GraphicsLayer::unparentAndClear(entry.clippingLayer);
+        GraphicsLayer::unparentAndClear(entry.scrollingLayer);
     }
 }
 
@@ -78,39 +82,39 @@ void LayerAncestorClippingStack::detachFromScrollingCoordinator(ScrollingCoordin
 {
     for (auto& entry : m_stack) {
         if (entry.overflowScrollProxyNodeID) {
-            scrollingCoordinator.unparentChildrenAndDestroyNode(entry.overflowScrollProxyNodeID);
-            entry.overflowScrollProxyNodeID = 0;
+            scrollingCoordinator.unparentChildrenAndDestroyNode(*entry.overflowScrollProxyNodeID);
+            entry.overflowScrollProxyNodeID = std::nullopt;
         }
     }
 }
 
-GraphicsLayer* LayerAncestorClippingStack::firstClippingLayer() const
+GraphicsLayer* LayerAncestorClippingStack::firstLayer() const
 {
-    return m_stack.first().clippingLayer.get();
+    return m_stack.first().childForSuperlayers();
 }
 
-GraphicsLayer* LayerAncestorClippingStack::lastClippingLayer() const
+GraphicsLayer* LayerAncestorClippingStack::lastLayer() const
 {
-    return m_stack.last().clippingLayer.get();
+    return m_stack.last().parentForSublayers();
 }
 
-ScrollingNodeID LayerAncestorClippingStack::lastOverflowScrollProxyNodeID() const
+std::optional<ScrollingNodeID> LayerAncestorClippingStack::lastOverflowScrollProxyNodeID() const
 {
     for (auto& entry : makeReversedRange(m_stack)) {
         if (entry.overflowScrollProxyNodeID)
             return entry.overflowScrollProxyNodeID;
     }
 
-    return 0;
+    return std::nullopt;
 }
 
 void LayerAncestorClippingStack::updateScrollingNodeLayers(ScrollingCoordinator& scrollingCoordinator)
 {
     for (const auto& entry : m_stack) {
-        if (!entry.clipData.isOverflowScroll)
+        if (!entry.clipData.isOverflowScroll || !entry.overflowScrollProxyNodeID)
             continue;
 
-        scrollingCoordinator.setNodeLayers(entry.overflowScrollProxyNodeID, { entry.clippingLayer.get() });
+        scrollingCoordinator.setNodeLayers(*entry.overflowScrollProxyNodeID, { entry.scrollingLayer.get() });
     }
 }
 
@@ -124,7 +128,7 @@ bool LayerAncestorClippingStack::updateWithClipData(ScrollingCoordinator* scroll
         auto& clipDataEntry = clipDataStack[i];
 
         if (i >= stackEntryCount) {
-            m_stack.append({ WTFMove(clipDataEntry), 0, nullptr });
+            m_stack.append({ WTFMove(clipDataEntry), { }, nullptr, nullptr });
             stackChanged = true;
             continue;
         }
@@ -137,7 +141,7 @@ bool LayerAncestorClippingStack::updateWithClipData(ScrollingCoordinator* scroll
         if (existingEntry.clipData.isOverflowScroll && !clipDataEntry.isOverflowScroll) {
             ASSERT(scrollingCoordinator);
             scrollingCoordinator->unparentChildrenAndDestroyNode(existingEntry.overflowScrollProxyNodeID);
-            existingEntry.overflowScrollProxyNodeID = 0;
+            existingEntry.overflowScrollProxyNodeID = std::nullopt;
         }
 
         existingEntry.clipData = WTFMove(clipDataEntry);
@@ -170,13 +174,15 @@ Vector<CompositedClipData> LayerAncestorClippingStack::compositedClipData() cons
 
 static TextStream& operator<<(TextStream& ts, const LayerAncestorClippingStack::ClippingStackEntry& entry)
 {
-    ts.dumpProperty("layer", entry.clipData.clippingLayer.get());
-    ts.dumpProperty("clip", entry.clipData.clipRect);
-    ts.dumpProperty("isOverflowScroll", entry.clipData.isOverflowScroll);
+    ts.dumpProperty("clippingLayer"_s, entry.clipData.clippingLayer.get());
+    ts.dumpProperty("clip"_s, entry.clipData.clipRect);
+    ts.dumpProperty("isOverflowScroll"_s, entry.clipData.isOverflowScroll);
     if (entry.overflowScrollProxyNodeID)
-        ts.dumpProperty("overflowScrollProxyNodeID", entry.overflowScrollProxyNodeID);
+        ts.dumpProperty("overflowScrollProxyNodeID"_s, entry.overflowScrollProxyNodeID);
     if (entry.clippingLayer)
-        ts.dumpProperty("clippingLayer", entry.clippingLayer->primaryLayerID());
+        ts.dumpProperty("clippingLayer"_s, entry.clippingLayer->primaryLayerID());
+    if (entry.scrollingLayer)
+        ts.dumpProperty("scrollingLayer"_s, entry.scrollingLayer->primaryLayerID());
     return ts;
 }
 

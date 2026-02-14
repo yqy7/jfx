@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple, Inc. All Rights Reserved.
+ * Copyright (C) 2016 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,11 +25,22 @@
 
 #pragma once
 
+#include <wtf/WeakPtr.h>
+
+namespace WebCore {
+class LoadableScriptClient;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::LoadableScriptClient> : std::true_type { };
+}
+
 namespace WebCore {
 
 class LoadableScript;
 
-class LoadableScriptClient {
+class LoadableScriptClient : public CanMakeWeakPtr<LoadableScriptClient> {
 public:
     virtual ~LoadableScriptClient() = default;
 

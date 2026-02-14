@@ -29,7 +29,7 @@
 #include "ResizeObservation.h"
 #include "ResizeObserverCallback.h"
 #include <wtf/Lock.h>
-#include <wtf/RefCounted.h>
+#include <wtf/RefCountedAndCanMakeWeakPtr.h>
 #include <wtf/WeakPtr.h>
 
 namespace JSC {
@@ -45,18 +45,24 @@ class Element;
 struct ResizeObserverOptions;
 
 struct ResizeObserverData {
-    WTF_MAKE_STRUCT_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_STRUCT_FAST_ALLOCATED(ResizeObserverData);
     Vector<WeakPtr<ResizeObserver>> observers;
 };
 
-class ResizeObserver : public RefCounted<ResizeObserver>, public CanMakeWeakPtr<ResizeObserver> {
+using NativeResizeObserverCallback = void (*)(const Vector<Ref<ResizeObserverEntry>>&, ResizeObserver&);
+using JSOrNativeResizeObserverCallback = Variant<RefPtr<ResizeObserverCallback>, NativeResizeObserverCallback>;
+
+class ResizeObserver : public RefCountedAndCanMakeWeakPtr<ResizeObserver> {
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(ResizeObserver);
 public:
     static Ref<ResizeObserver> create(Document&, Ref<ResizeObserverCallback>&&);
+    static Ref<ResizeObserver> createNativeObserver(Document&, NativeResizeObserverCallback&&);
     ~ResizeObserver();
 
     bool hasObservations() const { return m_observations.size(); }
     bool hasActiveObservations() const { return m_activeObservations.size(); }
 
+    void observe(Element&);
     void observe(Element&, const ResizeObserverOptions&);
     void unobserve(Element&);
     void disconnect();
@@ -68,22 +74,34 @@ public:
     bool hasSkippedObservations() const { return m_hasSkippedObservations; }
     void setHasSkippedObservations(bool skipped) { m_hasSkippedObservations = skipped; }
 
-    ResizeObserverCallback* callbackConcurrently() { return m_callback.get(); }
+    void resetObservationSize(Element&);
+
+    const Vector<WeakPtr<Element, WeakPtrImplWithEventTargetData>>& activeObservationTargets() const WTF_REQUIRES_LOCK(m_observationTargetsLock) { return m_activeObservationTargets; }
+    const Vector<WeakPtr<Element, WeakPtrImplWithEventTargetData>>& targetsWaitingForFirstObservation() const WTF_REQUIRES_LOCK(m_observationTargetsLock) { return m_targetsWaitingForFirstObservation; }
+    Lock& observationTargetsLock() WTF_RETURNS_LOCK(m_observationTargetsLock) { return m_observationTargetsLock; }
+
+    ResizeObserverCallback* callbackConcurrently();
     bool isReachableFromOpaqueRoots(JSC::AbstractSlotVisitor&) const;
 
 private:
-    ResizeObserver(Document&, Ref<ResizeObserverCallback>&&);
+    ResizeObserver(Document&, JSOrNativeResizeObserverCallback&&);
 
     bool removeTarget(Element&);
     void removeAllTargets();
     bool removeObservation(const Element&);
+    void observeInternal(Element&, const ResizeObserverBoxOptions);
+    bool isNativeCallback();
+    bool isJSCallback();
 
-    WeakPtr<Document> m_document;
-    RefPtr<ResizeObserverCallback> m_callback;
+    WeakPtr<Document, WeakPtrImplWithEventTargetData> m_document;
+    JSOrNativeResizeObserverCallback m_JSOrNativeCallback;
     Vector<Ref<ResizeObservation>> m_observations;
 
     Vector<Ref<ResizeObservation>> m_activeObservations;
-    Vector<GCReachableRef<Element>> m_activeObservationTargets;
+    Vector<WeakPtr<Element, WeakPtrImplWithEventTargetData>> m_activeObservationTargets WTF_GUARDED_BY_LOCK(m_observationTargetsLock);
+    Vector<WeakPtr<Element, WeakPtrImplWithEventTargetData>> m_targetsWaitingForFirstObservation WTF_GUARDED_BY_LOCK(m_observationTargetsLock);
+
+    mutable Lock m_observationTargetsLock;
     bool m_hasSkippedObservations { false };
 };
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -110,7 +110,7 @@ public class PerspectiveTransform extends CoreEffect<RenderState> {
 
         tx[2][2] = 1.0F;
 
-        if ((dx3 == 0.0F) && (dy3 == 0.0F)) { // TODO: use tolerance (RT-27402)
+        if ((dx3 == 0.0F) && (dy3 == 0.0F)) { // TODO: use tolerance (JDK-8091598)
             tx[0][0] = urx - ulx;
             tx[0][1] = lrx - urx;
             tx[0][2] = ulx;
@@ -223,8 +223,8 @@ public class PerspectiveTransform extends CoreEffect<RenderState> {
         Effect input = getDefaultedInput(0, defaultInput);
         p = input.transform(p, defaultInput);
         BaseBounds b = input.getBounds(BaseTransform.IDENTITY_TRANSFORM, defaultInput);
-        float sx = (float) ((p.x - b.getMinX()) / b.getWidth());
-        float sy = (float) ((p.y - b.getMinY()) / b.getHeight());
+        float sx = (p.x - b.getMinX()) / b.getWidth();
+        float sy = (p.y - b.getMinY()) / b.getHeight();
         float dx = tx[0][0] * sx + tx[0][1] * sy + tx[0][2];
         float dy = tx[1][0] * sx + tx[1][1] * sy + tx[1][2];
         float dw = tx[2][0] * sx + tx[2][1] * sy + tx[2][2];
@@ -236,8 +236,8 @@ public class PerspectiveTransform extends CoreEffect<RenderState> {
     public Point2D untransform(Point2D p, Effect defaultInput) {
         setupTransforms(BaseTransform.IDENTITY_TRANSFORM);
         Effect input = getDefaultedInput(0, defaultInput);
-        float dx = (float) p.x;
-        float dy = (float) p.y;
+        float dx = p.x;
+        float dy = p.y;
         float itx[][] = state.getITX();
         float sx = itx[0][0] * dx + itx[0][1] * dy + itx[0][2];
         float sy = itx[1][0] * dx + itx[1][1] * dy + itx[1][2];
@@ -264,7 +264,7 @@ public class PerspectiveTransform extends CoreEffect<RenderState> {
                                       Object renderHelper,
                                       Effect defaultInput)
     {
-        // RT-27402
+        // JDK-8091598
         // TODO: We could inverse map the output bounds through the perspective
         // transform to see what portions of the input contribute to the result,
         // but until we implement such a process we will just use the stock
@@ -281,8 +281,8 @@ public class PerspectiveTransform extends CoreEffect<RenderState> {
     public DirtyRegionContainer getDirtyRegions(Effect defaultInput, DirtyRegionPool regionPool) {
         DirtyRegionContainer drc = regionPool.checkOut();
 
-        //RT-28197 - Dirty regions could be computed in more efficient way
-        drc.deriveWithNewRegion((RectBounds) getBounds(BaseTransform.IDENTITY_TRANSFORM, defaultInput));
+        //JDK-8090678 - Dirty regions could be computed in more efficient way
+        drc.deriveWithNewRegion(getBounds(BaseTransform.IDENTITY_TRANSFORM, defaultInput));
 
         return drc;
     }

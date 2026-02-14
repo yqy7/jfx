@@ -25,8 +25,8 @@
 
 #pragma once
 
+#include "CachedResource.h"
 #include "ResourceCryptographicDigest.h"
-
 #include <optional>
 #include <wtf/Forward.h>
 
@@ -34,8 +34,19 @@ namespace WebCore {
 
 class CachedResource;
 
-bool matchIntegrityMetadata(const CachedResource&, const String& integrityMetadata);
+bool matchIntegrityMetadataSlow(const CachedResource&, const String& integrityMetadata);
+void reportHashesIfNeeded(const CachedResource&);
 String integrityMismatchDescription(const CachedResource&, const String& integrityMetadata);
 std::optional<Vector<EncodedResourceCryptographicDigest>> parseIntegrityMetadata(const String& integrityMetadata);
+
+inline bool matchIntegrityMetadata(const CachedResource& resource, const String& integrityMetadata)
+{
+    if (integrityMetadata.isEmpty() && !resource.isHashReportingNeeded()) [[likely]]
+        return true;
+    bool result = matchIntegrityMetadataSlow(resource, integrityMetadata);
+    if (result)
+        reportHashesIfNeeded(resource);
+    return result;
+}
 
 }

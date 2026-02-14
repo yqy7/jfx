@@ -29,15 +29,15 @@
 
 #include "MediaPlaybackTargetContext.h"
 #include <wtf/Forward.h>
-#include <wtf/RefCounted.h>
+#include <wtf/ThreadSafeRefCounted.h>
 
 namespace WebCore {
 
-class MediaPlaybackTarget : public RefCounted<MediaPlaybackTarget> {
+class MediaPlaybackTarget : public ThreadSafeRefCounted<MediaPlaybackTarget> {
 public:
     virtual ~MediaPlaybackTarget() = default;
 
-    enum class TargetType : uint8_t { AVFoundation, Mock };
+    enum class TargetType : uint8_t { AVFoundation, Mock, Serialized };
     virtual TargetType targetType() const = 0;
     virtual const MediaPlaybackTargetContext& targetContext() const = 0;
 

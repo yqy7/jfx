@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,32 +26,35 @@
 package javafx.scene.chart;
 
 
-import java.util.*;
-
-import javafx.animation.*;
-import javafx.application.Platform;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import javafx.animation.FadeTransition;
+import javafx.animation.Interpolator;
+import javafx.animation.KeyFrame;
+import javafx.animation.KeyValue;
+import javafx.animation.ParallelTransition;
+import javafx.animation.Timeline;
 import javafx.beans.NamedArg;
 import javafx.beans.property.DoubleProperty;
-import javafx.beans.value.WritableValue;
 import javafx.collections.FXCollections;
+import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
+import javafx.css.CssMetaData;
+import javafx.css.PseudoClass;
+import javafx.css.Styleable;
+import javafx.css.StyleableDoubleProperty;
+import javafx.css.StyleableProperty;
+import javafx.css.converter.SizeConverter;
 import javafx.geometry.Orientation;
 import javafx.scene.AccessibleRole;
 import javafx.scene.Node;
 import javafx.scene.layout.StackPane;
 import javafx.util.Duration;
-
 import com.sun.javafx.charts.Legend.LegendItem;
-
-import javafx.css.StyleableDoubleProperty;
-import javafx.css.CssMetaData;
-import javafx.css.PseudoClass;
-
-import javafx.css.converter.SizeConverter;
-
-import javafx.collections.ListChangeListener;
-import javafx.css.Styleable;
-import javafx.css.StyleableProperty;
 
 
 /**
@@ -59,6 +62,9 @@ import javafx.css.StyleableProperty;
  * data values for a category. The bars can be vertical or horizontal depending
  * on which axis is a category axis.
  * The bar for each series is stacked on top of the previous series.
+ *
+ * @param <X> the X axis value type
+ * @param <Y> the Y axis value type
  * @since JavaFX 2.1
  */
 public class StackedBarChart<X, Y> extends XYChart<X, Y> {
@@ -69,8 +75,9 @@ public class StackedBarChart<X, Y> extends XYChart<X, Y> {
     private final Orientation orientation;
     private CategoryAxis categoryAxis;
     private ValueAxis valueAxis;
-    // RT-23125 handling data removal when a category is removed.
-    private ListChangeListener<String> categoriesListener = new ListChangeListener<String>() {
+    private ParallelTransition parallelTransition;
+    // JDK-8115252 handling data removal when a category is removed.
+    private ListChangeListener<String> categoriesListener = new ListChangeListener<>() {
         @Override public void onChanged(ListChangeListener.Change<? extends String> c) {
             while (c.next()) {
                 for(String cat : c.getRemoved()) {
@@ -109,6 +116,7 @@ public class StackedBarChart<X, Y> extends XYChart<X, Y> {
             return "categoryGap";
         }
 
+        @Override
         public CssMetaData<StackedBarChart<?,?>,Number> getCssMetaData() {
             return StackedBarChart.StyleableProperties.CATEGORY_GAP;
         }
@@ -198,11 +206,11 @@ public class StackedBarChart<X, Y> extends XYChart<X, Y> {
         Map<String, List<Data<X, Y>>> categoryMap = seriesCategoryMap.get(series);
 
         if (categoryMap == null) {
-            categoryMap = new HashMap<String, List<Data<X, Y>>>();
+            categoryMap = new HashMap<>();
             seriesCategoryMap.put(series, categoryMap);
         }
         // list to hold more that one bar "positive and negative"
-        List<Data<X, Y>> itemList = categoryMap.get(category) != null ? categoryMap.get(category) : new ArrayList<Data<X, Y>>();
+        List<Data<X, Y>> itemList = categoryMap.get(category) != null ? categoryMap.get(category) : new ArrayList<>();
         itemList.add(item);
         categoryMap.put(category, itemList);
 //        categoryMap.put(category, item);
@@ -270,7 +278,7 @@ public class StackedBarChart<X, Y> extends XYChart<X, Y> {
     @Override protected void seriesAdded(Series<X, Y> series, int seriesIndex) {
         // handle any data already in series
         // create entry in the map
-        Map<String, List<Data<X, Y>>> categoryMap = new HashMap<String, List<Data<X, Y>>>();
+        Map<String, List<Data<X, Y>>> categoryMap = new HashMap<>();
         for (int j = 0; j < series.getData().size(); j++) {
             Data<X, Y> item = series.getData().get(j);
             Node bar = createBar(series, seriesIndex, item, j);
@@ -281,7 +289,7 @@ public class StackedBarChart<X, Y> extends XYChart<X, Y> {
                 category = (String) item.getYValue();
             }
             // list of two item positive and negative
-            List<Data<X, Y>> itemList = categoryMap.get(category) != null ? categoryMap.get(category) : new ArrayList<Data<X, Y>>();
+            List<Data<X, Y>> itemList = categoryMap.get(category) != null ? categoryMap.get(category) : new ArrayList<>();
             itemList.add(item);
             categoryMap.put(category, itemList);
             if (shouldAnimate()) {
@@ -303,8 +311,8 @@ public class StackedBarChart<X, Y> extends XYChart<X, Y> {
     @Override protected void seriesRemoved(final Series<X, Y> series) {
         // remove all symbol nodes
         if (shouldAnimate()) {
-            ParallelTransition pt = new ParallelTransition();
-            pt.setOnFinished(event -> {
+            parallelTransition = new ParallelTransition();
+            parallelTransition.setOnFinished(event -> {
                 removeSeriesFromDisplay(series);
                 requestChartLayout();
             });
@@ -313,7 +321,7 @@ public class StackedBarChart<X, Y> extends XYChart<X, Y> {
                 // Animate series deletion
                 if (getSeriesSize() > 1) {
                     Timeline t = createDataRemoveTimeline(d, bar, series);
-                    pt.getChildren().add(t);
+                    parallelTransition.getChildren().add(t);
                 } else {
                     // fade out last series
                     FadeTransition ft = new FadeTransition(Duration.millis(700), bar);
@@ -323,10 +331,10 @@ public class StackedBarChart<X, Y> extends XYChart<X, Y> {
                         processDataRemove(series, d);
                         bar.setOpacity(1.0);
                     });
-                    pt.getChildren().add(ft);
+                    parallelTransition.getChildren().add(ft);
                 }
             }
-            pt.play();
+            parallelTransition.play();
         } else {
             for (Data<X, Y> d : series.getData()) {
                 processDataRemove(series, d);
@@ -499,7 +507,6 @@ public class StackedBarChart<X, Y> extends XYChart<X, Y> {
     private Timeline createDataRemoveTimeline(Data<X, Y> item, final Node bar, final Series<X, Y> series) {
         Timeline t = new Timeline();
         if (orientation == Orientation.VERTICAL) {
-            item.setYValue(getYAxis().toRealValue(getYAxis().getZeroPosition()));
             t.getKeyFrames().addAll(
                     new KeyFrame(Duration.ZERO, new KeyValue(
                             currentDisplayedYValueProperty(item),
@@ -532,7 +539,7 @@ public class StackedBarChart<X, Y> extends XYChart<X, Y> {
             bar = new StackPane();
             bar.setAccessibleRole(AccessibleRole.TEXT);
             bar.setAccessibleRoleDescription("Bar");
-            bar.focusTraversableProperty().bind(Platform.accessibilityActiveProperty());
+            bar.setFocusTraversable(isAccessibilityActive());
             item.setNode(bar);
         }
         bar.getStyleClass().setAll("chart-bar", "series" + seriesIndex, "data" + itemIndex, series.defaultColorStyleClass);
@@ -542,7 +549,19 @@ public class StackedBarChart<X, Y> extends XYChart<X, Y> {
     private List<Data<X, Y>> getDataItem(Series<X, Y> series, String category) {
         Map<String, List<Data<X, Y>>> catmap = seriesCategoryMap.get(series);
         return catmap != null ? catmap.get(category) != null ?
-            catmap.get(category) : new ArrayList<Data<X, Y>>() : new ArrayList<Data<X, Y>>();
+            catmap.get(category) : new ArrayList<>() : new ArrayList<>();
+    }
+
+    /** {@inheritDoc} */
+    @Override void seriesBeingRemovedIsAdded(Series<X,Y> series) {
+        if (parallelTransition != null) {
+            parallelTransition.setOnFinished(null);
+            parallelTransition.stop();
+            parallelTransition = null;
+            getPlotChildren().remove(series.getNode());
+            for (Data<X,Y> d:series.getData()) getPlotChildren().remove(d.getNode());
+            removeSeriesFromDisplay(series);
+        }
     }
 
 // -------------- STYLESHEET HANDLING ------------------------------------------------------------------------------
@@ -553,7 +572,7 @@ public class StackedBarChart<X, Y> extends XYChart<X, Y> {
     private static class StyleableProperties {
 
         private static final CssMetaData<StackedBarChart<?,?>,Number> CATEGORY_GAP =
-            new CssMetaData<StackedBarChart<?,?>,Number>("-fx-category-gap",
+            new CssMetaData<>("-fx-category-gap",
                 SizeConverter.getInstance(), 10.0)  {
 
             @Override
@@ -563,7 +582,7 @@ public class StackedBarChart<X, Y> extends XYChart<X, Y> {
 
             @Override
             public StyleableProperty<Number> getStyleableProperty(StackedBarChart<?,?> node) {
-                return (StyleableProperty<Number>)(WritableValue<Number>)node.categoryGapProperty();
+                return (StyleableProperty<Number>)node.categoryGapProperty();
             }
         };
 

@@ -32,6 +32,12 @@
 #include <TargetConditionals.h>
 #endif
 
+/* PAS_CPU() - the target CPU architecture */
+#define PAS_CPU(FEATURE) (defined PAS_CPU_##FEATURE  && PAS_CPU_##FEATURE)
+
+/* PAS_HAVE() - specific system features (headers, functions or similar) that are present or not */
+#define PAS_HAVE(FEATURE) (defined PAS_HAVE_##FEATURE && PAS_HAVE_##FEATURE)
+
 /* PAS_COMPILER() - the target compiler */
 #define PAS_COMPILER(FEATURE) (defined PAS_COMPILER_##FEATURE  && PAS_COMPILER_##FEATURE)
 
@@ -126,6 +132,10 @@
 #define PAS_OS_LINUX 1
 #endif
 
+#if defined(__ANDROID__) || defined(ANDROID)
+#define PAS_OS_ANDROID 1
+#endif
+
 #if defined(__FreeBSD__) || defined(__DragonFly__) || defined(__FreeBSD_kernel__)
 #define PAS_OS_FREEBSD 1
 #endif
@@ -170,8 +180,41 @@
 #define PAS_PLATFORM_APPLETV 1
 #endif
 
+#if defined(TARGET_OS_VISION) && TARGET_OS_VISION
+#define PAS_PLATFORM_VISION 1
+#endif
+
 #if defined(__SCE__)
 #define PAS_PLATFORM_PLAYSTATION 1
+#endif
+
+#if PAS_COMPILER(GCC_COMPATIBLE)
+/* __LP64__ is not defined on 64bit Windows since it uses LLP64. Using __SIZEOF_POINTER__ is simpler. */
+#if __SIZEOF_POINTER__ == 8
+#define PAS_CPU_ADDRESS64 1
+#elif __SIZEOF_POINTER__ == 4
+#define PAS_CPU_ADDRESS32 1
+#else
+#error "Unsupported pointer width"
+#endif
+#elif PAS_COMPILER(MSVC)
+#define PAS_CPU_ADDRESS64 1
+#else
+#error "Unsupported compiler for libpas"
+#endif
+
+/* PAS_ALLOW_UNSAFE_BUFFER_USAGE */
+
+#if PAS_COMPILER(CLANG)
+#define PAS_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN \
+    _Pragma("clang diagnostic push") \
+    _Pragma("clang diagnostic ignored \"-Wunsafe-buffer-usage\"")
+
+#define PAS_ALLOW_UNSAFE_BUFFER_USAGE_END \
+    _Pragma("clang diagnostic pop")
+#else
+#define PAS_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
+#define PAS_ALLOW_UNSAFE_BUFFER_USAGE_END
 #endif
 
 #endif /* PAS_PLATFORM_H */

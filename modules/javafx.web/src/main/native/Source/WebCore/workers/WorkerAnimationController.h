@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Google Inc. All Rights Reserved.
+ * Copyright (C) 2011 Google Inc. All rights reserved.
  * Copyright (C) 2020 Metrological Group B.V.
  * Copyright (C) 2020 Igalia S.L.
  *
@@ -38,6 +38,7 @@
 namespace WebCore {
 
 class RequestAnimationFrameCallback;
+class WeakPtrImplWithEventTargetData;
 class WorkerGlobalScope;
 
 class WorkerAnimationController final : public ThreadSafeRefCounted<WorkerAnimationController>, public ActiveDOMObject {
@@ -48,14 +49,14 @@ public:
     int requestAnimationFrame(Ref<RequestAnimationFrameCallback>&&);
     void cancelAnimationFrame(int);
 
-    using ThreadSafeRefCounted::ref;
-    using ThreadSafeRefCounted::deref;
+    // ActiveDOMObject.
+    void ref() const final { ThreadSafeRefCounted::ref(); }
+    void deref() const final { ThreadSafeRefCounted::deref(); }
 
 private:
     WorkerAnimationController(WorkerGlobalScope&);
 
-    const char* activeDOMObjectName() const final;
-
+    // ActiveDOMObject.
     bool virtualHasPendingActivity() const final;
     void stop() final;
     void suspend(ReasonForSuspension) final;
@@ -65,7 +66,7 @@ private:
     void animationTimerFired();
     void serviceRequestAnimationFrameCallbacks(DOMHighResTimeStamp timestamp);
 
-    WorkerGlobalScope& m_workerGlobalScope;
+    WeakRef<WorkerGlobalScope, WeakPtrImplWithEventTargetData> m_workerGlobalScope;
 
     typedef Vector<RefPtr<RequestAnimationFrameCallback>> CallbackList;
     CallbackList m_animationCallbacks;

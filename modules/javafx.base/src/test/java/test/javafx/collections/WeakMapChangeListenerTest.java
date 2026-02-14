@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,29 +27,32 @@ package test.javafx.collections;
 
 import com.sun.javafx.binding.MapExpressionHelper;
 import com.sun.javafx.collections.ObservableMapWrapper;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import javafx.collections.MapChangeListener;
 import javafx.collections.WeakMapChangeListener;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class WeakMapChangeListenerTest {
 
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testConstructWithNull() {
-        new WeakMapChangeListener<Object, Object>(null);
+        assertThrows(NullPointerException.class, () -> {
+            new WeakMapChangeListener<>(null);
+        });
     }
+
 
     @Test
     public void testHandle() {
-        MockMapObserver<Object, Object> listener = new MockMapObserver<Object, Object>();
-        final WeakMapChangeListener<Object, Object> weakListener = new WeakMapChangeListener<Object, Object>(listener);
+        MockMapObserver<Object, Object> listener = new MockMapObserver<>();
+        final WeakMapChangeListener<Object, Object> weakListener = new WeakMapChangeListener<>(listener);
         final ObservableMapMock map = new ObservableMapMock();
         final Object key = new Object();
         final Object value = new Object();
-        final MapChangeListener.Change<Object, Object> change = new MapExpressionHelper.SimpleChange<Object, Object>(map).setRemoved(key, value);
+        final MapChangeListener.Change<Object, Object> change = new MapExpressionHelper.SimpleChange<>(map).setRemoved(key, value);
 
         // regular call
         weakListener.onChanged(change);
@@ -69,7 +72,7 @@ public class WeakMapChangeListenerTest {
         private int removeCounter;
 
         public ObservableMapMock() {
-            super(new HashMap<Object, Object>());
+            super(new HashMap<>());
         }
 
         private void reset() {

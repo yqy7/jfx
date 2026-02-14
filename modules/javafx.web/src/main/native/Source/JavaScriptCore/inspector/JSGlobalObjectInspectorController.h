@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,9 +28,10 @@
 #include "InspectorAgentRegistry.h"
 #include "InspectorEnvironment.h"
 #include "InspectorFrontendRouter.h"
-#include "JSGlobalObjectDebugger.h"
+#include "Strong.h"
 #include <wtf/Forward.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/text/WTFString.h>
 
 #if ENABLE(INSPECTOR_ALTERNATE_DISPATCHERS)
@@ -54,6 +55,7 @@ class InspectorConsoleAgent;
 class InspectorDebuggerAgent;
 class InspectorScriptProfilerAgent;
 class JSGlobalObjectConsoleClient;
+class JSGlobalObjectDebugger;
 class ScriptCallStack;
 struct JSAgentContext;
 
@@ -64,7 +66,7 @@ class JSGlobalObjectInspectorController final
 #endif
 {
     WTF_MAKE_NONCOPYABLE(JSGlobalObjectInspectorController);
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(JSGlobalObjectInspectorController);
 public:
     JSGlobalObjectInspectorController(JSC::JSGlobalObject&);
     ~JSGlobalObjectInspectorController() final;
@@ -89,7 +91,7 @@ public:
     InspectorEvaluateHandler evaluateHandler() const final;
     void frontendInitialized() final;
     WTF::Stopwatch& executionStopwatch() const final;
-    JSGlobalObjectDebugger& debugger() final;
+    JSC::Debugger* debugger() final;
     JSC::VM& vm() final;
 
 #if ENABLE(INSPECTOR_ALTERNATE_DISPATCHERS)
@@ -111,10 +113,10 @@ private:
     void createLazyAgents();
 
     JSC::JSGlobalObject& m_globalObject;
-    std::unique_ptr<InjectedScriptManager> m_injectedScriptManager;
+    const UniqueRef<InjectedScriptManager> m_injectedScriptManager;
     std::unique_ptr<JSGlobalObjectConsoleClient> m_consoleClient;
-    Ref<WTF::Stopwatch> m_executionStopwatch;
-    JSGlobalObjectDebugger m_debugger;
+    const Ref<WTF::Stopwatch> m_executionStopwatch;
+    std::unique_ptr<JSGlobalObjectDebugger> m_debugger;
 
     AgentRegistry m_agents;
     InspectorConsoleAgent* m_consoleAgent { nullptr };
@@ -123,8 +125,8 @@ private:
     InspectorAgent* m_inspectorAgent { nullptr };
     InspectorDebuggerAgent* m_debuggerAgent { nullptr };
 
-    Ref<FrontendRouter> m_frontendRouter;
-    Ref<BackendDispatcher> m_backendDispatcher;
+    const Ref<FrontendRouter> m_frontendRouter;
+    const Ref<BackendDispatcher> m_backendDispatcher;
 
     // Used to keep the JSGlobalObject and VM alive while we are debugging it.
     JSC::Strong<JSC::JSGlobalObject> m_strongGlobalObject;

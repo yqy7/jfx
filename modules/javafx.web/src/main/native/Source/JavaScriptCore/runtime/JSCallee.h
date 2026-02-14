@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -65,44 +65,31 @@ public:
         return m_scope.get();
     }
 
-    // This method may be called for host functions, in which case it
-    // will return an arbitrary value. This should only be used for
-    // optimized paths in which the return value does not matter for
-    // host functions, and checking whether the function is a host
-    // function is deemed too expensive.
-    JSScope* scopeUnchecked()
-    {
-        return m_scope.get();
-    }
-
     void setScope(VM& vm, JSScope* scope)
     {
+        if (scope)
         m_scope.set(vm, this, scope);
+        else
+            m_scope.clear();
     }
 
     DECLARE_EXPORT_INFO;
 
-    static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
-    {
-        ASSERT(globalObject);
-        return Structure::create(vm, globalObject, prototype, TypeInfo(JSCalleeType, StructureFlags), info());
-    }
+    DECLARE_VISIT_CHILDREN;
 
-    static inline ptrdiff_t offsetOfScopeChain()
+    inline static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
+
+    static constexpr ptrdiff_t offsetOfScopeChain()
     {
         return OBJECT_OFFSETOF(JSCallee, m_scope);
     }
 
 protected:
-    JS_EXPORT_PRIVATE JSCallee(VM&, JSGlobalObject*, Structure*);
+    JSCallee(VM&, JSGlobalObject*, Structure*);
     JSCallee(VM&, JSScope*, Structure*);
 
-    void finishCreation(VM&);
-    using Base::finishCreation;
+    DECLARE_DEFAULT_FINISH_CREATION;
 
-    DECLARE_VISIT_CHILDREN;
-
-private:
     friend class LLIntOffsetsExtractor;
 
     WriteBarrier<JSScope> m_scope;

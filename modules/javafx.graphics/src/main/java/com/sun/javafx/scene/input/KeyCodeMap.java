@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,7 +31,7 @@ import javafx.scene.input.KeyCode;
 
 /**
  * Map from int codes to KeyCode.
- * Should be removed once RT-20448 is fixed.
+ * Should be removed once JDK-8090319 is fixed.
  */
 public final class KeyCodeMap {
 
@@ -41,7 +41,7 @@ public final class KeyCodeMap {
     private static final Map<Integer, KeyCode> charMap;
 
     static {
-        charMap = new HashMap<Integer, KeyCode>(KeyCode.values().length);
+        charMap = new HashMap<>(KeyCode.values().length);
 
         for (KeyCode c : KeyCode.values()) {
             charMap.put(c.getCode(), c);

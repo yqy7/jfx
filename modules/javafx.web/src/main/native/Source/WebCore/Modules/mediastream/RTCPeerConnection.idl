@@ -31,6 +31,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// https://w3c.github.io/webrtc-pc/#interface-definition
+
 typedef RTCRtpTransceiverDirection RtpTransceiverDirection;
 
 [
@@ -103,7 +105,7 @@ typedef (object or DOMString) AlgorithmIdentifier;
 
     undefined restartIce();
     RTCConfiguration getConfiguration();
-    undefined setConfiguration(RTCConfiguration configuration);
+    undefined setConfiguration(optional RTCConfiguration configuration = {});
     undefined close();
 
     attribute EventHandler onnegotiationneeded;
@@ -133,7 +135,7 @@ typedef (object or DOMString) AlgorithmIdentifier;
     // 6.1 Peer-to-peer data API
     readonly attribute RTCSctpTransport? sctp;
 
-    RTCDataChannel createDataChannel([LegacyNullToEmptyString] USVString label, optional RTCDataChannelInit options);
+    RTCDataChannel createDataChannel(USVString label, optional RTCDataChannelInit options);
     attribute EventHandler ondatachannel;
 
 

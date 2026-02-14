@@ -24,31 +24,45 @@
 
 #pragma once
 
-#include "Color.h"
 #include "FontCascade.h"
 #include "Length.h"
+#include "StyleColor.h"
+#include "StyleFontData.h"
+#include "StyleWebKitBorderSpacing.h"
+#include <wtf/DataRef.h>
+
+namespace WTF {
+class TextStream;
+}
 
 namespace WebCore {
 
 DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(StyleInheritedData);
 class StyleInheritedData : public RefCounted<StyleInheritedData> {
-    WTF_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(StyleInheritedData);
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(StyleInheritedData, StyleInheritedData);
 public:
     static Ref<StyleInheritedData> create() { return adoptRef(*new StyleInheritedData); }
     Ref<StyleInheritedData> copy() const;
 
     bool operator==(const StyleInheritedData&) const;
-    bool operator!=(const StyleInheritedData& other) const { return !(*this == other); }
 
-    float horizontalBorderSpacing;
-    float verticalBorderSpacing;
+#if !LOG_DISABLED
+    void dumpDifferences(TextStream&, const StyleInheritedData&) const;
+#endif
+
+    bool fastPathInheritedEqual(const StyleInheritedData&) const;
+    bool nonFastPathInheritedEqual(const StyleInheritedData&) const;
+    void fastPathInheritFrom(const StyleInheritedData&);
+
+    Style::WebkitBorderSpacing borderHorizontalSpacing;
+    Style::WebkitBorderSpacing borderVerticalSpacing;
 
     Length lineHeight;
 #if ENABLE(TEXT_AUTOSIZING)
     Length specifiedLineHeight;
 #endif
 
-    FontCascade fontCascade;
+    DataRef<StyleFontData> fontData;
     Color color;
     Color visitedLinkColor;
 

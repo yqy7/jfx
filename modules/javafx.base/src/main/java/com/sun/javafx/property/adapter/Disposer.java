@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,35 +43,23 @@ import java.util.concurrent.ConcurrentHashMap;
  * of the associated Runnable object will be called.
  */
 public class Disposer implements Runnable {
-    private static final ReferenceQueue queue = new ReferenceQueue();
-    private static final Map<Object, Runnable> records = new ConcurrentHashMap<>();
+    private static final ReferenceQueue<Object> queue = new ReferenceQueue<>();
+    private static final Map<Reference<?>, Runnable> records = new ConcurrentHashMap<>();
     private static Disposer disposerInstance;
 
     static {
         disposerInstance = new Disposer();
-
-        @SuppressWarnings("removal")
-        var dummy = java.security.AccessController.doPrivileged(
-            new java.security.PrivilegedAction() {
-                public Object run() {
-                    /* The thread must be a member of a thread group
-                     * which will not get GCed before VM exit.
-                     * Make its parent the top-level thread group.
-                     */
-                    ThreadGroup tg = Thread.currentThread().getThreadGroup();
-                    for (ThreadGroup tgn = tg;
-                         tgn != null;
-                         tg = tgn, tgn = tg.getParent());
-                    Thread t =
-                        new Thread(tg, disposerInstance, "Property Disposer");
-                    t.setContextClassLoader(null);
-                    t.setDaemon(true);
-                    t.setPriority(Thread.MAX_PRIORITY);
-                    t.start();
-                    return null;
-                }
-            }
-        );
+        /* The thread must be a member of a thread group
+         * which will not get GCed before VM exit.
+         * Make its parent the top-level thread group.
+         */
+        ThreadGroup tg = Thread.currentThread().getThreadGroup();
+        for (ThreadGroup tgn = tg; tgn != null; tg = tgn, tgn = tg.getParent());
+        Thread t = new Thread(tg, disposerInstance, "Property Disposer");
+        t.setContextClassLoader(null);
+        t.setDaemon(true);
+        t.setPriority(Thread.MAX_PRIORITY);
+        t.start();
     }
 
     /**
@@ -80,16 +68,17 @@ public class Disposer implements Runnable {
      * @param rec the associated Runnable object
      */
     public static void addRecord(Object target, Runnable rec) {
-        PhantomReference ref = new PhantomReference<>(target, queue);
+        PhantomReference<Object> ref = new PhantomReference<>(target, queue);
         records.put(ref, rec);
     }
 
+    @Override
     public void run() {
         while (true) {
             try {
-                Object obj = queue.remove();
-                ((Reference)obj).clear();
-                Runnable rec = (Runnable)records.remove(obj);
+                Reference<?> reference = queue.remove();
+                reference.clear();
+                Runnable rec = records.remove(reference);
                 rec.run();
             } catch (Exception e) {
                 System.out.println("Exception while removing reference: " + e);

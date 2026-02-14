@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2015-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,9 +27,14 @@
 #include "VariableEnvironment.h"
 #include <wtf/CommaPrinter.h>
 #include <wtf/HexNumber.h>
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/UniquedStringImpl.h>
 
 namespace JSC {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(CompactTDZEnvironment);
+WTF_MAKE_TZONE_ALLOCATED_IMPL(VariableEnvironment);
+WTF_MAKE_TZONE_ALLOCATED_IMPL(VariableEnvironment::RareData);
 
 void VariableEnvironmentEntry::dump(PrintStream& out) const
 {
@@ -43,14 +48,14 @@ VariableEnvironment& VariableEnvironment::operator=(const VariableEnvironment& o
     return *this;
 }
 
-void VariableEnvironment::markVariableAsCapturedIfDefined(const RefPtr<UniquedStringImpl>& identifier)
+void VariableEnvironment::markVariableAsCapturedIfDefined(const UniquedStringImpl* identifier)
 {
     auto findResult = m_map.find(identifier);
     if (findResult != m_map.end())
         findResult->value.setIsCaptured();
 }
 
-void VariableEnvironment::markVariableAsCaptured(const RefPtr<UniquedStringImpl>& identifier)
+void VariableEnvironment::markVariableAsCaptured(const UniquedStringImpl* identifier)
 {
     auto findResult = m_map.find(identifier);
     RELEASE_ASSERT(findResult != m_map.end());
@@ -97,14 +102,14 @@ void VariableEnvironment::swap(VariableEnvironment& other)
     m_rareData.swap(other.m_rareData);
 }
 
-void VariableEnvironment::markVariableAsImported(const RefPtr<UniquedStringImpl>& identifier)
+void VariableEnvironment::markVariableAsImported(const UniquedStringImpl* identifier)
 {
     auto findResult = m_map.find(identifier);
     RELEASE_ASSERT(findResult != m_map.end());
     findResult->value.setIsImported();
 }
 
-void VariableEnvironment::markVariableAsExported(const RefPtr<UniquedStringImpl>& identifier)
+void VariableEnvironment::markVariableAsExported(const UniquedStringImpl* identifier)
 {
     auto findResult = m_map.find(identifier);
     RELEASE_ASSERT(findResult != m_map.end());
@@ -204,9 +209,9 @@ bool VariableEnvironment::declarePrivateMethod(const RefPtr<UniquedStringImpl>& 
 
 void VariableEnvironment::dump(PrintStream& out) const
 {
-    CommaPrinter comma(", ");
+    CommaPrinter comma(", "_s);
     for (auto& pair : m_map)
-        out.print(comma, pair.key, " => ", pair.value);
+        out.print(comma, pair.key, " => "_s, pair.value);
 }
 
 void CompactTDZEnvironment::sortCompact(Compact& compact)

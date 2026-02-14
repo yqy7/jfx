@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2019 Apple Inc.  All rights reserved.
+ * Copyright (C) 2018-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -55,7 +55,7 @@ public:
     ExceptionOr<void> setBaseVal(const DecorationType& baseVal)
     {
         if (!m_baseVal->setValue(baseVal))
-            return Exception { TypeError };
+            return Exception { ExceptionCode::TypeError };
         commitPropertyChange(nullptr);
         return { };
     }
@@ -136,22 +136,20 @@ public:
     // Controlling the instance animation.
     void instanceStartAnimation(SVGAttributeAnimator& animator, SVGAnimatedProperty& animated) override
     {
-        if (isAnimating())
-            return;
-        m_animVal = static_cast<decltype(*this)>(animated).m_animVal;
+        if (!isAnimating())
+            m_animVal = static_cast<decltype(*this)>(animated).m_animVal;
         SVGAnimatedProperty::instanceStartAnimation(animator, animated);
     }
 
     void instanceStopAnimation(SVGAttributeAnimator& animator) override
     {
-        if (!isAnimating())
-            return;
-        m_animVal = nullptr;
         SVGAnimatedProperty::instanceStopAnimation(animator);
+        if (!isAnimating())
+            m_animVal = nullptr;
     }
 
 protected:
-    Ref<SVGDecoratedProperty<DecorationType>> m_baseVal;
+    const Ref<SVGDecoratedProperty<DecorationType>> m_baseVal;
     RefPtr<SVGDecoratedProperty<DecorationType>> m_animVal;
     SVGPropertyState m_state { SVGPropertyState::Clean };
 };

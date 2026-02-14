@@ -26,6 +26,7 @@
 #pragma once
 
 #include "FileSystemHandleIdentifier.h"
+#include "StorageEstimate.h"
 #include <wtf/CompletionHandler.h>
 #include <wtf/ThreadSafeRefCounted.h>
 
@@ -39,11 +40,13 @@ class StorageConnection : public ThreadSafeRefCounted<StorageConnection> {
 public:
     virtual ~StorageConnection() = default;
     using PersistCallback = CompletionHandler<void(bool)>;
-    virtual void getPersisted(const ClientOrigin&, PersistCallback&&) = 0;
+    virtual void getPersisted(ClientOrigin&&, PersistCallback&&) = 0;
     virtual void persist(const ClientOrigin&, PersistCallback&& completionHandler) { completionHandler(false); }
     using DirectoryInfo = std::pair<FileSystemHandleIdentifier, RefPtr<FileSystemStorageConnection>>;
     using GetDirectoryCallback = CompletionHandler<void(ExceptionOr<DirectoryInfo>&&)>;
-    virtual void fileSystemGetDirectory(const ClientOrigin&, GetDirectoryCallback&&) = 0;
+    virtual void fileSystemGetDirectory(ClientOrigin&&, GetDirectoryCallback&&) = 0;
+    using GetEstimateCallback = CompletionHandler<void(ExceptionOr<StorageEstimate>&&)>;
+    virtual void getEstimate(ClientOrigin&&, GetEstimateCallback&&) = 0;
 };
 
 } // namespace WebCore

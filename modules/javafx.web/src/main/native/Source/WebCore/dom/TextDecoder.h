@@ -25,7 +25,6 @@
 #pragma once
 
 #include "BufferSource.h"
-#include "ExceptionOr.h"
 #include <pal/text/TextEncoding.h>
 #include <wtf/RefCounted.h>
 
@@ -35,7 +34,9 @@ class TextCodec;
 
 namespace WebCore {
 
-class TextDecoder : public RefCounted<TextDecoder> {
+template<typename> class ExceptionOr;
+
+class TextDecoder final : public RefCounted<TextDecoder> {
 public:
     ~TextDecoder();
 
@@ -55,7 +56,7 @@ public:
     ExceptionOr<String> decode(std::optional<BufferSource::VariantType>, DecodeOptions);
 
 private:
-    TextDecoder(const char*, Options);
+    TextDecoder(StringView, Options);
 
     const PAL::TextEncoding m_textEncoding;
     const Options m_options;

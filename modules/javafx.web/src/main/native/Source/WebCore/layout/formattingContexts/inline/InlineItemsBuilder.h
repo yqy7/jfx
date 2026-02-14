@@ -25,11 +25,14 @@
 
 #pragma once
 
-#if ENABLE(LAYOUT_FORMATTING_CONTEXT)
-
-#include "InlineFormattingState.h"
-#include "LayoutContainerBox.h"
+#include "InlineContentCache.h"
+#include "InlineItem.h"
+#include "InlineLineTypes.h"
+#include "LayoutElementBox.h"
+#include "SecurityOrigin.h"
+#include <wtf/HashMap.h>
 #include <wtf/text/StringBuilder.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 namespace Layout {
@@ -37,30 +40,42 @@ class InlineTextBox;
 
 class InlineItemsBuilder {
 public:
-    InlineItemsBuilder(const ContainerBox& formattingContextRoot, InlineFormattingState&);
-    InlineItems build();
+    InlineItemsBuilder(InlineContentCache&, const ElementBox& root, const SecurityOrigin&);
+    void build(InlineItemPosition startPosition);
+
+    static void populateBreakingPositionCache(const InlineItemList&, const Document&);
 
 private:
-    void collectInlineItems(InlineItems&);
-    void breakAndComputeBidiLevels(InlineItems&);
-    void computeInlineTextItemWidths(InlineItems&);
+    void collectInlineItems(InlineItemList&, InlineItemPosition startPosition);
+    using LayoutQueue = Vector<CheckedRef<const Box>, 8>;
+    LayoutQueue initializeLayoutQueue(InlineItemPosition startPosition);
+    LayoutQueue traverseUntilDamaged(const Box& firstDamagedLayoutBox);
+    void breakAndComputeBidiLevels(InlineItemList&);
+    InlineContentCache::InlineItems::ContentAttributes computeContentAttributesAndInlineTextItemWidths(InlineItemList&, InlineItemPosition damagePosition, const InlineItemList& damagedItemList);
 
-    void handleTextContent(const InlineTextBox&, InlineItems&);
-    void handleInlineBoxStart(const Box&, InlineItems&);
-    void handleInlineBoxEnd(const Box&, InlineItems&);
-    void handleInlineLevelBox(const Box&, InlineItems&);
+    void handleTextContent(const InlineTextBox&, InlineItemList&, std::optional<size_t> partialContentOffset);
+    bool buildInlineItemListForTextFromBreakingPositionsCache(const InlineTextBox&, InlineItemList&);
+    void handleInlineBoxStart(const Box&, InlineItemList&);
+    void handleInlineBoxEnd(const Box&, InlineItemList&);
+    void handleInlineLevelBox(const Box&, InlineItemList&);
 
-    bool needsVisualReordering() const { return m_needsVisualReordering; }
+    bool contentRequiresVisualReordering() const { return m_contentRequiresVisualReordering; }
 
-    const ContainerBox& root() const { return m_root; }
+    void computeInlineBoxBoundaryTextSpacings(const InlineItemList&);
 
-    const ContainerBox& m_root;
-    // FIXME: We should not need this here. This is only required by the out of flow boxes.
-    InlineFormattingState& m_formattingState;
-    bool m_needsVisualReordering { false };
+    const ElementBox& root() const { return m_root; }
+    InlineContentCache& inlineContentCache() { return m_inlineContentCache; }
+
+private:
+    InlineContentCache& m_inlineContentCache;
+    const ElementBox& m_root;
+    const SecurityOrigin& m_securityOrigin;
+
+    bool m_contentRequiresVisualReordering { false };
+    bool m_hasTextAutospace { !root().style().textAutospace().isNoAutospace() };
+    std::optional<bool> m_textContentPopulatedFromCache { };
 };
 
 }
 }
 
-#endif

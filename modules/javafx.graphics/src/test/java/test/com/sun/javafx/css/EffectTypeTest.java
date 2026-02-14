@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,6 @@
 package test.com.sun.javafx.css;
 
 import com.sun.javafx.css.ParsedValueImpl;
-import static org.junit.Assert.assertEquals;
 import javafx.css.ParsedValue;
 import javafx.css.Size;
 import javafx.css.SizeUnits;
@@ -37,7 +36,8 @@ import javafx.scene.effect.InnerShadow;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import javafx.css.converter.EffectConverter;
 import javafx.css.converter.DeriveColorConverter;
@@ -69,9 +69,9 @@ public class EffectTypeTest {
                 new ParsedValueImpl<Color,Color>(is.getColor(),null),
                 new ParsedValueImpl<Size,Size>(makeSize(0.5f),null)
             };
-            colorVal = new ParsedValueImpl<ParsedValue[],Color>(values, DeriveColorConverter.getInstance());
+            colorVal = new ParsedValueImpl<>(values, DeriveColorConverter.getInstance());
         } else {
-            colorVal = new ParsedValueImpl<Color,Color>(is.getColor(),null);
+            colorVal = new ParsedValueImpl<>(is.getColor(),null);
         }
 
         BlurType blurType = is.getBlurType();
@@ -85,7 +85,7 @@ public class EffectTypeTest {
             new ParsedValueImpl<Size,Size>(offsetY, null)
         };
 
-        return new ParsedValueImpl<ParsedValue[],Effect>(vals, EffectConverter.InnerShadowConverter.getInstance());
+        return new ParsedValueImpl<>(vals, EffectConverter.InnerShadowConverter.getInstance());
     }
 
     DropShadow getDropShadow() {
@@ -105,9 +105,9 @@ public class EffectTypeTest {
                 new ParsedValueImpl<Color,Color>(ds.getColor(),null),
                 new ParsedValueImpl<Size,Size>(makeSize(0.5f),null)
             };
-            colorVal = new ParsedValueImpl<ParsedValue[],Color>(values, DeriveColorConverter.getInstance());
+            colorVal = new ParsedValueImpl<>(values, DeriveColorConverter.getInstance());
         } else {
-            colorVal = new ParsedValueImpl<Color,Color>(ds.getColor(),null);
+            colorVal = new ParsedValueImpl<>(ds.getColor(),null);
         }
 
         BlurType blurType = ds.getBlurType();
@@ -121,32 +121,32 @@ public class EffectTypeTest {
             new ParsedValueImpl<Size,Size>(offsetY, null)
         };
 
-        return new ParsedValueImpl<ParsedValue[],Effect>(vals, EffectConverter.DropShadowConverter.getInstance());
+        return new ParsedValueImpl<>(vals, EffectConverter.DropShadowConverter.getInstance());
     }
 
-    void checkColor(String msg, Color c1, Color c2) {
-        assertEquals(msg + ".red", c1.getRed(), c2.getRed(), 0.001);
-        assertEquals(msg + ".blue", c1.getBlue(), c2.getBlue(), 0.001);
-        assertEquals(msg + ".green", c1.getGreen(), c2.getGreen(), 0.001);
-        assertEquals(msg + ".opacity", c1.getOpacity(), c2.getOpacity(), 0.001);
+    void checkColor(Color c1, Color c2, String msg) {
+        assertEquals(c1.getRed(), c2.getRed(), 0.001, msg + ".red");
+        assertEquals(c1.getBlue(), c2.getBlue(), 0.001, msg + ".blue");
+        assertEquals(c1.getGreen(), c2.getGreen(), 0.001, msg + ".green");
+        assertEquals(c1.getOpacity(), c2.getOpacity(), 0.001, msg + ".opacity");
     }
 
     void checkInnerShadow(String msg, InnerShadow o1, InnerShadow o2) {
-        assertEquals(msg + "innershadow.offsetX", o1.getOffsetX(), o2.getOffsetX(), 0.001);
-        assertEquals(msg + "innershadow.offsety", o1.getOffsetY(), o2.getOffsetY(), 0.001);
-        assertEquals(msg + "innershadow.choke", o1.getChoke(), o2.getChoke(), 0.001);
-        assertEquals(msg + "innershadow.radius", o1.getRadius(), o2.getRadius(), 0.001);
-        checkColor(msg + "innershadow", o1.getColor(), o2.getColor());
-        assertEquals(msg + "innershadow.blurType", o1.getBlurType(), o2.getBlurType());
+        assertEquals(o1.getOffsetX(), o2.getOffsetX(), 0.001, msg + "innershadow.offsetX");
+        assertEquals(o1.getOffsetY(), o2.getOffsetY(), 0.001, msg + "innershadow.offsety");
+        assertEquals(o1.getChoke(), o2.getChoke(), 0.001, msg + "innershadow.choke");
+        assertEquals(o1.getRadius(), o2.getRadius(), 0.001, msg + "innershadow.radius");
+        checkColor(o1.getColor(), o2.getColor(), msg + "innershadow");
+        assertEquals(o1.getBlurType(), o2.getBlurType(), msg + "innershadow.blurType");
     }
 
     void checkDropShadow(String msg, DropShadow o1, DropShadow o2) {
-        assertEquals(msg + "DropShadow.offsetX", o1.getOffsetX(), o2.getOffsetX(), 0.001);
-        assertEquals(msg + "DropShadow.offsety", o1.getOffsetY(), o2.getOffsetY(), 0.001);
-        assertEquals(msg + "DropShadow.spread", o1.getSpread(), o2.getSpread(), 0.001);
-        assertEquals(msg + "DropShadow.radius", o1.getRadius(), o2.getRadius(), 0.001);
-        checkColor(msg + "DropShadow", o1.getColor(), o2.getColor());
-        assertEquals(msg + "DropShadow.blurType", o1.getBlurType(), o2.getBlurType());
+        assertEquals(o1.getOffsetX(), o2.getOffsetX(), 0.001, msg + "DropShadow.offsetX");
+        assertEquals(o1.getOffsetY(), o2.getOffsetY(), 0.001, msg + "DropShadow.offsety");
+        assertEquals(o1.getSpread(), o2.getSpread(), 0.001, msg + "DropShadow.spread");
+        assertEquals(o1.getRadius(), o2.getRadius(), 0.001, msg + "DropShadow.radius");
+        checkColor(o1.getColor(), o2.getColor(), msg + "DropShadow");
+        assertEquals(o1.getBlurType(), o2.getBlurType(), msg + "DropShadow.blurType");
     }
 
     /**

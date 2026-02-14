@@ -40,21 +40,21 @@ namespace WebCore {
 
 static void skipSpaces(StringView input, unsigned& startIndex)
 {
-    while (startIndex < input.length() && isHTTPSpace(input[startIndex]))
+    while (startIndex < input.length() && isASCIIWhitespaceWithoutFF(input[startIndex]))
         ++startIndex;
 }
 
-static bool isQuotedStringTokenCharacter(UChar c)
+static bool isQuotedStringTokenCharacter(char16_t c)
 {
     return (c >= ' ' && c <= '~') || (c >= 0x80 && c <= 0xFF) || c == '\t';
 }
 
-static bool isTokenCharacter(UChar c)
+static bool isTokenCharacter(char16_t c)
 {
     return isASCII(c) && c > ' ' && c != '"' && c != '(' && c != ')' && c != ',' && c != '/' && (c < ':' || c > '@') && (c < '[' || c > ']');
 }
 
-using CharacterMeetsCondition = bool (*)(UChar);
+using CharacterMeetsCondition = bool (*)(char16_t);
 
 static StringView parseToken(StringView input, unsigned& startIndex, CharacterMeetsCondition characterMeetsCondition, Mode mode, bool skipTrailingWhitespace = false)
 {
@@ -78,14 +78,14 @@ static StringView parseToken(StringView input, unsigned& startIndex, CharacterMe
             while (input[tokenEnd - 1] == ' ')
                 --tokenEnd;
         } else {
-            while (isHTTPSpace(input[tokenEnd - 1]))
+            while (isASCIIWhitespaceWithoutFF(input[tokenEnd - 1]))
                 --tokenEnd;
         }
     }
     return input.substring(tokenStart, tokenEnd - tokenStart);
 }
 
-static bool isNotQuoteOrBackslash(UChar ch)
+static bool isNotQuoteOrBackslash(char16_t ch)
 {
     return ch != '"' && ch != '\\';
 }
@@ -103,7 +103,7 @@ static String collectHTTPQuotedString(StringView input, unsigned& startIndex)
         builder.append(input.substring(positionStart, position - positionStart));
         if (position >= inputLength)
             break;
-        UChar quoteOrBackslash = input[position++];
+        char16_t quoteOrBackslash = input[position++];
         if (quoteOrBackslash == '\\') {
             if (position >= inputLength) {
                 builder.append(quoteOrBackslash);
@@ -205,22 +205,22 @@ static StringView parseQuotedString(StringView input, unsigned& startIndex)
 //               ; Must be in quoted-string,
 //               ; to use within parameter values
 
-static bool isNotForwardSlash(UChar ch)
+static bool isNotForwardSlash(char16_t ch)
 {
     return ch != '/';
 }
 
-static bool isNotSemicolon(UChar ch)
+static bool isNotSemicolon(char16_t ch)
 {
     return ch != ';';
 }
 
-static bool isNotSemicolonOrEqualSign(UChar ch)
+static bool isNotSemicolonOrEqualSign(char16_t ch)
 {
     return ch != ';' && ch != '=';
 }
 
-static bool containsNewline(UChar ch)
+static bool containsNewline(char16_t ch)
 {
     return ch == '\r' || ch == '\n';
 }
@@ -329,7 +329,7 @@ bool ParsedContentType::parseContentType(Mode mode)
 
 std::optional<ParsedContentType> ParsedContentType::create(const String& contentType, Mode mode)
 {
-    ParsedContentType parsedContentType(mode == Mode::Rfc2045 ? contentType : stripLeadingAndTrailingHTTPSpaces(contentType));
+    ParsedContentType parsedContentType(mode == Mode::Rfc2045 ? contentType : contentType.trim(isASCIIWhitespaceWithoutFF<char16_t>));
     if (!parsedContentType.parseContentType(mode))
         return std::nullopt;
     return { WTFMove(parsedContentType) };
@@ -347,7 +347,7 @@ ParsedContentType::ParsedContentType(const String& contentType)
 
 String ParsedContentType::charset() const
 {
-    return parameterValueForName("charset");
+    return parameterValueForName("charset"_s);
 }
 
 void ParsedContentType::setCharset(String&& charset)
@@ -365,13 +365,13 @@ size_t ParsedContentType::parameterCount() const
     return m_parameterValues.size();
 }
 
-void ParsedContentType::setContentType(StringView contentRange, Mode mode)
+void ParsedContentType::setContentType(String&& contentRange, Mode mode)
 {
-    m_mimeType = contentRange.toString();
+    m_mimeType = WTFMove(contentRange);
     if (mode == Mode::MimeSniff)
-        m_mimeType = stripLeadingAndTrailingHTTPSpaces(m_mimeType).convertToASCIILowercase();
+        m_mimeType = StringView(m_mimeType).trim(isASCIIWhitespaceWithoutFF<char16_t>).convertToASCIILowercase();
     else
-        m_mimeType = m_mimeType.stripWhiteSpace();
+        m_mimeType = m_mimeType.trim(deprecatedIsSpaceOrNewline);
 }
 
 static bool containsNonQuoteStringTokenCharacters(const String& input)

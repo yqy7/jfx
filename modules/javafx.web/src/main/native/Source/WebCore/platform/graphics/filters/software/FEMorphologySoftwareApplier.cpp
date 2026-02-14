@@ -4,7 +4,7 @@
  * Copyright (C) 2005 Eric Seidel <eric@webkit.org>
  * Copyright (C) 2009 Dirk Schulze <krit@webkit.org>
  * Copyright (C) Research In Motion Limited 2010. All rights reserved.
- * Copyright (C) Apple Inc. 2017-2021 All rights reserved.
+ * Copyright (C) Apple Inc. 2017-2022 All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -29,8 +29,12 @@
 #include "Filter.h"
 #include "PixelBuffer.h"
 #include <wtf/ParallelJobs.h>
+#include <wtf/StdLibExtras.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(FEMorphologySoftwareApplier);
 
 inline ColorComponents<uint8_t, 4> FEMorphologySoftwareApplier::minOrMax(const ColorComponents<uint8_t, 4>& a, const ColorComponents<uint8_t, 4>& b, MorphologyOperatorType type)
 {
@@ -40,12 +44,12 @@ inline ColorComponents<uint8_t, 4> FEMorphologySoftwareApplier::minOrMax(const C
     return perComponentMax(a, b);
 }
 
-inline ColorComponents<uint8_t, 4> FEMorphologySoftwareApplier::columnExtremum(const Uint8ClampedArray& srcPixelArray, int x, int yStart, int yEnd, int width, MorphologyOperatorType type)
+inline ColorComponents<uint8_t, 4> FEMorphologySoftwareApplier::columnExtremum(const PixelBuffer& srcPixelBuffer, int x, int yStart, int yEnd, int width, MorphologyOperatorType type)
 {
-    auto extremum = makeColorComponentsfromPixelValue(PackedColor::RGBA { *reinterpret_cast<const unsigned*>(srcPixelArray.data() + pixelArrayIndex(x, yStart, width)) });
+    auto extremum = makeColorComponentsfromPixelValue(PackedColor::RGBA { reinterpretCastSpanStartTo<const unsigned>(srcPixelBuffer.bytes().subspan(pixelArrayIndex(x, yStart, width))) });
 
     for (int y = yStart + 1; y < yEnd; ++y) {
-        auto pixel = makeColorComponentsfromPixelValue(PackedColor::RGBA { *reinterpret_cast<const unsigned*>(srcPixelArray.data() + pixelArrayIndex(x, y, width)) });
+        auto pixel = makeColorComponentsfromPixelValue(PackedColor::RGBA { reinterpretCastSpanStartTo<const unsigned>(srcPixelBuffer.bytes().subspan(pixelArrayIndex(x, y, width))) });
         extremum = minOrMax(extremum, pixel, type);
     }
     return extremum;
@@ -64,8 +68,8 @@ void FEMorphologySoftwareApplier::applyPlatformGeneric(const PaintingData& paint
 {
     ASSERT(endY > startY);
 
-    const auto& srcPixelArray = *paintingData.srcPixelArray;
-    auto& dstPixelArray = *paintingData.dstPixelArray;
+    const auto& srcPixelBuffer = *paintingData.srcPixelBuffer;
+    auto& dstPixelBuffer = *paintingData.dstPixelBuffer;
 
     const int radiusX = paintingData.radiusX;
     const int radiusY = paintingData.radiusY;
@@ -86,18 +90,18 @@ void FEMorphologySoftwareApplier::applyPlatformGeneric(const PaintingData& paint
 
         // We start at the left edge, so compute extreme for the radiusX columns.
         for (int x = 0; x < radiusX; ++x)
-            extrema.append(columnExtremum(srcPixelArray, x, yRadiusStart, yRadiusEnd, width, paintingData.type));
+            extrema.append(columnExtremum(srcPixelBuffer, x, yRadiusStart, yRadiusEnd, width, paintingData.type));
 
         // Kernel is filled, get extrema of next column
         for (int x = 0; x < width; ++x) {
             if (x < width - radiusX)
-                extrema.append(columnExtremum(srcPixelArray, x + radiusX, yRadiusStart, yRadiusEnd, width, paintingData.type));
+                extrema.append(columnExtremum(srcPixelBuffer, x + radiusX, yRadiusStart, yRadiusEnd, width, paintingData.type));
 
             if (x > radiusX)
-                extrema.remove(0);
+                extrema.removeAt(0);
 
-            unsigned* destPixel = reinterpret_cast<unsigned*>(dstPixelArray.data() + pixelArrayIndex(x, y, width));
-            *destPixel = makePixelValueFromColorComponents(kernelExtremum(extrema, paintingData.type)).value;
+            unsigned& destPixel = reinterpretCastSpanStartTo<unsigned>(dstPixelBuffer.bytes().subspan(pixelArrayIndex(x, y, width)));
+            destPixel = makePixelValueFromColorComponents(kernelExtremum(extrema, paintingData.type)).value;
         }
     }
 }
@@ -141,7 +145,7 @@ void FEMorphologySoftwareApplier::applyPlatform(const PaintingData& paintingData
     applyPlatformGeneric(paintingData, 0, paintingData.height);
 }
 
-bool FEMorphologySoftwareApplier::apply(const Filter& filter, const FilterImageVector& inputs, FilterImage& result) const
+bool FEMorphologySoftwareApplier::apply(const Filter& filter, std::span<const Ref<FilterImage>> inputs, FilterImage& result) const
 {
     auto& input = inputs[0].get();
 
@@ -155,7 +159,7 @@ bool FEMorphologySoftwareApplier::apply(const Filter& filter, const FilterImageV
 
     auto effectDrawingRect = result.absoluteImageRectRelativeTo(input);
 
-    auto radius = filter.resolvedSize({ m_effect.radiusX(), m_effect.radiusY() });
+    auto radius = filter.resolvedSize({ m_effect->radiusX(), m_effect->radiusY() });
     auto absoluteRadius = flooredIntSize(filter.scaledByFilterScale(radius));
 
     if (isDegenerate(absoluteRadius)) {
@@ -171,17 +175,14 @@ bool FEMorphologySoftwareApplier::apply(const Filter& filter, const FilterImageV
         return true;
     }
 
-    auto sourcePixelBuffer = input.getPixelBuffer(AlphaPremultiplication::Premultiplied, effectDrawingRect, m_effect.operatingColorSpace());
+    auto sourcePixelBuffer = input.getPixelBuffer(AlphaPremultiplication::Premultiplied, effectDrawingRect, m_effect->operatingColorSpace());
     if (!sourcePixelBuffer)
         return false;
 
-    auto& sourcePixelArray = sourcePixelBuffer->data();
-    auto& destinationPixelArray = destinationPixelBuffer->data();
-
     PaintingData paintingData;
-    paintingData.type = m_effect.morphologyOperator();
-    paintingData.srcPixelArray = &sourcePixelArray;
-    paintingData.dstPixelArray = &destinationPixelArray;
+    paintingData.type = m_effect->morphologyOperator();
+    paintingData.srcPixelBuffer = &*sourcePixelBuffer;
+    paintingData.dstPixelBuffer = destinationPixelBuffer;
     paintingData.width = effectDrawingRect.width();
     paintingData.height = effectDrawingRect.height();
     paintingData.radiusX = radiusX;

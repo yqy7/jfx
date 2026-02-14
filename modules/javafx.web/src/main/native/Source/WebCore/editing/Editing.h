@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include "PlatformLayerIdentifier.h"
 #include "Position.h"
 #include "TextIteratorBehavior.h"
 #include <wtf/Forward.h>
@@ -34,36 +35,42 @@
 namespace WebCore {
 
 class Document;
+class GraphicsLayer;
 class HTMLElement;
 class HTMLImageElement;
 class HTMLSpanElement;
 class HTMLTextFormControlElement;
+class IntPoint;
 class RenderBlock;
+class RenderLayer;
 class VisiblePosition;
 class VisibleSelection;
 
 struct SimpleRange;
 
+enum class TextDirection : bool;
+
 // -------------------------------------------------------------------------
 // Node
 // -------------------------------------------------------------------------
 
-ContainerNode* highestEditableRoot(const Position&, EditableType = ContentIsEditable);
+RefPtr<ContainerNode> highestEditableRoot(const Position&, EditableType = ContentIsEditable);
 
-Node* highestEnclosingNodeOfType(const Position&, bool (*nodeIsOfType)(const Node*), EditingBoundaryCrossingRule = CannotCrossEditingBoundary, Node* stayWithin = nullptr);
-Node* highestNodeToRemoveInPruning(Node*);
+RefPtr<Node> highestEnclosingNodeOfType(const Position&, bool (*nodeIsOfType)(const Node&), EditingBoundaryCrossingRule = CannotCrossEditingBoundary, Node* stayWithin = nullptr);
+RefPtr<Node> highestNodeToRemoveInPruning(Node*);
 Element* lowestEditableAncestor(Node*);
 
 Element* deprecatedEnclosingBlockFlowElement(Node*); // Use enclosingBlock instead.
-Element* enclosingBlock(Node*, EditingBoundaryCrossingRule = CannotCrossEditingBoundary);
-Element* enclosingTableCell(const Position&);
-Node* enclosingEmptyListItem(const VisiblePosition&);
-Element* enclosingAnchorElement(const Position&);
+RefPtr<Element> enclosingBlock(RefPtr<Node>, EditingBoundaryCrossingRule = CannotCrossEditingBoundary);
+RefPtr<Element> enclosingTableCell(const Position&);
+RefPtr<Node> enclosingEmptyListItem(const VisiblePosition&);
+RefPtr<Element> enclosingAnchorElement(const Position&);
 Element* enclosingElementWithTag(const Position&, const QualifiedName&);
-Node* enclosingNodeOfType(const Position&, bool (*nodeIsOfType)(const Node*), EditingBoundaryCrossingRule = CannotCrossEditingBoundary);
-HTMLSpanElement* tabSpanNode(const Node*);
-Element* isLastPositionBeforeTable(const VisiblePosition&); // FIXME: Strange to name this isXXX, but return an element.
-Element* isFirstPositionAfterTable(const VisiblePosition&); // FIXME: Strange to name this isXXX, but return an element.
+RefPtr<Node> enclosingNodeOfType(const Position&, bool (*nodeIsOfType)(const Node&), EditingBoundaryCrossingRule = CannotCrossEditingBoundary);
+HTMLSpanElement* tabSpanNode(Node*);
+HTMLSpanElement* parentTabSpanNode(Node*);
+RefPtr<Element> isLastPositionBeforeTable(const VisiblePosition&); // FIXME: Strange to name this isXXX, but return an element.
+RefPtr<Element> isFirstPositionAfterTable(const VisiblePosition&); // FIXME: Strange to name this isXXX, but return an element.
 
 // These two deliver leaf nodes as if the whole DOM tree were a linear chain of its leaf nodes.
 Node* nextLeafNode(const Node*);
@@ -85,29 +92,42 @@ bool editingIgnoresContent(const Node&);
 bool canHaveChildrenForEditing(const Node&);
 bool isAtomicNode(const Node*);
 
-bool isBlock(const Node*);
+bool isBlock(const Node&);
 bool isBlockFlowElement(const Node&);
-bool isInline(const Node*);
-bool isTabSpanNode(const Node*);
-bool isTabSpanTextNode(const Node*);
-bool isMailBlockquote(const Node*);
+bool isInline(const Node&);
+bool isMailBlockquote(const Node&);
 bool isRenderedTable(const Node*);
-bool isTableCell(const Node*);
+bool isTableCell(const Node&);
 bool isEmptyTableCell(const Node*);
-bool isTableStructureNode(const Node*);
+bool isTableStructureNode(const Node&);
 bool isListHTMLElement(Node*);
-bool isListItem(const Node*);
-bool isNodeRendered(const Node&);
+bool isListItem(const Node&);
 bool isRenderedAsNonInlineTableImageOrHR(const Node*);
 bool isNonTableCellHTMLBlockElement(const Node*);
 
 bool isNodeVisiblyContainedWithin(Node&, const SimpleRange&);
 
-bool areIdenticalElements(const Node&, const Node&);
+Element* elementIfEquivalent(const Element&, Node&);
 
 bool positionBeforeOrAfterNodeIsCandidate(Node&);
 
+// -------------------------------------------------------------------------
+// SimpleRange
+// -------------------------------------------------------------------------
+
+PositionRange positionsForRange(const SimpleRange&);
 WEBCORE_EXPORT HashSet<RefPtr<HTMLImageElement>> visibleImageElementsInRangeWithNonLoadedImages(const SimpleRange&);
+WEBCORE_EXPORT SimpleRange adjustToVisuallyContiguousRange(const SimpleRange&);
+
+struct EnclosingLayerInfomation {
+    CheckedPtr<RenderLayer> startLayer;
+    CheckedPtr<RenderLayer> endLayer;
+    CheckedPtr<RenderLayer> enclosingLayer;
+    RefPtr<GraphicsLayer> enclosingGraphicsLayer;
+    std::optional<PlatformLayerIdentifier> enclosingGraphicsLayerID;
+};
+
+WEBCORE_EXPORT EnclosingLayerInfomation computeEnclosingLayer(const SimpleRange&);
 
 // -------------------------------------------------------------------------
 // Position
@@ -116,11 +136,12 @@ WEBCORE_EXPORT HashSet<RefPtr<HTMLImageElement>> visibleImageElementsInRangeWith
 Position nextCandidate(const Position&);
 Position previousCandidate(const Position&);
 
-Position nextVisuallyDistinctCandidate(const Position&);
+enum class SkipDisplayContents : bool { No, Yes };
+Position nextVisuallyDistinctCandidate(const Position&, SkipDisplayContents = SkipDisplayContents::Yes);
 Position previousVisuallyDistinctCandidate(const Position&);
 
 Position firstPositionInOrBeforeNode(Node*);
-Position lastPositionInOrAfterNode(Node*);
+inline Position lastPositionInOrAfterNode(Node*);
 
 Position firstEditablePositionAfterPositionInRoot(const Position&, ContainerNode* root);
 Position lastEditablePositionBeforePositionInRoot(const Position&, ContainerNode* root);
@@ -134,6 +155,7 @@ unsigned numEnclosingMailBlockquotes(const Position&);
 void updatePositionForNodeRemoval(Position&, Node&);
 
 WEBCORE_EXPORT TextDirection directionOfEnclosingBlock(const Position&);
+TextDirection primaryDirectionForSingleLineRange(const Position& start, const Position& end);
 
 // -------------------------------------------------------------------------
 // VisiblePosition
@@ -152,6 +174,14 @@ VisiblePosition visiblePositionForIndexUsingCharacterIterator(Node&, int index);
 
 WEBCORE_EXPORT VisiblePosition closestEditablePositionInElementForAbsolutePoint(const Element&, const IntPoint&);
 
+enum class SelectionExtentMovement : uint8_t {
+    Closest,
+    Left,
+    Right,
+};
+void adjustVisibleExtentPreservingVisualContiguity(const VisiblePosition& base, VisiblePosition& extent, SelectionExtentMovement);
+WEBCORE_EXPORT bool crossesBidiTextBoundaryInSameLine(const VisiblePosition&, const VisiblePosition& other);
+
 // -------------------------------------------------------------------------
 // HTMLElement
 // -------------------------------------------------------------------------
@@ -160,16 +190,16 @@ WEBCORE_EXPORT Ref<HTMLElement> createDefaultParagraphElement(Document&);
 Ref<HTMLElement> createHTMLElement(Document&, const QualifiedName&);
 Ref<HTMLElement> createHTMLElement(Document&, const AtomString&);
 
-WEBCORE_EXPORT HTMLElement* enclosingList(Node*);
-HTMLElement* outermostEnclosingList(Node*, Node* rootList = nullptr);
-Node* enclosingListChild(Node*);
+WEBCORE_EXPORT RefPtr<HTMLElement> enclosingList(Node*);
+RefPtr<HTMLElement> outermostEnclosingList(Node*, Node* rootList = nullptr);
+RefPtr<Node> enclosingListChild(Node*);
 
 // -------------------------------------------------------------------------
 // Element
 // -------------------------------------------------------------------------
 
 Ref<Element> createTabSpanElement(Document&);
-Ref<Element> createTabSpanElement(Document&, const String& tabText);
+Ref<Element> createTabSpanElement(Document&, String&& tabText);
 Ref<Element> createBlockPlaceholderElement(Document&);
 
 Element* editableRootForPosition(const Position&, EditableType = ContentIsEditable);
@@ -187,14 +217,14 @@ Position adjustedSelectionStartForStyleComputation(const VisibleSelection&);
 // -------------------------------------------------------------------------
 
 // FIXME: This is only one of many definitions of whitespace. Possibly never the right one to use.
-bool deprecatedIsEditingWhitespace(UChar);
+bool deprecatedIsEditingWhitespace(char16_t);
 
 // FIXME: Can't answer this question correctly without being passed the white-space mode.
-bool deprecatedIsCollapsibleWhitespace(UChar);
+bool deprecatedIsCollapsibleWhitespace(char16_t);
 
-bool isAmbiguousBoundaryCharacter(UChar);
+bool isAmbiguousBoundaryCharacter(char16_t);
 
-String stringWithRebalancedWhitespace(const String&, bool startIsStartOfParagraph, bool endIsEndOfParagraph);
+String stringWithRebalancedWhitespace(const String&, bool startIsStartOfParagraph, bool shouldEmitNBSPbeforeEnd);
 const String& nonBreakingSpaceString();
 
 // Miscellaneous functions for caret rendering.
@@ -206,18 +236,18 @@ IntRect absoluteBoundsForLocalCaretRect(RenderBlock* rendererForCaretPainting, c
 
 // -------------------------------------------------------------------------
 
-inline bool deprecatedIsEditingWhitespace(UChar c)
+inline bool deprecatedIsEditingWhitespace(char16_t c)
 {
     return c == noBreakSpace || c == ' ' || c == '\n' || c == '\t';
 }
 
 // FIXME: Can't really answer this question correctly without knowing the white-space mode.
-inline bool deprecatedIsCollapsibleWhitespace(UChar c)
+inline bool deprecatedIsCollapsibleWhitespace(char16_t c)
 {
     return c == ' ' || c == '\n';
 }
 
-bool isAmbiguousBoundaryCharacter(UChar);
+bool isAmbiguousBoundaryCharacter(char16_t);
 
 inline bool editingIgnoresContent(const Node& node)
 {
@@ -234,13 +264,6 @@ inline Position firstPositionInOrBeforeNode(Node* node)
     if (!node)
         return { };
     return editingIgnoresContent(*node) ? positionBeforeNode(node) : firstPositionInNode(node);
-}
-
-inline Position lastPositionInOrAfterNode(Node* node)
-{
-    if (!node)
-        return { };
-    return editingIgnoresContent(*node) ? positionAfterNode(node) : lastPositionInNode(node);
 }
 
 }

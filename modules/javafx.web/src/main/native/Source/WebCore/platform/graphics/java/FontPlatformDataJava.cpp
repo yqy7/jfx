@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
 #include "config.h"
 
 #include "FontPlatformData.h"
+#include "FontCustomPlatformData.h"
 #include "FontDescription.h"
 #include "GraphicsContextJava.h"
 #include "NotImplemented.h"
@@ -134,8 +135,14 @@ unsigned FontPlatformData::hash() const
 String FontPlatformData::description() const
 {
     notImplemented();
-    return "Java font";
+    return "Java font"_s;
 }
 #endif //NDEBUG
+
+String FontPlatformData::familyName() const
+{
+    // FIXME: Not implemented yet.
+    return { };
+}
 
 }

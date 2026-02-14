@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,18 +30,20 @@ import java.util.concurrent.TimeUnit;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.scene.Group;
-import javafx.scene.Scene;
 import javafx.scene.ImageCursor;
+import javafx.scene.Scene;
 import javafx.stage.Stage;
 import javafx.stage.WindowEvent;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import test.util.Util;
 
+@Timeout(value=20000, unit=TimeUnit.MILLISECONDS)
 public class ImageCursorGetBestSizeTest {
-    static CountDownLatch startupLatch;
+    static CountDownLatch startupLatch = new CountDownLatch(1);
     static Stage stage;
 
     private static final double INIT_SIZE = 100.d;
@@ -60,30 +62,20 @@ public class ImageCursorGetBestSizeTest {
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() {
-        startupLatch = new CountDownLatch(1);
-
-        new Thread(() -> Application.launch(TestApp.class, (String[]) null)).start();
-        try {
-            if (!startupLatch.await(15, TimeUnit.SECONDS)) {
-                Assert.fail("Timeout waiting for FX runtime to start");
-            }
-        } catch (InterruptedException ex) {
-            Assert.fail("Unexpected exception: " + ex);
-        }
+        Util.launch(startupLatch, TestApp.class);
     }
 
-    @Test(timeout = 20000)
+    @AfterAll
+    public static void teardown() {
+        Util.shutdown();
+    }
+
+    @Test
     public void testImageCursorGetBestSize() throws Exception {
         Util.runAndWait(() -> {
-            Assert.assertNotNull(ImageCursor.getBestSize(10, 20));
+            Assertions.assertNotNull(ImageCursor.getBestSize(10, 20));
         });
-    }
-
-    @AfterClass
-    public static void teardown() {
-        Platform.runLater(stage::hide);
-        Platform.exit();
     }
 }

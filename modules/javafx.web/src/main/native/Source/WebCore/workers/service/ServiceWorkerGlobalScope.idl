@@ -26,8 +26,7 @@
 [
     Global=(Worker,ServiceWorker),
     Exposed=ServiceWorker,
-    Conditional=SERVICE_WORKER,
-    EnabledAtRuntime=ServiceWorkerEnabled,
+    EnabledBySetting=ServiceWorkersEnabled,
     JSCustomMarkFunction,
     IsImmutablePrototypeExoticObject,
     IsImmutablePrototypeExoticObjectOnPrototype,
@@ -38,6 +37,9 @@
 
     [NewObject] Promise<undefined> skipWaiting();
 
+    [EnabledBySetting=CookieStoreAPIEnabled] readonly attribute CookieStore cookieStore;
+
+    [EnabledBySetting=CookieStoreAPIEnabled&CookieStoreManagerEnabled] attribute EventHandler oncookiechange;
     attribute EventHandler oninstall;
     attribute EventHandler onactivate;
     attribute EventHandler onfetch;
@@ -46,6 +48,6 @@
     attribute EventHandler onmessage;
     attribute EventHandler onmessageerror;
 
-    [Conditional=NOTIFICATION_EVENT, EnabledAtRuntime=NotificationEventEnabled] attribute EventHandler onnotificationclick;
-    [Conditional=NOTIFICATION_EVENT, EnabledAtRuntime=NotificationEventEnabled] attribute EventHandler onnotificationclose;
+    [Conditional=NOTIFICATION_EVENT, EnabledBySetting=NotificationEventEnabled] attribute EventHandler onnotificationclick;
+    [Conditional=NOTIFICATION_EVENT, EnabledBySetting=NotificationEventEnabled] attribute EventHandler onnotificationclose;
 };

@@ -25,28 +25,48 @@
 #pragma once
 
 #include "StyleMultiImage.h"
+#include <wtf/TZoneMalloc.h>
+#include <wtf/WeakHashSet.h>
 
 namespace WebCore {
 
-class CSSCursorImageValue;
-
-struct ImageWithScale;
+class CSSValue;
+class Document;
+class WeakPtrImplWithEventTargetData;
+class SVGCursorElement;
 
 class StyleCursorImage final : public StyleMultiImage {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(StyleCursorImage);
 public:
-    static Ref<StyleCursorImage> create(CSSCursorImageValue&);
+    static Ref<StyleCursorImage> create(const Ref<StyleImage>&, std::optional<IntPoint>, const Style::URL&);
+    static Ref<StyleCursorImage> create(Ref<StyleImage>&&, std::optional<IntPoint>, Style::URL&&);
     virtual ~StyleCursorImage();
-    bool operator==(const StyleImage& other) const;
+
+    bool operator==(const StyleImage&) const final;
+    bool equals(const StyleCursorImage&) const;
+    bool equalInputImages(const StyleCursorImage&) const;
+
     bool usesDataProtocol() const final;
 
-private:
-    void setContainerContextForRenderer(const RenderElement& renderer, const FloatSize& containerSize, float containerZoom) final;
-    Ref<CSSValue> cssValue() const final;
-    ImageWithScale selectBestFitImage(const Document&) const final;
+    void cursorElementRemoved(SVGCursorElement&);
+    void cursorElementChanged(SVGCursorElement&);
 
-    explicit StyleCursorImage(CSSCursorImageValue&);
-    Ref<CSSCursorImageValue> m_cssValue;
+    std::optional<IntPoint> hotSpot() const { return m_hotSpot; }
+
+private:
+    explicit StyleCursorImage(const Ref<StyleImage>&, std::optional<IntPoint> hotSpot, const Style::URL&);
+    explicit StyleCursorImage(Ref<StyleImage>&&, std::optional<IntPoint> hotSpot, Style::URL&&);
+
+    void setContainerContextForRenderer(const RenderElement& renderer, const FloatSize& containerSize, float containerZoom) final;
+    Ref<CSSValue> computedStyleValue(const RenderStyle&) const final;
+    ImageWithScale selectBestFitImage(const Document&) final;
+
+    RefPtr<SVGCursorElement> updateCursorElement(const Document&);
+
+    Ref<StyleImage> m_image;
+    std::optional<IntPoint> m_hotSpot;
+    Style::URL m_originalURL;
+    WeakHashSet<SVGCursorElement, WeakPtrImplWithEventTargetData> m_cursorElements;
 };
 
 } // namespace WebCore

@@ -25,17 +25,19 @@
 
 #pragma once
 
-#include "PublicSuffix.h"
+#include "PublicSuffixStore.h"
 #include "SecurityOriginData.h"
 #include <wtf/HashTraits.h>
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/URL.h>
+#include <wtf/text/StringConcatenate.h>
 #include <wtf/text/StringHash.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 class RegistrableDomain {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED_INLINE(RegistrableDomain);
 public:
     RegistrableDomain() = default;
 
@@ -45,17 +47,20 @@ public:
     }
 
     explicit RegistrableDomain(const SecurityOriginData& origin)
-        : RegistrableDomain(registrableDomainFromHost(origin.host))
+        : RegistrableDomain(registrableDomainFromHost(origin.host()))
     {
     }
 
+    static RegistrableDomain fromRawString(String&& origin)
+    {
+        return RegistrableDomain(WTFMove(origin));
+    }
+
     bool isEmpty() const { return m_registrableDomain.isEmpty() || m_registrableDomain == "nullOrigin"_s; }
-    String& string() { return m_registrableDomain; }
     const String& string() const { return m_registrableDomain; }
 
-    bool operator!=(const RegistrableDomain& other) const { return m_registrableDomain != other.m_registrableDomain; }
-    bool operator==(const RegistrableDomain& other) const { return m_registrableDomain == other.m_registrableDomain; }
-    bool operator==(const char* other) const { return m_registrableDomain == other; }
+    friend bool operator==(const RegistrableDomain&, const RegistrableDomain&) = default;
+    bool operator==(ASCIILiteral other) const { return m_registrableDomain == other; }
 
     bool matches(const URL& url) const
     {
@@ -64,10 +69,11 @@ public:
 
     bool matches(const SecurityOriginData& origin) const
     {
-        return matches(origin.host);
+        return matches(origin.host());
     }
 
-    RegistrableDomain isolatedCopy() const { return RegistrableDomain { m_registrableDomain.isolatedCopy() }; }
+    RegistrableDomain isolatedCopy() const & { return RegistrableDomain { m_registrableDomain.isolatedCopy() }; }
+    RegistrableDomain isolatedCopy() && { return RegistrableDomain { WTFMove(m_registrableDomain).isolatedCopy() }; }
 
     RegistrableDomain(WTF::HashTableDeletedValueType)
         : m_registrableDomain(WTF::HashTableDeletedValue) { }
@@ -87,20 +93,11 @@ public:
 
     static RegistrableDomain uncheckedCreateFromHost(const String& host)
     {
-#if ENABLE(PUBLIC_SUFFIX_LIST)
-        auto registrableDomain = topPrivatelyControlledDomain(host);
+        auto registrableDomain = PublicSuffixStore::singleton().topPrivatelyControlledDomain(host);
         if (registrableDomain.isEmpty())
             return uncheckedCreateFromRegistrableDomainString(host);
         return RegistrableDomain { WTFMove(registrableDomain) };
-#else
-        return uncheckedCreateFromRegistrableDomainString(host);
-#endif
     }
-
-    template<class Encoder> void encode(Encoder&) const;
-    template<class Decoder> static std::optional<RegistrableDomain> decode(Decoder&);
-
-protected:
 
 private:
     explicit RegistrableDomain(String&& domain)
@@ -121,11 +118,7 @@ private:
 
     static inline String registrableDomainFromHost(const String& host)
     {
-#if ENABLE(PUBLIC_SUFFIX_LIST)
-        auto domain = topPrivatelyControlledDomain(host);
-#else
-        auto domain = host;
-#endif
+        auto domain = PublicSuffixStore::singleton().topPrivatelyControlledDomain(host);
         if (host.isEmpty())
             domain = "nullOrigin"_s;
         else if (domain.isEmpty())
@@ -135,25 +128,6 @@ private:
 
     String m_registrableDomain;
 };
-
-template<class Encoder>
-void RegistrableDomain::encode(Encoder& encoder) const
-{
-    encoder << m_registrableDomain;
-}
-
-template<class Decoder>
-std::optional<RegistrableDomain> RegistrableDomain::decode(Decoder& decoder)
-{
-    std::optional<String> domain;
-    decoder >> domain;
-    if (!domain)
-        return std::nullopt;
-
-    RegistrableDomain registrableDomain;
-    registrableDomain.m_registrableDomain = WTFMove(*domain);
-    return registrableDomain;
-}
 
 inline bool areRegistrableDomainsEqual(const URL& a, const URL& b)
 {

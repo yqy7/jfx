@@ -25,22 +25,27 @@
 
 #pragma once
 
+#include "CSSNumericValue.h"
+#include "CommonAtomStrings.h"
 #include "FillMode.h"
 #include "PlaybackDirection.h"
-#include <variant>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
+using OptionalDoubleOrString = std::optional<Variant<double, String>>;
+using DoubleOrCSSNumericValueOrString = Variant<double, RefPtr<CSSNumericValue>, String>;
+
 struct EffectTiming {
-    std::variant<double, String> duration { "auto" };
+    DoubleOrCSSNumericValueOrString duration { autoAtom() };
     double delay { 0 };
     double endDelay { 0 };
     double iterationStart { 0 };
     double iterations { 1 };
-    String easing { "linear" };
+    String easing { "linear"_s };
     FillMode fill { FillMode::Auto };
     PlaybackDirection direction { PlaybackDirection::Normal };
+    OptionalDoubleOrString durationAsDoubleOrString() const;
 };
 
 } // namespace WebCore

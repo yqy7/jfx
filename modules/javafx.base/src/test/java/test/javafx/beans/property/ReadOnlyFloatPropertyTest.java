@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,27 +25,22 @@
 
 package test.javafx.beans.property;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import javafx.beans.InvalidationListener;
-import javafx.beans.binding.ObjectExpression;
 import javafx.beans.property.ReadOnlyFloatProperty;
 import javafx.beans.property.ReadOnlyFloatWrapper;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.value.ChangeListener;
-import static org.junit.Assert.assertEquals;
-
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class ReadOnlyFloatPropertyTest {
 
     private static final float DEFAULT = 0.0f;
     private static final float EPSILON = 1e-6f;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
     }
 
@@ -87,7 +82,7 @@ public class ReadOnlyFloatPropertyTest {
 
     @Test
     public void testObjectToFloat() {
-        final ReadOnlyObjectWrapper<Float> valueModel = new ReadOnlyObjectWrapper<Float>();
+        final ReadOnlyObjectWrapper<Float> valueModel = new ReadOnlyObjectWrapper<>();
         final ReadOnlyFloatProperty exp = ReadOnlyFloatProperty.readOnlyFloatProperty(valueModel.getReadOnlyProperty());
 
 
@@ -129,5 +124,4 @@ public class ReadOnlyFloatPropertyTest {
         }
 
     }
-
 }

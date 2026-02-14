@@ -50,7 +50,7 @@ namespace WTF {
     // Essentially, MessageQueue acts as a queue of std::unique_ptr<DataType>.
     template<typename DataType>
     class MessageQueue final {
-        WTF_MAKE_FAST_ALLOCATED;
+        WTF_DEPRECATED_MAKE_FAST_ALLOCATED(MessageQueue);
         WTF_MAKE_NONCOPYABLE(MessageQueue);
     public:
         MessageQueue() : m_killed(false) { }
@@ -141,7 +141,7 @@ namespace WTF {
         Locker lock { m_lock };
         bool timedOut = false;
 
-        MonotonicTime absoluteTimeout = MonotonicTime::now() + relativeTimeout;
+        MonotonicTime absoluteTimeout = MonotonicTime::timePointFromNow(relativeTimeout);
         auto found = m_queue.end();
         while (!m_killed && !timedOut) {
             found = m_queue.findIf([&predicate](const std::unique_ptr<DataType>& ptr) -> bool {

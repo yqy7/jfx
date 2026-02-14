@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -64,13 +64,15 @@ public final class EventType<T extends Event> implements Serializable{
      * indirect sub types of it. It is also the only event type which
      * has its super event type set to {@code null}.
      */
-    public static final EventType<Event> ROOT =
-            new EventType<Event>("EVENT", null);
+    public static final EventType<Event> ROOT = new EventType<>("EVENT", true);
 
+    @SuppressWarnings("doclint:missing")
     private WeakHashMap<EventType<? extends T>, Void> subTypes;
 
+    @SuppressWarnings("doclint:missing")
     private final EventType<? super T> superType;
 
+    @SuppressWarnings("doclint:missing")
     private final String name;
 
     /**
@@ -129,23 +131,11 @@ public final class EventType<T extends Event> implements Serializable{
     }
 
     /**
-     * Internal constructor that skips various checks
+     * Internal constructor for the ROOT instance that skips various checks
      */
-    EventType(final String name,
-                      final EventType<? super T> superType) {
-        this.superType = superType;
+    private EventType(String name, boolean ignored) {
+        this.superType = null;
         this.name = name;
-        if (superType != null) {
-            if (superType.subTypes != null) {
-                for (Iterator i = superType.subTypes.keySet().iterator(); i.hasNext();) {
-                    EventType t  = (EventType) i.next();
-                    if (name == null && t.name == null || (name != null && name.equals(t.name))) {
-                        i.remove();
-                    }
-                }
-            }
-            superType.register(this);
-        }
     }
 
     /**
@@ -176,9 +166,9 @@ public final class EventType<T extends Event> implements Serializable{
         return (name != null) ? name : super.toString();
     }
 
-    private void register(javafx.event.EventType<? extends T> subType) {
+    private synchronized void register(javafx.event.EventType<? extends T> subType) {
         if (subTypes == null) {
-            subTypes = new WeakHashMap<EventType<? extends T>, Void>();
+            subTypes = new WeakHashMap<>();
         }
         for (EventType<? extends T> t : subTypes.keySet()) {
             if (((t.name == null && subType.name == null) || (t.name != null && t.name.equals(subType.name)))) {
@@ -189,14 +179,15 @@ public final class EventType<T extends Event> implements Serializable{
         subTypes.put(subType, null);
     }
 
-    private Object writeReplace() throws ObjectStreamException {
-        Deque<String> path = new LinkedList<String>();
+    @SuppressWarnings("doclint:missing")
+    private Object writeReplace() {
+        Deque<String> path = new LinkedList<>();
         EventType<?> t = this;
         while (t != ROOT) {
             path.addFirst(t.name);
             t = t.superType;
         }
-        return new EventTypeSerialization(new ArrayList<String>(path));
+        return new EventTypeSerialization(new ArrayList<>(path));
     }
 
     static class EventTypeSerialization implements Serializable {

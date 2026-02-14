@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2015 Andy VanWagoner (andy@vanwagoner.family)
- * Copyright (C) 2016-2021 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,7 +44,7 @@ static JSC_DECLARE_HOST_FUNCTION(intlNumberFormatConstructorFuncSupportedLocales
 
 namespace JSC {
 
-const ClassInfo IntlNumberFormatConstructor::s_info = { "Function", &Base::s_info, &numberFormatConstructorTable, nullptr, CREATE_METHOD_TABLE(IntlNumberFormatConstructor) };
+const ClassInfo IntlNumberFormatConstructor::s_info = { "Function"_s, &Base::s_info, &numberFormatConstructorTable, nullptr, CREATE_METHOD_TABLE(IntlNumberFormatConstructor) };
 
 /* Source for IntlNumberFormatConstructor.lut.h
 @begin numberFormatConstructorTable

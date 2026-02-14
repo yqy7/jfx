@@ -47,13 +47,13 @@ namespace WTF {
 
 class WordLock final {
     WTF_MAKE_NONCOPYABLE(WordLock);
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(WordLock);
 public:
     constexpr WordLock() = default;
 
     void lock()
     {
-        if (LIKELY(m_word.compareExchangeWeak(0, isLockedBit, std::memory_order_acquire))) {
+        if (m_word.compareExchangeWeak(0, isLockedBit, std::memory_order_acquire)) [[likely]] {
             // WordLock acquired!
             return;
         }
@@ -63,7 +63,7 @@ public:
 
     void unlock()
     {
-        if (LIKELY(m_word.compareExchangeWeak(isLockedBit, 0, std::memory_order_release))) {
+        if (m_word.compareExchangeWeak(isLockedBit, 0, std::memory_order_release)) [[likely]] {
             // WordLock released, and nobody was waiting!
             return;
         }
@@ -100,9 +100,6 @@ protected:
     Atomic<uintptr_t> m_word { 0 };
 };
 
-using WordLockHolder = Locker<WordLock>;
-
 } // namespace WTF
 
 using WTF::WordLock;
-using WTF::WordLockHolder;

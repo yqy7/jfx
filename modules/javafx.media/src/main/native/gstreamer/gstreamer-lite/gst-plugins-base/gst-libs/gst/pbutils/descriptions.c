@@ -37,7 +37,7 @@
 # include "config.h"
 #endif
 
-#include "gst/gst-i18n-plugin.h"
+#include <glib/gi18n-lib.h>
 
 #include <gst/audio/audio.h>
 #include <gst/video/video.h>
@@ -56,7 +56,8 @@ typedef enum
   FLAG_IMAGE = (1 << 4),        /* format is an image format, or image container/tag  */
   FLAG_SUB = (1 << 5),          /* format is a subtitle format, or subtitle container */
   FLAG_TAG = (1 << 6),          /* format is a tag/container                          */
-  FLAG_GENERIC = (1 << 7)       /* format is a generic container (e.g. multipart)     */
+  FLAG_GENERIC = (1 << 7),      /* format is a generic container (e.g. multipart)     */
+  FLAG_METADATA = (1 << 8),     /* format is a metadata format, or metadata container/tag */
 } FormatFlags;
 
 typedef struct
@@ -107,6 +108,7 @@ static const FormatInfo formats[] = {
   {"video/x-quicktime", "Quicktime", AVIS_CONTAINER, "mov"},
   {"video/quicktime", "Quicktime", AVIS_CONTAINER, "mov"},
   {"video/mj2", "Motion JPEG 2000", AVIS_CONTAINER, "mj2"},
+  {"video/x-ivf", "Indeo video format (IVF)", AVIS_CONTAINER, "ivf"},
 
   /* audio formats with static descriptions */
   {"audio/x-ac3", "AC-3 (ATSC A/52)", FLAG_AUDIO, "ac3"},
@@ -152,6 +154,7 @@ static const FormatInfo formats[] = {
   {"audio/x-mod", "Module Music Format (MOD)", FLAG_AUDIO, "mod"},
   {"audio/x-mulaw", "Mu-Law", FLAG_AUDIO, ""},
   {"audio/x-musepack", "Musepack (MPC)", FLAG_AUDIO, "mpc"},
+  {"audio/x-ffmpeg-parsed-musepack", "Musepack (MPC)", FLAG_AUDIO, "mpc"},
   {"audio/x-nellymoser", "Nellymoser Asao", FLAG_AUDIO, ""},
   {"audio/x-nist", "Sphere NIST", FLAG_AUDIO, ""},
   {"audio/x-nsf", "Nintendo NSF", FLAG_AUDIO, ""},
@@ -203,6 +206,7 @@ static const FormatInfo formats[] = {
       FLAG_VIDEO, ""},
   {"subpicture/x-dvd", "DVD subpicture", FLAG_VIDEO, ""},
   {"video/x-ffv", N_("FFMpeg v1"), FLAG_VIDEO, ""},
+  {"video/x-ffvhuff", "FFmpeg Huffman YUV variant", FLAG_VIDEO, ""},
   {"video/x-flash-screen", "Flash Screen Video", FLAG_VIDEO, ""},
   {"video/x-flash-video", "Sorenson Spark Video", FLAG_VIDEO, ""},
   {"video/x-h261", "H.261", FLAG_VIDEO, ""},
@@ -317,6 +321,7 @@ static const FormatInfo formats[] = {
   {"video/x-h263", NULL, FLAG_VIDEO, "h263"},
   {"video/x-h264", NULL, FLAG_VIDEO, "h264"},
   {"video/x-h265", NULL, FLAG_VIDEO, "h265"},
+  {"video/x-h266", NULL, FLAG_VIDEO, "h266"},
   {"video/x-indeo", NULL, FLAG_VIDEO, ""},
   {"video/x-msmpeg", NULL, FLAG_VIDEO, ""},
   {"video/x-pn-realvideo", NULL, FLAG_VIDEO, ""},
@@ -331,7 +336,10 @@ static const FormatInfo formats[] = {
   {"video/x-svq", NULL, FLAG_VIDEO, ""},
   {"video/x-wmv", NULL, FLAG_VIDEO, ""},
   {"video/x-xan", NULL, FLAG_VIDEO, ""},
-  {"video/x-tscc", NULL, FLAG_VIDEO, ""}
+  {"video/x-tscc", NULL, FLAG_VIDEO, ""},
+  /* metadata */
+  {"application/x-onvif-metadata", "ONVIF Timed Metadata", FLAG_METADATA, ""},
+  {"meta/x-klv", "KLV Metadata", FLAG_METADATA, ""},
 };
 #else // GSTREAMER_LITE
 static const FormatInfo formats[] = {
@@ -456,6 +464,27 @@ pbutils_desc_get_h265_profile_name_from_nick (const gchar * nick)
   return pbutils_desc_get_profile_name_from_nick (map, sizeof (map), nick);
 }
 
+static const gchar *
+pbutils_desc_get_h266_profile_name_from_nick (const gchar * nick)
+{
+  static const gchar map[] =
+      "main-10\000Main 10\000"
+      "multilayer-main-10\000Multilayer Main 10\000"
+      "main-10-still-picture\000Main 10 Still Picture\000"
+      "main-4:4:4-10\000Main 4:4:4 10\000"
+      "multilayer-main-4:4:4-10\000Multilayer Main 4:4:4 10\000"
+      "main-4:4:4-10-still-picture\000Main 4:4:4 10 Still Picture\000"
+      "main-12\000Main 12\000"
+      "main-12-intra\000Main 12 Intra\000"
+      "main-12-still-picture\000Main 12 Still Picture\000"
+      "main-4:4:4-12\000Main 4:4:4 12\000"
+      "main-4:4:4-12-intra\000Main 4:4:4 12 Intra\000"
+      "main-4:4:4-12-still-picture\000Main 4:4:4 12 Still Picture\000"
+      "main-4:4:4-16\000Main 4:4:4 16\000";
+
+  return pbutils_desc_get_profile_name_from_nick (map, sizeof (map), nick);
+}
+
 /* returns static descriptions and dynamic ones (such as video/x-raw),
  * or NULL if caps aren't known at all */
 static gchar *
@@ -493,8 +522,8 @@ format_info_get_desc (const FormatInfo * info, const GstCaps * caps)
       const gchar *subs;
       gint w_sub, h_sub, n_semi;
 
-      w_sub = GST_VIDEO_FORMAT_INFO_W_SUB (finfo, 1);
-      h_sub = GST_VIDEO_FORMAT_INFO_H_SUB (finfo, 1);
+      w_sub = 1 << GST_VIDEO_FORMAT_INFO_W_SUB (finfo, 1);
+      h_sub = 1 << GST_VIDEO_FORMAT_INFO_H_SUB (finfo, 1);
 
       if (w_sub == 1 && h_sub == 1) {
         subs = "4:4:4";
@@ -562,6 +591,8 @@ format_info_get_desc (const FormatInfo * info, const GstCaps * caps)
   } else if (strcmp (info->type, "video/x-h264") == 0) {
     const gchar *variant, *ret;
     const gchar *profile;
+    gboolean lcevc = FALSE;
+    const gchar *lcevc_str = "";
 
     variant = gst_structure_get_string (s, "variant");
     if (variant == NULL)
@@ -580,9 +611,13 @@ format_info_get_desc (const FormatInfo * info, const GstCaps * caps)
     profile = gst_structure_get_string (s, "profile");
     if (profile != NULL)
       profile = pbutils_desc_get_h264_profile_name_from_nick (profile);
+    gst_structure_get_boolean (s, "lcevc", &lcevc);
+    if (lcevc)
+      lcevc_str = " (LCEVC)";
     if (profile == NULL)
-      return g_strdup (ret);
-    return g_strdup_printf ("%s (%s Profile)", ret, profile);
+      return g_strdup_printf ("%s%s", ret, lcevc_str);
+    else
+      return g_strdup_printf ("%s (%s Profile)%s", ret, profile, lcevc_str);
   } else if (strcmp (info->type, "video/x-h265") == 0) {
     const gchar *profile = gst_structure_get_string (s, "profile");
 
@@ -592,6 +627,15 @@ format_info_get_desc (const FormatInfo * info, const GstCaps * caps)
       return g_strdup_printf ("H.265 (%s Profile)", profile);
 
     return g_strdup ("H.265");
+  } else if (strcmp (info->type, "video/x-h266") == 0) {
+    const gchar *profile = gst_structure_get_string (s, "profile");
+
+    if (profile != NULL)
+      profile = pbutils_desc_get_h266_profile_name_from_nick (profile);
+    if (profile != NULL)
+      return g_strdup_printf ("H.266 (%s Profile)", profile);
+
+    return g_strdup ("H.266");
   } else if (strcmp (info->type, "video/x-dirac") == 0) {
     const gchar *profile = gst_structure_get_string (s, "profile");
     if (profile == NULL)
@@ -676,7 +720,7 @@ format_info_get_desc (const FormatInfo * info, const GstCaps * caps)
       case 1:
       case 2:
       case 3:
-        if (str && strncmp (str, "MSS", 3)) {
+        if (str && !strncmp (str, "MSS", 3)) {
           return g_strdup_printf ("Windows Media Video %d Screen", ver + 6);
         } else {
           return g_strdup_printf ("Windows Media Video %d", ver + 6);
@@ -762,16 +806,17 @@ format_info_get_desc (const FormatInfo * info, const GstCaps * caps)
 
     switch (ver) {
       case 1:
-        gst_structure_get_int (s, "layer", &layer);
-        switch (layer) {
-          case 1:
-          case 2:
-          case 3:
-            return g_strdup_printf ("MPEG-1 Layer %d (MP%d)", layer, layer);
-          default:
-            break;
+        if (gst_structure_get_int (s, "layer", &layer)) {
+          switch (layer) {
+            case 1:
+            case 2:
+            case 3:
+              return g_strdup_printf ("MPEG-1 Layer %d (MP%d)", layer, layer);
+            default:
+              break;
+          }
+          GST_WARNING ("Unexpected MPEG-1 layer in %" GST_PTR_FORMAT, caps);
         }
-        GST_WARNING ("Unexpected MPEG-1 layer in %" GST_PTR_FORMAT, caps);
         return g_strdup ("MPEG-1 Audio");
       case 2:
         return g_strdup ("MPEG-2 AAC");
@@ -880,6 +925,30 @@ format_info_get_desc (const FormatInfo * info, const GstCaps * caps)
     }
     GST_WARNING ("Unexpected version in %" GST_PTR_FORMAT, caps);
     return g_strdup ("TechSmith Screen Capture");
+  } else if (strcmp (info->type, "video/x-hap") == 0) {
+    const gchar *variant, *ret;
+
+    // https://github.com/Vidvox/hap/blob/master/documentation/HapVideoDRAFT.md
+    variant = gst_structure_get_string (s, "variant");
+    if (variant == NULL || strcmp (variant, "Hap1") == 0)
+      ret = "Hap";
+    else if (strcmp (variant, "Hap5") == 0)
+      ret = "Hap Alpha";
+    else if (strcmp (variant, "HapY") == 0)
+      ret = "Hap Q";
+    else if (strcmp (variant, "HapM") == 0)
+      ret = "Hap Q Alpha";
+    else if (strcmp (variant, "HapA") == 0)
+      ret = "Hap Alpha-Only";
+    else if (strcmp (variant, "Hap7") == 0)
+      ret = "Hap R";
+    else if (strcmp (variant, "HapH") == 0)
+      ret = "Hap HDR";
+    else {
+      GST_WARNING ("Unknown Hap video variant '%s'", variant);
+      ret = "Hap";
+    }
+    return g_strdup (ret);
   }
   return NULL;
 }
@@ -948,13 +1017,13 @@ caps_are_rtp_caps (const GstCaps * caps, const gchar * media, gchar ** format)
  *
  * Returns a localised string describing a source element handling the protocol
  * specified in @protocol, for use in error dialogs or other messages to be
- * seen by the user. Should never return NULL unless @protocol is invalid.
+ * seen by the user.
  *
  * This function is mainly for internal use, applications would typically
  * use gst_missing_plugin_message_get_description() to get a description of
  * a missing feature from a missing-plugin message.
  *
- * Returns: a newly-allocated description string, or NULL on error. Free
+ * Returns: a newly-allocated description string. Free
  *          string with g_free() when not needed any longer.
  */
 gchar *
@@ -998,13 +1067,13 @@ gst_pb_utils_get_source_description (const gchar * protocol)
  *
  * Returns a localised string describing a sink element handling the protocol
  * specified in @protocol, for use in error dialogs or other messages to be
- * seen by the user. Should never return NULL unless @protocol is invalid.
+ * seen by the user.
  *
  * This function is mainly for internal use, applications would typically
  * use gst_missing_plugin_message_get_description() to get a description of
  * a missing feature from a missing-plugin message.
  *
- * Returns: a newly-allocated description string, or NULL on error. Free
+ * Returns: a newly-allocated description string. Free
  *          string with g_free() when not needed any longer.
  */
 gchar *
@@ -1033,13 +1102,12 @@ gst_pb_utils_get_sink_description (const gchar * protocol)
  *
  * Returns a localised string describing an decoder for the format specified
  * in @caps, for use in error dialogs or other messages to be seen by the user.
- * Should never return NULL unless @factory_name or @caps are invalid.
  *
  * This function is mainly for internal use, applications would typically
  * use gst_missing_plugin_message_get_description() to get a description of
  * a missing feature from a missing-plugin message.
  *
- * Returns: a newly-allocated description string, or NULL on error. Free
+ * Returns: a newly-allocated description string. Free
  *          string with g_free() when not needed any longer.
  */
 gchar *
@@ -1088,13 +1156,12 @@ gst_pb_utils_get_decoder_description (const GstCaps * caps)
  *
  * Returns a localised string describing an encoder for the format specified
  * in @caps, for use in error dialogs or other messages to be seen by the user.
- * Should never return NULL unless @factory_name or @caps are invalid.
  *
  * This function is mainly for internal use, applications would typically
  * use gst_missing_plugin_message_get_description() to get a description of
  * a missing feature from a missing-plugin message.
  *
- * Returns: a newly-allocated description string, or NULL on error. Free
+ * Returns: a newly-allocated description string. Free
  *          string with g_free() when not needed any longer.
  */
 gchar *
@@ -1139,14 +1206,13 @@ gst_pb_utils_get_encoder_description (const GstCaps * caps)
  * @factory_name: the name of the element, e.g. "giosrc"
  *
  * Returns a localised string describing the given element, for use in
- * error dialogs or other messages to be seen by the user. Should never
- * return NULL unless @factory_name is invalid.
+ * error dialogs or other messages to be seen by the user.
  *
  * This function is mainly for internal use, applications would typically
  * use gst_missing_plugin_message_get_description() to get a description of
  * a missing feature from a missing-plugin message.
  *
- * Returns: a newly-allocated description string, or NULL on error. Free
+ * Returns: a newly-allocated description string. Free
  *          string with g_free() when not needed any longer.
  */
 gchar *
@@ -1168,7 +1234,7 @@ gst_pb_utils_get_element_description (const gchar * factory_name)
 /**
  * gst_pb_utils_add_codec_description_to_tag_list:
  * @taglist: a #GstTagList
- * @codec_tag: (allow-none): a GStreamer codec tag such as #GST_TAG_AUDIO_CODEC,
+ * @codec_tag: (nullable): a GStreamer codec tag such as #GST_TAG_AUDIO_CODEC,
  *             #GST_TAG_VIDEO_CODEC or #GST_TAG_CODEC. If none is specified,
  *             the function will attempt to detect the appropriate category.
  * @caps: the (fixed) #GstCaps for which a codec tag should be added.
@@ -1227,7 +1293,7 @@ gst_pb_utils_add_codec_description_to_tag_list (GstTagList * taglist,
  * Also see the convenience function
  * gst_pb_utils_add_codec_description_to_tag_list().
  *
- * Returns: a newly-allocated description string, or NULL on error. Free
+ * Returns: (nullable): a newly-allocated description string, or NULL on error. Free
  *          string with g_free() when not needed any longer.
  */
 gchar *
@@ -1328,7 +1394,8 @@ pb_utils_get_file_extension_from_caps (const GstCaps * caps)
 gchar *
 gst_pb_utils_get_file_extension_from_caps (const GstCaps * caps)
 {
-  return g_strdup (pb_utils_get_file_extension_from_caps (caps));
+  const gchar *extension = pb_utils_get_file_extension_from_caps (caps);
+  return extension ? g_strdup (extension) : NULL;
 }
 
 /**
@@ -1359,20 +1426,22 @@ gst_pb_utils_get_caps_description_flags (const GstCaps * caps)
   /* A separate flags type is used because internally more flags are needed
    * for filtering purposes, e.g. the SYSTEMSTREAM flag */
   if (info) {
-    if ((info->flags | FLAG_CONTAINER))
+    if ((info->flags & FLAG_CONTAINER))
       flags |= GST_PBUTILS_CAPS_DESCRIPTION_FLAG_CONTAINER;
-    if ((info->flags | FLAG_AUDIO))
+    if ((info->flags & FLAG_AUDIO))
       flags |= GST_PBUTILS_CAPS_DESCRIPTION_FLAG_AUDIO;
-    if ((info->flags | FLAG_VIDEO))
+    if ((info->flags & FLAG_VIDEO))
       flags |= GST_PBUTILS_CAPS_DESCRIPTION_FLAG_VIDEO;
-    if ((info->flags | FLAG_IMAGE))
+    if ((info->flags & FLAG_IMAGE))
       flags |= GST_PBUTILS_CAPS_DESCRIPTION_FLAG_IMAGE;
-    if ((info->flags | FLAG_SUB))
+    if ((info->flags & FLAG_SUB))
       flags |= GST_PBUTILS_CAPS_DESCRIPTION_FLAG_SUBTITLE;
-    if ((info->flags | FLAG_TAG))
+    if ((info->flags & FLAG_TAG))
       flags |= GST_PBUTILS_CAPS_DESCRIPTION_FLAG_TAG;
-    if ((info->flags | FLAG_GENERIC))
+    if ((info->flags & FLAG_GENERIC))
       flags |= GST_PBUTILS_CAPS_DESCRIPTION_FLAG_GENERIC;
+    if ((info->flags & FLAG_METADATA))
+      flags |= GST_PBUTILS_CAPS_DESCRIPTION_FLAG_METADATA;
   }
 
   gst_caps_unref (tmp);

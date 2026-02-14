@@ -27,6 +27,7 @@
 #include "FontShadow.h"
 
 #include "ColorSerialization.h"
+#include "CommonAtomStrings.h"
 #include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
@@ -34,17 +35,17 @@ namespace WebCore {
 String serializationForCSS(const FontShadow& shadow)
 {
     if (shadow.offset.isZero() && !shadow.blurRadius)
-        return "none"_s;
+        return noneAtom();
 
     if (!shadow.color.isValid())
-        return "none"_s;
+        return noneAtom();
 
     StringBuilder builder;
-    builder.append(shadow.offset.width(), "px ");
-    builder.append(shadow.offset.height(), "px ");
-    builder.append(serializationForCSS(shadow.color));
+    builder.append(shadow.offset.width(), "px "_s,
+        shadow.offset.height(), "px "_s,
+        serializationForCSS(shadow.color));
     if (shadow.blurRadius)
-        builder.append(" ", shadow.blurRadius, "px");
+        builder.append(' ', shadow.blurRadius, "px"_s);
     return builder.toString();
 }
 

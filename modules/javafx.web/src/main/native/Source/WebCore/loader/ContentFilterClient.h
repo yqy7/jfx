@@ -27,7 +27,17 @@
 
 #if ENABLE(CONTENT_FILTERING)
 
+#include <wtf/AbstractRefCountedAndCanMakeWeakPtr.h>
 #include <wtf/Forward.h>
+
+namespace WebCore {
+class ContentFilterClient;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::ContentFilterClient> : std::true_type { };
+}
 
 namespace WebCore {
 
@@ -36,20 +46,21 @@ class ResourceError;
 class SharedBuffer;
 class SubstituteData;
 
-class ContentFilterClient {
+class ContentFilterClient : public AbstractRefCountedAndCanMakeWeakPtr<ContentFilterClient> {
 public:
     virtual ~ContentFilterClient() = default;
-    virtual void ref() const = 0;
-    virtual void deref() const = 0;
 
-#if ENABLE(CONTENT_FILTERING_IN_NETWORKING_PROCESS)
-    virtual void dataReceivedThroughContentFilter(const SharedBuffer&, size_t) = 0;
-#else
     virtual void dataReceivedThroughContentFilter(const SharedBuffer&) = 0;
-#endif
     virtual ResourceError contentFilterDidBlock(ContentFilterUnblockHandler, String&& unblockRequestDeniedScript) = 0;
     virtual void cancelMainResourceLoadForContentFilter(const ResourceError&) = 0;
-    virtual void handleProvisionalLoadFailureFromContentFilter(const URL& blockedPageURL, SubstituteData&) = 0;
+    virtual void handleProvisionalLoadFailureFromContentFilter(const URL& blockedPageURL, SubstituteData&&) = 0;
+
+#if HAVE(WEBCONTENTRESTRICTIONS)
+    virtual bool usesWebContentRestrictions() = 0;
+#endif
+#if HAVE(WEBCONTENTRESTRICTIONS_PATH_SPI)
+    virtual String webContentRestrictionsConfigurationPath() const = 0;
+#endif
 };
 
 } // namespace WebCore

@@ -31,6 +31,7 @@
 #include "CaptionPreferencesDelegate.h"
 #include "CaptionUserPreferences.h"
 #include "Color.h"
+#include <wtf/TZoneMalloc.h>
 
 #if PLATFORM(COCOA)
 OBJC_CLASS WebCaptionUserPreferencesMediaAFWeakObserver;
@@ -39,7 +40,7 @@ OBJC_CLASS WebCaptionUserPreferencesMediaAFWeakObserver;
 namespace WebCore {
 
 class CaptionUserPreferencesMediaAF : public CaptionUserPreferences {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(CaptionUserPreferencesMediaAF);
 public:
     static Ref<CaptionUserPreferencesMediaAF> create(PageGroup&);
     virtual ~CaptionUserPreferencesMediaAF();
@@ -54,6 +55,7 @@ public:
 
     bool userPrefersCaptions() const override;
     bool userPrefersSubtitles() const override;
+    bool userPrefersTextDescriptions() const final;
 
     float captionFontSizeScaleAndImportance(bool&) const override;
     bool captionStrokeWidthForFont(float fontSize, const String& language, float& strokeWidth, bool& important) const override;
@@ -108,7 +110,7 @@ private:
 #if HAVE(MEDIA_ACCESSIBILITY_FRAMEWORK) && PLATFORM(COCOA)
     static RetainPtr<WebCaptionUserPreferencesMediaAFWeakObserver> createWeakObserver(CaptionUserPreferencesMediaAF*);
 
-    RetainPtr<WebCaptionUserPreferencesMediaAFWeakObserver> m_weakObserver;
+    const RetainPtr<WebCaptionUserPreferencesMediaAFWeakObserver> m_observer;
 #endif
 
 #if HAVE(MEDIA_ACCESSIBILITY_FRAMEWORK)

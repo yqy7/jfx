@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc.
+ * Copyright (C) 2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted, provided that the following conditions
@@ -42,5 +42,7 @@
 #define WEBRTC_WEBKIT_BUILD 1
 #define WEBRTC_POSIX 1
 #define _COMMON_INCLUDED_
+
+#define WEBRTC_NON_STATIC_TRACE_EVENT_HANDLERS 0
 
 #endif // USE(LIBWEBRTC)

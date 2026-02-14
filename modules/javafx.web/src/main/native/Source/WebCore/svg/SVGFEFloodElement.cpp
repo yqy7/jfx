@@ -22,18 +22,21 @@
 #include "config.h"
 #include "SVGFEFloodElement.h"
 
+#include "ContainerNodeInlines.h"
 #include "FEFlood.h"
+#include "RenderElement.h"
 #include "RenderStyle.h"
 #include "SVGNames.h"
+#include "SVGPropertyOwnerRegistry.h"
 #include "SVGRenderStyle.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(SVGFEFloodElement);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(SVGFEFloodElement);
 
 inline SVGFEFloodElement::SVGFEFloodElement(const QualifiedName& tagName, Document& document)
-    : SVGFilterPrimitiveStandardAttributes(tagName, document)
+    : SVGFilterPrimitiveStandardAttributes(tagName, document, makeUniqueRef<PropertyRegistry>(*this))
 {
     ASSERT(hasTagName(SVGNames::feFloodTag));
 }
@@ -43,32 +46,33 @@ Ref<SVGFEFloodElement> SVGFEFloodElement::create(const QualifiedName& tagName, D
     return adoptRef(*new SVGFEFloodElement(tagName, document));
 }
 
-bool SVGFEFloodElement::setFilterEffectAttribute(FilterEffect* effect, const QualifiedName& attrName)
+bool SVGFEFloodElement::setFilterEffectAttribute(FilterEffect& effect, const QualifiedName& attrName)
 {
-    RenderObject* renderer = this->renderer();
+    CheckedPtr renderer = this->renderer();
     ASSERT(renderer);
-    const RenderStyle& style = renderer->style();
-    FEFlood* flood = static_cast<FEFlood*>(effect);
+    auto& style = renderer->style();
 
+    auto& feFlood = downcast<FEFlood>(effect);
     if (attrName == SVGNames::flood_colorAttr)
-        return flood->setFloodColor(style.svgStyle().floodColor());
+        return feFlood.setFloodColor(style.colorResolvingCurrentColor(style.svgStyle().floodColor()));
     if (attrName == SVGNames::flood_opacityAttr)
-        return flood->setFloodOpacity(style.svgStyle().floodOpacity());
+        return feFlood.setFloodOpacity(style.svgStyle().floodOpacity().value.value);
 
     ASSERT_NOT_REACHED();
     return false;
 }
 
-RefPtr<FilterEffect> SVGFEFloodElement::filterEffect(const SVGFilterBuilder&, const FilterEffectVector&) const
+RefPtr<FilterEffect> SVGFEFloodElement::createFilterEffect(const FilterEffectVector&, const GraphicsContext&) const
 {
-    RenderObject* renderer = this->renderer();
+    CheckedPtr renderer = this->renderer();
     if (!renderer)
         return nullptr;
 
-    const SVGRenderStyle& svgStyle = renderer->style().svgStyle();
+    auto& style = renderer->style();
+    auto& svgStyle = style.svgStyle();
 
-    Color color = renderer->style().colorByApplyingColorFilter(svgStyle.floodColor());
-    float opacity = svgStyle.floodOpacity();
+    auto color = style.colorWithColorFilter(svgStyle.floodColor());
+    float opacity = svgStyle.floodOpacity().value.value;
 
     return FEFlood::create(color, opacity);
 }

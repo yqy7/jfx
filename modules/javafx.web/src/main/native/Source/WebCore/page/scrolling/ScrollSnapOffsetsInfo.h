@@ -28,6 +28,7 @@
 #include "FloatRect.h"
 #include "LayoutRect.h"
 #include "LayoutUnit.h"
+#include "NodeIdentifier.h"
 #include "ScrollTypes.h"
 #include "StyleScrollSnapPoints.h"
 #include <utility>
@@ -38,22 +39,26 @@ namespace WebCore {
 class ScrollableArea;
 class RenderBox;
 class RenderStyle;
+class Element;
 
 template <typename T>
 struct SnapOffset {
     T offset;
     ScrollSnapStop stop;
     bool hasSnapAreaLargerThanViewport;
-    Vector<size_t> snapAreaIndices;
+    Markable<NodeIdentifier> snapTargetID;
+    bool isFocused;
+    Vector<uint64_t> snapAreaIndices;
 };
 
 template <typename UnitType, typename RectType>
 struct ScrollSnapOffsetsInfo {
-    WTF_MAKE_STRUCT_FAST_ALLOCATED;
-    ScrollSnapStrictness strictness;
+    WTF_DEPRECATED_MAKE_STRUCT_FAST_ALLOCATED(ScrollSnapOffsetsInfo);
+    ScrollSnapStrictness strictness { ScrollSnapStrictness::None };
     Vector<SnapOffset<UnitType>> horizontalSnapOffsets;
     Vector<SnapOffset<UnitType>> verticalSnapOffsets;
     Vector<RectType> snapAreas;
+    Vector<NodeIdentifier> snapAreasIDs;
 
     bool isEqual(const ScrollSnapOffsetsInfo<UnitType, RectType>& other) const
     {
@@ -82,6 +87,7 @@ template<typename UnitType> inline bool operator==(const SnapOffset<UnitType>& a
 
 using LayoutScrollSnapOffsetsInfo = ScrollSnapOffsetsInfo<LayoutUnit, LayoutRect>;
 using FloatScrollSnapOffsetsInfo = ScrollSnapOffsetsInfo<float, FloatRect>;
+using FloatSnapOffset = SnapOffset<float>;
 
 template <> template <>
 LayoutScrollSnapOffsetsInfo FloatScrollSnapOffsetsInfo::convertUnits(float /* unusedScaleFactor */) const;
@@ -97,13 +103,13 @@ WEBCORE_EXPORT std::pair<LayoutUnit, std::optional<unsigned>> LayoutScrollSnapOf
 // Update the snap offsets for this scrollable area, given the RenderBox of the scroll container, the RenderStyle
 // which defines the scroll-snap properties, and the viewport rectangle with the origin at the top left of
 // the scrolling container's border box.
-void updateSnapOffsetsForScrollableArea(ScrollableArea&, const RenderBox& scrollingElementBox, const RenderStyle& scrollingElementStyle, LayoutRect viewportRectInBorderBoxCoordinates, WritingMode, TextDirection);
+void updateSnapOffsetsForScrollableArea(ScrollableArea&, const RenderBox& scrollingElementBox, const RenderStyle& scrollingElementStyle, LayoutRect viewportRectInBorderBoxCoordinates, WritingMode, Element*);
 
 template <typename T> WTF::TextStream& operator<<(WTF::TextStream& ts, SnapOffset<T> offset)
 {
-    ts << offset.offset;
+    ts << offset.offset << " snapTargetID: "_s <<  offset.snapTargetID << " isFocused: "_s << offset.isFocused;
     if (offset.stop == ScrollSnapStop::Always)
-        ts << " (always)";
+        ts << " (always)"_s;
     return ts;
 }
 

@@ -25,6 +25,9 @@
 
 #include "config.h"
 #include "testb3.h"
+#include <wtf/WasmSIMD128.h>
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 #if ENABLE(B3_JIT)
 
@@ -32,19 +35,27 @@ void testPinRegisters()
 {
     auto go = [&] (bool pin) {
         Procedure proc;
-        RegisterSet csrs;
-        csrs.merge(RegisterSet::calleeSaveRegisters());
-        csrs.exclude(RegisterSet::stackRegisters());
+        RegisterSetBuilder csrs;
+        csrs.merge(RegisterSetBuilder::calleeSaveRegisters());
+        csrs.exclude(RegisterSetBuilder::stackRegisters());
+#if CPU(ARM)
+        // FIXME We should allow this to be used. See the note
+        // in https://commits.webkit.org/257808@main for more
+        // info about why masm is using scratch registers on
+        // ARM-only.
+        csrs.remove(MacroAssembler::addressTempRegister);
+#endif // CPU(ARM)
         if (pin) {
-            csrs.forEach(
+            csrs.buildAndValidate().forEach(
                 [&] (Reg reg) {
                     proc.pinRegister(reg);
                 });
         }
         BasicBlock* root = proc.addBlock();
-        Value* a = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0);
-        Value* b = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1);
-        Value* c = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR2);
+        auto arguments = cCallArgumentValues<intptr_t, intptr_t, intptr_t>(proc, root);
+        Value* a = arguments[0];
+        Value* b = arguments[1];
+        Value* c = arguments[2];
         Value* d = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::regCS0);
         root->appendNew<CCallValue>(
             proc, Void, Origin(),
@@ -71,7 +82,7 @@ void testPinRegisters()
                 inst.forEachTmpFast(
                     [&] (Air::Tmp tmp) {
                         if (tmp.isReg())
-                            usesCSRs |= csrs.get(tmp.reg());
+                            usesCSRs |= csrs.buildAndValidate().contains(tmp.reg(), IgnoreVectors);
                     });
             }
         }
@@ -81,7 +92,7 @@ void testPinRegisters()
             usesCSRs = false;
         }
         for (const RegisterAtOffset& regAtOffset : proc.calleeSaveRegisterAtOffsetList())
-            usesCSRs |= csrs.get(regAtOffset.reg());
+            usesCSRs |= csrs.buildAndValidate().contains(regAtOffset.reg(), IgnoreVectors);
         CHECK_EQ(usesCSRs, !pin);
     };
 
@@ -94,15 +105,16 @@ void testX86LeaAddAddShlLeft()
     // Add(Add(Shl(@x, $c), @y), $d)
     Procedure proc;
     BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t, intptr_t>(proc, root);
     Value* result = root->appendNew<Value>(
         proc, Add, Origin(),
         root->appendNew<Value>(
             proc, Add, Origin(),
             root->appendNew<Value>(
                 proc, Shl, Origin(),
-                root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1),
+                arguments[1],
                 root->appendNew<Const32Value>(proc, Origin(), 2)),
-            root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0)),
+            arguments[0]),
         root->appendNew<ConstPtrValue>(proc, Origin(), 100));
     root->appendNew<Value>(proc, Return, Origin(), result);
 
@@ -119,14 +131,15 @@ void testX86LeaAddAddShlRight()
     // Add(Add(@x, Shl(@y, $c)), $d)
     Procedure proc;
     BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t, intptr_t>(proc, root);
     Value* result = root->appendNew<Value>(
         proc, Add, Origin(),
         root->appendNew<Value>(
             proc, Add, Origin(),
-            root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0),
+            arguments[0],
             root->appendNew<Value>(
                 proc, Shl, Origin(),
-                root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1),
+                arguments[1],
                 root->appendNew<Const32Value>(proc, Origin(), 2))),
         root->appendNew<ConstPtrValue>(proc, Origin(), 100));
     root->appendNew<Value>(proc, Return, Origin(), result);
@@ -144,12 +157,13 @@ void testX86LeaAddAdd()
     // Add(Add(@x, @y), $c)
     Procedure proc;
     BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t, intptr_t>(proc, root);
     Value* result = root->appendNew<Value>(
         proc, Add, Origin(),
         root->appendNew<Value>(
             proc, Add, Origin(),
-            root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1),
-            root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0)),
+            arguments[1],
+            arguments[0]),
         root->appendNew<ConstPtrValue>(proc, Origin(), 100));
     root->appendNew<Value>(proc, Return, Origin(), result);
 
@@ -162,7 +176,7 @@ void testX86LeaAddAdd()
                 return strstr(disassembly, "lea 0x64(%rdi,%rsi,1), %rax")
                     || strstr(disassembly, "lea 0x64(%rsi,%rdi,1), %rax");
             },
-            "Expected to find something like lea 0x64(%rdi,%rsi,1), %rax but didn't!");
+            "Expected to find something like lea 0x64(%rdi,%rsi,1), %rax but didn't!"_s);
     }
 }
 
@@ -171,12 +185,13 @@ void testX86LeaAddShlRight()
     // Add(Shl(@x, $c), @y)
     Procedure proc;
     BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t, intptr_t>(proc, root);
     Value* result = root->appendNew<Value>(
         proc, Add, Origin(),
-        root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0),
+        arguments[0],
         root->appendNew<Value>(
             proc, Shl, Origin(),
-            root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1),
+            arguments[1],
             root->appendNew<Const32Value>(proc, Origin(), 2)));
     root->appendNew<Value>(proc, Return, Origin(), result);
 
@@ -193,12 +208,13 @@ void testX86LeaAddShlLeftScale1()
     // Add(Shl(@x, $c), @y)
     Procedure proc;
     BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t, intptr_t>(proc, root);
     Value* result = root->appendNew<Value>(
         proc, Add, Origin(),
-        root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0),
+        arguments[0],
         root->appendNew<Value>(
             proc, Shl, Origin(),
-            root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1),
+            arguments[1],
             root->appendNew<Const32Value>(proc, Origin(), 0)));
     root->appendNew<Value>(proc, Return, Origin(), result);
 
@@ -220,12 +236,13 @@ void testX86LeaAddShlLeftScale2()
     // Add(Shl(@x, $c), @y)
     Procedure proc;
     BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t, intptr_t>(proc, root);
     Value* result = root->appendNew<Value>(
         proc, Add, Origin(),
-        root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0),
+        arguments[0],
         root->appendNew<Value>(
             proc, Shl, Origin(),
-            root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1),
+            arguments[1],
             root->appendNew<Const32Value>(proc, Origin(), 1)));
     root->appendNew<Value>(proc, Return, Origin(), result);
 
@@ -242,13 +259,14 @@ void testX86LeaAddShlLeftScale4()
     // Add(Shl(@x, $c), @y)
     Procedure proc;
     BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t, intptr_t>(proc, root);
     Value* result = root->appendNew<Value>(
         proc, Add, Origin(),
         root->appendNew<Value>(
             proc, Shl, Origin(),
-            root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1),
+            arguments[1],
             root->appendNew<Const32Value>(proc, Origin(), 2)),
-        root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+        arguments[0]);
     root->appendNew<Value>(proc, Return, Origin(), result);
 
     auto code = compileProc(proc);
@@ -264,12 +282,13 @@ void testX86LeaAddShlLeftScale8()
     // Add(Shl(@x, $c), @y)
     Procedure proc;
     BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t, intptr_t>(proc, root);
     Value* result = root->appendNew<Value>(
         proc, Add, Origin(),
-        root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0),
+        arguments[0],
         root->appendNew<Value>(
             proc, Shl, Origin(),
-            root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1),
+            arguments[1],
             root->appendNew<Const32Value>(proc, Origin(), 3)));
     root->appendNew<Value>(proc, Return, Origin(), result);
 
@@ -286,17 +305,18 @@ void testAddShl32()
     // Add(Shl(@x, $c), @y)
     Procedure proc;
     BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<int64_t, int64_t>(proc, root);
     Value* result = root->appendNew<Value>(
         proc, Add, Origin(),
-        root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0),
+        arguments[0],
         root->appendNew<Value>(
             proc, Shl, Origin(),
-            root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1),
+            arguments[1],
             root->appendNew<Const32Value>(proc, Origin(), 32)));
     root->appendNew<Value>(proc, Return, Origin(), result);
 
     auto code = compileProc(proc);
-    CHECK_EQ(invoke<int64_t>(*code, 1, 2), 1 + (static_cast<int64_t>(2) << static_cast<int64_t>(32)));
+    CHECK_EQ(invoke<int64_t>(*code, static_cast<int64_t>(1), static_cast<int64_t>(2)), static_cast<int64_t>(1) + (static_cast<int64_t>(2) << static_cast<int32_t>(32)));
 }
 
 void testAddShl64()
@@ -304,12 +324,13 @@ void testAddShl64()
     // Add(Shl(@x, $c), @y)
     Procedure proc;
     BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t, intptr_t>(proc, root);
     Value* result = root->appendNew<Value>(
         proc, Add, Origin(),
-        root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0),
+        arguments[0],
         root->appendNew<Value>(
             proc, Shl, Origin(),
-            root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1),
+            arguments[1],
             root->appendNew<Const32Value>(proc, Origin(), 64)));
     root->appendNew<Value>(proc, Return, Origin(), result);
 
@@ -322,12 +343,13 @@ void testAddShl65()
     // Add(Shl(@x, $c), @y)
     Procedure proc;
     BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t, intptr_t>(proc, root);
     Value* result = root->appendNew<Value>(
         proc, Add, Origin(),
-        root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0),
+        arguments[0],
         root->appendNew<Value>(
             proc, Shl, Origin(),
-            root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1),
+            arguments[1],
             root->appendNew<Const32Value>(proc, Origin(), 65)));
     root->appendNew<Value>(proc, Return, Origin(), result);
 
@@ -342,8 +364,9 @@ void testReduceStrengthReassociation(bool flip)
     // Add(@y, Add(@x, $c)) -> Add(Add(@x, @y), $c)
     Procedure proc;
     BasicBlock* root = proc.addBlock();
-    Value* arg1 = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0);
-    Value* arg2 = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1);
+    auto arguments = cCallArgumentValues<int, int>(proc, root);
+    Value* arg1 = arguments[0];
+    Value* arg2 = arguments[1];
 
     Value* innerAdd = root->appendNew<Value>(
         proc, Add, Origin(), arg1,
@@ -380,26 +403,64 @@ void testReduceStrengthReassociation(bool flip)
         (root->last()->child(0)->child(0)->child(0) == arg2 && root->last()->child(0)->child(0)->child(1) == arg1));
 }
 
+template<typename B3ContType, typename Type64, typename Type32>
+void testReduceStrengthTruncConstant(Type64 filler, Type32 value)
+{
+    Procedure proc;
+    BasicBlock* root = proc.addBlock();
+
+    int64_t bits = std::bit_cast<int64_t>(filler);
+    int32_t loBits = std::bit_cast<int32_t>(value);
+    bits = ((bits >> 32) << 32) | loBits;
+    Type64 testValue = std::bit_cast<Type64>(bits);
+
+    Value* b2  = root->appendNew<B3ContType>(proc, Origin(), testValue);
+    Value* b3  = root->appendNew<Value>(proc, JSC::B3::Trunc, Origin(), b2);
+    root->appendNew<Value>(proc, Return, Origin(), b3);
+
+    proc.resetReachability();
+
+    reduceStrength(proc);
+
+    CHECK_EQ(root->last()->opcode(), Return);
+    if constexpr (std::is_same_v<B3ContType, ConstDoubleValue>) {
+        CHECK_EQ(root->last()->child(0)->opcode(), ConstFloat);
+        CHECK_EQ(std::bit_cast<int32_t>(root->last()->child(0)->asFloat()), std::bit_cast<int32_t>(value));
+    } else
+        CHECK(root->last()->child(0)->isInt32(value));
+}
+
+void testReduceStrengthTruncInt64Constant(int64_t filler, int32_t value)
+{
+    testReduceStrengthTruncConstant<Const64Value>(filler, value);
+}
+
+void testReduceStrengthTruncDoubleConstant(double filler, float value)
+{
+    testReduceStrengthTruncConstant<ConstDoubleValue>(filler, value);
+}
+
 void testLoadBaseIndexShift2()
 {
     Procedure proc;
     BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t, intptr_t>(proc, root);
     root->appendNew<Value>(
         proc, Return, Origin(),
         root->appendNew<MemoryValue>(
             proc, Load, Int32, Origin(),
             root->appendNew<Value>(
                 proc, Add, Origin(),
-                root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0),
+                arguments[0],
                 root->appendNew<Value>(
                     proc, Shl, Origin(),
-                    root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1),
+                    arguments[1],
                     root->appendNew<Const32Value>(proc, Origin(), 2)))));
     auto code = compileProc(proc);
     if (isX86() && proc.optLevel() > 1)
         checkUsesInstruction(*code, "(%rdi,%rsi,4)");
     int32_t value = 12341234;
-    char* ptr = bitwise_cast<char*>(&value);
+    char* ptr = std::bit_cast<char*>(&value);
     for (unsigned i = 0; i < 10; ++i)
         CHECK_EQ(invoke<int32_t>(*code, ptr - (static_cast<intptr_t>(1) << static_cast<intptr_t>(2)) * i, i), 12341234);
 }
@@ -409,20 +470,21 @@ void testLoadBaseIndexShift32()
 #if CPU(ADDRESS64)
     Procedure proc;
     BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t, intptr_t>(proc, root);
     root->appendNew<Value>(
         proc, Return, Origin(),
         root->appendNew<MemoryValue>(
             proc, Load, Int32, Origin(),
             root->appendNew<Value>(
                 proc, Add, Origin(),
-                root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0),
+                arguments[0],
                 root->appendNew<Value>(
                     proc, Shl, Origin(),
-                    root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1),
+                    arguments[1],
                     root->appendNew<Const32Value>(proc, Origin(), 32)))));
     auto code = compileProc(proc);
     int32_t value = 12341234;
-    char* ptr = bitwise_cast<char*>(&value);
+    char* ptr = std::bit_cast<char*>(&value);
     for (unsigned i = 0; i < 10; ++i)
         CHECK_EQ(invoke<int32_t>(*code, ptr - (static_cast<intptr_t>(1) << static_cast<intptr_t>(32)) * i, i), 12341234);
 #endif
@@ -432,6 +494,8 @@ void testOptimizeMaterialization()
 {
     Procedure proc;
     if (proc.optLevel() < 2)
+        return;
+    if constexpr (is32Bit())
         return;
 
     BasicBlock* root = proc.addBlock();
@@ -524,7 +588,7 @@ void generateLoopNotBackwardsDominant(Procedure& proc, std::array<int, 100>& arr
                 loopHeader->appendNew<ConstPtrValue>(proc, Origin(), &array),
                 loopHeader->appendNew<Value>(
                     proc, Mul, Origin(),
-                    loopHeader->appendNew<Value>(proc, ZExt32, Origin(), index),
+                    is32Bit() ? index : loopHeader->appendNew<Value>(proc, ZExt32, Origin(), index),
                     loopHeader->appendNew<ConstPtrValue>(proc, Origin(), sizeof(int))))));
     loopHeader->setSuccessors(loopCall, loopFooter);
 
@@ -550,18 +614,18 @@ void generateLoopNotBackwardsDominant(Procedure& proc, std::array<int, 100>& arr
 }
 
 extern "C" {
-static JSC_DECLARE_JIT_OPERATION_WITHOUT_WTF_INTERNAL(oneFunction, int, (int* callCount));
+static JSC_DECLARE_NOEXCEPT_JIT_OPERATION_WITHOUT_WTF_INTERNAL(oneFunction, int, (int* callCount));
 }
-JSC_DEFINE_JIT_OPERATION(oneFunction, int, (int* callCount))
+JSC_DEFINE_NOEXCEPT_JIT_OPERATION(oneFunction, int, (int* callCount))
 {
     (*callCount)++;
     return 1;
 }
 
 extern "C" {
-static JSC_DECLARE_JIT_OPERATION_WITHOUT_WTF_INTERNAL(noOpFunction, void, ());
+static JSC_DECLARE_NOEXCEPT_JIT_OPERATION_WITHOUT_WTF_INTERNAL(noOpFunction, void, ());
 }
-JSC_DEFINE_JIT_OPERATION(noOpFunction, void, ())
+JSC_DEFINE_NOEXCEPT_JIT_OPERATION(noOpFunction, void, ())
 {
 }
 
@@ -575,10 +639,11 @@ void testLICMPure()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<intptr_t>(proc, loop);
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), Effects::none(),
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -594,8 +659,10 @@ void testLICMPureSideExits()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<intptr_t>(proc, loop);
             Effects effects = Effects::none();
             effects.exitsSideways = true;
+            effects.reads = HeapRange::top();
             loop->appendNew<CCallValue>(
                 proc, Void, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(noOpFunction)));
@@ -603,7 +670,7 @@ void testLICMPureSideExits()
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), Effects::none(),
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -619,6 +686,7 @@ void testLICMPureWritesPinned()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.writesPinned = true;
             loop->appendNew<CCallValue>(
@@ -628,7 +696,7 @@ void testLICMPureWritesPinned()
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), Effects::none(),
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -644,6 +712,7 @@ void testLICMPureWrites()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.writes = HeapRange(63479);
             loop->appendNew<CCallValue>(
@@ -653,7 +722,7 @@ void testLICMPureWrites()
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), Effects::none(),
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -667,12 +736,13 @@ void testLICMReadsLocalState()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.readsLocalState = true;
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -688,12 +758,13 @@ void testLICMReadsPinned()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.readsPinned = true;
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -709,12 +780,13 @@ void testLICMReads()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.reads = HeapRange::top();
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -731,10 +803,11 @@ void testLICMPureNotBackwardsDominant()
     generateLoopNotBackwardsDominant(
         proc, array,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), Effects::none(),
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -748,10 +821,11 @@ void testLICMPureFoiledByChild()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value* index) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), Effects::none(),
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0),
+                arguments[0],
                 index);
         });
 
@@ -769,10 +843,11 @@ void testLICMPureNotBackwardsDominantFoiledByChild()
     generateLoopNotBackwardsDominant(
         proc, array,
         [&] (BasicBlock* loop, Value* index) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), Effects::none(),
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0),
+                arguments[0],
                 index);
         });
 
@@ -787,12 +862,14 @@ void testLICMExitsSideways()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.exitsSideways = true;
+            effects.reads = HeapRange::top();
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -806,12 +883,13 @@ void testLICMWritesLocalState()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.writesLocalState = true;
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -825,12 +903,13 @@ void testLICMWrites()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.writes = HeapRange(666);
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -844,12 +923,13 @@ void testLICMFence()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.fence = true;
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -863,12 +943,13 @@ void testLICMWritesPinned()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.writesPinned = true;
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -884,12 +965,13 @@ void testLICMControlDependent()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.controlDependent = true;
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -906,12 +988,13 @@ void testLICMControlDependentNotBackwardsDominant()
     generateLoopNotBackwardsDominant(
         proc, array,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.controlDependent = true;
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -925,8 +1008,10 @@ void testLICMControlDependentSideExits()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.exitsSideways = true;
+            effects.reads = HeapRange::top();
             loop->appendNew<CCallValue>(
                 proc, Void, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(noOpFunction)));
@@ -936,7 +1021,7 @@ void testLICMControlDependentSideExits()
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -950,6 +1035,7 @@ void testLICMReadsPinnedWritesPinned()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.writesPinned = true;
             loop->appendNew<CCallValue>(
@@ -961,7 +1047,7 @@ void testLICMReadsPinnedWritesPinned()
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -977,6 +1063,7 @@ void testLICMReadsWritesDifferentHeaps()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.writes = HeapRange(6436);
             loop->appendNew<CCallValue>(
@@ -988,7 +1075,7 @@ void testLICMReadsWritesDifferentHeaps()
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -1002,6 +1089,7 @@ void testLICMReadsWritesOverlappingHeaps()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             Effects effects = Effects::none();
             effects.writes = HeapRange(6436, 74458);
             loop->appendNew<CCallValue>(
@@ -1013,7 +1101,7 @@ void testLICMReadsWritesOverlappingHeaps()
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(), effects,
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -1027,10 +1115,11 @@ void testLICMDefaultCall()
     generateLoop(
         proc,
         [&] (BasicBlock* loop, Value*) -> Value* {
+            auto arguments = cCallArgumentValues<unsigned*>(proc, loop);
             return loop->appendNew<CCallValue>(
                 proc, Int32, Origin(),
                 loop->appendNew<ConstPtrValue>(proc, Origin(), tagCFunction<OperationPtrTag>(oneFunction)),
-                loop->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
+                arguments[0]);
         });
 
     unsigned callCount = 0;
@@ -1042,15 +1131,17 @@ void testDepend32()
 {
     Procedure proc;
     BasicBlock* root = proc.addBlock();
-    Value* ptr = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0);
+    auto arguments = cCallArgumentValues<int32_t*>(proc, root);
+    Value* ptr = arguments[0];
     Value* first = root->appendNew<MemoryValue>(proc, Load, Int32, Origin(), ptr, 0);
+    Value* depend = root->appendNew<Value>(proc, Depend, Origin(), first);
+    if constexpr (!is32Bit())
+        depend = root->appendNew<Value>(proc, ZExt32, Origin(), depend);
     Value* second = root->appendNew<MemoryValue>(
         proc, Load, Int32, Origin(),
         root->appendNew<Value>(
             proc, Add, Origin(), ptr,
-            root->appendNew<Value>(
-                proc, ZExt32, Origin(),
-                root->appendNew<Value>(proc, Depend, Origin(), first))),
+            depend),
         4);
     root->appendNew<Value>(
         proc, Return, Origin(),
@@ -1061,7 +1152,7 @@ void testDepend32()
     values[1] = 0xbeef;
 
     auto code = compileProc(proc);
-    if (isARM64())
+    if (isARM64() || isARM_THUMB2())
         checkUsesInstruction(*code, "eor");
     else if (isX86()) {
         checkDoesNotUseInstruction(*code, "mfence");
@@ -1074,7 +1165,8 @@ void testDepend64()
 {
     Procedure proc;
     BasicBlock* root = proc.addBlock();
-    Value* ptr = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0);
+    auto arguments = cCallArgumentValues<int64_t*>(proc, root);
+    Value* ptr = arguments[0];
     Value* first = root->appendNew<MemoryValue>(proc, Load, Int64, Origin(), ptr, 0);
     Value* second = root->appendNew<MemoryValue>(
         proc, Load, Int64, Origin(),
@@ -1108,7 +1200,7 @@ void testWasmBoundsCheck(unsigned offset)
     GPRReg pinned = GPRInfo::argumentGPR1;
     proc.pinRegister(pinned);
 
-    proc.setWasmBoundsCheckGenerator([=] (CCallHelpers& jit, GPRReg pinnedGPR) {
+    proc.setWasmBoundsCheckGenerator([=](CCallHelpers& jit, WasmBoundsCheckValue*, GPRReg pinnedGPR) {
         CHECK_EQ(pinnedGPR, pinned);
 
         // This should always work because a function this simple should never have callee
@@ -1119,10 +1211,8 @@ void testWasmBoundsCheck(unsigned offset)
     });
 
     BasicBlock* root = proc.addBlock();
-    Value* left = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0);
-    if (pointerType() != Int32)
-        left = root->appendNew<Value>(proc, Trunc, Origin(), left);
-    root->appendNew<WasmBoundsCheckValue>(proc, Origin(), pinned, left, offset);
+    auto arguments = cCallArgumentValues<int32_t>(proc, root);
+    root->appendNew<WasmBoundsCheckValue>(proc, Origin(), pinned, arguments[0], offset);
     Value* result = root->appendNew<Const32Value>(proc, Origin(), 0x42);
     root->appendNewControlValue(proc, Return, Origin(), result);
 
@@ -1151,10 +1241,11 @@ void testWasmAddress()
     BasicBlock* header = proc.addBlock();
     BasicBlock* body = proc.addBlock();
     BasicBlock* continuation = proc.addBlock();
+    auto arguments = cCallArgumentValues<unsigned, unsigned, unsigned*>(proc, root);
 
     // Root
-    Value* loopCountValue = root->appendNew<Value>(proc, Trunc, Origin(), root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0));
-    Value* valueToStore = root->appendNew<Value>(proc, Trunc, Origin(), root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1));
+    Value* loopCountValue = arguments[0];
+    Value* valueToStore = arguments[1];
     UpsilonValue* beginUpsilon = root->appendNew<UpsilonValue>(proc, Origin(), root->appendNew<Const32Value>(proc, Origin(), 0));
     root->appendNewControlValue(proc, Jump, Origin(), header);
 
@@ -1167,6 +1258,7 @@ void testWasmAddress()
     // Body
     Value* pointer = body->appendNew<Value>(proc, Mul, Origin(), indexPhi,
         body->appendNew<Const32Value>(proc, Origin(), sizeof(unsigned)));
+    if (!is32Bit())
     pointer = body->appendNew<Value>(proc, ZExt32, Origin(), pointer);
     body->appendNew<MemoryValue>(proc, Store, Origin(), valueToStore,
         body->appendNew<WasmAddressValue>(proc, Origin(), pointer, pinnedGPR), 0);
@@ -1183,21 +1275,51 @@ void testWasmAddress()
 
 
     auto code = compileProc(proc);
-    invoke<void>(*code, loopCount, numToStore, values.data());
+    invoke<void>(*code, loopCount, numToStore, values.span().data());
     for (unsigned value : values)
         CHECK_EQ(numToStore, value);
+}
+
+void testWasmAddressWithOffset()
+{
+    Procedure proc;
+    GPRReg pinnedGPR = GPRInfo::argumentGPR2;
+    proc.pinRegister(pinnedGPR);
+
+    Vector<uint8_t> values(3);
+    values[0] = 20;
+    values[1] = 21;
+    values[2] = 22;
+    uint8_t numToStore = 42;
+
+    BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<int32_t, uint32_t, uint8_t*>(proc, root);
+    // Root
+    Value* offset = arguments[0];
+    Value* valueToStore = arguments[1];
+    Value* pointer = offset;
+    if (!is32Bit())
+        pointer = root->appendNew<Value>(proc, ZExt32, Origin(), offset);
+    root->appendNew<MemoryValue>(proc, Store8, Origin(), valueToStore, root->appendNew<WasmAddressValue>(proc, Origin(), pointer, pinnedGPR), 1);
+    root->appendNewControlValue(proc, Return, Origin());
+
+    auto code = compileProc(proc);
+    invoke<void>(*code, 1, numToStore, values.span().data());
+    CHECK_EQ(20U, values[0]);
+    CHECK_EQ(21U, values[1]);
+    CHECK_EQ(42U, values[2]);
 }
 
 void testFastTLSLoad()
 {
 #if ENABLE(FAST_TLS_JIT)
-    _pthread_setspecific_direct(WTF_TESTING_KEY, bitwise_cast<void*>(static_cast<uintptr_t>(0xbeef)));
+    _pthread_setspecific_direct(WTF_TESTING_KEY, std::bit_cast<void*>(static_cast<uintptr_t>(0xbeef)));
 
     Procedure proc;
     BasicBlock* root = proc.addBlock();
 
     PatchpointValue* patchpoint = root->appendNew<PatchpointValue>(proc, pointerType(), Origin());
-    patchpoint->clobber(RegisterSet::macroScratchRegisters());
+    patchpoint->clobber(RegisterSetBuilder::macroClobberedGPRs());
     patchpoint->setGenerator(
         [&] (CCallHelpers& jit, const StackmapGenerationParams& params) {
             AllowMacroScratchRegisterUsage allowScratch(jit);
@@ -1217,7 +1339,7 @@ void testFastTLSStore()
     BasicBlock* root = proc.addBlock();
 
     PatchpointValue* patchpoint = root->appendNew<PatchpointValue>(proc, Void, Origin());
-    patchpoint->clobber(RegisterSet::macroScratchRegisters());
+    patchpoint->clobber(RegisterSetBuilder::macroClobberedGPRs());
     patchpoint->numGPScratchRegisters = 1;
     patchpoint->setGenerator(
         [&] (CCallHelpers& jit, const StackmapGenerationParams& params) {
@@ -1230,7 +1352,7 @@ void testFastTLSStore()
     root->appendNewControlValue(proc, Return, Origin());
 
     compileAndRun<void>(proc);
-    CHECK_EQ(bitwise_cast<uintptr_t>(_pthread_getspecific_direct(WTF_TESTING_KEY)), static_cast<uintptr_t>(0xdead));
+    CHECK_EQ(std::bit_cast<uintptr_t>(_pthread_getspecific_direct(WTF_TESTING_KEY)), static_cast<uintptr_t>(0xdead));
 #endif
 }
 
@@ -1270,7 +1392,7 @@ void testDoubleLiteralComparison(double a, double b)
                     root->appendNew<Value>(proc, std::get<0>(test), Origin(), valueA, valueB),
                     root->appendNew<Value>(proc, Equal, Origin(), valueAsFloat, valueAsFloat)));
 
-        CHECK(!!compileAndRun<int32_t>(proc) == std::get<1>(test)(a, b));
+        CHECK_EQ(!!compileAndRun<int32_t>(proc), std::get<1>(test)(a, b));
     }
 }
 
@@ -1291,7 +1413,7 @@ void testFloatEqualOrUnorderedFolding()
                     proc, EqualOrUnordered, Origin(),
                     constA,
                     constB));
-            CHECK(!!compileAndRun<int32_t>(proc) == expectedResult);
+            CHECK_EQ(!!compileAndRun<int32_t>(proc), expectedResult);
         }
     }
 }
@@ -1299,9 +1421,9 @@ void testFloatEqualOrUnorderedFolding()
 void testFloatEqualOrUnorderedFoldingNaN()
 {
     StdList<float> nans = {
-        bitwise_cast<float>(0xfffffffd),
-        bitwise_cast<float>(0xfffffffe),
-        bitwise_cast<float>(0xfffffff0),
+        std::bit_cast<float>(0xfffffffd),
+        std::bit_cast<float>(0xfffffffe),
+        std::bit_cast<float>(0xfffffff0),
         static_cast<float>(PNaN),
     };
 
@@ -1310,9 +1432,9 @@ void testFloatEqualOrUnorderedFoldingNaN()
         RELEASE_ASSERT(std::isnan(nan));
         Procedure proc;
         BasicBlock* root = proc.addBlock();
+        auto arguments = cCallArgumentValues<double>(proc, root);
         Value* a = root->appendNew<ConstFloatValue>(proc, Origin(), nan);
-        Value* b = root->appendNew<Value>(proc, DoubleToFloat, Origin(),
-            root->appendNew<ArgumentRegValue>(proc, Origin(), FPRInfo::argumentFPR0));
+        Value* b = root->appendNew<Value>(proc, DoubleToFloat, Origin(), arguments[0]);
 
         if (i % 2)
             std::swap(a, b);
@@ -1329,9 +1451,9 @@ void testFloatEqualOrUnorderedDontFold()
         float a = first.value;
         Procedure proc;
         BasicBlock* root = proc.addBlock();
+        auto arguments = cCallArgumentValues<double>(proc, root);
         Value* constA = root->appendNew<ConstFloatValue>(proc, Origin(), a);
-        Value* b = root->appendNew<Value>(proc, DoubleToFloat, Origin(),
-            root->appendNew<ArgumentRegValue>(proc, Origin(), FPRInfo::argumentFPR0));
+        Value* b = root->appendNew<Value>(proc, DoubleToFloat, Origin(), arguments[0]);
         root->appendNewControlValue(proc, Return, Origin(),
             root->appendNew<Value>(
                 proc, EqualOrUnordered, Origin(), constA, b));
@@ -1341,15 +1463,15 @@ void testFloatEqualOrUnorderedDontFold()
         for (auto& second : floatingPointOperands<float>()) {
             float b = second.value;
             bool expectedResult = (a == b) || std::isunordered(a, b);
-            CHECK(!!invoke<int32_t>(*code, static_cast<double>(b)) == expectedResult);
+            CHECK_EQ(!!invoke<int32_t>(*code, static_cast<double>(b)), expectedResult);
         }
     }
 }
 
 extern "C" {
-static JSC_DECLARE_JIT_OPERATION_WITHOUT_WTF_INTERNAL(functionNineArgs, void, (int32_t, void*, void*, void*, void*, void*, void*, void*, void*));
+static JSC_DECLARE_NOEXCEPT_JIT_OPERATION_WITHOUT_WTF_INTERNAL(functionNineArgs, void, (int32_t, void*, void*, void*, void*, void*, void*, void*, void*));
 }
-JSC_DEFINE_JIT_OPERATION(functionNineArgs, void, (int32_t, void*, void*, void*, void*, void*, void*, void*, void*))
+JSC_DEFINE_NOEXCEPT_JIT_OPERATION(functionNineArgs, void, (int32_t, void*, void*, void*, void*, void*, void*, void*, void*))
 {
 }
 
@@ -1361,19 +1483,16 @@ void testShuffleDoesntTrashCalleeSaves()
     BasicBlock* likely = proc.addBlock();
     BasicBlock* unlikely = proc.addBlock();
 
-    RegisterSet regs = RegisterSet::allGPRs();
-    regs.exclude(RegisterSet::stackRegisters());
-    regs.exclude(RegisterSet::reservedHardwareRegisters());
-    regs.exclude(RegisterSet::calleeSaveRegisters());
-    regs.exclude(RegisterSet::argumentGPRS());
+    auto regs = RegisterSetBuilder::registersToSaveForCCall(RegisterSetBuilder::allScalarRegisters());
 
     unsigned i = 0;
     Vector<Value*> patches;
-    for (Reg reg : regs) {
+    for (Reg reg : regs.buildAndValidate()) {
+        if (RegisterSetBuilder::argumentGPRs().contains(reg, IgnoreVectors) || !reg.isGPR())
+            continue;
         ++i;
         PatchpointValue* patchpoint = root->appendNew<PatchpointValue>(proc, Int32, Origin());
-        patchpoint->clobber(RegisterSet::macroScratchRegisters());
-        RELEASE_ASSERT(reg.isGPR());
+        patchpoint->clobber(RegisterSetBuilder::macroClobberedGPRs());
         patchpoint->resultConstraints = { ValueRep::reg(reg.gpr()) };
         patchpoint->setGenerator(
             [=] (CCallHelpers& jit, const StackmapGenerationParams& params) {
@@ -1392,8 +1511,8 @@ void testShuffleDoesntTrashCalleeSaves()
     Value* arg7 = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::toArgumentRegister(6 % GPRInfo::numberOfArgumentRegisters));
     Value* arg8 = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::toArgumentRegister(7 % GPRInfo::numberOfArgumentRegisters));
 
-    PatchpointValue* ptr = root->appendNew<PatchpointValue>(proc, Int64, Origin());
-    ptr->clobber(RegisterSet::macroScratchRegisters());
+    PatchpointValue* ptr = root->appendNew<PatchpointValue>(proc, pointerType(), Origin());
+    ptr->clobber(RegisterSetBuilder::macroClobberedGPRs());
     ptr->resultConstraints = { ValueRep::reg(GPRInfo::regCS0) };
     ptr->appendSomeRegister(arg1);
     ptr->setGenerator(
@@ -1405,7 +1524,7 @@ void testShuffleDoesntTrashCalleeSaves()
     Value* condition = root->appendNew<Value>(
         proc, Equal, Origin(),
         ptr,
-        root->appendNew<Const64Value>(proc, Origin(), 0));
+        root->appendNew<ConstPtrValue>(proc, Origin(), 0));
 
     root->appendNewControlValue(
         proc, Branch, Origin(),
@@ -1425,7 +1544,7 @@ void testShuffleDoesntTrashCalleeSaves()
         constNumber, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
 
     PatchpointValue* voidPatch = unlikely->appendNew<PatchpointValue>(proc, Void, Origin());
-    voidPatch->clobber(RegisterSet::macroScratchRegisters());
+    voidPatch->clobber(RegisterSetBuilder::macroClobberedGPRs());
     for (Value* v : patches)
         voidPatch->appendSomeRegister(v);
     voidPatch->appendSomeRegister(arg1);
@@ -1441,7 +1560,7 @@ void testShuffleDoesntTrashCalleeSaves()
 
     int32_t* inputPtr = static_cast<int32_t*>(fastMalloc(sizeof(int32_t)));
     *inputPtr = 48;
-    CHECK(compileAndRun<int32_t>(proc, inputPtr) == 48);
+    CHECK_EQ(compileAndRun<int32_t>(proc, inputPtr), 48);
     fastFree(inputPtr);
 }
 
@@ -1473,15 +1592,15 @@ void testReportUsedRegistersLateUseFollowedByEarlyDefDoesNotMarkUseAsDead()
         return;
     BasicBlock* root = proc.addBlock();
 
-    RegisterSet allRegs = RegisterSet::allGPRs();
-    allRegs.exclude(RegisterSet::stackRegisters());
-    allRegs.exclude(RegisterSet::reservedHardwareRegisters());
+    RegisterSetBuilder allRegs = RegisterSetBuilder::allGPRs();
+    allRegs.exclude(RegisterSetBuilder::stackRegisters());
+    allRegs.exclude(RegisterSetBuilder::reservedHardwareRegisters());
 
     {
         // Make every reg 42 (just needs to be a value other than 10).
         Value* const42 = root->appendNew<Const32Value>(proc, Origin(), 42);
         PatchpointValue* patchpoint = root->appendNew<PatchpointValue>(proc, Void, Origin());
-        for (Reg reg : allRegs)
+        for (Reg reg : allRegs.buildAndValidate())
             patchpoint->append(const42, ValueRep::reg(reg));
         patchpoint->setGenerator([&] (CCallHelpers&, const StackmapGenerationParams&) { });
     }
@@ -1489,10 +1608,10 @@ void testReportUsedRegistersLateUseFollowedByEarlyDefDoesNotMarkUseAsDead()
     {
         Value* const10 = root->appendNew<Const32Value>(proc, Origin(), 10);
         PatchpointValue* patchpoint = root->appendNew<PatchpointValue>(proc, Void, Origin());
-        for (Reg reg : allRegs)
+        for (Reg reg : allRegs.buildAndValidate())
             patchpoint->append(const10, ValueRep::lateReg(reg));
         patchpoint->setGenerator([&] (CCallHelpers& jit, const StackmapGenerationParams&) {
-            for (Reg reg : allRegs) {
+            for (Reg reg : allRegs.buildAndValidate()) {
                 auto done = jit.branch32(CCallHelpers::Equal, reg.gpr(), CCallHelpers::TrustedImm32(10));
                 jit.breakpoint();
                 done.link(&jit);
@@ -1504,7 +1623,7 @@ void testReportUsedRegistersLateUseFollowedByEarlyDefDoesNotMarkUseAsDead()
         PatchpointValue* patchpoint = root->appendNew<PatchpointValue>(proc, Int32, Origin());
         patchpoint->resultConstraints = { ValueRep::SomeEarlyRegister };
         patchpoint->setGenerator([&] (CCallHelpers&, const StackmapGenerationParams& params) {
-            RELEASE_ASSERT(allRegs.contains(params[0].gpr()));
+            RELEASE_ASSERT(allRegs.buildAndValidate().contains(params[0].gpr(), IgnoreVectors));
         });
     }
 
@@ -1522,15 +1641,16 @@ void testInfiniteLoopDoesntCauseBadHoisting()
     BasicBlock* header = proc.addBlock();
     BasicBlock* loadBlock = proc.addBlock();
     BasicBlock* postLoadBlock = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t>(proc, root);
 
-    Value* arg = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0);
+    Value* arg = arguments[0];
     root->appendNewControlValue(proc, Jump, Origin(), header);
 
     header->appendNewControlValue(
         proc, Branch, Origin(),
         header->appendNew<Value>(proc, Equal, Origin(),
             arg,
-            header->appendNew<Const64Value>(proc, Origin(), 10)), header, loadBlock);
+            header->appendNew<ConstPtrValue>(proc, Origin(), 10)), header, loadBlock);
 
     PatchpointValue* patchpoint = loadBlock->appendNew<PatchpointValue>(proc, Void, Origin());
     patchpoint->effects = Effects::none();
@@ -1554,8 +1674,8 @@ void testInfiniteLoopDoesntCauseBadHoisting()
 
     // The patchpoint early ret() works because we don't have callee saves.
     auto code = compileProc(proc);
-    RELEASE_ASSERT(!proc.calleeSaveRegisterAtOffsetList().size());
-    invoke<void>(*code, static_cast<uint64_t>(55)); // Shouldn't crash dereferncing 55.
+    RELEASE_ASSERT(!proc.calleeSaveRegisterAtOffsetList().registerCount());
+    invoke<void>(*code, static_cast<intptr_t>(55)); // Shouldn't crash dereferncing 55.
 }
 
 static void testSimpleTuplePair(unsigned first, int64_t second)
@@ -1564,12 +1684,12 @@ static void testSimpleTuplePair(unsigned first, int64_t second)
     BasicBlock* root = proc.addBlock();
 
     PatchpointValue* patchpoint = root->appendNew<PatchpointValue>(proc, proc.addTuple({ Int32, Int64 }), Origin());
-    patchpoint->clobber(RegisterSet::macroScratchRegisters());
+    patchpoint->clobber(RegisterSetBuilder::macroClobberedGPRs());
     patchpoint->resultConstraints = { ValueRep::SomeRegister, ValueRep::SomeRegister };
     patchpoint->setGenerator([&] (CCallHelpers& jit, const StackmapGenerationParams& params) {
         AllowMacroScratchRegisterUsage allowScratch(jit);
         jit.move(CCallHelpers::TrustedImm32(first), params[0].gpr());
-        jit.move(CCallHelpers::TrustedImm64(second), params[1].gpr());
+        jit.move(CCallHelpers::TrustedImmPtr(second), params[1].gpr());
     });
     Value* i32 = root->appendNew<Value>(proc, ZExt32, Origin(),
         root->appendNew<ExtractValue>(proc, Origin(), Int32, patchpoint, 0));
@@ -1585,13 +1705,15 @@ static void testSimpleTuplePairUnused(unsigned first, int64_t second)
     BasicBlock* root = proc.addBlock();
 
     PatchpointValue* patchpoint = root->appendNew<PatchpointValue>(proc, proc.addTuple({ Int32, Int64, Double }), Origin());
-    patchpoint->clobber(RegisterSet::macroScratchRegisters());
+    patchpoint->clobber(RegisterSetBuilder::macroClobberedGPRs());
     patchpoint->resultConstraints = { ValueRep::SomeRegister, ValueRep::SomeRegister, ValueRep::SomeRegister };
     patchpoint->setGenerator([&] (CCallHelpers& jit, const StackmapGenerationParams& params) {
         AllowMacroScratchRegisterUsage allowScratch(jit);
         jit.move(CCallHelpers::TrustedImm32(first), params[0].gpr());
+#if !CPU(ARM_THUMB2) // FIXME
         jit.move(CCallHelpers::TrustedImm64(second), params[1].gpr());
-        jit.moveDouble(CCallHelpers::Imm64(bitwise_cast<uint64_t>(0.0)), params[2].fpr());
+        jit.move64ToDouble(CCallHelpers::Imm64(std::bit_cast<uint64_t>(0.0)), params[2].fpr());
+#endif
     });
     Value* i32 = root->appendNew<Value>(proc, ZExt32, Origin(),
         root->appendNew<ExtractValue>(proc, Origin(), Int32, patchpoint, 0));
@@ -1607,12 +1729,14 @@ static void testSimpleTuplePairStack(unsigned first, int64_t second)
     BasicBlock* root = proc.addBlock();
 
     PatchpointValue* patchpoint = root->appendNew<PatchpointValue>(proc, proc.addTuple({ Int32, Int64 }), Origin());
-    patchpoint->clobber(RegisterSet::macroScratchRegisters());
+    patchpoint->clobber(RegisterSetBuilder::macroClobberedGPRs());
     patchpoint->resultConstraints = { ValueRep::SomeRegister, ValueRep::stackArgument(0) };
     patchpoint->setGenerator([&] (CCallHelpers& jit, const StackmapGenerationParams& params) {
         AllowMacroScratchRegisterUsage allowScratch(jit);
         jit.move(CCallHelpers::TrustedImm32(first), params[0].gpr());
+#if !CPU(ARM_THUMB2) // FIXME
         jit.store64(CCallHelpers::TrustedImm64(second), CCallHelpers::Address(CCallHelpers::framePointerRegister, params[1].offsetFromFP()));
+#endif
     });
     Value* i32 = root->appendNew<Value>(proc, ZExt32, Origin(),
         root->appendNew<ExtractValue>(proc, Origin(), Int32, patchpoint, 0));
@@ -1678,18 +1802,21 @@ static void tailDupedTuplePair(unsigned first, double second)
     BasicBlock* root = proc.addBlock();
     BasicBlock* truthy = proc.addBlock();
     BasicBlock* falsey = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t>(proc, root);
 
     Type tupleType = proc.addTuple({ Int32, Double });
     Variable* var = proc.addVariable(tupleType);
 
-    Value* test = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0);
+    Value* test = arguments[0];
     PatchpointValue* patchpoint = root->appendNew<PatchpointValue>(proc, tupleType, Origin());
-    patchpoint->clobber(RegisterSet::macroScratchRegisters());
+    patchpoint->clobber(RegisterSetBuilder::macroClobberedGPRs());
     patchpoint->resultConstraints = { ValueRep::SomeRegister, ValueRep::stackArgument(0) };
     patchpoint->setGenerator([&] (CCallHelpers& jit, const StackmapGenerationParams& params) {
         AllowMacroScratchRegisterUsage allowScratch(jit);
         jit.move(CCallHelpers::TrustedImm32(first), params[0].gpr());
-        jit.store64(CCallHelpers::TrustedImm64(bitwise_cast<uint64_t>(second)), CCallHelpers::Address(CCallHelpers::framePointerRegister, params[1].offsetFromFP()));
+#if !CPU(ARM_THUMB2) // FIXME
+        jit.store64(CCallHelpers::TrustedImm64(std::bit_cast<uint64_t>(second)), CCallHelpers::Address(CCallHelpers::framePointerRegister, params[1].offsetFromFP()));
+#endif
     });
     root->appendNew<VariableValue>(proc, Set, Origin(), var, patchpoint);
     root->appendNewControlValue(proc, Branch, Origin(), test, FrequentedBlock(truthy), FrequentedBlock(falsey));
@@ -1719,13 +1846,14 @@ static void tuplePairVariableLoop(unsigned first, uint64_t second)
     BasicBlock* root = proc.addBlock();
     BasicBlock* body = proc.addBlock();
     BasicBlock* exit = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t, intptr_t>(proc, root);
 
     Type tupleType = proc.addTuple({ Int32, Int64 });
     Variable* var = proc.addVariable(tupleType);
 
     {
-        Value* first = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0);
-        Value* second = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR1);
+        Value* first = arguments[0];
+        Value* second = arguments[1];
         PatchpointValue* patchpoint = root->appendNew<PatchpointValue>(proc, tupleType, Origin());
         patchpoint->append({ first, ValueRep::SomeRegister });
         patchpoint->append({ second, ValueRep::SomeRegister });
@@ -1743,7 +1871,7 @@ static void tuplePairVariableLoop(unsigned first, uint64_t second)
         Value* first = body->appendNew<ExtractValue>(proc, Origin(), Int32, tuple, 0);
         Value* second = body->appendNew<ExtractValue>(proc, Origin(), Int64, tuple, 1);
         PatchpointValue* patchpoint = body->appendNew<PatchpointValue>(proc, tupleType, Origin());
-        patchpoint->clobber(RegisterSet::macroScratchRegisters());
+        patchpoint->clobber(RegisterSetBuilder::macroClobberedGPRs());
         patchpoint->append({ first, ValueRep::SomeRegister });
         patchpoint->append({ second, ValueRep::SomeRegister });
         patchpoint->resultConstraints = { ValueRep::SomeEarlyRegister, ValueRep::stackArgument(0) };
@@ -1751,8 +1879,10 @@ static void tuplePairVariableLoop(unsigned first, uint64_t second)
             AllowMacroScratchRegisterUsage allowScratch(jit);
             CHECK(params[3].gpr() != params[0].gpr());
             CHECK(params[2].gpr() != params[0].gpr());
+#if !CPU(ARM_THUMB2) // FIXME
             jit.add64(CCallHelpers::TrustedImm32(1), params[3].gpr(), params[0].gpr());
             jit.store64(params[0].gpr(), CCallHelpers::Address(CCallHelpers::framePointerRegister, params[1].offsetFromFP()));
+#endif
 
             jit.move(params[2].gpr(), params[0].gpr());
             jit.urshift32(CCallHelpers::TrustedImm32(1), params[0].gpr());
@@ -1776,13 +1906,14 @@ static void tuplePairVariableLoop(unsigned first, uint64_t second)
 }
 
 template<bool shouldFixSSA>
-static void tupleNestedLoop(int32_t first, double second)
+static void tupleNestedLoop(intptr_t first, double second)
 {
     Procedure proc;
     BasicBlock* root = proc.addBlock();
     BasicBlock* outerLoop = proc.addBlock();
     BasicBlock* innerLoop = proc.addBlock();
     BasicBlock* outerContinuation = proc.addBlock();
+    auto arguments = cCallArgumentValues<intptr_t, double>(proc, root);
 
     Type tupleType = proc.addTuple({ Int32, Double, Int32 });
     Variable* varOuter = proc.addVariable(tupleType);
@@ -1790,8 +1921,8 @@ static void tupleNestedLoop(int32_t first, double second)
     Variable* tookInner = proc.addVariable(Int32);
 
     {
-        Value* first = root->appendNew<ArgumentRegValue>(proc, Origin(), GPRInfo::argumentGPR0);
-        Value* second = root->appendNew<ArgumentRegValue>(proc, Origin(), FPRInfo::argumentFPR0);
+        Value* first = arguments[0];
+        Value* second = arguments[1];
         PatchpointValue* patchpoint = root->appendNew<PatchpointValue>(proc, tupleType, Origin());
         patchpoint->append({ first, ValueRep::SomeRegisterWithClobber });
         patchpoint->append({ second, ValueRep::SomeRegisterWithClobber });
@@ -1799,7 +1930,7 @@ static void tupleNestedLoop(int32_t first, double second)
         patchpoint->setGenerator([&] (CCallHelpers& jit, const StackmapGenerationParams& params) {
             jit.move(params[3].gpr(), params[0].gpr());
             jit.move(params[0].gpr(), params[2].gpr());
-            jit.move(params[4].fpr(), params[1].fpr());
+            jit.moveDouble(params[4].fpr(), params[1].fpr());
         });
         root->appendNew<VariableValue>(proc, Set, Origin(), varOuter, patchpoint);
         root->appendNew<VariableValue>(proc, Set, Origin(), tookInner, root->appendIntConstant(proc, Origin(), Int32, 0));
@@ -1812,7 +1943,7 @@ static void tupleNestedLoop(int32_t first, double second)
         Value* second = outerLoop->appendNew<ExtractValue>(proc, Origin(), Double, tuple, 1);
         Value* third = outerLoop->appendNew<VariableValue>(proc, B3::Get, Origin(), tookInner);
         PatchpointValue* patchpoint = outerLoop->appendNew<PatchpointValue>(proc, tupleType, Origin());
-        patchpoint->clobber(RegisterSet::macroScratchRegisters());
+        patchpoint->clobber(RegisterSetBuilder::macroClobberedGPRs());
         patchpoint->append({ first, ValueRep::SomeRegisterWithClobber });
         patchpoint->append({ second, ValueRep::SomeRegisterWithClobber });
         patchpoint->append({ third, ValueRep::SomeRegisterWithClobber });
@@ -1821,7 +1952,7 @@ static void tupleNestedLoop(int32_t first, double second)
             AllowMacroScratchRegisterUsage allowScratch(jit);
             jit.move(params[3].gpr(), params[0].gpr());
             jit.moveConditionally32(CCallHelpers::Equal, params[5].gpr(), CCallHelpers::TrustedImm32(0), params[0].gpr(), params[5].gpr(), params[2].gpr());
-            jit.move(params[4].fpr(), params[1].fpr());
+            jit.moveDouble(params[4].fpr(), params[1].fpr());
         });
         outerLoop->appendNew<VariableValue>(proc, Set, Origin(), varOuter, patchpoint);
         outerLoop->appendNew<VariableValue>(proc, Set, Origin(), varInner, patchpoint);
@@ -1834,7 +1965,7 @@ static void tupleNestedLoop(int32_t first, double second)
         Value* first = innerLoop->appendNew<ExtractValue>(proc, Origin(), Int32, tuple, 0);
         Value* second = innerLoop->appendNew<ExtractValue>(proc, Origin(), Double, tuple, 1);
         PatchpointValue* patchpoint = innerLoop->appendNew<PatchpointValue>(proc, tupleType, Origin());
-        patchpoint->clobber(RegisterSet::macroScratchRegisters());
+        patchpoint->clobber(RegisterSetBuilder::macroClobberedGPRs());
         patchpoint->append({ first, ValueRep::SomeRegisterWithClobber });
         patchpoint->append({ second, ValueRep::SomeRegisterWithClobber });
         patchpoint->resultConstraints = { ValueRep::SomeRegister, ValueRep::SomeRegister, ValueRep::SomeEarlyRegister };
@@ -1842,7 +1973,7 @@ static void tupleNestedLoop(int32_t first, double second)
             AllowMacroScratchRegisterUsage allowScratch(jit);
             jit.move(params[3].gpr(), params[0].gpr());
             jit.move(CCallHelpers::TrustedImm32(0), params[2].gpr());
-            jit.move(params[4].fpr(), params[1].fpr());
+            jit.moveDouble(params[4].fpr(), params[1].fpr());
         });
         innerLoop->appendNew<VariableValue>(proc, Set, Origin(), varOuter, patchpoint);
         innerLoop->appendNew<VariableValue>(proc, Set, Origin(), varInner, patchpoint);
@@ -1866,7 +1997,7 @@ static void tupleNestedLoop(int32_t first, double second)
     CHECK_EQ(compileAndRun<double>(proc, first, second), first + second);
 }
 
-void addTupleTests(const char* filter, Deque<RefPtr<SharedTask<void()>>>& tasks)
+void addTupleTests(const TestConfig* config, Deque<RefPtr<SharedTask<void()>>>& tasks)
 {
     RUN_BINARY(testSimpleTuplePair, int32Operands(), int64Operands());
     RUN_BINARY(testSimpleTuplePairUnused, int32Operands(), int64Operands());
@@ -1902,12 +2033,9 @@ static void testFMaxMin()
     auto runArgTest = [&] (bool max, FloatType arg1, FloatType arg2) {
         Procedure proc;
         BasicBlock* root = proc.addBlock();
-        Value* a = root->appendNew<ArgumentRegValue>(proc, Origin(), FPRInfo::argumentFPR0);
-        Value* b = root->appendNew<ArgumentRegValue>(proc, Origin(), FPRInfo::argumentFPR1);
-        if (std::is_same_v<FloatType, float>) {
-            a = root->appendNew<Value>(proc, Trunc, Origin(), a);
-            b = root->appendNew<Value>(proc, Trunc, Origin(), b);
-        }
+        auto arguments = cCallArgumentValues<FloatType, FloatType>(proc, root);
+        Value* a = arguments[0];
+        Value* b = arguments[1];
         Value* result = root->appendNew<Value>(proc, max ? FMax : FMin, Origin(), a, b);
         root->appendNewControlValue(proc, Return, Origin(), result);
         auto code = compileProc(proc);
@@ -1996,4 +2124,679 @@ void testDoubleMaxMin()
     testFMaxMin<double>();
 }
 
+void testVectorOrConstants(v128_t lhs, v128_t rhs)
+{
+    alignas(16) v128_t vector;
+    {
+        Procedure proc;
+        BasicBlock* root = proc.addBlock();
+        auto arguments = cCallArgumentValues<void*>(proc, root);
+
+        Value* address = arguments[0];
+        Value* lhsConstant = root->appendNew<Const128Value>(proc, Origin(), lhs);
+        Value* rhsConstant = root->appendNew<Const128Value>(proc, Origin(), rhs);
+        Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorOr, B3::V128, SIMDLane::v128, SIMDSignMode::None, lhsConstant, rhsConstant);
+        root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+        root->appendNewControlValue(proc, Return, Origin());
+
+        compileAndRun<void>(proc, &vector);
+        CHECK(bitEquals(vector, vectorOr(lhs, rhs)));
+    }
+    {
+        Procedure proc;
+        BasicBlock* root = proc.addBlock();
+        auto arguments = cCallArgumentValues<void*>(proc, root);
+
+        Value* address = arguments[0];
+        Value* lhsConstant = root->appendNew<Const128Value>(proc, Origin(), lhs);
+        Value* rhsConstant = root->appendNew<Const128Value>(proc, Origin(), rhs);
+        Value* input = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address);
+        Value* first = root->appendNew<SIMDValue>(proc, Origin(), VectorOr, B3::V128, SIMDLane::v128, SIMDSignMode::None, input, lhsConstant);
+        Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorOr, B3::V128, SIMDLane::v128, SIMDSignMode::None, first, rhsConstant);
+        root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+        root->appendNewControlValue(proc, Return, Origin());
+        auto code = compileProc(proc);
+
+        for (auto& operand : v128Operands()) {
+            vector = operand.value;
+            invoke<void>(*code, &vector);
+            CHECK(bitEquals(vector, vectorOr(vectorOr(lhs, operand.value), rhs)));
+        }
+    }
+}
+
+void testVectorOrSelf()
+{
+    alignas(16) v128_t vector;
+    Procedure proc;
+    BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<void*>(proc, root);
+
+    Value* address = arguments[0];
+    Value* input = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address);
+    Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorOr, B3::V128, SIMDLane::v128, SIMDSignMode::None, input, input);
+    root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+    root->appendNewControlValue(proc, Return, Origin());
+
+    auto code = compileProc(proc);
+
+    for (auto& operand : v128Operands()) {
+        vector = operand.value;
+        invoke<void>(*code, &vector);
+        CHECK(bitEquals(vector, vectorOr(operand.value, operand.value)));
+    }
+}
+
+void testVectorXorOrAllOnesToVectorAndXor()
+{
+    alignas(16) v128_t vectors[2];
+    Procedure proc;
+    BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<void*>(proc, root);
+
+    Value* address = arguments[0];
+    Value* constant = root->appendNew<Const128Value>(proc, Origin(), vectorAllOnes());
+    Value* input0 = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address);
+    Value* input1 = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address, sizeof(v128_t));
+    Value* result0 = root->appendNew<SIMDValue>(proc, Origin(), VectorXor, B3::V128, SIMDLane::v128, SIMDSignMode::None, input0, constant);
+    Value* result1 = root->appendNew<SIMDValue>(proc, Origin(), VectorXor, B3::V128, SIMDLane::v128, SIMDSignMode::None, input1, constant);
+    Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorOr, B3::V128, SIMDLane::v128, SIMDSignMode::None, result0, result1);
+    root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+    root->appendNewControlValue(proc, Return, Origin());
+
+    auto code = compileProc(proc);
+
+    for (auto& operand0 : v128Operands()) {
+        for (auto& operand1 : v128Operands()) {
+            vectors[0] = operand0.value;
+            vectors[1] = operand1.value;
+            invoke<void>(*code, vectors);
+            CHECK(bitEquals(vectors[0], vectorOr(vectorXor(operand0.value, vectorAllOnes()), vectorXor(operand1.value, vectorAllOnes()))));
+        }
+    }
+}
+
+void testVectorXorAndAllOnesToVectorOrXor()
+{
+    alignas(16) v128_t vectors[2];
+    Procedure proc;
+    BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<void*>(proc, root);
+
+    Value* address = arguments[0];
+    Value* constant = root->appendNew<Const128Value>(proc, Origin(), vectorAllOnes());
+    Value* input0 = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address);
+    Value* input1 = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address, sizeof(v128_t));
+    Value* result0 = root->appendNew<SIMDValue>(proc, Origin(), VectorXor, B3::V128, SIMDLane::v128, SIMDSignMode::None, input0, constant);
+    Value* result1 = root->appendNew<SIMDValue>(proc, Origin(), VectorXor, B3::V128, SIMDLane::v128, SIMDSignMode::None, input1, constant);
+    Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorAnd, B3::V128, SIMDLane::v128, SIMDSignMode::None, result0, result1);
+    root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+    root->appendNewControlValue(proc, Return, Origin());
+
+    auto code = compileProc(proc);
+
+    for (auto& operand0 : v128Operands()) {
+        for (auto& operand1 : v128Operands()) {
+            vectors[0] = operand0.value;
+            vectors[1] = operand1.value;
+            invoke<void>(*code, vectors);
+            CHECK(bitEquals(vectors[0], vectorAnd(vectorXor(operand0.value, vectorAllOnes()), vectorXor(operand1.value, vectorAllOnes()))));
+        }
+    }
+}
+
+void testVectorXorOrAllOnesConstantToVectorAndXor(v128_t constant)
+{
+    alignas(16) v128_t vector;
+    Procedure proc;
+    BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<void*>(proc, root);
+
+    Value* address = arguments[0];
+    Value* allOnes = root->appendNew<Const128Value>(proc, Origin(), vectorAllOnes());
+    Value* constant0 = root->appendNew<Const128Value>(proc, Origin(), constant);
+    Value* input = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address);
+    Value* result0 = root->appendNew<SIMDValue>(proc, Origin(), VectorXor, B3::V128, SIMDLane::v128, SIMDSignMode::None, input, allOnes);
+    Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorOr, B3::V128, SIMDLane::v128, SIMDSignMode::None, result0, constant0);
+    root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+    root->appendNewControlValue(proc, Return, Origin());
+
+    auto code = compileProc(proc);
+
+    for (auto& operand : v128Operands()) {
+        vector = operand.value;
+        invoke<void>(*code, &vector);
+        CHECK(bitEquals(vector, vectorOr(vectorXor(operand.value, vectorAllOnes()), constant)));
+    }
+}
+
+void testVectorXorAndAllOnesConstantToVectorOrXor(v128_t constant)
+{
+    alignas(16) v128_t vector;
+    Procedure proc;
+    BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<void*>(proc, root);
+
+    Value* address = arguments[0];
+    Value* allOnes = root->appendNew<Const128Value>(proc, Origin(), vectorAllOnes());
+    Value* constant0 = root->appendNew<Const128Value>(proc, Origin(), constant);
+    Value* input = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address);
+    Value* result0 = root->appendNew<SIMDValue>(proc, Origin(), VectorXor, B3::V128, SIMDLane::v128, SIMDSignMode::None, input, allOnes);
+    Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorAnd, B3::V128, SIMDLane::v128, SIMDSignMode::None, result0, constant0);
+    root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+    root->appendNewControlValue(proc, Return, Origin());
+
+    auto code = compileProc(proc);
+
+    for (auto& operand : v128Operands()) {
+        vector = operand.value;
+        invoke<void>(*code, &vector);
+        CHECK(bitEquals(vector, vectorAnd(vectorXor(operand.value, vectorAllOnes()), constant)));
+    }
+}
+
+void testVectorAndConstants(v128_t lhs, v128_t rhs)
+{
+    alignas(16) v128_t vector;
+    {
+        Procedure proc;
+        BasicBlock* root = proc.addBlock();
+        auto arguments = cCallArgumentValues<void*>(proc, root);
+
+        Value* address = arguments[0];
+        Value* lhsConstant = root->appendNew<Const128Value>(proc, Origin(), lhs);
+        Value* rhsConstant = root->appendNew<Const128Value>(proc, Origin(), rhs);
+        Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorAnd, B3::V128, SIMDLane::v128, SIMDSignMode::None, lhsConstant, rhsConstant);
+        root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+        root->appendNewControlValue(proc, Return, Origin());
+
+        compileAndRun<void>(proc, &vector);
+        CHECK(bitEquals(vector, vectorAnd(lhs, rhs)));
+    }
+    {
+        Procedure proc;
+        BasicBlock* root = proc.addBlock();
+        auto arguments = cCallArgumentValues<void*>(proc, root);
+
+        Value* address = arguments[0];
+        Value* lhsConstant = root->appendNew<Const128Value>(proc, Origin(), lhs);
+        Value* rhsConstant = root->appendNew<Const128Value>(proc, Origin(), rhs);
+        Value* input = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address);
+        Value* first = root->appendNew<SIMDValue>(proc, Origin(), VectorAnd, B3::V128, SIMDLane::v128, SIMDSignMode::None, input, lhsConstant);
+        Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorAnd, B3::V128, SIMDLane::v128, SIMDSignMode::None, first, rhsConstant);
+        root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+        root->appendNewControlValue(proc, Return, Origin());
+        auto code = compileProc(proc);
+
+        for (auto& operand : v128Operands()) {
+            vector = operand.value;
+            invoke<void>(*code, &vector);
+            CHECK(bitEquals(vector, vectorAnd(vectorAnd(lhs, operand.value), rhs)));
+        }
+    }
+}
+
+void testVectorAndSelf()
+{
+    alignas(16) v128_t vector;
+    Procedure proc;
+    BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<void*>(proc, root);
+
+    Value* address = arguments[0];
+    Value* input = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address);
+    Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorAnd, B3::V128, SIMDLane::v128, SIMDSignMode::None, input, input);
+    root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+    root->appendNewControlValue(proc, Return, Origin());
+
+    auto code = compileProc(proc);
+
+    for (auto& operand : v128Operands()) {
+        vector = operand.value;
+        invoke<void>(*code, &vector);
+        CHECK(bitEquals(vector, vectorAnd(operand.value, operand.value)));
+    }
+}
+
+void testVectorXorConstants(v128_t lhs, v128_t rhs)
+{
+    alignas(16) v128_t vector;
+    {
+        Procedure proc;
+        BasicBlock* root = proc.addBlock();
+        auto arguments = cCallArgumentValues<void*>(proc, root);
+
+        Value* address = arguments[0];
+        Value* lhsConstant = root->appendNew<Const128Value>(proc, Origin(), lhs);
+        Value* rhsConstant = root->appendNew<Const128Value>(proc, Origin(), rhs);
+        Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorXor, B3::V128, SIMDLane::v128, SIMDSignMode::None, lhsConstant, rhsConstant);
+        root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+        root->appendNewControlValue(proc, Return, Origin());
+
+        compileAndRun<void>(proc, &vector);
+        CHECK(bitEquals(vector, vectorXor(lhs, rhs)));
+    }
+    {
+        Procedure proc;
+        BasicBlock* root = proc.addBlock();
+        auto arguments = cCallArgumentValues<void*>(proc, root);
+
+        Value* address = arguments[0];
+        Value* lhsConstant = root->appendNew<Const128Value>(proc, Origin(), lhs);
+        Value* rhsConstant = root->appendNew<Const128Value>(proc, Origin(), rhs);
+        Value* input = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address);
+        Value* first = root->appendNew<SIMDValue>(proc, Origin(), VectorXor, B3::V128, SIMDLane::v128, SIMDSignMode::None, input, lhsConstant);
+        Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorXor, B3::V128, SIMDLane::v128, SIMDSignMode::None, first, rhsConstant);
+        root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+        root->appendNewControlValue(proc, Return, Origin());
+        auto code = compileProc(proc);
+
+        for (auto& operand : v128Operands()) {
+            vector = operand.value;
+            invoke<void>(*code, &vector);
+            CHECK(bitEquals(vector, vectorXor(vectorXor(lhs, operand.value), rhs)));
+        }
+    }
+}
+
+void testVectorXorSelf()
+{
+    alignas(16) v128_t vector;
+    Procedure proc;
+    BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<void*>(proc, root);
+
+    Value* address = arguments[0];
+    Value* input = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address);
+    Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorXor, B3::V128, SIMDLane::v128, SIMDSignMode::None, input, input);
+    root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+    root->appendNewControlValue(proc, Return, Origin());
+
+    auto code = compileProc(proc);
+
+    for (auto& operand : v128Operands()) {
+        vector = operand.value;
+        invoke<void>(*code, &vector);
+        CHECK(bitEquals(vector, vectorXor(operand.value, operand.value)));
+    }
+}
+
+void testVectorAndConstantConstant(v128_t lhs, v128_t rhs)
+{
+    alignas(16) v128_t vector;
+    {
+        Procedure proc;
+        BasicBlock* root = proc.addBlock();
+        auto arguments = cCallArgumentValues<void*>(proc, root);
+
+        Value* address = arguments[0];
+        Value* firstConstant = root->appendNew<Const128Value>(proc, Origin(), lhs);
+        Value* secondConstant = root->appendNew<Const128Value>(proc, Origin(), rhs);
+        Value* input = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address);
+        Value* first = root->appendNew<SIMDValue>(proc, Origin(), VectorXor, B3::V128, SIMDLane::v128, SIMDSignMode::None, input, firstConstant);
+        Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorAnd, B3::V128, SIMDLane::v128, SIMDSignMode::None, first, secondConstant);
+        root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+        root->appendNewControlValue(proc, Return, Origin());
+        auto code = compileProc(proc);
+
+        for (auto& operand : v128Operands()) {
+            vector = operand.value;
+            invoke<void>(*code, &vector);
+            CHECK(bitEquals(vector, vectorAnd(vectorXor(operand.value, lhs), rhs)));
+        }
+    }
+    {
+        Procedure proc;
+        BasicBlock* root = proc.addBlock();
+        auto arguments = cCallArgumentValues<void*>(proc, root);
+
+        Value* address = arguments[0];
+        Value* firstConstant = root->appendNew<Const128Value>(proc, Origin(), lhs);
+        Value* secondConstant = root->appendNew<Const128Value>(proc, Origin(), rhs);
+        Value* input = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address);
+        Value* first = root->appendNew<SIMDValue>(proc, Origin(), VectorOr, B3::V128, SIMDLane::v128, SIMDSignMode::None, input, firstConstant);
+        Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorAnd, B3::V128, SIMDLane::v128, SIMDSignMode::None, first, secondConstant);
+        root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+        root->appendNewControlValue(proc, Return, Origin());
+        auto code = compileProc(proc);
+
+        for (auto& operand : v128Operands()) {
+            vector = operand.value;
+            invoke<void>(*code, &vector);
+            CHECK(bitEquals(vector, vectorAnd(vectorOr(operand.value, lhs), rhs)));
+        }
+    }
+}
+
+void testVectorFmulByElementFloat()
+{
+    for (unsigned i = 0; i < 4; ++i) {
+        Procedure proc;
+        BasicBlock* root = proc.addBlock();
+        auto arguments = cCallArgumentValues<void*, void*, void*>(proc, root);
+
+        Value* address0 = arguments[0];
+        Value* address1 = arguments[1];
+        Value* address2 = arguments[2];
+
+        Value* input0 = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address0);
+        Value* input1 = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address1);
+        Value* dup = root->appendNew<SIMDValue>(proc, Origin(), VectorDupElement, B3::V128, SIMDLane::f32x4, SIMDSignMode::None, static_cast<uint8_t>(i), input0);
+        Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorMul, B3::V128, SIMDLane::f32x4, SIMDSignMode::None, input1, dup);
+
+        root->appendNew<MemoryValue>(proc, Store, Origin(), result, address2);
+        root->appendNewControlValue(proc, Return, Origin());
+
+        auto code = compileProc(proc);
+
+        auto checkFloat = [&](float a, float b) {
+            if (std::isnan(a))
+                CHECK(std::isnan(b));
+            else
+                CHECK_EQ(a, b);
+        };
+
+        for (auto& operand0 : floatingPointOperands<float>()) {
+            for (auto& operand1 : floatingPointOperands<float>()) {
+                for (auto& operand2 : floatingPointOperands<float>()) {
+                    for (auto& operand3 : floatingPointOperands<float>()) {
+                        alignas(16) v128_t vector0;
+                        alignas(16) v128_t vector1;
+                        alignas(16) v128_t vector2;
+                        alignas(16) v128_t result;
+
+                        vector0.f32x4[0] = operand0.value;
+                        vector0.f32x4[1] = operand1.value;
+                        vector0.f32x4[2] = operand2.value;
+                        vector0.f32x4[3] = operand3.value;
+
+                        vector1.f32x4[0] = operand3.value;
+                        vector1.f32x4[1] = operand2.value;
+                        vector1.f32x4[2] = operand1.value;
+                        vector1.f32x4[3] = operand0.value;
+
+                        result.f32x4[0] = vector0.f32x4[i] * vector1.f32x4[0];
+                        result.f32x4[1] = vector0.f32x4[i] * vector1.f32x4[1];
+                        result.f32x4[2] = vector0.f32x4[i] * vector1.f32x4[2];
+                        result.f32x4[3] = vector0.f32x4[i] * vector1.f32x4[3];
+
+                        invoke<void>(*code, &vector0, &vector1, &vector2);
+                        checkFloat(result.f32x4[0], vector2.f32x4[0]);
+                        checkFloat(result.f32x4[1], vector2.f32x4[1]);
+                        checkFloat(result.f32x4[2], vector2.f32x4[2]);
+                        checkFloat(result.f32x4[3], vector2.f32x4[3]);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void testVectorFmulByElementDouble()
+{
+    for (unsigned i = 0; i < 2; ++i) {
+        Procedure proc;
+        BasicBlock* root = proc.addBlock();
+        auto arguments = cCallArgumentValues<void*, void*, void*>(proc, root);
+
+        Value* address0 = arguments[0];
+        Value* address1 = arguments[1];
+        Value* address2 = arguments[2];
+
+        Value* input0 = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address0);
+        Value* input1 = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address1);
+        Value* dup = root->appendNew<SIMDValue>(proc, Origin(), VectorDupElement, B3::V128, SIMDLane::f64x2, SIMDSignMode::None, static_cast<uint8_t>(i), input0);
+        Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorMul, B3::V128, SIMDLane::f64x2, SIMDSignMode::None, input1, dup);
+
+        root->appendNew<MemoryValue>(proc, Store, Origin(), result, address2);
+        root->appendNewControlValue(proc, Return, Origin());
+
+        auto code = compileProc(proc);
+
+        auto checkDouble = [&](double a, double b) {
+            if (std::isnan(a))
+                CHECK(std::isnan(b));
+            else
+                CHECK_EQ(a, b);
+        };
+
+        for (auto& operand0 : floatingPointOperands<double>()) {
+            for (auto& operand1 : floatingPointOperands<double>()) {
+                for (auto& operand2 : floatingPointOperands<double>()) {
+                    for (auto& operand3 : floatingPointOperands<double>()) {
+                        alignas(16) v128_t vector0;
+                        alignas(16) v128_t vector1;
+                        alignas(16) v128_t vector2;
+                        alignas(16) v128_t result;
+
+                        vector0.f64x2[0] = operand0.value;
+                        vector0.f64x2[1] = operand1.value;
+
+                        vector1.f64x2[0] = operand2.value;
+                        vector1.f64x2[1] = operand3.value;
+
+                        result.f64x2[0] = vector0.f64x2[i] * vector1.f64x2[0];
+                        result.f64x2[1] = vector0.f64x2[i] * vector1.f64x2[1];
+
+                        invoke<void>(*code, &vector0, &vector1, &vector2);
+                        checkDouble(result.f64x2[0], vector2.f64x2[0]);
+                        checkDouble(result.f64x2[1], vector2.f64x2[1]);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void testVectorExtractLane0Float()
+{
+    Procedure proc;
+    BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<void*>(proc, root);
+
+    Value* address0 = arguments[0];
+    Value* input0 = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address0);
+    root->appendNewControlValue(proc, Return, Origin(), root->appendNew<SIMDValue>(proc, Origin(), VectorExtractLane, B3::Float, SIMDLane::f32x4, SIMDSignMode::None, static_cast<uint8_t>(0), input0));
+
+    auto code = compileProc(proc);
+
+    auto checkFloat = [&](float a, float b) {
+        if (std::isnan(a))
+            CHECK(std::isnan(b));
+        else
+            CHECK_EQ(a, b);
+    };
+
+    for (auto& operand0 : floatingPointOperands<float>()) {
+        alignas(16) v128_t vector0;
+
+        vector0.f32x4[0] = operand0.value;
+        vector0.f32x4[1] = 1;
+        vector0.f32x4[2] = 2;
+        vector0.f32x4[3] = 3;
+
+        float result = invoke<float>(*code, &vector0);
+        checkFloat(result, operand0.value);
+    }
+}
+
+void testVectorExtractLane0Double()
+{
+    Procedure proc;
+    BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<void*>(proc, root);
+
+    Value* address0 = arguments[0];
+    Value* input0 = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address0);
+    root->appendNewControlValue(proc, Return, Origin(), root->appendNew<SIMDValue>(proc, Origin(), VectorExtractLane, B3::Double, SIMDLane::f64x2, SIMDSignMode::None, static_cast<uint8_t>(0), input0));
+
+    auto code = compileProc(proc);
+
+    auto checkDouble = [&](double a, double b) {
+        if (std::isnan(a))
+            CHECK(std::isnan(b));
+        else
+            CHECK_EQ(a, b);
+    };
+
+    for (auto& operand0 : floatingPointOperands<double>()) {
+        alignas(16) v128_t vector0;
+
+        vector0.f64x2[0] = operand0.value;
+        vector0.f64x2[1] = 32;
+
+        double result = invoke<double>(*code, &vector0);
+        checkDouble(result, operand0.value);
+    }
+}
+
+void testVectorMulHigh()
+{
+    auto vectorMulHigh = [&](SIMDLane lane, SIMDSignMode signMode, v128_t lhs, v128_t rhs) {
+        auto simdeLHS = std::bit_cast<simde_v128_t>(lhs);
+        auto simdeRHS = std::bit_cast<simde_v128_t>(rhs);
+        switch (lane) {
+        case SIMDLane::i16x8:
+            if (signMode == SIMDSignMode::Unsigned)
+                return std::bit_cast<v128_t>(simde_wasm_u16x8_extmul_high_u8x16(simdeLHS, simdeRHS));
+            return std::bit_cast<v128_t>(simde_wasm_i16x8_extmul_high_i8x16(simdeLHS, simdeRHS));
+        case SIMDLane::i32x4:
+            if (signMode == SIMDSignMode::Unsigned)
+                return std::bit_cast<v128_t>(simde_wasm_u32x4_extmul_high_u16x8(simdeLHS, simdeRHS));
+            return std::bit_cast<v128_t>(simde_wasm_i32x4_extmul_high_i16x8(simdeLHS, simdeRHS));
+        case SIMDLane::i64x2:
+            if (signMode == SIMDSignMode::Unsigned)
+                return std::bit_cast<v128_t>(simde_wasm_u64x2_extmul_high_u32x4(simdeLHS, simdeRHS));
+            return std::bit_cast<v128_t>(simde_wasm_i64x2_extmul_high_i32x4(simdeLHS, simdeRHS));
+        default:
+            return v128_t { };
+        }
+    };
+
+    auto test = [&](SIMDLane lane, SIMDSignMode signMode) {
+        alignas(16) v128_t vectors[2];
+        Procedure proc;
+        BasicBlock* root = proc.addBlock();
+        auto arguments = cCallArgumentValues<void*>(proc, root);
+
+        Value* address = arguments[0];
+        Value* input0 = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address);
+        Value* input1 = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address, sizeof(v128_t));
+        Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorMulHigh, B3::V128, lane, signMode, input0, input1);
+        root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+        root->appendNewControlValue(proc, Return, Origin());
+
+        auto code = compileProc(proc);
+        for (auto& operand0 : v128Operands()) {
+            for (auto& operand1 : v128Operands()) {
+                vectors[0] = operand0.value;
+                vectors[1] = operand1.value;
+                invoke<void>(*code, vectors);
+                CHECK(bitEquals(vectors[0], vectorMulHigh(lane, signMode, operand0.value, operand1.value)));
+            }
+        }
+    };
+
+    test(SIMDLane::i16x8, SIMDSignMode::Signed);
+    test(SIMDLane::i16x8, SIMDSignMode::Unsigned);
+    test(SIMDLane::i32x4, SIMDSignMode::Signed);
+    test(SIMDLane::i32x4, SIMDSignMode::Unsigned);
+    test(SIMDLane::i64x2, SIMDSignMode::Signed);
+    test(SIMDLane::i64x2, SIMDSignMode::Unsigned);
+}
+
+void testVectorMulLow()
+{
+    auto vectorMulLow = [&](SIMDLane lane, SIMDSignMode signMode, v128_t lhs, v128_t rhs) {
+        auto simdeLHS = std::bit_cast<simde_v128_t>(lhs);
+        auto simdeRHS = std::bit_cast<simde_v128_t>(rhs);
+        switch (lane) {
+        case SIMDLane::i16x8:
+            if (signMode == SIMDSignMode::Unsigned)
+                return std::bit_cast<v128_t>(simde_wasm_u16x8_extmul_low_u8x16(simdeLHS, simdeRHS));
+            return std::bit_cast<v128_t>(simde_wasm_i16x8_extmul_low_i8x16(simdeLHS, simdeRHS));
+        case SIMDLane::i32x4:
+            if (signMode == SIMDSignMode::Unsigned)
+                return std::bit_cast<v128_t>(simde_wasm_u32x4_extmul_low_u16x8(simdeLHS, simdeRHS));
+            return std::bit_cast<v128_t>(simde_wasm_i32x4_extmul_low_i16x8(simdeLHS, simdeRHS));
+        case SIMDLane::i64x2:
+            if (signMode == SIMDSignMode::Unsigned)
+                return std::bit_cast<v128_t>(simde_wasm_u64x2_extmul_low_u32x4(simdeLHS, simdeRHS));
+            return std::bit_cast<v128_t>(simde_wasm_i64x2_extmul_low_i32x4(simdeLHS, simdeRHS));
+        default:
+            return v128_t { };
+        }
+    };
+
+    auto test = [&](SIMDLane lane, SIMDSignMode signMode) {
+        alignas(16) v128_t vectors[2];
+        Procedure proc;
+        BasicBlock* root = proc.addBlock();
+        auto arguments = cCallArgumentValues<void*>(proc, root);
+
+        Value* address = arguments[0];
+        Value* input0 = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address);
+        Value* input1 = root->appendNew<MemoryValue>(proc, Load, V128, Origin(), address, sizeof(v128_t));
+        Value* result = root->appendNew<SIMDValue>(proc, Origin(), VectorMulLow, B3::V128, lane, signMode, input0, input1);
+        root->appendNew<MemoryValue>(proc, Store, Origin(), result, address);
+        root->appendNewControlValue(proc, Return, Origin());
+
+        auto code = compileProc(proc);
+        for (auto& operand0 : v128Operands()) {
+            for (auto& operand1 : v128Operands()) {
+                vectors[0] = operand0.value;
+                vectors[1] = operand1.value;
+                invoke<void>(*code, vectors);
+                CHECK(bitEquals(vectors[0], vectorMulLow(lane, signMode, operand0.value, operand1.value)));
+            }
+        }
+    };
+
+    test(SIMDLane::i16x8, SIMDSignMode::Signed);
+    test(SIMDLane::i16x8, SIMDSignMode::Unsigned);
+    test(SIMDLane::i32x4, SIMDSignMode::Signed);
+    test(SIMDLane::i32x4, SIMDSignMode::Unsigned);
+    test(SIMDLane::i64x2, SIMDSignMode::Signed);
+    test(SIMDLane::i64x2, SIMDSignMode::Unsigned);
+}
+
+void testInt52RoundTripUnary(int32_t constant)
+{
+    Procedure proc;
+    BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<int32_t>(proc, root);
+    Value* argA = arguments[0];
+    Value* int52A = root->appendNew<Value>(proc, Shl, Origin(), root->appendNew<Value>(proc, SExt32, Origin(), argA), root->appendNew<Const32Value>(proc, Origin(), 12));
+    Value* int52B = root->appendNew<Value>(proc, Shl, Origin(), root->appendNew<Value>(proc, SExt32, Origin(), root->appendNew<Const32Value>(proc, Origin(), constant)), root->appendNew<Const32Value>(proc, Origin(), 12));
+    Value* node = root->appendNew<Value>(proc, Add, Origin(), int52A, int52B);
+    Value* result = root->appendNew<Value>(proc, Trunc, Origin(), root->appendNew<Value>(proc, SShr, Origin(), node, root->appendNew<Const32Value>(proc, Origin(), 12)));
+    root->appendNew<Value>(proc, Return, Origin(), result);
+    auto code = compileProc(proc);
+
+    for (auto value : int32Operands())
+        CHECK_EQ(invoke<int32_t>(*code, value.value), static_cast<int32_t>(((static_cast<int64_t>(value.value) << 12) + (static_cast<int64_t>(constant) << 12)) >> 12));
+}
+
+void testInt52RoundTripBinary()
+{
+    Procedure proc;
+    BasicBlock* root = proc.addBlock();
+    auto arguments = cCallArgumentValues<int32_t, int32_t>(proc, root);
+    Value* argA = arguments[0];
+    Value* argB = arguments[1];
+    Value* int52A = root->appendNew<Value>(proc, Shl, Origin(), root->appendNew<Value>(proc, SExt32, Origin(), argA), root->appendNew<Const32Value>(proc, Origin(), 12));
+    Value* int52B = root->appendNew<Value>(proc, Shl, Origin(), root->appendNew<Value>(proc, SExt32, Origin(), argB), root->appendNew<Const32Value>(proc, Origin(), 12));
+    Value* node = root->appendNew<Value>(proc, Add, Origin(), int52A, int52B);
+    Value* result = root->appendNew<Value>(proc, Trunc, Origin(), root->appendNew<Value>(proc, SShr, Origin(), node, root->appendNew<Const32Value>(proc, Origin(), 12)));
+    root->appendNew<Value>(proc, Return, Origin(), result);
+    auto code = compileProc(proc);
+
+    for (auto lhs : int32Operands()) {
+        for (auto rhs : int32Operands())
+            CHECK_EQ(invoke<int32_t>(*code, lhs.value, rhs.value), static_cast<int32_t>(((static_cast<int64_t>(lhs.value) << 12) + (static_cast<int64_t>(rhs.value) << 12)) >> 12));
+    }
+}
+
 #endif // ENABLE(B3_JIT)
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

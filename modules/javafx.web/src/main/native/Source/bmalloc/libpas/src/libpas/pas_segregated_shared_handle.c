@@ -37,7 +37,7 @@
 pas_segregated_shared_handle* pas_segregated_shared_handle_create(
     pas_segregated_shared_view* view,
     pas_segregated_shared_page_directory* shared_page_directory,
-    pas_segregated_page_config* page_config_ptr)
+    const pas_segregated_page_config* page_config_ptr)
 {
     pas_segregated_page_config page_config;
     pas_segregated_shared_handle* result;
@@ -66,7 +66,7 @@ void pas_segregated_shared_handle_destroy(pas_segregated_shared_handle* handle)
 {
     pas_segregated_shared_page_directory* shared_page_directory;
     pas_segregated_directory* directory;
-    pas_segregated_page_config* page_config_ptr;
+    const pas_segregated_page_config* page_config_ptr;
     pas_segregated_page_config page_config;
     pas_segregated_shared_view* shared_view;
 
@@ -91,7 +91,7 @@ void pas_segregated_shared_handle_destroy(pas_segregated_shared_handle* handle)
 void pas_segregated_shared_handle_note_emptiness(
     pas_segregated_shared_handle* handle)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
 
     pas_segregated_shared_view* shared_view;
 

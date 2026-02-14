@@ -44,7 +44,6 @@ public:
         LeftStickY,
         RightStickX,
         RightStickY,
-        Count,
     };
     enum class StandardGamepadButton : int8_t {
         Unknown = -1,
@@ -64,7 +63,7 @@ public:
         DPadDown,
         DPadLeft,
         DPadRight,
-        Count,
+        Mode,
     };
 
     ManetteGamepad(ManetteDevice*, unsigned index);

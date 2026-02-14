@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,31 +25,28 @@
 
 package javafx.scene.control.skin;
 
-import com.sun.javafx.scene.control.skin.Utils;
-import javafx.beans.property.DoubleProperty;
-import javafx.css.StyleableBooleanProperty;
-import javafx.css.StyleableDoubleProperty;
-import javafx.css.StyleableObjectProperty;
-import javafx.css.CssMetaData;
-
-import javafx.css.converter.BooleanConverter;
-import javafx.css.converter.EnumConverter;
-import javafx.css.converter.SizeConverter;
-import com.sun.javafx.scene.control.behavior.PaginationBehavior;
-
+import static com.sun.javafx.scene.control.skin.resources.ControlResources.getString;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-
-import javafx.animation.*;
+import javafx.animation.Interpolator;
+import javafx.animation.KeyFrame;
+import javafx.animation.KeyValue;
+import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.DoubleProperty;
 import javafx.beans.property.ObjectProperty;
-import javafx.beans.value.ChangeListener;
 import javafx.beans.value.WritableValue;
-import javafx.collections.ListChangeListener;
+import javafx.css.CssMetaData;
 import javafx.css.Styleable;
+import javafx.css.StyleableBooleanProperty;
+import javafx.css.StyleableDoubleProperty;
+import javafx.css.StyleableObjectProperty;
 import javafx.css.StyleableProperty;
+import javafx.css.converter.BooleanConverter;
+import javafx.css.converter.EnumConverter;
+import javafx.css.converter.SizeConverter;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.geometry.HPos;
@@ -61,15 +58,24 @@ import javafx.scene.AccessibleAction;
 import javafx.scene.AccessibleAttribute;
 import javafx.scene.AccessibleRole;
 import javafx.scene.Node;
-import javafx.scene.control.*;
+import javafx.scene.control.Button;
+import javafx.scene.control.Control;
+import javafx.scene.control.Label;
+import javafx.scene.control.Pagination;
+import javafx.scene.control.SkinBase;
+import javafx.scene.control.Toggle;
+import javafx.scene.control.ToggleButton;
+import javafx.scene.control.ToggleGroup;
+import javafx.scene.control.Tooltip;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.TouchEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.shape.Rectangle;
 import javafx.util.Duration;
-
-import static com.sun.javafx.scene.control.skin.resources.ControlResources.getString;
+import com.sun.javafx.scene.control.ListenerHelper;
+import com.sun.javafx.scene.control.behavior.PaginationBehavior;
+import com.sun.javafx.scene.control.skin.Utils;
 
 /**
  * Default skin implementation for the {@link Pagination} control.
@@ -88,7 +94,7 @@ public class PaginationSkin extends SkinBase<Pagination> {
     private static final Duration DURATION = new Duration(125.0);
     private static final double SWIPE_THRESHOLD = 0.30;
     private static final double TOUCH_THRESHOLD = 15;
-    private static final Interpolator interpolator = Interpolator.SPLINE(0.4829, 0.5709, 0.6803, 0.9928);
+    private static final Interpolator interpolator = Interpolator.ofSpline(0.4829, 0.5709, 0.6803, 0.9928);
 
 
 
@@ -98,13 +104,12 @@ public class PaginationSkin extends SkinBase<Pagination> {
      *                                                                         *
      **************************************************************************/
 
-    private Pagination pagination;
     private StackPane currentStackPane;
     private StackPane nextStackPane;
     private Timeline timeline;
     private Rectangle clipRect;
 
-    private NavigationControl navigation;
+    private final NavigationControl navigation;
     private int fromIndex;
     private int previousIndex;
     private int currentIndex;
@@ -122,14 +127,10 @@ public class PaginationSkin extends SkinBase<Pagination> {
     private boolean nextPageReached = false;
     private boolean setInitialDirection = false;
     private int direction;
-
     private int currentAnimatedIndex;
-    private boolean hasPendingAnimation = false;
-
+    private volatile boolean hasPendingAnimation;
     private boolean animate = true;
-
     private final PaginationBehavior behavior;
-
 
 
     /* *************************************************************************
@@ -138,7 +139,7 @@ public class PaginationSkin extends SkinBase<Pagination> {
      *                                                                         *
      **************************************************************************/
 
-    private EventHandler<ActionEvent> swipeAnimationEndEventHandler = new EventHandler<ActionEvent>() {
+    private EventHandler<ActionEvent> swipeAnimationEndEventHandler = new EventHandler<>() {
         @Override public void handle(ActionEvent t) {
             swapPanes();
             timeline = null;
@@ -150,7 +151,7 @@ public class PaginationSkin extends SkinBase<Pagination> {
         }
     };
 
-    private EventHandler<ActionEvent> clampAnimationEndEventHandler = new EventHandler<ActionEvent>() {
+    private EventHandler<ActionEvent> clampAnimationEndEventHandler = new EventHandler<>() {
         @Override public void handle(ActionEvent t) {
             currentStackPane.setTranslateX(0);
             nextStackPane.setTranslateX(0);
@@ -179,13 +180,8 @@ public class PaginationSkin extends SkinBase<Pagination> {
 
         // install default input map for the Pagination control
         behavior = new PaginationBehavior(control);
-//        control.setInputMap(behavior.getInputMap());
 
-//        setManaged(false);
         clipRect = new Rectangle();
-        getSkinnable().setClip(clipRect);
-
-        this.pagination = control;
 
         this.currentStackPane = new StackPane();
         currentStackPane.getStyleClass().add("page");
@@ -194,20 +190,32 @@ public class PaginationSkin extends SkinBase<Pagination> {
         nextStackPane.getStyleClass().add("page");
         nextStackPane.setVisible(false);
 
+        // sets the current page index property in control to the same value (no-op)
         resetIndexes(true);
 
-        this.navigation = new NavigationControl();
+        navigation = new NavigationControl();
 
         getChildren().addAll(currentStackPane, nextStackPane, navigation);
 
-        control.maxPageIndicatorCountProperty().addListener(o -> {
+        ListenerHelper lh = ListenerHelper.get(this);
+
+        lh.addInvalidationListener(control.maxPageIndicatorCountProperty(), (o) -> {
             resetIndiciesAndNav();
         });
 
-        registerChangeListener(control.widthProperty(), e -> clipRect.setWidth(getSkinnable().getWidth()));
-        registerChangeListener(control.heightProperty(), e -> clipRect.setHeight(getSkinnable().getHeight()));
-        registerChangeListener(control.pageCountProperty(), e -> resetIndiciesAndNav());
-        registerChangeListener(control.pageFactoryProperty(), e -> {
+        lh.addChangeListener(control.widthProperty(), true, (ev) -> {
+            clipRect.setWidth(control.getWidth());
+        });
+
+        lh.addChangeListener(control.heightProperty(), true, (ev) -> {
+            clipRect.setHeight(control.getHeight());
+        });
+
+        lh.addChangeListener(control.pageCountProperty(), (ev) -> {
+            resetIndiciesAndNav();
+        });
+
+        lh.addChangeListener(control.pageFactoryProperty(), (ev) -> {
             if (animate && timeline != null) {
                 // If we are in the middle of a page animation.
                 // Speedup and finish the animation then update the page factory.
@@ -220,7 +228,16 @@ public class PaginationSkin extends SkinBase<Pagination> {
             resetIndiciesAndNav();
         });
 
+        lh.addListChangeListener(control.getStyleClass(), (ch) -> {
+            navigation.updateBulletIndicatorType();
+        });
+
         initializeSwipeAndTouchHandlers();
+    }
+
+    @Override
+    public void install() {
+        getSkinnable().setClip(clipRect);
     }
 
 
@@ -351,6 +368,7 @@ public class PaginationSkin extends SkinBase<Pagination> {
             tooltipVisible = new StyleableBooleanProperty(DEFAULT_TOOLTIP_VISIBLE) {
                 @Override
                 protected void invalidated() {
+                    navigation.updateTooltipVisible();
                     getSkinnable().requestLayout();
                 }
 
@@ -382,12 +400,20 @@ public class PaginationSkin extends SkinBase<Pagination> {
      **************************************************************************/
 
     /** {@inheritDoc} */
-    @Override public void dispose() {
-        super.dispose();
+    @Override
+    public void dispose() {
+        if (getSkinnable() == null) {
+            return;
+        }
+
+        getSkinnable().setClip(null);
+        getChildren().removeAll(currentStackPane, nextStackPane, navigation);
 
         if (behavior != null) {
             behavior.dispose();
         }
+
+        super.dispose();
     }
 
     /** {@inheritDoc} */
@@ -449,13 +475,13 @@ public class PaginationSkin extends SkinBase<Pagination> {
 
     private void selectNext() {
         if (getCurrentPageIndex() < getPageCount() - 1) {
-            pagination.setCurrentPageIndex(getCurrentPageIndex() + 1);
+            getSkinnable().setCurrentPageIndex(getCurrentPageIndex() + 1);
         }
     }
 
     private void selectPrevious() {
         if (getCurrentPageIndex() > 0) {
-            pagination.setCurrentPageIndex(getCurrentPageIndex() - 1);
+            getSkinnable().setCurrentPageIndex(getCurrentPageIndex() - 1);
         }
     }
 
@@ -467,8 +493,9 @@ public class PaginationSkin extends SkinBase<Pagination> {
 
     private void initializeSwipeAndTouchHandlers() {
         final Pagination control = getSkinnable();
+        ListenerHelper lh = ListenerHelper.get(this);
 
-        getSkinnable().addEventHandler(TouchEvent.TOUCH_PRESSED, e -> {
+        lh.addEventHandler(control, TouchEvent.TOUCH_PRESSED, e -> {
             if (touchEventId == -1) {
                 touchEventId = e.getTouchPoint().getId();
             }
@@ -481,7 +508,7 @@ public class PaginationSkin extends SkinBase<Pagination> {
             e.consume();
         });
 
-        getSkinnable().addEventHandler(TouchEvent.TOUCH_MOVED, e -> {
+        lh.addEventHandler(control, TouchEvent.TOUCH_MOVED, e -> {
             if (touchEventId != e.getTouchPoint().getId()) {
                 return;
             }
@@ -559,7 +586,7 @@ public class PaginationSkin extends SkinBase<Pagination> {
             e.consume();
         });
 
-        getSkinnable().addEventHandler(TouchEvent.TOUCH_RELEASED, e -> {
+        lh.addEventHandler(control, TouchEvent.TOUCH_RELEASED, e -> {
             if (touchEventId != e.getTouchPoint().getId()) {
                 return;
             } else {
@@ -575,7 +602,7 @@ public class PaginationSkin extends SkinBase<Pagination> {
                 // if time is less than 300ms then considered a quick swipe and whole time is used
                 final boolean quick = time < 300;
                 // calculate velocity
-                final double velocity = quick ? (double)drag / time : touchVelocity; // pixels/ms
+                final double velocity = quick ? drag / time : touchVelocity; // pixels/ms
                 // calculate distance we would travel at this speed for 500ms of travel
                 final double distance = (velocity * 500);
                 final double width = control.getWidth() - (snappedLeftInset() + snappedRightInset());
@@ -625,7 +652,7 @@ public class PaginationSkin extends SkinBase<Pagination> {
         currentStackPane.getChildren().clear();
         nextStackPane.getChildren().clear();
 
-        pagination.setCurrentPageIndex(currentIndex);
+        getSkinnable().setCurrentPageIndex(currentIndex);
         createPage(currentStackPane, currentIndex);
 
         if (isAnimate) {
@@ -634,8 +661,8 @@ public class PaginationSkin extends SkinBase<Pagination> {
     }
 
     private boolean createPage(StackPane pane, int index) {
-        if (pagination.getPageFactory() != null && pane.getChildren().isEmpty()) {
-            Node content = pagination.getPageFactory().call(index);
+        if (getSkinnable().getPageFactory() != null && pane.getChildren().isEmpty()) {
+            Node content = getSkinnable().getPageFactory().call(index);
             // If the content is null we don't want to switch pages.
             if (content != null) {
                 pane.getChildren().setAll(content);
@@ -648,12 +675,12 @@ public class PaginationSkin extends SkinBase<Pagination> {
                     animate = false;
                 }
 
-                if (pagination.getPageFactory().call(previousIndex) != null) {
-                    pagination.setCurrentPageIndex(previousIndex);
+                if (getSkinnable().getPageFactory().call(previousIndex) != null) {
+                    getSkinnable().setCurrentPageIndex(previousIndex);
                 } else {
                     // Set the page index to 0 because both the current,
                     // and the previous pages have no content.
-                    pagination.setCurrentPageIndex(0);
+                    getSkinnable().setCurrentPageIndex(0);
                 }
 
                 if (isAnimate) {
@@ -681,6 +708,10 @@ public class PaginationSkin extends SkinBase<Pagination> {
     }
 
     private void animateSwitchPage() {
+        if (!Platform.isFxApplicationThread()) {
+            hasPendingAnimation = true;
+            return;
+        }
         if (timeline != null) {
             timeline.setRate(8);
             hasPendingAnimation = true;
@@ -864,7 +895,6 @@ public class PaginationSkin extends SkinBase<Pagination> {
 
             getChildren().addAll(controlBox, pageInformation);
             initializeNavigationHandlers();
-            initializePageIndicators();
             updatePageIndex();
 
             // listen to changes to arrowButtonGap and update margins
@@ -878,6 +908,7 @@ public class PaginationSkin extends SkinBase<Pagination> {
                     HBox.setMargin(rightArrowButton, new Insets(0, 0, 0, snapSizeX(newValue.doubleValue())));
                 }
             });
+            initializePageIndicators();
         }
 
         private void initializeNavigationHandlers() {
@@ -893,9 +924,9 @@ public class PaginationSkin extends SkinBase<Pagination> {
                 requestLayout();
             });
 
-            pagination.currentPageIndexProperty().addListener((arg0, arg1, arg2) -> {
-                previousIndex = arg1.intValue();
-                currentIndex = arg2.intValue();
+            ListenerHelper.get(PaginationSkin.this).addChangeListener(getSkinnable().currentPageIndexProperty(), (src, old, cur) -> {
+                previousIndex = old.intValue();
+                currentIndex = cur.intValue();
                 updatePageIndex();
                 if (animate) {
                     currentAnimatedIndex = currentIndex;
@@ -919,16 +950,12 @@ public class PaginationSkin extends SkinBase<Pagination> {
                 ib.setToggleGroup(indicatorButtons);
                 controlBox.getChildren().add(ib);
             }
+            updateTooltipVisible();
+            updateBulletIndicatorType();
             controlBox.getChildren().add(rightArrowButton);
         }
 
         private void clearIndicatorButtons() {
-            for (Toggle toggle : indicatorButtons.getToggles()) {
-                if (toggle instanceof IndicatorButton) {
-                    IndicatorButton indicatorButton = (IndicatorButton) toggle;
-                    indicatorButton.release();
-                }
-            }
             indicatorButtons.getToggles().clear();
         }
 
@@ -1075,7 +1102,7 @@ public class PaginationSkin extends SkinBase<Pagination> {
                 fromIndex = toIndex - lastIndicatorButtonIndex;
             } else {
                 // We need to get the new page set if the currentIndex is out of range.
-                // This can happen if setPageIndex() is called programatically.
+                // This can happen if setPageIndex() is called programmatically.
                 if (currentIndex < fromIndex || currentIndex > toIndex) {
                     fromIndex = currentIndex - index;
                     toIndex = fromIndex + lastIndicatorButtonIndex;
@@ -1265,43 +1292,49 @@ public class PaginationSkin extends SkinBase<Pagination> {
 
             layoutInArea(controlBox, controlBoxX, controlBoxY, controlBoxWidth, controlBoxHeight, 0, controlBoxHPos, controlBoxVPos);
         }
+
+        private void updateTooltipVisible() {
+            boolean on = tooltipVisibleProperty().get();
+            for (Toggle t : indicatorButtons.getToggles()) {
+                if (t instanceof IndicatorButton b) {
+                    b.setTooltipVisible(on);
+                }
+            }
+        }
+
+        private void updateBulletIndicatorType() {
+            boolean on = getSkinnable().getStyleClass().contains(Pagination.STYLE_CLASS_BULLET);
+            for (Toggle t : indicatorButtons.getToggles()) {
+                if (t instanceof IndicatorButton b) {
+                    b.setBulletIndicatorType(on);
+                }
+            }
+        }
     }
 
     class IndicatorButton extends ToggleButton {
-        private final ListChangeListener<String> updateSkinIndicatorType =
-                                                    c -> setIndicatorType();
-
-        private final ChangeListener<Boolean> updateTooltipVisibility =
-                       (ob, oldValue, newValue) -> setTooltipVisible(newValue);
-
         private int pageNumber;
 
         public IndicatorButton(int pageNumber) {
             this.pageNumber = pageNumber;
             setFocusTraversable(false);
-            setIndicatorType();
-            setTooltipVisible(isTooltipVisible());
-
-            getSkinnable().getStyleClass().addListener(updateSkinIndicatorType);
 
             setOnAction(arg0 -> {
                     getNode().requestFocus();
                     int selected = getCurrentPageIndex();
                     // We do not need to update the selection if it has not changed.
                     if (selected != IndicatorButton.this.pageNumber) {
-                        pagination.setCurrentPageIndex(IndicatorButton.this.pageNumber);
+                        getSkinnable().setCurrentPageIndex(IndicatorButton.this.pageNumber);
                         requestLayout();
                     }
             });
-
-            tooltipVisibleProperty().addListener(updateTooltipVisibility);
 
             prefHeightProperty().bind(minHeightProperty());
             setAccessibleRole(AccessibleRole.PAGE_ITEM);
         }
 
-        private void setIndicatorType() {
-            if (getSkinnable().getStyleClass().contains(Pagination.STYLE_CLASS_BULLET)) {
+        private void setBulletIndicatorType(boolean on) {
+            if (on) {
                 getStyleClass().remove("number-button");
                 getStyleClass().add("bullet-button");
                 setText(null);
@@ -1335,11 +1368,6 @@ public class PaginationSkin extends SkinBase<Pagination> {
             if (getToggleGroup() == null || !isSelected()) {
                 super.fire();
             }
-        }
-
-        public void release() {
-            getSkinnable().getStyleClass().removeListener(updateSkinIndicatorType);
-            tooltipVisibleProperty().removeListener(updateTooltipVisibility);
         }
 
         /** {@inheritDoc} */
@@ -1377,7 +1405,7 @@ public class PaginationSkin extends SkinBase<Pagination> {
 
     private static class StyleableProperties {
         private static final CssMetaData<Pagination,Boolean> ARROWS_VISIBLE =
-            new CssMetaData<Pagination,Boolean>("-fx-arrows-visible",
+            new CssMetaData<>("-fx-arrows-visible",
                 BooleanConverter.getInstance(), DEFAULT_ARROW_VISIBLE) {
 
             @Override
@@ -1389,12 +1417,12 @@ public class PaginationSkin extends SkinBase<Pagination> {
             @Override
             public StyleableProperty<Boolean> getStyleableProperty(Pagination n) {
                 final PaginationSkin skin = (PaginationSkin) n.getSkin();
-                return (StyleableProperty<Boolean>)(WritableValue<Boolean>)skin.arrowsVisibleProperty();
+                return (StyleableProperty<Boolean>)skin.arrowsVisibleProperty();
             }
         };
 
         private static final CssMetaData<Pagination,Boolean> PAGE_INFORMATION_VISIBLE =
-            new CssMetaData<Pagination,Boolean>("-fx-page-information-visible",
+            new CssMetaData<>("-fx-page-information-visible",
                 BooleanConverter.getInstance(), DEFAULT_PAGE_INFORMATION_VISIBLE) {
 
             @Override
@@ -1406,13 +1434,13 @@ public class PaginationSkin extends SkinBase<Pagination> {
             @Override
             public StyleableProperty<Boolean> getStyleableProperty(Pagination n) {
                 final PaginationSkin skin = (PaginationSkin) n.getSkin();
-                return (StyleableProperty<Boolean>)(WritableValue<Boolean>)skin.pageInformationVisibleProperty();
+                return (StyleableProperty<Boolean>)skin.pageInformationVisibleProperty();
             }
         };
 
         private static final CssMetaData<Pagination,Side> PAGE_INFORMATION_ALIGNMENT =
-            new CssMetaData<Pagination,Side>("-fx-page-information-alignment",
-                new EnumConverter<Side>(Side.class), DEFAULT_PAGE_INFORMATION_ALIGNMENT) {
+            new CssMetaData<>("-fx-page-information-alignment",
+                new EnumConverter<>(Side.class), DEFAULT_PAGE_INFORMATION_ALIGNMENT) {
 
             @Override
             public boolean isSettable(Pagination n) {
@@ -1428,7 +1456,7 @@ public class PaginationSkin extends SkinBase<Pagination> {
         };
 
         private static final CssMetaData<Pagination,Boolean> TOOLTIP_VISIBLE =
-            new CssMetaData<Pagination,Boolean>("-fx-tooltip-visible",
+            new CssMetaData<>("-fx-tooltip-visible",
                 BooleanConverter.getInstance(), DEFAULT_TOOLTIP_VISIBLE) {
 
             @Override
@@ -1440,11 +1468,11 @@ public class PaginationSkin extends SkinBase<Pagination> {
             @Override
             public StyleableProperty<Boolean> getStyleableProperty(Pagination n) {
                 final PaginationSkin skin = (PaginationSkin) n.getSkin();
-                return (StyleableProperty<Boolean>)(WritableValue<Boolean>)skin.tooltipVisibleProperty();
+                return (StyleableProperty<Boolean>)skin.tooltipVisibleProperty();
             }
         };
         private static final CssMetaData<Pagination,Number> ARROW_BUTTON_GAP =
-            new CssMetaData<Pagination,Number>("-fx-arrow-button-gap", SizeConverter.getInstance(), 4) {
+            new CssMetaData<>("-fx-arrow-button-gap", SizeConverter.getInstance(), 4) {
                 @Override public boolean isSettable(Pagination n) {
                     final PaginationSkin skin = (PaginationSkin) n.getSkin();
                     return skin.arrowButtonGap == null ||
@@ -1452,14 +1480,14 @@ public class PaginationSkin extends SkinBase<Pagination> {
                 }
                 @Override public StyleableProperty<Number> getStyleableProperty(Pagination n) {
                     final PaginationSkin skin = (PaginationSkin) n.getSkin();
-                    return (StyleableProperty<Number>)(WritableValue<Number>)skin.arrowButtonGapProperty();
+                    return (StyleableProperty<Number>)skin.arrowButtonGapProperty();
                 }
             };
 
         private static final List<CssMetaData<? extends Styleable, ?>> STYLEABLES;
         static {
             final List<CssMetaData<? extends Styleable, ?>> styleables =
-                new ArrayList<CssMetaData<? extends Styleable, ?>>(SkinBase.getClassCssMetaData());
+                new ArrayList<>(SkinBase.getClassCssMetaData());
             styleables.add(ARROWS_VISIBLE);
             styleables.add(PAGE_INFORMATION_VISIBLE);
             styleables.add(PAGE_INFORMATION_ALIGNMENT);
@@ -1486,5 +1514,4 @@ public class PaginationSkin extends SkinBase<Pagination> {
     public List<CssMetaData<? extends Styleable, ?>> getCssMetaData() {
         return getClassCssMetaData();
     }
-
 }

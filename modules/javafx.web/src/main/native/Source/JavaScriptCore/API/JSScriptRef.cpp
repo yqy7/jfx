@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,6 +37,8 @@
 
 using namespace JSC;
 
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
+
 struct OpaqueJSScript final : public SourceProvider {
 public:
     static WTF::Ref<OpaqueJSScript> create(VM& vm, const SourceOrigin& sourceOrigin, String filename, int startingLineNumber, const String& source)
@@ -58,7 +60,7 @@ public:
 
 private:
     OpaqueJSScript(VM& vm, const SourceOrigin& sourceOrigin, String&& filename, int startingLineNumber, const String& source)
-        : SourceProvider(sourceOrigin, WTFMove(filename), TextPosition(OrdinalNumber::fromOneBasedInt(startingLineNumber), OrdinalNumber()), SourceProviderSourceType::Program)
+        : SourceProvider(sourceOrigin, WTFMove(filename), String(), SourceTaintedOrigin::Untainted, TextPosition(OrdinalNumber::fromOneBasedInt(startingLineNumber), OrdinalNumber()), SourceProviderSourceType::Program)
         , m_vm(vm)
         , m_source(source.isNull() ? *StringImpl::empty() : *source.impl())
     {
@@ -67,15 +69,14 @@ private:
     ~OpaqueJSScript() final { }
 
     VM& m_vm;
-    Ref<StringImpl> m_source;
+    const Ref<StringImpl> m_source;
 };
 
 static bool parseScript(VM& vm, const SourceCode& source, ParserError& error)
 {
-    return !!JSC::parse<JSC::ProgramNode>(
-        vm, source, Identifier(), JSParserBuiltinMode::NotBuiltin,
-        JSParserStrictMode::NotStrict, JSParserScriptMode::Classic, SourceParseMode::ProgramMode, SuperBinding::NotNeeded,
-        error);
+    return !!parseRootNode<ProgramNode>(
+        vm, source, ImplementationVisibility::Public, JSParserBuiltinMode::NotBuiltin,
+        NoLexicallyScopedFeatures, JSParserScriptMode::Classic, SourceParseMode::ProgramMode, error);
 }
 
 extern "C" {
@@ -92,7 +93,7 @@ JSScriptRef JSScriptCreateReferencingImmortalASCIIText(JSContextGroupRef context
     startingLineNumber = std::max(1, startingLineNumber);
 
     auto sourceURL = urlString ? URL({ }, urlString->string()) : URL();
-    auto result = OpaqueJSScript::create(vm, SourceOrigin { sourceURL }, sourceURL.string(), startingLineNumber, String(StringImpl::createFromLiteral(source, length)));
+    auto result = OpaqueJSScript::create(vm, SourceOrigin { sourceURL }, sourceURL.string(), startingLineNumber, String(StringImpl::createWithoutCopying({ source, length })));
 
     ParserError error;
     if (!parseScript(vm, SourceCode(result.copyRef()), error)) {
@@ -162,3 +163,5 @@ JSValueRef JSScriptEvaluate(JSContextRef context, JSScriptRef script, JSValueRef
 }
 
 }
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

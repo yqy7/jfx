@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2016 Canon Inc.
- * Copyright (C) 2017 Apple Inc.
+ * Copyright (C) 2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted, provided that the following conditions
@@ -37,9 +37,10 @@ namespace WebCore {
 
 class FetchBodyOwner;
 
-class FetchBodySource final : public ReadableStreamSource {
+class FetchBodySource final : public RefCountedReadableStreamSource {
 public:
     FetchBodySource(FetchBodyOwner&);
+    virtual ~FetchBodySource();
 
     bool enqueue(RefPtr<JSC::ArrayBuffer>&& chunk) { return controller().enqueue(WTFMove(chunk)); }
     void close();

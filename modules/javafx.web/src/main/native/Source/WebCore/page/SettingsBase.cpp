@@ -36,30 +36,38 @@
 #include "DOMTimer.h"
 #include "Database.h"
 #include "Document.h"
+#include "DocumentInlines.h"
 #include "FontCache.h"
-#include "Frame.h"
 #include "FrameTree.h"
-#include "FrameView.h"
 #include "HistoryItem.h"
+#include "LocalFrame.h"
+#include "LocalFrameView.h"
 #include "Page.h"
+#include "RenderObjectInlines.h"
 #include "RenderWidget.h"
-#include "RuntimeApplicationChecks.h"
 #include "Settings.h"
 #include "StorageMap.h"
 #include <limits>
+#include <wtf/RuntimeApplicationChecks.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/TZoneMallocInlines.h>
 
 #if ENABLE(MEDIA_STREAM)
 #include "MockRealtimeMediaSourceCenter.h"
 #endif
+#if USE(MODERN_AVCONTENTKEYSESSION)
+#include "MediaSessionManagerCocoa.h"
+#endif
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(SettingsBase);
 
 static void invalidateAfterGenericFamilyChange(Page* page)
 {
     // No need to invalidate FontCascadeCaches in worker threads, since workers
     // do not respond to changes in Settings values.
-    FontCache::forCurrentThread().invalidateFontCascadeCache();
+    FontCascadeCache::forCurrentThread().invalidate();
 
     if (page)
         page->setNeedsRecalcStyleInAllFrames();
@@ -86,6 +94,13 @@ bool SettingsBase::platformDefaultMediaSourceEnabled()
 {
     return true;
 }
+
+uint64_t SettingsBase::defaultMaximumSourceBufferSize()
+{
+    // Allow SourceBuffers to store up to 304MB each, enough for approximately five minutes
+    // of 1080p video and stereo audio.
+    return 318767104;
+}
 #endif
 
 #endif
@@ -99,7 +114,7 @@ void SettingsBase::setStandardFontFamily(const String& family, UScriptCode scrip
 {
     bool changes = fontGenericFamilies().setStandardFontFamily(family, script);
     if (changes)
-        invalidateAfterGenericFamilyChange(m_page);
+        invalidateAfterGenericFamilyChange(m_page.get());
 }
 
 const String& SettingsBase::fixedFontFamily(UScriptCode script) const
@@ -111,7 +126,7 @@ void SettingsBase::setFixedFontFamily(const String& family, UScriptCode script)
 {
     bool changes = fontGenericFamilies().setFixedFontFamily(family, script);
     if (changes)
-        invalidateAfterGenericFamilyChange(m_page);
+        invalidateAfterGenericFamilyChange(m_page.get());
 }
 
 const String& SettingsBase::serifFontFamily(UScriptCode script) const
@@ -123,7 +138,7 @@ void SettingsBase::setSerifFontFamily(const String& family, UScriptCode script)
 {
     bool changes = fontGenericFamilies().setSerifFontFamily(family, script);
     if (changes)
-        invalidateAfterGenericFamilyChange(m_page);
+        invalidateAfterGenericFamilyChange(m_page.get());
 }
 
 const String& SettingsBase::sansSerifFontFamily(UScriptCode script) const
@@ -135,7 +150,7 @@ void SettingsBase::setSansSerifFontFamily(const String& family, UScriptCode scri
 {
     bool changes = fontGenericFamilies().setSansSerifFontFamily(family, script);
     if (changes)
-        invalidateAfterGenericFamilyChange(m_page);
+        invalidateAfterGenericFamilyChange(m_page.get());
 }
 
 const String& SettingsBase::cursiveFontFamily(UScriptCode script) const
@@ -147,7 +162,7 @@ void SettingsBase::setCursiveFontFamily(const String& family, UScriptCode script
 {
     bool changes = fontGenericFamilies().setCursiveFontFamily(family, script);
     if (changes)
-        invalidateAfterGenericFamilyChange(m_page);
+        invalidateAfterGenericFamilyChange(m_page.get());
 }
 
 const String& SettingsBase::fantasyFontFamily(UScriptCode script) const
@@ -159,7 +174,7 @@ void SettingsBase::setFantasyFontFamily(const String& family, UScriptCode script
 {
     bool changes = fontGenericFamilies().setFantasyFontFamily(family, script);
     if (changes)
-        invalidateAfterGenericFamilyChange(m_page);
+        invalidateAfterGenericFamilyChange(m_page.get());
 }
 
 const String& SettingsBase::pictographFontFamily(UScriptCode script) const
@@ -171,7 +186,7 @@ void SettingsBase::setPictographFontFamily(const String& family, UScriptCode scr
 {
     bool changes = fontGenericFamilies().setPictographFontFamily(family, script);
     if (changes)
-        invalidateAfterGenericFamilyChange(m_page);
+        invalidateAfterGenericFamilyChange(m_page.get());
 }
 
 void SettingsBase::setMinimumDOMTimerInterval(Seconds interval)
@@ -181,9 +196,12 @@ void SettingsBase::setMinimumDOMTimerInterval(Seconds interval)
     if (!m_page)
         return;
 
-    for (Frame* frame = &m_page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
-        if (frame->document())
-            frame->document()->adjustMinimumDOMTimerInterval(oldTimerInterval);
+    for (RefPtr frame = m_page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
+        RefPtr localFrame = dynamicDowncast<LocalFrame>(frame);
+        if (!localFrame)
+            continue;
+        if (RefPtr document = localFrame->document())
+            document->adjustMinimumDOMTimerInterval(oldTimerInterval);
     }
 }
 
@@ -306,22 +324,37 @@ void SettingsBase::setNeedsRelayoutAllFrames()
         return;
 
     for (Frame* frame = &m_page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
-        if (!frame->ownerRenderer())
+        auto* localFrame = dynamicDowncast<LocalFrame>(frame);
+        if (!localFrame)
             continue;
-        frame->ownerRenderer()->setNeedsLayoutAndPrefWidthsRecalc();
+        if (!localFrame->ownerRenderer())
+            continue;
+        localFrame->ownerRenderer()->setNeedsLayoutAndPreferredWidthsUpdate();
     }
+}
+
+void SettingsBase::updateDisplayEDRHeadroom()
+{
+#if HAVE(SUPPORT_HDR_DISPLAY)
+    if (m_page)
+        m_page->updateDisplayEDRHeadroom();
+#endif
 }
 
 void SettingsBase::mediaTypeOverrideChanged()
 {
-    if (!m_page)
+    RefPtr page = m_page.get();
+    if (!page)
         return;
 
-    FrameView* view = m_page->mainFrame().view();
-    if (view)
-        view->setMediaType(m_page->settings().mediaTypeOverride());
+    RefPtr localMainFrame = page->localMainFrame();
+    if (!localMainFrame)
+        return;
 
-    m_page->setNeedsRecalcStyleInAllFrames();
+    if (RefPtr view = localMainFrame->view())
+        view->setMediaType(AtomString(page->settings().mediaTypeOverride()));
+
+    page->setNeedsRecalcStyleInAllFrames();
 }
 
 void SettingsBase::imagesEnabledChanged()
@@ -341,17 +374,16 @@ void SettingsBase::imageLoadingSettingsTimerFired()
     if (!m_page)
         return;
 
-    for (Frame* frame = &m_page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
-        if (!frame->document())
+    for (RefPtr frame = m_page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
+        RefPtr localFrame = dynamicDowncast<LocalFrame>(frame);
+        if (!localFrame)
             continue;
-        frame->document()->cachedResourceLoader().setImagesEnabled(m_page->settings().areImagesEnabled());
-        frame->document()->cachedResourceLoader().setAutoLoadImages(m_page->settings().loadsImagesAutomatically());
+        RefPtr document = localFrame->document();
+        if (!document)
+            continue;
+        document->protectedCachedResourceLoader()->setImagesEnabled(m_page->settings().areImagesEnabled());
+        document->protectedCachedResourceLoader()->setAutoLoadImages(m_page->settings().loadsImagesAutomatically());
     }
-}
-
-void SettingsBase::pluginsEnabledChanged()
-{
-    Page::refreshPlugins(false);
 }
 
 void SettingsBase::iceCandidateFilteringEnabledChanged()
@@ -402,19 +434,20 @@ void SettingsBase::mockCaptureDevicesEnabledChanged()
 
 #endif
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
-
 void SettingsBase::layerBasedSVGEngineEnabledChanged()
 {
     if (!m_page)
         return;
 
-    for (auto* frame = &m_page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
-        auto* document = frame->document();
+    for (RefPtr frame = m_page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
+        RefPtr localFrame = dynamicDowncast<LocalFrame>(frame);
+        if (!localFrame)
+            continue;
+        RefPtr document = localFrame->document();
         if (!document)
             continue;
 
-        auto* documentElement = document->documentElement();
+        RefPtr documentElement = document->documentElement();
         if (!documentElement)
             continue;
 
@@ -422,8 +455,6 @@ void SettingsBase::layerBasedSVGEngineEnabledChanged()
         document->scheduleFullStyleRebuild();
     }
 }
-
-#endif
 
 void SettingsBase::userStyleSheetLocationChanged()
 {
@@ -440,12 +471,6 @@ void SettingsBase::usesBackForwardCacheChanged()
         BackForwardCache::singleton().pruneToSizeNow(0, PruningReason::None);
 }
 
-void SettingsBase::dnsPrefetchingEnabledChanged()
-{
-    if (m_page)
-        m_page->dnsPrefetchingStateChanged();
-}
-
 void SettingsBase::storageBlockingPolicyChanged()
 {
     if (m_page)
@@ -454,14 +479,30 @@ void SettingsBase::storageBlockingPolicyChanged()
 
 void SettingsBase::backgroundShouldExtendBeyondPageChanged()
 {
-    if (m_page)
-        m_page->mainFrame().view()->updateExtendBackgroundIfNecessary();
+    RefPtr page = m_page.get();
+    if (!page)
+        return;
+
+    RefPtr localMainFrame = page->localMainFrame();
+    if (!localMainFrame)
+        return;
+
+    if (RefPtr view = localMainFrame->view())
+        view->updateExtendBackgroundIfNecessary();
 }
 
 void SettingsBase::scrollingPerformanceTestingEnabledChanged()
 {
-    if (m_page && m_page->mainFrame().view())
-        m_page->mainFrame().view()->setScrollingPerformanceTestingEnabled(m_page->settings().scrollingPerformanceTestingEnabled());
+    RefPtr page = m_page.get();
+    if (!page)
+        return;
+
+    RefPtr localMainFrame = page->localMainFrame();
+    if (!localMainFrame)
+        return;
+
+    if (RefPtr view = localMainFrame->view())
+        view->setScrollingPerformanceTestingEnabled(page->settings().scrollingPerformanceTestingEnabled());
 }
 
 void SettingsBase::hiddenPageDOMTimerThrottlingStateChanged()
@@ -482,6 +523,30 @@ void SettingsBase::resourceUsageOverlayVisibleChanged()
     if (m_page)
         m_page->setResourceUsageOverlayVisible(m_page->settings().resourceUsageOverlayVisible());
 #endif
+}
+
+#if USE(MODERN_AVCONTENTKEYSESSION)
+void SettingsBase::shouldUseModernAVContentKeySessionChanged()
+{
+    if (m_page)
+        MediaSessionManagerCocoa::setShouldUseModernAVContentKeySession(m_page->settings().shouldUseModernAVContentKeySession());
+}
+#endif
+
+void SettingsBase::useSystemAppearanceChanged()
+{
+    if (m_page)
+        m_page->useSystemAppearanceChanged();
+}
+
+RefPtr<Page> SettingsBase::protectedPage() const
+{
+    return m_page.get();
+}
+
+void SettingsBase::fontFallbackPrefersPictographsChanged()
+{
+    invalidateAfterGenericFamilyChange(protectedPage().get());
 }
 
 } // namespace WebCore

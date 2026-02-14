@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,7 @@
  */
 package test.robot.javafx.scene;
 
+import java.util.concurrent.CountDownLatch;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.scene.Scene;
@@ -36,18 +37,12 @@ import javafx.scene.robot.Robot;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.stage.WindowEvent;
-
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import static org.junit.Assert.fail;
-
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import test.util.Util;
 
 public class TabContextMenuCloseButtonTest {
@@ -82,7 +77,7 @@ public class TabContextMenuCloseButtonTest {
                 robot.mouseRelease(mouseButtons[ic]);
             });
             Util.sleep(1000); // Wait for tabPane to layout
-            Assert.assertEquals(expectedTabCount[i], tabPane.getTabs().size());
+            Assertions.assertEquals(expectedTabCount[i], tabPane.getTabs().size());
         }
     }
 
@@ -103,10 +98,10 @@ public class TabContextMenuCloseButtonTest {
             robot.mousePress(MouseButton.SECONDARY);
             robot.mouseRelease(MouseButton.SECONDARY);
         });
-        waitForLatch(cmlatch, 5, "Timeout waiting for ContextMenu to be shown.");
+        Util.waitForLatch(cmlatch, 5, "Timeout waiting for ContextMenu to be shown.");
     }
 
-    @After
+    @AfterEach
     public void resetUI() {
         Util.runAndWait(() -> {
             tabPane.getTabs().remove(0, tabPane.getTabs().size());
@@ -114,7 +109,7 @@ public class TabContextMenuCloseButtonTest {
         });
     }
 
-    @Before
+    @BeforeEach
     public void setupUI() {
         Util.runAndWait(() -> {
             for (int i = 0; i < NUM_TABS; ++i) {
@@ -123,18 +118,14 @@ public class TabContextMenuCloseButtonTest {
         });
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() {
-        new Thread(() -> Application.launch(TestApp.class, (String[])null)).start();
-        waitForLatch(startupLatch, 10, "Timeout waiting for FX runtime to start");
+        Util.launch(startupLatch, TestApp.class);
     }
 
-    @AfterClass
+    @AfterAll
     public static void exit() {
-        Platform.runLater(() -> {
-            stage.hide();
-        });
-        Platform.exit();
+        Util.shutdown();
     }
 
     public static class TestApp extends Application {
@@ -152,16 +143,6 @@ public class TabContextMenuCloseButtonTest {
                     Platform.runLater(startupLatch::countDown));
             stage.setAlwaysOnTop(true);
             stage.show();
-        }
-    }
-
-    public static void waitForLatch(CountDownLatch latch, int seconds, String msg) {
-        try {
-            if (!latch.await(seconds, TimeUnit.SECONDS)) {
-                fail(msg);
-            }
-        } catch (Exception ex) {
-            fail("Unexpected exception: " + ex);
         }
     }
 }

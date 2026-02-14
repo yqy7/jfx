@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, Google Inc. All rights reserved.
+ * Copyright (C) 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,12 +35,12 @@
 #include "Logging.h"
 #include "MediaStreamAudioSourceOptions.h"
 #include "WebAudioSourceProvider.h"
-#include <wtf/IsoMallocInlines.h>
 #include <wtf/Locker.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(MediaStreamAudioSourceNode);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(MediaStreamAudioSourceNode);
 
 ExceptionOr<Ref<MediaStreamAudioSourceNode>> MediaStreamAudioSourceNode::create(BaseAudioContext& context, MediaStreamAudioSourceOptions&& options)
 {
@@ -48,7 +48,7 @@ ExceptionOr<Ref<MediaStreamAudioSourceNode>> MediaStreamAudioSourceNode::create(
 
     auto audioTracks = options.mediaStream->getAudioTracks();
     if (audioTracks.isEmpty())
-        return Exception { InvalidStateError, "Media stream has no audio tracks"_s };
+        return Exception { ExceptionCode::InvalidStateError, "Media stream has no audio tracks"_s };
 
     RefPtr<WebAudioSourceProvider> provider;
     for (auto& track : audioTracks) {
@@ -57,7 +57,7 @@ ExceptionOr<Ref<MediaStreamAudioSourceNode>> MediaStreamAudioSourceNode::create(
             break;
     }
     if (!provider)
-        return Exception { InvalidStateError, "Could not find an audio track with an audio source provider"_s };
+        return Exception { ExceptionCode::InvalidStateError, "Could not find an audio track with an audio source provider"_s };
 
     auto node = adoptRef(*new MediaStreamAudioSourceNode(context, *options.mediaStream, provider.releaseNonNull()));
     node->setFormat(2, context.sampleRate());
@@ -125,14 +125,14 @@ void MediaStreamAudioSourceNode::setFormat(size_t numberOfChannels, float source
     }
 }
 
-void MediaStreamAudioSourceNode::provideInput(AudioBus* bus, size_t framesToProcess)
+void MediaStreamAudioSourceNode::provideInput(AudioBus& bus, size_t framesToProcess)
 {
     m_provider->provideInput(bus, framesToProcess);
 }
 
 void MediaStreamAudioSourceNode::process(size_t numberOfFrames)
 {
-    AudioBus* outputBus = output(0)->bus();
+    Ref outputBus = output(0)->bus();
 
     // Use tryLock() to avoid contention in the real-time audio thread.
     // If we fail to acquire the lock then the MediaStream must be in the middle of
@@ -154,7 +154,7 @@ void MediaStreamAudioSourceNode::process(size_t numberOfFrames)
 
     if (m_multiChannelResampler) {
         ASSERT(m_sourceSampleRate != sampleRate());
-        m_multiChannelResampler->process(outputBus, numberOfFrames);
+        m_multiChannelResampler->process(outputBus.get(), numberOfFrames);
     } else {
         // Bypass the resampler completely if the source is at the context's sample-rate.
         ASSERT(m_sourceSampleRate == sampleRate());

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,6 +29,7 @@ import static javafx.scene.input.KeyCode.*;
 
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.WeakChangeListener;
+import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.scene.control.TableColumnBase;
 import javafx.scene.control.TableFocusModel;
@@ -38,6 +39,7 @@ import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTablePosition;
 import javafx.scene.control.TreeTableView;
+import javafx.scene.control.TreeTableView.TreeTableViewSelectionModel;
 import com.sun.javafx.scene.control.inputmap.InputMap;
 import javafx.util.Callback;
 
@@ -89,7 +91,7 @@ public class TreeTableViewBehavior<T> extends TableViewBehaviorBase<TreeTableVie
         addDefaultChildMap(getInputMap(), expandCollapseInputMap);
 
 
-        // Fix for RT-16565
+        // Fix for JDK-8128723
         control.selectionModelProperty().addListener(weakSelectionModelListener);
         if (getSelectionModel() != null) {
             control.getSelectionModel().getSelectedCells().addListener(selectedCellsListener);
@@ -121,7 +123,12 @@ public class TreeTableViewBehavior<T> extends TableViewBehaviorBase<TreeTableVie
 
     /** {@inheritDoc}  */
     @Override protected ObservableList<TreeTablePosition<T,?>> getSelectedCells() {
-        return getNode().getSelectionModel().getSelectedCells();
+        TreeTableViewSelectionModel<T> sm = getNode().getSelectionModel();
+        if (sm == null) {
+            return FXCollections.observableArrayList();
+        } else {
+            return sm.getSelectedCells();
+        }
     }
 
     /** {@inheritDoc}  */
@@ -170,7 +177,7 @@ public class TreeTableViewBehavior<T> extends TableViewBehaviorBase<TreeTableVie
 
     /** {@inheritDoc} */
     @Override protected void selectAllToFocus(boolean setAnchorToFocusIndex) {
-        // Fix for RT-31241
+        // Fix for JDK-8123409
         if (getNode().getEditingCell() != null) return;
 
         super.selectAllToFocus(setAnchorToFocusIndex);
@@ -187,7 +194,8 @@ public class TreeTableViewBehavior<T> extends TableViewBehaviorBase<TreeTableVie
      * on whether we are in row or cell selection.
      */
     private void rightArrowPressed() {
-        if (getNode().getSelectionModel().isCellSelectionEnabled()) {
+        TreeTableViewSelectionModel<T> sm = getNode().getSelectionModel();
+        if ((sm != null) && sm.isCellSelectionEnabled()) {
             if (isRTL()) {
                 selectLeftCell();
             } else {
@@ -199,7 +207,8 @@ public class TreeTableViewBehavior<T> extends TableViewBehaviorBase<TreeTableVie
     }
 
     private void leftArrowPressed() {
-        if (getNode().getSelectionModel().isCellSelectionEnabled()) {
+        TreeTableViewSelectionModel<T> sm = getNode().getSelectionModel();
+        if ((sm != null) && sm.isCellSelectionEnabled()) {
             if (isRTL()) {
                 selectRightCell();
             } else {

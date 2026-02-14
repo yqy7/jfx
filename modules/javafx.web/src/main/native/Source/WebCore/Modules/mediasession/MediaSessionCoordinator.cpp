@@ -28,7 +28,9 @@
 
 #if ENABLE(MEDIA_SESSION_COORDINATOR)
 
+#include "Document.h"
 #include "EventNames.h"
+#include "EventTargetInlines.h"
 #include "JSDOMException.h"
 #include "JSDOMPromiseDeferred.h"
 #include "JSMediaSessionCoordinatorState.h"
@@ -37,19 +39,24 @@
 #include "MediaSession.h"
 #include "MediaSessionCoordinatorPrivate.h"
 #include <wtf/CompletionHandler.h>
+#include <wtf/CryptographicallyRandomNumber.h>
 #include <wtf/Logger.h>
 #include <wtf/LoggerHelper.h>
 #include <wtf/Seconds.h>
+#include <wtf/TZoneMallocInlines.h>
+#include <wtf/text/MakeString.h>
 
 static const Seconds CommandTimeTolerance = 50_ms;
 
 namespace WebCore {
 
-static const void* nextCoordinatorLogIdentifier()
+static uint64_t nextCoordinatorLogIdentifier()
 {
-    static uint64_t logIdentifier = cryptographicallyRandomNumber();
-    return reinterpret_cast<const void*>(++logIdentifier);
+    static uint64_t logIdentifier = cryptographicallyRandomNumber<uint32_t>();
+    return ++logIdentifier;
 }
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(MediaSessionCoordinator);
 
 Ref<MediaSessionCoordinator> MediaSessionCoordinator::create(ScriptExecutionContext* context)
 {
@@ -97,14 +104,14 @@ void MediaSessionCoordinator::join(DOMPromiseDeferred<void>&& promise)
 
     if (m_state != MediaSessionCoordinatorState::Waiting) {
         ERROR_LOG(identifier, "invalid state");
-        promise.reject(Exception { InvalidStateError, makeString("Unable to join when state is ", convertEnumerationToString(m_state)) });
+        promise.reject(Exception { ExceptionCode::InvalidStateError, makeString("Unable to join when state is "_s, convertEnumerationToString(m_state)) });
         return;
     }
     ASSERT(m_privateCoordinator, "We must be in Waiting state if no private coordinator is set");
 
     m_privateCoordinator->join([protectedThis = Ref { *this }, identifier, promise = WTFMove(promise)] (std::optional<Exception>&& exception) mutable {
         if (!protectedThis->m_session) {
-            promise.reject(Exception { InvalidStateError });
+            promise.reject(Exception { ExceptionCode::InvalidStateError });
             return;
         }
 
@@ -124,7 +131,7 @@ ExceptionOr<void> MediaSessionCoordinator::leave()
 {
     ALWAYS_LOG(LOGIDENTIFIER);
     if (m_state != MediaSessionCoordinatorState::Joined)
-        return Exception { InvalidStateError, makeString("Unable to leave when state is ", convertEnumerationToString(m_state)) };
+        return Exception { ExceptionCode::InvalidStateError, makeString("Unable to leave when state is "_s, convertEnumerationToString(m_state)) };
 
     close();
 
@@ -149,19 +156,19 @@ void MediaSessionCoordinator::seekTo(double time, DOMPromiseDeferred<void>&& pro
 
     if (!m_session) {
         ERROR_LOG(identifier, "MediaSession is NULL!");
-        promise.reject(Exception { InvalidStateError });
+        promise.reject(Exception { ExceptionCode::InvalidStateError });
         return;
     }
 
     if (m_state != MediaSessionCoordinatorState::Joined) {
         ERROR_LOG(identifier, ".state is ", m_state);
-        promise.reject(Exception { InvalidStateError, makeString("Unable to seekTo when state is ", convertEnumerationToString(m_state)) });
+        promise.reject(Exception { ExceptionCode::InvalidStateError, makeString("Unable to seekTo when state is "_s, convertEnumerationToString(m_state)) });
         return;
     }
 
     m_privateCoordinator->seekTo(time, [protectedThis = Ref { *this }, identifier, promise = WTFMove(promise)] (std::optional<Exception>&& exception) mutable {
         if (!protectedThis->m_session) {
-            promise.reject(Exception { InvalidStateError });
+            promise.reject(Exception { ExceptionCode::InvalidStateError });
             return;
         }
 
@@ -182,19 +189,19 @@ void MediaSessionCoordinator::play(DOMPromiseDeferred<void>&& promise)
 
     if (!m_session) {
         ERROR_LOG(identifier, "MediaSession is NULL!");
-        promise.reject(Exception { InvalidStateError });
+        promise.reject(Exception { ExceptionCode::InvalidStateError });
         return;
     }
 
     if (m_state != MediaSessionCoordinatorState::Joined) {
         ERROR_LOG(identifier, ".state is ", m_state);
-        promise.reject(Exception { InvalidStateError, makeString("Unable to play when state is ", convertEnumerationToString(m_state)) });
+        promise.reject(Exception { ExceptionCode::InvalidStateError, makeString("Unable to play when state is "_s, convertEnumerationToString(m_state)) });
         return;
     }
 
     m_privateCoordinator->play([protectedThis = Ref { *this }, identifier, promise = WTFMove(promise)] (std::optional<Exception>&& exception) mutable {
         if (!protectedThis->m_session) {
-            promise.reject(Exception { InvalidStateError });
+            promise.reject(Exception { ExceptionCode::InvalidStateError });
             return;
         }
 
@@ -215,19 +222,19 @@ void MediaSessionCoordinator::pause(DOMPromiseDeferred<void>&& promise)
 
     if (!m_session) {
         ERROR_LOG(identifier, "MediaSession is NULL!");
-        promise.reject(Exception { InvalidStateError });
+        promise.reject(Exception { ExceptionCode::InvalidStateError });
         return;
     }
 
     if (m_state != MediaSessionCoordinatorState::Joined) {
         ERROR_LOG(identifier, ".state is ", m_state);
-        promise.reject(Exception { InvalidStateError, makeString("Unable to pause when state is ", convertEnumerationToString(m_state)) });
+        promise.reject(Exception { ExceptionCode::InvalidStateError, makeString("Unable to pause when state is "_s, convertEnumerationToString(m_state)) });
         return;
     }
 
     m_privateCoordinator->pause([protectedThis = Ref { *this }, identifier, promise = WTFMove(promise)] (std::optional<Exception>&& exception) mutable {
         if (!protectedThis->m_session) {
-            promise.reject(Exception { InvalidStateError });
+            promise.reject(Exception { ExceptionCode::InvalidStateError });
             return;
         }
 
@@ -248,19 +255,19 @@ void MediaSessionCoordinator::setTrack(const String& track, DOMPromiseDeferred<v
 
     if (!m_session) {
         ERROR_LOG(identifier, "MediaSession is NULL!");
-        promise.reject(Exception { InvalidStateError });
+        promise.reject(Exception { ExceptionCode::InvalidStateError });
         return;
     }
 
     if (m_state != MediaSessionCoordinatorState::Joined) {
         ERROR_LOG(identifier, ".state is ", m_state);
-        promise.reject(Exception { InvalidStateError, makeString("Unable to setTrack when state is ", convertEnumerationToString(m_state)) });
+        promise.reject(Exception { ExceptionCode::InvalidStateError, makeString("Unable to setTrack when state is "_s, convertEnumerationToString(m_state)) });
         return;
     }
 
     m_privateCoordinator->setTrack(track, [protectedThis = Ref { *this }, identifier, promise = WTFMove(promise)] (std::optional<Exception>&& exception) mutable {
         if (!protectedThis->m_session) {
-            promise.reject(Exception { InvalidStateError });
+            promise.reject(Exception { ExceptionCode::InvalidStateError });
             return;
         }
 
@@ -435,7 +442,7 @@ bool MediaSessionCoordinator::currentPositionApproximatelyEqualTo(double time) c
     if (!currentPosition)
         return false;
 
-    auto delta = Seconds(abs(*currentPosition - time));
+    auto delta = Seconds(std::abs(*currentPosition - time));
     return delta <= CommandTimeTolerance;
 }
 

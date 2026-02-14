@@ -25,7 +25,6 @@
 
 #pragma once
 
-#include "ExceptionOr.h"
 #include "ScriptWrappable.h"
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
@@ -40,9 +39,10 @@ namespace WebCore {
 
 class IDBKey;
 class ScriptExecutionContext;
+template<typename> class ExceptionOr;
 
 class IDBKeyRange final : public ScriptWrappable, public RefCounted<IDBKeyRange> {
-    WTF_MAKE_ISO_ALLOCATED(IDBKeyRange);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(IDBKeyRange);
 public:
     static Ref<IDBKeyRange> create(RefPtr<IDBKey>&& lower, RefPtr<IDBKey>&& upper, bool isLowerOpen, bool isUpperOpen);
     static Ref<IDBKeyRange> create(RefPtr<IDBKey>&&);

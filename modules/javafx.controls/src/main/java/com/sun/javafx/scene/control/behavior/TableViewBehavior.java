@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@ package com.sun.javafx.scene.control.behavior;
 
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.WeakChangeListener;
+import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableColumnBase;
@@ -58,7 +59,7 @@ public class TableViewBehavior<T> extends TableViewBehaviorBase<TableView<T>, T,
             };
 
     private final WeakChangeListener<TableViewSelectionModel<T>> weakSelectionModelListener =
-            new WeakChangeListener<TableViewSelectionModel<T>>(selectionModelListener);
+            new WeakChangeListener<>(selectionModelListener);
 
     private TwoLevelFocusBehavior tlFocus;
 
@@ -73,11 +74,11 @@ public class TableViewBehavior<T> extends TableViewBehaviorBase<TableView<T>, T,
     public TableViewBehavior(TableView<T> control) {
         super(control);
 
-        // Fix for RT-16565
+        // Fix for JDK-8128723
         control.selectionModelProperty().addListener(weakSelectionModelListener);
         TableViewSelectionModel<T> sm = control.getSelectionModel();
         if (sm != null) {
-            sm.getSelectedCells().addListener(selectedCellsListener);
+            sm.getSelectedCells().addListener(weakSelectedCellsListener);
         }
 
         // Only add this if we're on an embedded platform that supports 5-button navigation
@@ -86,8 +87,12 @@ public class TableViewBehavior<T> extends TableViewBehaviorBase<TableView<T>, T,
         }
     }
 
-    @Override public void dispose() {
-        if (tlFocus != null) tlFocus.dispose();
+    @Override
+    public void dispose() {
+        if (tlFocus != null) {
+            tlFocus.dispose();
+            tlFocus = null;
+        }
         super.dispose();
     }
 
@@ -114,7 +119,12 @@ public class TableViewBehavior<T> extends TableViewBehaviorBase<TableView<T>, T,
 
     /** {@inheritDoc}  */
     @Override protected ObservableList<TablePosition> getSelectedCells() {
-        return getNode().getSelectionModel().getSelectedCells();
+        TableViewSelectionModel<T> sm = getNode().getSelectionModel();
+        if (sm == null) {
+            return FXCollections.emptyObservableList();
+        } else {
+            return sm.getSelectedCells();
+        }
     }
 
     /** {@inheritDoc}  */
@@ -163,7 +173,7 @@ public class TableViewBehavior<T> extends TableViewBehaviorBase<TableView<T>, T,
 
     /** {@inheritDoc} */
     @Override protected void selectAllToFocus(boolean setAnchorToFocusIndex) {
-        // Fix for RT-31241
+        // Fix for JDK-8123409
         if (getNode().getEditingCell() != null) return;
 
         super.selectAllToFocus(setAnchorToFocusIndex);

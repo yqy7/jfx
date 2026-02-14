@@ -1,6 +1,6 @@
 /*
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2025 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -33,6 +33,7 @@ class Node;
 class ShadowRoot;
 class StyleSheet;
 class CSSStyleSheet;
+class WeakPtrImplWithEventTargetData;
 
 class StyleSheetList final : public RefCounted<StyleSheetList> {
 public:
@@ -40,10 +41,12 @@ public:
     static Ref<StyleSheetList> create(ShadowRoot& shadowRoot) { return adoptRef(*new StyleSheetList(shadowRoot)); }
     WEBCORE_EXPORT ~StyleSheetList();
 
+    bool isSupportedPropertyIndex(unsigned index) const { return index < length(); }
     WEBCORE_EXPORT unsigned length() const;
     WEBCORE_EXPORT StyleSheet* item(unsigned index);
 
     CSSStyleSheet* namedItem(const AtomString&) const;
+    bool isSupportedPropertyName(const AtomString&) const;
     Vector<AtomString> supportedPropertyNames();
 
     Node* ownerNode() const;
@@ -55,8 +58,8 @@ private:
     StyleSheetList(ShadowRoot&);
     const Vector<RefPtr<StyleSheet>>& styleSheets() const;
 
-    WeakPtr<Document> m_document;
-    ShadowRoot* m_shadowRoot { nullptr };
+    WeakPtr<Document, WeakPtrImplWithEventTargetData> m_document;
+    WeakPtr<ShadowRoot, WeakPtrImplWithEventTargetData> m_shadowRoot;
     Vector<RefPtr<StyleSheet>> m_detachedStyleSheets;
 };
 

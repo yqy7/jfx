@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2008-2021 Apple Inc. All rights reserved.
- * Copyright (C) 2009 Google Inc. All Rights Reserved.
+ * Copyright (C) 2009 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,22 +30,28 @@
 
 #include "DOMWrapperWorld.h"
 #include "EventLoop.h"
+#include "JSDOMExceptionHandling.h"
 #include "JSDOMGuardedObject.h"
-#include "JSMicrotaskCallback.h"
+#include "JSExecState.h"
+#include "JSTrustedScript.h"
+#include "TrustedType.h"
 #include "WorkerGlobalScope.h"
 #include "WorkerThread.h"
+#include <JavaScriptCore/GlobalObjectMethodTable.h>
 #include <JavaScriptCore/JSCInlines.h>
 #include <JavaScriptCore/JSCJSValueInlines.h>
-#include <JavaScriptCore/JSProxy.h>
+#include <JavaScriptCore/JSGlobalProxy.h>
 #include <JavaScriptCore/Microtask.h>
 #include <wtf/Language.h>
 
 namespace WebCore {
 using namespace JSC;
 
-const ClassInfo JSWorkerGlobalScopeBase::s_info = { "WorkerGlobalScope", &JSDOMGlobalObject::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSWorkerGlobalScopeBase) };
+const ClassInfo JSWorkerGlobalScopeBase::s_info = { "WorkerGlobalScope"_s, &JSDOMGlobalObject::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSWorkerGlobalScopeBase) };
 
-const GlobalObjectMethodTable JSWorkerGlobalScopeBase::s_globalObjectMethodTable = {
+const GlobalObjectMethodTable* JSWorkerGlobalScopeBase::globalObjectMethodTable()
+{
+    static constexpr GlobalObjectMethodTable table = {
     &supportsRichSourceInfo,
     &shouldInterruptScript,
     &javaScriptRuntimeFlags,
@@ -70,20 +76,25 @@ const GlobalObjectMethodTable JSWorkerGlobalScopeBase::s_globalObjectMethodTable
     nullptr,
 #endif
     deriveShadowRealmGlobalObject,
+        codeForEval,
+        canCompileStrings,
+        trustedScriptStructure,
+    };
+    return &table;
 };
 
 JSWorkerGlobalScopeBase::JSWorkerGlobalScopeBase(JSC::VM& vm, JSC::Structure* structure, RefPtr<WorkerGlobalScope>&& impl)
-    : JSDOMGlobalObject(vm, structure, normalWorld(vm), &s_globalObjectMethodTable)
+    : JSDOMGlobalObject(vm, structure, normalWorld(vm), globalObjectMethodTable())
     , m_wrapped(WTFMove(impl))
 {
 }
 
-void JSWorkerGlobalScopeBase::finishCreation(VM& vm, JSProxy* proxy)
+void JSWorkerGlobalScopeBase::finishCreation(VM& vm, JSGlobalProxy* proxy)
 {
     m_proxy.set(vm, this, proxy);
 
     Base::finishCreation(vm, m_proxy.get());
-    ASSERT(inherits(vm, info()));
+    ASSERT(inherits(info()));
 }
 
 template<typename Visitor>
@@ -134,20 +145,17 @@ JSC::ScriptExecutionStatus JSWorkerGlobalScopeBase::scriptExecutionStatus(JSC::J
     return jsCast<JSWorkerGlobalScopeBase*>(globalObject)->scriptExecutionContext()->jscScriptExecutionStatus();
 }
 
-void JSWorkerGlobalScopeBase::reportViolationForUnsafeEval(JSC::JSGlobalObject* globalObject, JSC::JSString* source)
+void JSWorkerGlobalScopeBase::reportViolationForUnsafeEval(JSC::JSGlobalObject* globalObject, const String& source)
 {
     return JSGlobalObject::reportViolationForUnsafeEval(globalObject, source);
 }
 
-void JSWorkerGlobalScopeBase::queueMicrotaskToEventLoop(JSGlobalObject& object, Ref<JSC::Microtask>&& task)
+void JSWorkerGlobalScopeBase::queueMicrotaskToEventLoop(JSGlobalObject& object, JSC::QueuedTask&& task)
 {
     JSWorkerGlobalScopeBase& thisObject = static_cast<JSWorkerGlobalScopeBase&>(object);
-
-    auto callback = JSMicrotaskCallback::create(thisObject, WTFMove(task));
     auto& context = thisObject.wrapped();
-    context.eventLoop().queueMicrotask([callback = WTFMove(callback)]() mutable {
-        callback->call();
-    });
+    task.setDispatcher(context.eventLoop().jsMicrotaskDispatcher());
+    context.eventLoop().queueMicrotask(WTFMove(task));
 }
 
 JSValue toJS(JSGlobalObject* lexicalGlobalObject, JSDOMGlobalObject*, WorkerGlobalScope& workerGlobalScope)

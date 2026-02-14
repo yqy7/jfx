@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,9 @@ package test.robot.javafx.embed.swing;
 
 import static com.sun.javafx.application.PlatformImpl.runAndWait;
 import com.sun.javafx.tk.TKPulseListener;
+
+import test.util.Util;
+
 import java.awt.Color;
 import javafx.animation.AnimationTimer;
 import javafx.scene.Scene;
@@ -45,7 +48,7 @@ import javafx.stage.Stage;
 import javax.swing.JPanel;
 
 /**
- * RT-30650: SwingNode is not Resizable
+ * JDK-8120292: SwingNode is not Resizable
  *
  * The scenario: SwingNode contains JPanel. It should be initialized with the same layout bounds.
  * SwingNode is added to StackPane. The JPanel's max size is unbounded, so SwingNode is expected
@@ -67,6 +70,7 @@ public class RT30650GUI extends Application {
 
     private AnimationTimer animationTimer;
     private TKPulseListener pulseListener;
+    private Robot robot;
 
     @Override
     public void start(final Stage stage) {
@@ -85,8 +89,11 @@ public class RT30650GUI extends Application {
         Scene scene = new Scene(pane, SIZE, SIZE);
 
         stage.setScene(scene);
-        stage.setTitle("RT-30650");
+        stage.setTitle("JDK-8120292");
         stage.show();
+
+        robot = new Robot();
+        Util.parkCursor(robot);
 
         SwingUtilities.invokeLater(() -> {
             JPanel panel = new JPanel();
@@ -113,8 +120,7 @@ public class RT30650GUI extends Application {
 
         final javafx.scene.paint.Color rgb[] = new javafx.scene.paint.Color[1];
         runAndWait(() -> {
-            Robot r = new Robot();
-            rgb[0] = r.getPixelColor(x + SIZE/2, y + SIZE/2);
+            rgb[0] = robot.getPixelColor(x + SIZE/2, y + SIZE/2);
         });
 
         System.out.println("detected color: " + rgb[0].toString());

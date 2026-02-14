@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2022, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,6 +28,7 @@ package com.sun.javafx.binding;
 import javafx.beans.InvalidationListener;
 import javafx.beans.binding.ObjectBinding;
 import javafx.beans.value.ChangeListener;
+import javafx.util.Subscription;
 
 /**
  * Extends {@link ObjectBinding} with the ability to lazily register and eagerly unregister listeners on its
@@ -42,9 +43,9 @@ abstract class LazyObjectBinding<T> extends ObjectBinding<T> {
 
     @Override
     public void addListener(ChangeListener<? super T> listener) {
-        super.addListener(listener);
+        updateSubscriptionBeforeAdd();
 
-        updateSubscriptionAfterAdd();
+        super.addListener(listener);
     }
 
     @Override
@@ -56,9 +57,9 @@ abstract class LazyObjectBinding<T> extends ObjectBinding<T> {
 
     @Override
     public void addListener(InvalidationListener listener) {
-        super.addListener(listener);
+        updateSubscriptionBeforeAdd();
 
-        updateSubscriptionAfterAdd();
+        super.addListener(listener);
     }
 
     @Override
@@ -74,31 +75,16 @@ abstract class LazyObjectBinding<T> extends ObjectBinding<T> {
     }
 
     /**
-     * Called after a listener was added to start observing inputs if they're not observed already.
+     * Called before a listener was added to start observing inputs if they're not observed already.
+     * This is done before the addition of a listener to be able to start observing its source
+     * before the first listener queries the current value. By doing this, this first query will
+     * also be immediately cached, as observed bindings are allowed to do so. This potentially avoids
+     * many redundant compute value calls, especially if the source was also not yet observed (and
+     * its source, and so on).
      */
-    private void updateSubscriptionAfterAdd() {
+    private void updateSubscriptionBeforeAdd() {
         if (!wasObserved) { // was first observer registered?
             subscription = observeSources(); // start observing source
-
-            /*
-             * Although the act of registering a listener already attempts to make
-             * this binding valid, allowValidation won't allow it as the binding is
-             * not observed yet. This is because isObserved will not yet return true
-             * when the process of registering the listener hasn't completed yet.
-             *
-             * As the binding must be valid after it becomes observed the first time
-             * 'get' is called again.
-             *
-             * See com.sun.javafx.binding.ExpressionHelper (which is used
-             * by ObjectBinding) where it will do a call to ObservableValue#getValue
-             * BEFORE adding the actual listener. This results in ObjectBinding#get
-             * to be called in which the #allowValidation call will block it from
-             * becoming valid as the condition is "isObserved()"; this is technically
-             * correct as the listener wasn't added yet, but means we must call
-             * #get again to make this binding valid.
-             */
-
-            get(); // make binding valid as source wasn't tracked until now
             wasObserved = true;
         }
     }

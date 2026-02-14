@@ -40,7 +40,11 @@ class SQLTransactionErrorCallback : public ThreadSafeRefCounted<SQLTransactionEr
 public:
     using ActiveDOMCallback::ActiveDOMCallback;
 
-    virtual CallbackResult<void> handleEvent(SQLError&) = 0;
+    virtual CallbackResult<void> invoke(SQLError&) = 0;
+    virtual CallbackResult<void> invokeRethrowingException(SQLError&) = 0;
+
+private:
+    virtual bool hasCallback() const = 0;
 };
 
 } // namespace WebCore

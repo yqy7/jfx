@@ -103,12 +103,17 @@ CBORValue::CBORValue(BinaryValue&& inBytes)
 
 CBORValue::CBORValue(const WebCore::BufferSource& bufferSource)
     : m_type(Type::ByteString)
-    , m_byteStringValue(bufferSource.data(), bufferSource.length())
+    , m_byteStringValue(bufferSource.span())
 {
 }
 
 CBORValue::CBORValue(const char* inString)
-    : CBORValue(String(inString))
+    : CBORValue(String::fromLatin1(inString))
+{
+}
+
+CBORValue::CBORValue(ASCIILiteral inString)
+    : CBORValue(String { inString })
 {
 }
 

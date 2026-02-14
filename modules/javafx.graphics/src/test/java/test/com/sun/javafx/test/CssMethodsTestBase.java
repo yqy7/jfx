@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,13 +25,7 @@
 
 package test.com.sun.javafx.test;
 
-import java.util.Iterator;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 import javafx.scene.Node;
-
-import org.junit.Test;
 
 import javafx.css.StyleConverter;
 import javafx.css.CssMetaData;
@@ -39,35 +33,40 @@ import java.util.List;
 import javafx.css.Styleable;
 import javafx.css.StyleableProperty;
 
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+
 public abstract class CssMethodsTestBase {
-    private final Configuration configuration;
 
-    public CssMethodsTestBase(final Configuration configuration) {
-        this.configuration = configuration;
-    }
-
-
-    @Test // This _must_ be the first test!
-    public void testCssDefaultSameAsPropertyDefault() {
+    // This _must_ be the first test!
+    @ParameterizedTest
+    @MethodSource("data")
+    public void testCssDefaultSameAsPropertyDefault(Configuration configuration) {
         configuration.cssDefaultsTest();
     }
 
-    @Test
-    public void testCSSPropertyAndCSSPropertyReferenceEachOther() {
+    @ParameterizedTest
+    @MethodSource("data")
+    public void testCSSPropertyAndCSSPropertyReferenceEachOther(Configuration configuration) {
         configuration.cssPropertyReferenceIntegrityTest();
     }
 
-    @Test
-    public void testCssSettable() throws Exception {
+    @ParameterizedTest
+    @MethodSource("data")
+    public void testCssSettable(Configuration configuration) {
         configuration.cssSettableTest();
     }
 
-    @Test
-    public void testCssSet() {
+    @ParameterizedTest
+    @MethodSource("data")
+    public void testCssSet(Configuration configuration) {
         configuration.cssSetTest();
     }
 
-    public static Object[] config(
+    public static Configuration config(
             final Node node,
             final String propertyName,
             final Object initialValue,
@@ -80,7 +79,7 @@ public abstract class CssMethodsTestBase {
                                         cssPropertyValue));
     }
 
-    public static Object[] config(
+    public static Configuration config(
             final Node node,
             final String propertyName,
             final Object initialValue,
@@ -95,7 +94,7 @@ public abstract class CssMethodsTestBase {
                                         expectedFinalValue));
     }
 
-    public static Object[] config(
+    public static Configuration config(
             final Node node,
             final String propertyName,
             final Object initialValue,
@@ -110,8 +109,8 @@ public abstract class CssMethodsTestBase {
                                         comparator));
     }
 
-    public static Object[] config(final Configuration configuration) {
-        return new Object[] { configuration };
+    public static Configuration config(final Configuration configuration) {
+        return configuration;
     }
 
     private static CssMetaData<? extends Styleable, ?> getCssMetaData(Node node, String cssProperty) {
@@ -128,10 +127,10 @@ public abstract class CssMethodsTestBase {
 
     public static class Configuration {
         private static final StyleConverter<String, Object> TEST_TYPE =
-                new StyleConverter<String, Object>();
+                new StyleConverter<>();
 
         private static final CssMetaData<Node, Object> UNDEFINED_KEY =
-                new CssMetaData<Node,Object>("U-N-D-E-F-I-N-E-D", TEST_TYPE, "") {
+                new CssMetaData<>("U-N-D-E-F-I-N-E-D", TEST_TYPE, "") {
 
             @Override
             public boolean isSettable(Node n) {
@@ -222,7 +221,7 @@ public abstract class CssMethodsTestBase {
             this.comparator = comparator;
         }
 
-        public void cssSettableTest() throws Exception {
+        public void cssSettableTest() {
             assertFalse(UNDEFINED_KEY.isSettable(node));
             assertTrue(cssPropertyKey.isSettable(node));
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,14 +26,12 @@
 package com.sun.media.jfxmediaimpl.platform.osx;
 
 import com.sun.glass.utils.NativeLibLoader;
+import com.sun.javafx.PlatformUtil;
 import com.sun.media.jfxmedia.Media;
 import com.sun.media.jfxmedia.MediaPlayer;
 import com.sun.media.jfxmedia.locator.Locator;
 import com.sun.media.jfxmedia.logging.Logger;
-import com.sun.media.jfxmediaimpl.HostUtils;
 import com.sun.media.jfxmediaimpl.platform.Platform;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.Arrays;
 
 /**
@@ -45,7 +43,6 @@ public final class OSXPlatform extends Platform {
      * The MIME types of all supported media.
      */
     private static final String[] CONTENT_TYPES = {
-        "audio/x-aiff",
         "audio/mp3",
         "audio/mpeg",
         "audio/x-m4a",
@@ -61,7 +58,9 @@ public final class OSXPlatform extends Platform {
     private static final String[] PROTOCOLS = {
         "file",
         "http",
-        "https"
+        "https",
+        "jrt",
+        "resource"
     };
 
     private static final class OSXPlatformInitializer {
@@ -71,20 +70,10 @@ public final class OSXPlatform extends Platform {
             // Do this early so we can report the correct content types
             boolean isLoaded = false;
             try {
-                @SuppressWarnings("removal")
-                boolean tmp = AccessController.doPrivileged((PrivilegedAction<Boolean>) () -> {
-                    boolean avf = false;
-                    try {
-                        NativeLibLoader.loadLibrary("jfxmedia_avf");
-                        avf = true;
-                    } catch (UnsatisfiedLinkError ule) {}
+                NativeLibLoader.loadLibrary("jfxmedia_avf");
+                isLoaded = true;
+            } catch (UnsatisfiedLinkError ule) { }
 
-                    return avf;
-                });
-                isLoaded = tmp;
-            } catch (Exception e) {
-                // Ignore
-            }
             if (isLoaded) {
                 globalInstance = new OSXPlatform();
             } else {
@@ -105,7 +94,7 @@ public final class OSXPlatform extends Platform {
      */
     @Override
     public boolean loadPlatform() {
-        if (!HostUtils.isMacOSX()) {
+        if (!PlatformUtil.isMac()) {
             return false;
         }
 

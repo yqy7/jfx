@@ -38,7 +38,7 @@
 pas_bitfit_view* pas_bitfit_view_create(pas_bitfit_directory* directory,
                                         unsigned index)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_BITFIT_HEAPS);
 
     pas_bitfit_view* result;
 
@@ -103,9 +103,9 @@ void pas_bitfit_view_note_max_free(pas_bitfit_view* view)
 
 static pas_heap_summary compute_summary(pas_bitfit_view* view)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_BITFIT_HEAPS);
 
-    pas_bitfit_page_config* config_ptr;
+    const pas_bitfit_page_config* config_ptr;
     pas_bitfit_page_config config;
     void* boundary;
     pas_bitfit_page* page;
@@ -197,7 +197,7 @@ static bool for_each_live_object(
     pas_bitfit_view_for_each_live_object_callback callback,
     void* arg)
 {
-    pas_bitfit_page_config* config_ptr;
+    const pas_bitfit_page_config* config_ptr;
     pas_bitfit_page_config config;
     void* boundary;
     pas_bitfit_page* page;

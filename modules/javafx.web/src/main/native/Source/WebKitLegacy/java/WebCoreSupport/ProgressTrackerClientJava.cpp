@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,8 @@
 #include <WebCore/DocumentLoader.h>
 #include <WebCore/FrameLoader.h>
 #include <WebCore/Page.h>
+#include "FrameInlines.h"
+#include  "LocalFrame.h"
 #include <WebCore/ProgressTracker.h>
 
 #include "com_sun_webkit_LoadListenerClient.h"
@@ -60,11 +62,11 @@ ProgressTrackerClientJava::ProgressTrackerClientJava(const JLObject& webPage)
 {
 }
 
-void ProgressTrackerClientJava::progressStarted(Frame&)
+void ProgressTrackerClientJava::progressStarted(LocalFrame&)
 {
 }
 
-void ProgressTrackerClientJava::progressEstimateChanged(Frame& originatingProgressFrame)
+void ProgressTrackerClientJava::progressEstimateChanged(LocalFrame& originatingProgressFrame)
 {
     using namespace ProgressTrackerClientJavaInternal;
     JNIEnv* env = WTF::GetJavaEnv();
@@ -93,7 +95,7 @@ void ProgressTrackerClientJava::progressEstimateChanged(Frame& originatingProgre
     }
 }
 
-void ProgressTrackerClientJava::progressFinished(Frame&)
+void ProgressTrackerClientJava::progressFinished(LocalFrame&)
 {
     // shouldn't post PROGRESS_CHANGED after PAGE_FINISHED
 }

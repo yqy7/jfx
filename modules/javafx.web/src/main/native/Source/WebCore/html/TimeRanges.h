@@ -25,10 +25,11 @@
 
 #pragma once
 
-#include "ExceptionOr.h"
 #include "PlatformTimeRanges.h"
 
 namespace WebCore {
+
+template<typename> class ExceptionOr;
 
 class TimeRanges : public RefCounted<TimeRanges> {
 public:
@@ -46,7 +47,7 @@ public:
 
     WEBCORE_EXPORT unsigned length() const;
 
-    WEBCORE_EXPORT void add(double start, double end);
+    WEBCORE_EXPORT void add(double start, double end, AddTimeRangeOption = AddTimeRangeOption::None);
     bool contain(double time) const;
 
     size_t find(double time) const;

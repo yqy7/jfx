@@ -32,8 +32,11 @@
 #include "PreviewConverterProvider.h"
 #include <wtf/RunLoop.h>
 #include <wtf/SetForScope.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(PreviewConverter);
 
 PreviewConverter::~PreviewConverter() = default;
 
@@ -42,7 +45,7 @@ bool PreviewConverter::supportsMIMEType(const String& mimeType)
     if (mimeType.isNull())
         return false;
 
-    if (equalLettersIgnoringASCIICase(mimeType, "text/html") || equalLettersIgnoringASCIICase(mimeType, "text/plain"))
+    if (equalLettersIgnoringASCIICase(mimeType, "text/html"_s) || equalLettersIgnoringASCIICase(mimeType, "text/plain"_s))
         return false;
 
     static NeverDestroyed<HashSet<String, ASCIICaseInsensitiveHash>> supportedMIMETypes = platformSupportedMIMETypes();
@@ -81,7 +84,7 @@ void PreviewConverter::updateMainResource()
         return;
     }
 
-    provider->provideMainResourceForPreviewConverter(*this, [this, protectedThis = Ref { *this }](auto&& buffer) {
+    provider->provideMainResourceForPreviewConverter(*this, [this, protectedThis = Ref { *this }](Ref<FragmentedSharedBuffer>&& buffer) {
         appendFromBuffer(WTFMove(buffer));
     });
 }
@@ -159,7 +162,7 @@ void PreviewConverter::setPasswordForTesting(const String& password)
 template<typename T>
 void PreviewConverter::iterateClients(T&& callback)
 {
-    SetForScope<bool> isInClientCallback { m_isInClientCallback, true };
+    SetForScope isInClientCallback { m_isInClientCallback, true };
     auto clientsCopy { m_clients };
     auto protectedThis { Ref { *this } };
 
@@ -171,7 +174,7 @@ void PreviewConverter::iterateClients(T&& callback)
 
 void PreviewConverter::didAddClient(PreviewConverterClient& client)
 {
-    RunLoop::current().dispatch([this, protectedThis = Ref { *this }, weakClient = WeakPtr { client }]() {
+    RunLoop::currentSingleton().dispatch([this, protectedThis = Ref { *this }, weakClient = WeakPtr { client }]() {
         if (auto client = weakClient.get())
             replayToClient(*client);
     });
@@ -201,7 +204,7 @@ void PreviewConverter::replayToClient(PreviewConverterClient& client)
     if (!hasClient(client))
         return;
 
-    SetForScope<bool> isInClientCallback { m_isInClientCallback, true };
+    SetForScope isInClientCallback { m_isInClientCallback, true };
     auto protectedThis { Ref { *this } };
 
     client.previewConverterDidStartUpdating(*this);

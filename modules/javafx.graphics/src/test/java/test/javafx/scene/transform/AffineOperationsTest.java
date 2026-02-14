@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,17 +27,10 @@ package test.javafx.scene.transform;
 
 //import java.awt.geom.AffineTransform;
 //import com.sun.javafx.geom.transform.Affine3D;
-import java.util.Collection;
-import javafx.beans.Observable;
-import org.junit.runners.Parameterized.Parameters;
-import org.junit.runners.Parameterized;
-import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Stream;
 import javafx.geometry.Point3D;
-import org.junit.Test;
-import org.junit.runner.RunWith;
 import test.com.sun.javafx.test.TransformHelper;
-import javafx.beans.InvalidationListener;
-import javafx.event.EventHandler;
 import javafx.geometry.Point2D;
 import javafx.scene.transform.Affine;
 import javafx.scene.transform.AffineShim;
@@ -49,9 +42,16 @@ import javafx.scene.transform.Shear;
 import javafx.scene.transform.Transform;
 import javafx.scene.transform.TransformShim;
 import javafx.scene.transform.Translate;
-import static org.junit.Assert.*;
 
-@RunWith(Parameterized.class)
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 public class AffineOperationsTest {
 
     private static final Affine identity = new Affine();
@@ -150,48 +150,41 @@ public class AffineOperationsTest {
          0, 0, 0, 0,
          0, 0, 0, 0, 1, 0, 0, 0, 0 };
 
-    @Parameters
-    public static Collection getParams() {
-        return Arrays.asList(new Object[][] {
-            { identity },                   //  0
-            { translate },                  //  1
-            { scale },                      //  2
-            { sc_tr },                      //  3
-            { shear },                      //  4
-            { sh_tr },                      //  5
-            { sh_sc },                      //  6
-            { sh_sc_simple },               //  7
-            { sh_sc_tr },                   //  8
-            { a3d_tr },                     //  9
-            { a3d_sc },                     // 10
-            { a3d_sc_tr },                  // 11
-            { a3d_sc2_tr3 },                // 12
-            { a3d_sc3_tr2 },                // 13
-            { a3d_withShear },              // 14
-            { a3d_only3d },                 // 15
-            { a3d_translate_only },         // 16
-            { a3d_complex },                // 17
-            { a3d_complex_noninvertible },  // 18
-            { shearRotatesToIdentity1 },    // 19
-            { shearRotatesToIdentity2 },    // 20
-            { scaleRotatesToIdentity },     // 21
-            { scr_tr_rotatesToTr },         // 22
-            { translate_only },             // 23
-            { nonInv_translate },           // 24
-            { nonInv_scale },               // 25
-            { nonInv_shear },               // 26
-            { nonInv_sh_sc_tr },            // 27
-            { nonInv_sh_sc },               // 28
-            { nonInv_sh_tr },               // 29
-            { nonInv_sc_tr },               // 30
-            { zero },                       // 31
-        });
-    }
-
-    private Affine affine;
-
-    public AffineOperationsTest(Affine a) {
-        this.affine = a;
+    public static Stream<Arguments> getParams() {
+        return Stream.of(
+            Arguments.of( identity ),                   //  0
+            Arguments.of( translate ),                  //  1
+            Arguments.of( scale ),                      //  2
+            Arguments.of( sc_tr ),                      //  3
+            Arguments.of( shear ),                      //  4
+            Arguments.of( sh_tr ),                      //  5
+            Arguments.of( sh_sc ),                      //  6
+            Arguments.of( sh_sc_simple ),               //  7
+            Arguments.of( sh_sc_tr ),                   //  8
+            Arguments.of( a3d_tr ),                     //  9
+            Arguments.of( a3d_sc ),                     // 10
+            Arguments.of( a3d_sc_tr ),                  // 11
+            Arguments.of( a3d_sc2_tr3 ),                // 12
+            Arguments.of( a3d_sc3_tr2 ),                // 13
+            Arguments.of( a3d_withShear ),              // 14
+            Arguments.of( a3d_only3d ),                 // 15
+            Arguments.of( a3d_translate_only ),         // 16
+            Arguments.of( a3d_complex ),                // 17
+            Arguments.of( a3d_complex_noninvertible ),  // 18
+            Arguments.of( shearRotatesToIdentity1 ),    // 19
+            Arguments.of( shearRotatesToIdentity2 ),    // 20
+            Arguments.of( scaleRotatesToIdentity ),     // 21
+            Arguments.of( scr_tr_rotatesToTr ),         // 22
+            Arguments.of( translate_only ),             // 23
+            Arguments.of( nonInv_translate ),           // 24
+            Arguments.of( nonInv_scale ),               // 25
+            Arguments.of( nonInv_shear ),               // 26
+            Arguments.of( nonInv_sh_sc_tr ),            // 27
+            Arguments.of( nonInv_sh_sc ),               // 28
+            Arguments.of( nonInv_sh_tr ),               // 29
+            Arguments.of( nonInv_sc_tr ),               // 30
+            Arguments.of( zero )                       // 31
+        );
     }
 
     private int eventCounter;
@@ -248,8 +241,9 @@ public class AffineOperationsTest {
         assertFalse(AffineShim.atomicChangeRuns(a));
     }
 
-    @Test
-    public void SetToTransformShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void SetToTransformShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Shear sh = new Shear(12, 15);
 
@@ -259,8 +253,9 @@ public class AffineOperationsTest {
         );
     }
 
-    @Test
-    public void SetToTransform2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void SetToTransform2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Shear sh = new Shear(12, 15);
 
@@ -270,15 +265,17 @@ public class AffineOperationsTest {
         );
     }
 
-    @Test
-    public void testSetToIdentity() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testSetToIdentity(Affine affine) {
         final Affine a = affine.clone();
         a.setToIdentity();
         TransformHelper.assertMatrix(a, new Affine());
     }
 
-    @Test
-    public void SetToIdentityShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void SetToIdentityShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
 
         testOperationIsAtomic(a,
@@ -287,8 +284,9 @@ public class AffineOperationsTest {
         );
     }
 
-    @Test
-    public void testAppendTranslation2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendTranslation2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -302,8 +300,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendZeroTranslation2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendZeroTranslation2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -317,8 +316,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendTranslation2DWhichEliminatesTranslation() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendTranslation2DWhichEliminatesTranslation(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -348,8 +348,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendTranslation3DWhichMakesTranslation2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendTranslation3DWhichMakesTranslation2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -370,16 +371,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void appendTranslation2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendTranslation2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Translate(8, 9));
 
         testOperationIsAtomic(a, () -> a.appendTranslation(8, 9), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrependTranslation2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependTranslation2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -389,8 +392,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependZeroTranslation() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependZeroTranslation(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -400,16 +404,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void prependTranslation2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependTranslation2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(new Translate(8, 9), a);
 
         testOperationIsAtomic(a, () -> a.prependTranslation(8, 9), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppendTranslation3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendTranslation3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -419,16 +425,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void appendTranslation3DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendTranslation3DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Translate(8, 9, 10));
 
         testOperationIsAtomic(a, () -> a.appendTranslation(8, 9, 10), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrependTranslation3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependTranslation3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -438,8 +446,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependTranslation3DWhichMakesIt2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependTranslation3DWhichMakesIt2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -449,16 +458,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void prependTranslation3DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependTranslation3DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(new Translate(8, 9, 10), a);
 
         testOperationIsAtomic(a, () -> a.prependTranslation(8, 9, 10), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppendScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendScale2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -468,14 +479,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testAppendNullPivotedScale2D() {
-        Affine a = affine.clone();
-        a.appendScale(8, 9, null);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendNullPivotedScale2D(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.appendScale(8, 9, null);
+        });
     }
 
-    @Test
-    public void testAppendZeroPivotScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendZeroPivotScale2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -494,8 +509,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendZeroScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendZeroScale2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -514,8 +530,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendNoScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendNoScale2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -525,8 +542,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendScale2DWhichMayEliminateScale() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendScale2DWhichMayEliminateScale(Affine affine) {
         Affine a = affine.clone();
 
         if (a.getMxx() == 0 || a.getMyy() == 0) {
@@ -543,8 +561,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendScale3DWhichMakesIt2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendScale3DWhichMakesIt2D(Affine affine) {
         Affine a = affine.clone();
 
         if (a.getMzz() == 0.0) {
@@ -560,16 +579,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void appendScale2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendScale2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Scale(8, 9));
 
         testOperationIsAtomic(a, () -> a.appendScale(8, 9), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrependScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependScale2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -579,14 +600,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testPrependNullPivotedScale2D() {
-        Affine a = affine.clone();
-        a.appendScale(8, 9, null);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependNullPivotedScale2D(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.appendScale(8, 9, null);
+        });
     }
 
-    @Test
-    public void testPrependZeroPivotScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependZeroPivotScale2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -605,8 +630,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependZeroScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependZeroScale2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -625,8 +651,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependHalfZeroScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependHalfZeroScale2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -636,8 +663,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependOtherHalfZeroScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependOtherHalfZeroScale2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -647,8 +675,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependNoScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependNoScale2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -658,8 +687,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependOppositeScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependOppositeScale2D(Affine affine) {
         Affine a = affine.clone();
 
         final double sx = a.getMxx() == 0 ? 0 : 1 / a.getMxx();
@@ -680,8 +710,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependOppositeScale3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependOppositeScale3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -699,16 +730,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void prependScale2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependScale2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(new Scale(8, 9), a);
 
         testOperationIsAtomic(a, () -> a.prependScale(8, 9), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppendPivotedScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendPivotedScale2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -718,8 +751,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendPointPivotedScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendPointPivotedScale2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -729,16 +763,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void appendPivotedScale2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendPivotedScale2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Scale(8, 9, 10, 11));
 
         testOperationIsAtomic(a, () -> a.appendScale(8, 9, 10, 11), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrependPivotedScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependPivotedScale2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -748,8 +784,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependPointPivotedScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependPointPivotedScale2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -759,16 +796,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void prependPivotedScale2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependPivotedScale2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(new Scale(8, 9, 10, 11), a);
 
         testOperationIsAtomic(a, () -> a.prependScale(8, 9, 10, 11), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppendScale3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendScale3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -778,14 +817,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testAppendNullPivotedScale3D() {
-        Affine a = affine.clone();
-        a.appendScale(8, 9, 10, null);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendNullPivotedScale3D(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.appendScale(8, 9, 10, null);
+        });
     }
 
-    @Test
-    public void testAppendOppositeScale2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendOppositeScale2D(Affine affine) {
         Affine a = affine.clone();
 
         final double sx = a.getMxx() == 0 ? 0 : 1 / a.getMxx();
@@ -806,8 +849,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendOppositeScale3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendOppositeScale3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -831,16 +875,18 @@ public class AffineOperationsTest {
 
     }
 
-    @Test
-    public void appendScale3DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendScale3DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Scale(8, 9, 10));
 
         testOperationIsAtomic(a, () -> a.appendScale(8, 9, 10), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrependScale3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependScale3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -850,14 +896,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testPrependNullPivotedScale3D() {
-        Affine a = affine.clone();
-        a.prependScale(8, 9, 10, null);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependNullPivotedScale3D(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.prependScale(8, 9, 10, null);
+        });
     }
 
-    @Test
-    public void testPrependScale3DWichMakesIt2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependScale3DWichMakesIt2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -874,16 +924,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void prependScale3DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependScale3DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(new Scale(8, 9, 10), a);
 
         testOperationIsAtomic(a, () -> a.prependScale(8, 9, 10), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppendPivotedScale3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendPivotedScale3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -893,8 +945,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendPointPivotedScale3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendPointPivotedScale3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -904,16 +957,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void appendPivotedScale3DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendPivotedScale3DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Scale(8, 9, 10, 11, 12, 13));
 
         testOperationIsAtomic(a, () -> a.appendScale(8, 9, 10, 11, 12, 13), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrependPivotedScale3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependPivotedScale3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -923,8 +978,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependPointPivotedScale3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependPointPivotedScale3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -934,16 +990,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void prependPivotedScale3DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependPivotedScale3DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(new Scale(8, 9, 10, 11, 12, 13), a);
 
         testOperationIsAtomic(a, () -> a.prependScale(8, 9, 10, 11, 12, 13), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppendShear2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendShear2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -953,20 +1011,27 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testAppendNullPivotedShear2D() {
-        Affine a = affine.clone();
-        a.appendShear(8, 9, null);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendNullPivotedShear2D(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.appendShear(8, 9, null);
+        });
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testPrependNullPivotedShear2D() {
-        Affine a = affine.clone();
-        a.prependShear(8, 9, null);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependNullPivotedShear2D(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.prependShear(8, 9, null);
+        });
     }
 
-    @Test
-    public void testAppendZeroPivotedShear2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendZeroPivotedShear2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -985,8 +1050,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependZeroPivotedShear2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependZeroPivotedShear2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1005,8 +1071,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendZeroShear2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendZeroShear2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1016,16 +1083,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void appendShear2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendShear2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Shear(8, 9));
 
         testOperationIsAtomic(a, () -> a.appendShear(8, 9), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrependShear2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependShear2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1035,8 +1104,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependShearWhichMayEliminateTranslation() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependShearWhichMayEliminateTranslation(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1049,8 +1119,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependZeroShear2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependZeroShear2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1060,16 +1131,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void prependShear2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependShear2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(new Shear(8, 9), a);
 
         testOperationIsAtomic(a, () -> a.prependShear(8, 9), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppendPivotedShear2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendPivotedShear2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1079,8 +1152,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendPointPivotedShear2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendPointPivotedShear2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1090,16 +1164,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void appendPivotedShear2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendPivotedShear2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Shear(8, 9, 10, 11));
 
         testOperationIsAtomic(a, () -> a.appendShear(8, 9, 10, 11), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrependPivotedShear2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependPivotedShear2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1109,8 +1185,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependPointPivotedShear2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependPointPivotedShear2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1120,16 +1197,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void prependPivotedShear2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependPivotedShear2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(new Shear(8, 9, 10, 11), a);
 
         testOperationIsAtomic(a, () -> a.prependShear(8, 9, 10, 11), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppendRotation2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendRotation2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1139,16 +1218,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void appendRotate2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendRotate2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Rotate(37));
 
         testOperationIsAtomic(a, () -> a.appendRotation(37), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrependRotation2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependRotation2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1158,16 +1239,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void prependRotate2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependRotate2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(new Rotate(37), a);
 
         testOperationIsAtomic(a, () -> a.prependRotation(37), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppendRotation90() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendRotation90(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1177,16 +1260,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void appendRotate90ShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendRotate90ShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Rotate(90));
 
         testOperationIsAtomic(a, () -> a.appendRotation(90), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrependRotation90() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependRotation90(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1196,16 +1281,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void prependRotate90ShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependRotate90ShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Rotate(90));
 
         testOperationIsAtomic(a, () -> a.appendRotation(90), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppendRotation180() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendRotation180(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1215,16 +1302,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void appendRotate180ShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendRotate180ShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Rotate(180));
 
         testOperationIsAtomic(a, () -> a.appendRotation(180), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrependRotation180() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependRotation180(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1234,16 +1323,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void prependRotate180ShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependRotate180ShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Rotate(180));
 
         testOperationIsAtomic(a, () -> a.appendRotation(180), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppendRotation270() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendRotation270(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1253,16 +1344,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void appendRotate270ShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendRotate270ShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Rotate(270));
 
         testOperationIsAtomic(a, () -> a.appendRotation(270), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrependRotation270() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependRotation270(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1272,16 +1365,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void prependRotate270ShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependRotate270ShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Rotate(270));
 
         testOperationIsAtomic(a, () -> a.appendRotation(270), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppendRotationMinus450() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendRotationMinus450(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1291,8 +1386,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependRotationMinus450() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependRotationMinus450(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1303,8 +1399,9 @@ public class AffineOperationsTest {
     }
 
 
-    @Test
-    public void testAppendPivotedRotate2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendPivotedRotate2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1314,20 +1411,27 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testAppendNullPivotedRotate2D() {
-        Affine a = affine.clone();
-        a.appendRotation(8, null);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendNullPivotedRotate2D(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.appendRotation(8, null);
+        });
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testPrependNullPivotedRotate2D() {
-        Affine a = affine.clone();
-        a.prependRotation(8, null);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependNullPivotedRotate2D(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.prependRotation(8, null);
+        });
     }
 
-    @Test
-    public void testAppendZeroPivotedRotate2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendZeroPivotedRotate2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1346,8 +1450,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendPointPivotedRotate2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendPointPivotedRotate2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1357,16 +1462,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void appendPivotedRotate2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendPivotedRotate2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a, new Rotate(37, 10, 11));
 
         testOperationIsAtomic(a, () -> a.appendRotation(37, 10, 11), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrependPivotedRotate2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependPivotedRotate2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1376,8 +1483,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependZeroPivotedRotate2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependZeroPivotedRotate2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1397,8 +1505,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependPointPivotedRotate2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependPointPivotedRotate2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1408,16 +1517,18 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void prependPivotedRotate2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependPivotedRotate2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(new Rotate(37, 10, 11), a);
 
         testOperationIsAtomic(a, () -> a.prependRotation(37, 10, 11), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppendNoRotation() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendNoRotation(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1428,8 +1539,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendRotation3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendRotation3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1440,44 +1552,63 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testAppendNullAxisRotation3D() {
-        Affine a = affine.clone();
-        a.appendRotation(8, 100, 110, 120, null);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendNullAxisRotation3D(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.appendRotation(8, 100, 110, 120, null);
+        });
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testPrependNullAxisRotation3D() {
-        Affine a = affine.clone();
-        a.prependRotation(8, 100, 110, 120, null);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependNullAxisRotation3D(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.prependRotation(8, 100, 110, 120, null);
+        });
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testAppendNullAxisPointPivotRotation3D() {
-        Affine a = affine.clone();
-        a.appendRotation(8, new Point3D(100, 110, 120), null);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendNullAxisPointPivotRotation3D(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.appendRotation(8, new Point3D(100, 110, 120), null);
+        });
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testPrependNullAxisPointPivotRotation3D() {
-        Affine a = affine.clone();
-        a.prependRotation(8, new Point3D(100, 110, 120), null);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependNullAxisPointPivotRotation3D(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.prependRotation(8, new Point3D(100, 110, 120), null);
+        });
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testAppendNullPivotRotation3D() {
-        Affine a = affine.clone();
-        a.appendRotation(8, null, Rotate.Z_AXIS);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendNullPivotRotation3D(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.appendRotation(8, null, Rotate.Z_AXIS);
+        });
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testPrependNullPivotRotation3D() {
-        Affine a = affine.clone();
-        a.prependRotation(8, null, Rotate.Z_AXIS);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependNullPivotRotation3D(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.prependRotation(8, null, Rotate.Z_AXIS);
+        });
     }
 
-    @Test
-    public void testAppendRotation3Dbeing2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendRotation3Dbeing2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1488,8 +1619,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendRotation3DbeingUpsideDown2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendRotation3DbeingUpsideDown2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1500,8 +1632,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendRotationWithZeroAxis() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendRotationWithZeroAxis(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1510,8 +1643,9 @@ public class AffineOperationsTest {
         assertAffineOk(affine, a);
     }
 
-    @Test
-    public void testAppendRotationWithAlmostZeroAxis() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendRotationWithAlmostZeroAxis(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1520,8 +1654,9 @@ public class AffineOperationsTest {
         assertAffineOk(affine, a);
     }
 
-    @Test
-    public void testAppendPointedAxisRotation3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendPointedAxisRotation3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1532,8 +1667,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testAppendPointedAxisPointedPivotRotation3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendPointedAxisPointedPivotRotation3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1544,8 +1680,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void appendRotate3DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendRotate3DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a,
                 new Rotate(37, 8, 9, 10, new Point3D(12, 123, 521)));
@@ -1553,8 +1690,9 @@ public class AffineOperationsTest {
         testOperationIsAtomic(a, () -> a.appendRotation(37, 8, 9, 10, 12, 123, 521), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrependRotation3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependRotation3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1565,8 +1703,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependNoRotation() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependNoRotation(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1576,8 +1715,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependRotation3Dbeing2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependRotation3Dbeing2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1588,8 +1728,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependRotation3DbeingUpsideDown2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependRotation3DbeingUpsideDown2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1600,8 +1741,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependRotationWithZeroAxis() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependRotationWithZeroAxis(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1610,8 +1752,9 @@ public class AffineOperationsTest {
         assertAffineOk(affine, a);
     }
 
-    @Test
-    public void testPrependRotationWithAlmostZeroAxis() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependRotationWithAlmostZeroAxis(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1620,8 +1763,9 @@ public class AffineOperationsTest {
         assertAffineOk(affine, a);
     }
 
-    @Test
-    public void testPrependPointedAxisRotation3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependPointedAxisRotation3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1632,8 +1776,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void testPrependPointedAxisPointedPivotRotation3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependPointedAxisPointedPivotRotation3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1645,8 +1790,9 @@ public class AffineOperationsTest {
     }
 
 
-    @Test
-    public void prependRotate3DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependRotate3DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(
                 new Rotate(37, 8, 9, 10, new Point3D(12, 123, 521)), a);
@@ -1654,8 +1800,9 @@ public class AffineOperationsTest {
         testOperationIsAtomic(a, () -> a.prependRotation(37, 8, 9, 10, 12, 123, 521), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppend2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppend2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1669,8 +1816,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void append2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void append2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a,
                 new Affine(20, 22, 24,
@@ -1680,8 +1828,9 @@ public class AffineOperationsTest {
                  28, 30, 32), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrepend2D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrepend2D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1695,8 +1844,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void prepend2DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prepend2DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(
                 new Affine(20, 22, 24,
@@ -1706,8 +1856,9 @@ public class AffineOperationsTest {
                  28, 30, 32), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppend3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppend3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1723,8 +1874,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void append3DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void append3DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a,
                 new Affine(20, 22, 24, 26,
@@ -1736,8 +1888,9 @@ public class AffineOperationsTest {
                  36, 38, 40, 42), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrepend3D() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrepend3D(Affine affine) {
         Affine a = affine.clone();
         assertStateOk(a);
 
@@ -1753,8 +1906,9 @@ public class AffineOperationsTest {
         assertAffineOk(res, a);
     }
 
-    @Test
-    public void prepend3DShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prepend3DShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(
                 new Affine(20, 22, 24, 26,
@@ -1766,11 +1920,13 @@ public class AffineOperationsTest {
                  36, 38, 40, 42), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppendTransform() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendTransform(Affine affine) {
         int counter = 0;
-        for (Object o : TransformOperationsTest.getParams()) {
-            Object[] arr = (Object[]) o;
+        List<Arguments> arguments = TransformOperationsTest.getParams().toList();
+        for (Arguments arg : arguments) {
+            Object[] arr = arg.get();
             Transform other = (Transform) arr[0];
 
             Affine a = affine.clone();
@@ -1782,14 +1938,18 @@ public class AffineOperationsTest {
         }
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testAppendNullTransform() {
-        Affine a = affine.clone();
-        a.append((Transform) null);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendNullTransform(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.append((Transform) null);
+        });
     }
 
-    @Test
-    public void appendTransformShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendTransformShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a,
                 new Affine(20, 22, 24, 26,
@@ -1802,11 +1962,13 @@ public class AffineOperationsTest {
                  36, 38, 40, 42)), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testPrependTransform() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependTransform(Affine affine) {
         int counter = 0;
-        for (Object o : TransformOperationsTest.getParams()) {
-            Object[] arr = (Object[]) o;
+        List<Arguments> arguments = TransformOperationsTest.getParams().toList();
+        for (Arguments arg : arguments) {
+            Object[] arr = arg.get();
             Transform other = (Transform) arr[0];
 
             Affine a = affine.clone();
@@ -1820,14 +1982,18 @@ public class AffineOperationsTest {
         }
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testPrependNullTransform() {
-        Affine a = affine.clone();
-        a.prepend((Transform) null);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependNullTransform(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.prepend((Transform) null);
+        });
     }
 
-    @Test
-    public void prependTransformShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependTransformShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(
                 new Affine(20, 22, 24, 26,
@@ -1840,8 +2006,9 @@ public class AffineOperationsTest {
                  36, 38, 40, 42)), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void testAppendArray() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendArray(Affine affine) {
 
         Affine a = affine.clone();
         a.append(array2d, MatrixType.MT_2D_2x3, 2);
@@ -1876,20 +2043,27 @@ public class AffineOperationsTest {
                    10, 11, 12, 13)));
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testAppendArrayNullMatrix() {
-        Affine a = new Affine();
-        a.append(new double[] { 1, 2, 3 }, null, 0);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendArrayNullMatrix(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = new Affine();
+            a.append(new double[] { 1, 2, 3 }, null, 0);
+        });
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testAppendArrayNullType() {
-        Affine a = new Affine();
-        a.append(null, MatrixType.MT_2D_2x3, 0);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendArrayNullType(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = new Affine();
+            a.append(null, MatrixType.MT_2D_2x3, 0);
+        });
     }
 
-    @Test
-    public void appendArray2x3ShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendArray2x3ShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a,
                 new Affine(2,  3,  0,  4,
@@ -1899,8 +2073,9 @@ public class AffineOperationsTest {
         testOperationIsAtomic(a, () -> a.append(array2d, MatrixType.MT_2D_2x3, 2), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void appendArray3x3ShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendArray3x3ShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a,
                 new Affine(2,  3,  0,  4,
@@ -1910,8 +2085,9 @@ public class AffineOperationsTest {
         testOperationIsAtomic(a, () -> a.append(array2d, MatrixType.MT_2D_3x3, 2), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void appendArray3x4ShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendArray3x4ShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a,
                 new Affine(2,  3,  4,  5,
@@ -1921,8 +2097,9 @@ public class AffineOperationsTest {
         testOperationIsAtomic(a, () -> a.append(array3d, MatrixType.MT_3D_3x4, 2), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void appendArray4x4ShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void appendArray4x4ShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(a,
                 new Affine(2,  3,  4,  5,
@@ -1932,129 +2109,163 @@ public class AffineOperationsTest {
         testOperationIsAtomic(a, () -> a.append(array3d, MatrixType.MT_3D_4x4, 2), () -> assertAffineOk(res, a));
     }
 
-    @Test(expected=IndexOutOfBoundsException.class)
-    public void testAppendArray2x3ShortArray() {
-        Affine a = affine.clone();
-        try {
-            a.append(array2d, MatrixType.MT_2D_2x3, 6);
-        } catch(IndexOutOfBoundsException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendArray2x3ShortArray(Affine affine) {
+        assertThrows(IndexOutOfBoundsException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.append(array2d, MatrixType.MT_2D_2x3, 6);
+            } catch(IndexOutOfBoundsException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IndexOutOfBoundsException.class)
-    public void testAppendArray3x3ShortArray() {
-        Affine a = affine.clone();
-        try {
-            a.append(array2d, MatrixType.MT_2D_3x3, 4);
-        } catch(IndexOutOfBoundsException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendArray3x3ShortArray(Affine affine) {
+        assertThrows(IndexOutOfBoundsException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.append(array2d, MatrixType.MT_2D_3x3, 4);
+            } catch(IndexOutOfBoundsException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IndexOutOfBoundsException.class)
-    public void testAppendArray3x4ShortArray() {
-        Affine a = affine.clone();
-        try {
-            a.append(array3d, MatrixType.MT_3D_3x4, 7);
-        } catch(IndexOutOfBoundsException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendArray3x4ShortArray(Affine affine) {
+        assertThrows(IndexOutOfBoundsException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.append(array3d, MatrixType.MT_3D_3x4, 7);
+            } catch(IndexOutOfBoundsException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IndexOutOfBoundsException.class)
-    public void testAppendArray4x4ShortArray() {
-        Affine a = affine.clone();
-        try {
-            a.append(array3d, MatrixType.MT_3D_4x4, 4);
-        } catch(IndexOutOfBoundsException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendArray4x4ShortArray(Affine affine) {
+        assertThrows(IndexOutOfBoundsException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.append(array3d, MatrixType.MT_3D_4x4, 4);
+            } catch(IndexOutOfBoundsException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IllegalArgumentException.class)
-    public void testAppendArray3x3NotAffineX() {
-        Affine a = affine.clone();
-        try {
-            a.append(arrayZeros, MatrixType.MT_2D_3x3, 10);
-        } catch(IllegalArgumentException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendArray3x3NotAffineX(Affine affine) {
+        assertThrows(IllegalArgumentException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.append(arrayZeros, MatrixType.MT_2D_3x3, 10);
+            } catch(IllegalArgumentException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IllegalArgumentException.class)
-    public void testAppendArray3x3NotAffineY() {
-        Affine a = affine.clone();
-        try {
-            a.append(arrayZeros, MatrixType.MT_2D_3x3, 9);
-        } catch(IllegalArgumentException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendArray3x3NotAffineY(Affine affine) {
+        assertThrows(IllegalArgumentException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.append(arrayZeros, MatrixType.MT_2D_3x3, 9);
+            } catch(IllegalArgumentException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IllegalArgumentException.class)
-    public void testAppendArray3x3NotAffineT() {
-        Affine a = affine.clone();
-        try {
-            a.append(arrayZeros, MatrixType.MT_2D_3x3, 0);
-        } catch(IllegalArgumentException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendArray3x3NotAffineT(Affine affine) {
+        assertThrows(IllegalArgumentException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.append(arrayZeros, MatrixType.MT_2D_3x3, 0);
+            } catch(IllegalArgumentException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IllegalArgumentException.class)
-    public void testAppendArray4x4NotAffineX() {
-        Affine a = affine.clone();
-        try {
-            a.append(arrayZeros, MatrixType.MT_3D_4x4, 4);
-        } catch(IllegalArgumentException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendArray4x4NotAffineX(Affine affine) {
+        assertThrows(IllegalArgumentException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.append(arrayZeros, MatrixType.MT_3D_4x4, 4);
+            } catch(IllegalArgumentException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IllegalArgumentException.class)
-    public void testAppendArray4x4NotAffineY() {
-        Affine a = affine.clone();
-        try {
-            a.append(arrayZeros, MatrixType.MT_3D_4x4, 3);
-        } catch(IllegalArgumentException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendArray4x4NotAffineY(Affine affine) {
+        assertThrows(IllegalArgumentException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.append(arrayZeros, MatrixType.MT_3D_4x4, 3);
+            } catch(IllegalArgumentException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IllegalArgumentException.class)
-    public void testAppendArray4x4NotAffineZ() {
-        Affine a = affine.clone();
-        try {
-            a.append(arrayZeros, MatrixType.MT_3D_4x4, 2);
-        } catch(IllegalArgumentException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendArray4x4NotAffineZ(Affine affine) {
+        assertThrows(IllegalArgumentException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.append(arrayZeros, MatrixType.MT_3D_4x4, 2);
+            } catch(IllegalArgumentException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IllegalArgumentException.class)
-    public void testAppendArray4x4NotAffineT() {
-        Affine a = affine.clone();
-        try {
-            a.append(arrayZeros, MatrixType.MT_3D_4x4, 0);
-        } catch(IllegalArgumentException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendArray4x4NotAffineT(Affine affine) {
+        assertThrows(IllegalArgumentException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.append(arrayZeros, MatrixType.MT_3D_4x4, 0);
+            } catch(IllegalArgumentException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test
-    public void testPrependArray() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependArray(Affine affine) {
 
         Affine a = affine.clone();
         a.prepend(array2d, MatrixType.MT_2D_2x3, 2);
@@ -2089,20 +2300,27 @@ public class AffineOperationsTest {
                    10, 11, 12, 13), affine));
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testPrependArrayNullMatrix() {
-        Affine a = new Affine();
-        a.prepend(new double[] { 1, 2, 3 }, null, 0);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependArrayNullMatrix(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = new Affine();
+            a.prepend(new double[] { 1, 2, 3 }, null, 0);
+        });
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testPrependArrayNullType() {
-        Affine a = new Affine();
-        a.prepend(null, MatrixType.MT_2D_2x3, 0);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependArrayNullType(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = new Affine();
+            a.prepend(null, MatrixType.MT_2D_2x3, 0);
+        });
     }
 
-    @Test
-    public void prependArray2x3ShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependArray2x3ShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(
                 new Affine(2,  3,  0,  4,
@@ -2112,8 +2330,9 @@ public class AffineOperationsTest {
         testOperationIsAtomic(a, () -> a.prepend(array2d, MatrixType.MT_2D_2x3, 2), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void prependArray3x3ShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependArray3x3ShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(
                 new Affine(2,  3,  0,  4,
@@ -2123,8 +2342,9 @@ public class AffineOperationsTest {
         testOperationIsAtomic(a, () -> a.prepend(array2d, MatrixType.MT_2D_3x3, 2), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void prependArray3x4ShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependArray3x4ShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(
                 new Affine(2,  3,  4,  5,
@@ -2134,8 +2354,9 @@ public class AffineOperationsTest {
         testOperationIsAtomic(a, () -> a.prepend(array3d, MatrixType.MT_3D_3x4, 2), () -> assertAffineOk(res, a));
     }
 
-    @Test
-    public void prependArray4x4ShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prependArray4x4ShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
         final Transform res = TransformHelper.concatenate(
                 new Affine(2,  3,  4,  5,
@@ -2145,129 +2366,163 @@ public class AffineOperationsTest {
         testOperationIsAtomic(a, () -> a.prepend(array3d, MatrixType.MT_3D_4x4, 2), () -> assertAffineOk(res, a));
     }
 
-    @Test(expected=IndexOutOfBoundsException.class)
-    public void testPrependArray2x3ShortArray() {
-        Affine a = affine.clone();
-        try {
-            a.prepend(array2d, MatrixType.MT_2D_2x3, 6);
-        } catch(IndexOutOfBoundsException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependArray2x3ShortArray(Affine affine) {
+        assertThrows(IndexOutOfBoundsException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.prepend(array2d, MatrixType.MT_2D_2x3, 6);
+            } catch(IndexOutOfBoundsException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IndexOutOfBoundsException.class)
-    public void testPrependdArray3x3ShortArray() {
-        Affine a = affine.clone();
-        try {
-            a.prepend(array2d, MatrixType.MT_2D_3x3, 4);
-        } catch(IndexOutOfBoundsException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependdArray3x3ShortArray(Affine affine) {
+        assertThrows(IndexOutOfBoundsException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.prepend(array2d, MatrixType.MT_2D_3x3, 4);
+            } catch(IndexOutOfBoundsException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IndexOutOfBoundsException.class)
-    public void testPrependArray3x4ShortArray() {
-        Affine a = affine.clone();
-        try {
-            a.prepend(array3d, MatrixType.MT_3D_3x4, 7);
-        } catch(IndexOutOfBoundsException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependArray3x4ShortArray(Affine affine) {
+        assertThrows(IndexOutOfBoundsException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.prepend(array3d, MatrixType.MT_3D_3x4, 7);
+            } catch(IndexOutOfBoundsException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IndexOutOfBoundsException.class)
-    public void testPrependArray4x4ShortArray() {
-        Affine a = affine.clone();
-        try {
-            a.prepend(array3d, MatrixType.MT_3D_4x4, 4);
-        } catch(IndexOutOfBoundsException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testPrependArray4x4ShortArray(Affine affine) {
+        assertThrows(IndexOutOfBoundsException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.prepend(array3d, MatrixType.MT_3D_4x4, 4);
+            } catch(IndexOutOfBoundsException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IllegalArgumentException.class)
-    public void prestPrependArray3x3NotAffineX() {
-        Affine a = affine.clone();
-        try {
-            a.prepend(arrayZeros, MatrixType.MT_2D_3x3, 10);
-        } catch(IllegalArgumentException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prestPrependArray3x3NotAffineX(Affine affine) {
+        assertThrows(IllegalArgumentException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.prepend(arrayZeros, MatrixType.MT_2D_3x3, 10);
+            } catch(IllegalArgumentException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IllegalArgumentException.class)
-    public void prestPrependArray3x3NotAffineY() {
-        Affine a = affine.clone();
-        try {
-            a.prepend(arrayZeros, MatrixType.MT_2D_3x3, 9);
-        } catch(IllegalArgumentException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prestPrependArray3x3NotAffineY(Affine affine) {
+        assertThrows(IllegalArgumentException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.prepend(arrayZeros, MatrixType.MT_2D_3x3, 9);
+            } catch(IllegalArgumentException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IllegalArgumentException.class)
-    public void prestPrependArray3x3NotAffineT() {
-        Affine a = affine.clone();
-        try {
-            a.prepend(arrayZeros, MatrixType.MT_2D_3x3, 0);
-        } catch(IllegalArgumentException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prestPrependArray3x3NotAffineT(Affine affine) {
+        assertThrows(IllegalArgumentException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.prepend(arrayZeros, MatrixType.MT_2D_3x3, 0);
+            } catch(IllegalArgumentException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IllegalArgumentException.class)
-    public void prestPrependArray4x4NotAffineX() {
-        Affine a = affine.clone();
-        try {
-            a.prepend(arrayZeros, MatrixType.MT_3D_4x4, 4);
-        } catch(IllegalArgumentException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prestPrependArray4x4NotAffineX(Affine affine) {
+        assertThrows(IllegalArgumentException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.prepend(arrayZeros, MatrixType.MT_3D_4x4, 4);
+            } catch(IllegalArgumentException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IllegalArgumentException.class)
-    public void prestPrependArray4x4NotAffineY() {
-        Affine a = affine.clone();
-        try {
-            a.prepend(arrayZeros, MatrixType.MT_3D_4x4, 3);
-        } catch(IllegalArgumentException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prestPrependArray4x4NotAffineY(Affine affine) {
+        assertThrows(IllegalArgumentException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.prepend(arrayZeros, MatrixType.MT_3D_4x4, 3);
+            } catch(IllegalArgumentException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IllegalArgumentException.class)
-    public void prestPrependArray4x4NotAffineZ() {
-        Affine a = affine.clone();
-        try {
-            a.prepend(arrayZeros, MatrixType.MT_3D_4x4, 2);
-        } catch(IllegalArgumentException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prestPrependArray4x4NotAffineZ(Affine affine) {
+        assertThrows(IllegalArgumentException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.prepend(arrayZeros, MatrixType.MT_3D_4x4, 2);
+            } catch(IllegalArgumentException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test(expected=IllegalArgumentException.class)
-    public void prestPrependArray4x4NotAffineT() {
-        Affine a = affine.clone();
-        try {
-            a.prepend(arrayZeros, MatrixType.MT_3D_4x4, 0);
-        } catch(IllegalArgumentException e) {
-            TransformHelper.assertMatrix(a, affine);
-            throw e;
-        }
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void prestPrependArray4x4NotAffineT(Affine affine) {
+        assertThrows(IllegalArgumentException.class, () -> {
+            Affine a = affine.clone();
+            try {
+                a.prepend(arrayZeros, MatrixType.MT_3D_4x4, 0);
+            } catch(IllegalArgumentException e) {
+                TransformHelper.assertMatrix(a, affine);
+                throw e;
+            }
+        });
     }
 
-    @Test
-    public void testInvert() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testInvert(Affine affine) {
         Affine a = affine.clone();
         Transform expected = null;
 
@@ -2297,8 +2552,9 @@ public class AffineOperationsTest {
         assertStateOk(a);
     }
 
-    @Test
-    public void invertShouldBeAtomic() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void invertShouldBeAtomic(Affine affine) {
         final Affine a = affine.clone();
 
         try {
@@ -2321,8 +2577,9 @@ public class AffineOperationsTest {
 
     }
 
-    @Test
-    public void testAppendInverse() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testAppendInverse(Affine affine) {
         final Affine a = affine.clone();
         final Affine i = affine.clone();
 
@@ -2365,8 +2622,9 @@ public class AffineOperationsTest {
         }
     }
 
-    @Test
-    public void testSetElement() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testSetElement(Affine affine) {
         Affine a = affine.clone();
         boolean is2d = TransformShim.computeIs2D(affine);
 
@@ -2509,13 +2767,18 @@ public class AffineOperationsTest {
                 affine.getTz() + 1000), a);
     }
 
-    @Test(expected=NullPointerException.class)
-    public void testSetElementNullType() {
-        Affine a = affine.clone();
-        a.setElement(null, 0, 0, 0);
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void testSetElementNullType(Affine affine) {
+        assertThrows(NullPointerException.class, () -> {
+            Affine a = affine.clone();
+            a.setElement(null, 0, 0, 0);
+        });
     }
 
-    @Test public void nonInvertibleExceptionShoudCancelAtomicOperation() {
+    @ParameterizedTest
+    @MethodSource("getParams")
+    public void nonInvertibleExceptionShoudCancelAtomicOperation(Affine affine) {
         Affine a = affine.clone();
         try {
             a.invert();

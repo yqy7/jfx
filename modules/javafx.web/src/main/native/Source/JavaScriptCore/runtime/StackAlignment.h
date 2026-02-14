@@ -38,22 +38,32 @@ constexpr unsigned stackAlignmentRegisters()
 {
     return stackAlignmentBytes() / sizeof(EncodedJSValue);
 }
+static_assert(stackAlignmentRegisters() == 2, "LLInt, CLoop, and JIT rely on this");
+
+// The number of bytes the SP needs to be adjusted downwards to get an aligned SP after a function prologue.
+// I.e.: (callFrameRegister - stackAdjustmentForAlignment()) % stackAlignmentBytes() == 0 always;
+constexpr unsigned stackAdjustmentForAlignment()
+{
+    if (constexpr unsigned excess = sizeof(CallerFrameAndPC) % stackAlignmentBytes())
+        return stackAlignmentBytes() - excess;
+    return 0;
+}
 
 // Align argument count taking into account the CallFrameHeaderSize may be
 // an "unaligned" count of registers.
-inline unsigned roundArgumentCountToAlignFrame(unsigned argumentCount)
+constexpr unsigned roundArgumentCountToAlignFrame(unsigned argumentCount)
 {
     return WTF::roundUpToMultipleOf(stackAlignmentRegisters(), argumentCount + CallFrame::headerSizeInRegisters) - CallFrame::headerSizeInRegisters;
 }
 
 // Align local register count to make the last local end on a stack aligned address given the
 // CallFrame is at an address that is stack aligned minus CallerFrameAndPC::sizeInRegisters
-inline unsigned roundLocalRegisterCountForFramePointerOffset(unsigned localRegisterCount)
+constexpr unsigned roundLocalRegisterCountForFramePointerOffset(unsigned localRegisterCount)
 {
     return WTF::roundUpToMultipleOf(stackAlignmentRegisters(), localRegisterCount + CallerFrameAndPC::sizeInRegisters) - CallerFrameAndPC::sizeInRegisters;
 }
 
-inline unsigned argumentCountForStackSize(unsigned sizeInBytes)
+constexpr unsigned argumentCountForStackSize(unsigned sizeInBytes)
 {
     unsigned sizeInRegisters = sizeInBytes / sizeof(void*);
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,9 @@ import javafx.collections.ObservableList;
 import javafx.scene.Node;
 
 import com.sun.javafx.collections.TrackableObservableList;
+import com.sun.javafx.css.BinarySerializer;
+import com.sun.javafx.css.RuleHelper;
+import com.sun.javafx.css.media.MediaRule;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -47,6 +50,17 @@ import java.util.Set;
  */
 final public class Rule {
 
+    static {
+        RuleHelper.setAccessor(new RuleHelper.Accessor() {
+            @Override
+            public MediaRule getMediaRule(Rule rule) {
+                return rule.mediaRule;
+            }
+        });
+    }
+
+    private final MediaRule mediaRule;
+
     private List<Selector> selectors = null;
 
     /**
@@ -55,7 +69,7 @@ final public class Rule {
      */
     List<Selector>  getUnobservedSelectorList() {
         if (selectors == null) {
-            selectors = new ArrayList<Selector>();
+            selectors = new ArrayList<>();
         }
         return selectors;
     }
@@ -74,7 +88,7 @@ final public class Rule {
                 DataInputStream dis = new DataInputStream(bis);
 
                 short nDeclarations = dis.readShort();
-                declarations = new ArrayList<Declaration>(nDeclarations);
+                declarations = new ArrayList<>(nDeclarations);
                 for (int i = 0; i < nDeclarations; i++) {
 
                     Declaration decl = Declaration.readBinary(bssVersion, dis, stylesheet.getStringStore());
@@ -168,12 +182,11 @@ final public class Rule {
         return stylesheet != null ? stylesheet.getOrigin() : null;
     }
 
-
-    Rule(List<Selector> selectors, List<Declaration> declarations) {
-
+    Rule(MediaRule mediaRule, List<Selector> selectors, List<Declaration> declarations) {
+        this.mediaRule = mediaRule;
         this.selectors = selectors;
         this.declarations = declarations;
-        serializedDecls = null;
+        this.serializedDecls = null;
         this.bssVersion = Stylesheet.BINARY_CSS_VERSION;
 
         int sMax = selectors != null ? selectors.size() : 0;
@@ -192,8 +205,8 @@ final public class Rule {
     private byte[] serializedDecls;
     private final int bssVersion;
 
-    private Rule(List<Selector> selectors, byte[] buf, int bssVersion) {
-
+    private Rule(MediaRule mediaRule, List<Selector> selectors, byte[] buf, int bssVersion) {
+        this.mediaRule = mediaRule;
         this.selectors = selectors;
         this.declarations = null;
         this.serializedDecls = buf;
@@ -254,7 +267,7 @@ final public class Rule {
 
             this.rule = rule;
 
-            selectorObservableList = new TrackableObservableList<Selector>(rule.getUnobservedSelectorList()) {
+            selectorObservableList = new TrackableObservableList<>(rule.getUnobservedSelectorList()) {
                 @Override protected void onChanged(Change<Selector> c) {
                     while (c.next()) {
                         if (c.wasAdded()) {
@@ -266,7 +279,7 @@ final public class Rule {
                         }
 
                         if (c.wasRemoved()) {
-                            List<Selector> removed = c.getAddedSubList();
+                            List<Selector> removed = c.getRemoved();
                             for(int i = 0, max = removed.size(); i < max; i++) {
                                 Selector sel = removed.get(i);
                                 if (sel.getRule() == Observables.this.rule) {
@@ -278,7 +291,7 @@ final public class Rule {
                 }
             };
 
-            declarationObservableList = new TrackableObservableList<Declaration>(rule.getUnobservedDeclarationList()) {
+            declarationObservableList = new TrackableObservableList<>(rule.getUnobservedDeclarationList()) {
                 @Override protected void onChanged(Change<Declaration> c) {
                     while (c.next()) {
                         if (c.wasAdded()) {
@@ -326,12 +339,18 @@ final public class Rule {
 
     final void writeBinary(DataOutputStream os, StyleConverter.StringStore stringStore)
             throws IOException {
+        if (mediaRule != null) {
+            os.writeBoolean(true); // flag to indicate whether we have a media rule
+            mediaRule.writeBinary(os, stringStore);
+        } else {
+            os.writeBoolean(false);
+        }
 
         final int nSelectors = this.selectors != null ? this.selectors.size() : 0;
         os.writeShort(nSelectors);
         for (int i = 0; i < nSelectors; i++) {
             Selector sel = this.selectors.get(i);
-            sel.writeBinary(os, stringStore);
+            BinarySerializer.write(sel, os, stringStore);
         }
 
         List<Declaration> decls = getUnobservedDeclarationList();
@@ -360,22 +379,33 @@ final public class Rule {
     static Rule readBinary(int bssVersion, DataInputStream is, String[] strings)
             throws IOException
     {
+        MediaRule mediaRule = null;
+
+        // see Stylesheet.BINARY_CSS_VERSION
+        if (bssVersion >= 7) {
+            boolean hasMediaRule = is.readBoolean();
+            if (hasMediaRule) {
+                mediaRule = MediaRule.readBinary(is, strings);
+            }
+        }
+
         short nSelectors = is.readShort();
-        List<Selector> selectors = new ArrayList<Selector>(nSelectors);
+        List<Selector> selectors = new ArrayList<>(nSelectors);
         for (int i = 0; i < nSelectors; i++) {
-            Selector s = Selector.readBinary(bssVersion, is, strings);
+            Selector s = BinarySerializer.read(is, strings);
             selectors.add(s);
         }
 
+        // see Stylesheet.BINARY_CSS_VERSION
         if (bssVersion < 4) {
             short nDeclarations = is.readShort();
-            List<Declaration> declarations = new ArrayList<Declaration>(nDeclarations);
+            List<Declaration> declarations = new ArrayList<>(nDeclarations);
             for (int i = 0; i < nDeclarations; i++) {
                 Declaration d = Declaration.readBinary(bssVersion, is, strings);
                 declarations.add(d);
             }
 
-            return new Rule(selectors, declarations);
+            return new Rule(null, selectors, declarations);
         }
 
         // de-serialize decls into byte array
@@ -385,6 +415,6 @@ final public class Rule {
         if (nBytes > 0) {
             is.readFully(buf);
         }
-        return new Rule(selectors, buf, bssVersion);
+        return new Rule(mediaRule, selectors, buf, bssVersion);
     }
 }

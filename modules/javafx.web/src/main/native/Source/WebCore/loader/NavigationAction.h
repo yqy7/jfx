@@ -43,10 +43,15 @@
 namespace WebCore {
 
 class Document;
+class Element;
 class Event;
 class HistoryItem;
 class MouseEvent;
 class UIEventWithKeyState;
+
+enum class SyntheticClickType : uint8_t;
+enum class MouseButton : int8_t;
+enum class NavigationNavigationType : uint8_t;
 
 // NavigationAction should never hold a strong reference to the originating document either directly
 // or indirectly as doing so prevents its destruction even after navigating away from it because
@@ -54,8 +59,8 @@ class UIEventWithKeyState;
 class NavigationAction {
 public:
     NavigationAction();
-    WEBCORE_EXPORT NavigationAction(Document&, const ResourceRequest&, InitiatedByMainFrame, NavigationType = NavigationType::Other, ShouldOpenExternalURLsPolicy = ShouldOpenExternalURLsPolicy::ShouldNotAllow, Event* = nullptr, const AtomString& downloadAttribute = nullAtom());
-    NavigationAction(Document&, const ResourceRequest&, InitiatedByMainFrame, FrameLoadType, bool isFormSubmission, Event* = nullptr, ShouldOpenExternalURLsPolicy = ShouldOpenExternalURLsPolicy::ShouldNotAllow, const AtomString& downloadAttribute = nullAtom());
+    WEBCORE_EXPORT NavigationAction(Document&, const ResourceRequest&, InitiatedByMainFrame, bool, NavigationType = NavigationType::Other, ShouldOpenExternalURLsPolicy = ShouldOpenExternalURLsPolicy::ShouldNotAllow, Event* = nullptr, const AtomString& downloadAttribute = nullAtom(), Element* sourceElement = nullptr);
+    NavigationAction(Document&, const ResourceRequest&, InitiatedByMainFrame, bool, FrameLoadType, bool isFormSubmission, Event* = nullptr, ShouldOpenExternalURLsPolicy = ShouldOpenExternalURLsPolicy::ShouldNotAllow, const AtomString& downloadAttribute = nullAtom(), Element* sourceElement = nullptr);
 
     WEBCORE_EXPORT ~NavigationAction();
 
@@ -81,8 +86,8 @@ public:
 
         LayoutPoint absoluteLocation;
         FloatPoint locationInRootViewCoordinates;
-        short button;
-        unsigned short syntheticClickType;
+        MouseButton button;
+        SyntheticClickType syntheticClickType;
         bool buttonDown;
     };
     const std::optional<UIEventWithKeyStateData>& keyStateEventData() const { return m_keyStateEventData; }
@@ -90,10 +95,10 @@ public:
 
     NavigationAction copyWithShouldOpenExternalURLsPolicy(ShouldOpenExternalURLsPolicy) const;
 
-    bool isEmpty() const { return !m_requester || m_requester->url.isEmpty() || m_resourceRequest.url().isEmpty(); }
+    bool isEmpty() const { return !m_requester || m_requester->url.isEmpty() || m_originalRequest.url().isEmpty(); }
 
-    URL url() const { return m_resourceRequest.url(); }
-    const ResourceRequest& resourceRequest() const { return m_resourceRequest; }
+    URL url() const { return m_originalRequest.url(); }
+    const ResourceRequest& originalRequest() const { return m_originalRequest; }
 
     NavigationType type() const { return m_type; }
 
@@ -106,6 +111,8 @@ public:
 
     const AtomString& downloadAttribute() const { return m_downloadAttribute; }
 
+    Element* sourceElement() const { return m_sourceElement.get(); }
+
     bool treatAsSameOriginNavigation() const { return m_treatAsSameOriginNavigation; }
 
     bool hasOpenedFrames() const { return m_hasOpenedFrames; }
@@ -113,6 +120,9 @@ public:
 
     bool openedByDOMWithOpener() const { return m_openedByDOMWithOpener; }
     void setOpenedByDOMWithOpener() { m_openedByDOMWithOpener = true; }
+
+    NewFrameOpenerPolicy newFrameOpenerPolicy() const { return m_newFrameOpenerPolicy; }
+    void setNewFrameOpenerPolicy(NewFrameOpenerPolicy newFrameOpenerPolicy) { m_newFrameOpenerPolicy = newFrameOpenerPolicy; }
 
     void setTargetBackForwardItem(HistoryItem&);
     const std::optional<BackForwardItemIdentifier>& targetBackForwardItemIdentifier() const { return m_targetBackForwardItemIdentifier; }
@@ -134,27 +144,51 @@ public:
     ShouldReplaceDocumentIfJavaScriptURL shouldReplaceDocumentIfJavaScriptURL() const { return m_shouldReplaceDocumentIfJavaScriptURL; }
     void setShouldReplaceDocumentIfJavaScriptURL(ShouldReplaceDocumentIfJavaScriptURL shouldReplaceDocumentIfJavaScriptURL) { m_shouldReplaceDocumentIfJavaScriptURL = shouldReplaceDocumentIfJavaScriptURL; }
 
+    bool isRequestFromClientOrUserInput() const { return m_isRequestFromClientOrUserInput; }
+    void setIsRequestFromClientOrUserInput(bool isRequestFromClientOrUserInput) { m_isRequestFromClientOrUserInput = isRequestFromClientOrUserInput; }
+
+    bool isInitialFrameSrcLoad() const { return m_isInitialFrameSrcLoad; }
+    void setIsInitialFrameSrcLoad(bool isInitialFrameSrcLoad) { m_isInitialFrameSrcLoad = isInitialFrameSrcLoad; }
+
+    bool isContentRuleListRedirect() const { return m_isContentRuleListRedirect; }
+    void setIsContentRuleListRedirect(bool isContentRuleListRedirect) { m_isContentRuleListRedirect = isContentRuleListRedirect; }
+
+    std::optional<NavigationNavigationType> navigationAPIType() const { return m_navigationAPIType; }
+    void setNavigationAPIType(NavigationNavigationType navigationAPIType) { m_navigationAPIType = navigationAPIType; }
+
+    bool isFromNavigationAPI() const { return m_isFromNavigationAPI; }
+    void setIsFromNavigationAPI(bool isFromNavigationAPI) { m_isFromNavigationAPI = isFromNavigationAPI; }
+
 private:
     // Do not add a strong reference to the originating document or a subobject that holds the
     // originating document. See comment above the class for more details.
     std::optional<NavigationRequester> m_requester;
-    ResourceRequest m_resourceRequest;
-    NavigationType m_type;
-    ShouldOpenExternalURLsPolicy m_shouldOpenExternalURLsPolicy;
-    InitiatedByMainFrame m_initiatedByMainFrame;
+    ResourceRequest m_originalRequest;
     std::optional<UIEventWithKeyStateData> m_keyStateEventData;
     std::optional<MouseEventData> m_mouseEventData;
     RefPtr<UserGestureToken> m_userGestureToken { UserGestureIndicator::currentUserGesture() };
     AtomString m_downloadAttribute;
-    bool m_treatAsSameOriginNavigation;
-    bool m_hasOpenedFrames { false };
-    bool m_openedByDOMWithOpener { false };
+    RefPtr<Element> m_sourceElement;
     std::optional<BackForwardItemIdentifier> m_targetBackForwardItemIdentifier;
     std::optional<BackForwardItemIdentifier> m_sourceBackForwardItemIdentifier;
-    LockHistory m_lockHistory { LockHistory::No };
-    LockBackForwardList m_lockBackForwardList { LockBackForwardList::No };
     std::optional<PrivateClickMeasurement> m_privateClickMeasurement;
     ShouldReplaceDocumentIfJavaScriptURL m_shouldReplaceDocumentIfJavaScriptURL { ReplaceDocumentIfJavaScriptURL };
+
+    NavigationType m_type;
+    std::optional<NavigationNavigationType> m_navigationAPIType;
+    ShouldOpenExternalURLsPolicy m_shouldOpenExternalURLsPolicy;
+    InitiatedByMainFrame m_initiatedByMainFrame;
+
+    bool m_treatAsSameOriginNavigation { false };
+    bool m_hasOpenedFrames { false };
+    bool m_openedByDOMWithOpener { false };
+    bool m_isRequestFromClientOrUserInput { false };
+    bool m_isInitialFrameSrcLoad { false };
+    bool m_isContentRuleListRedirect { false };
+    LockHistory m_lockHistory { LockHistory::No };
+    LockBackForwardList m_lockBackForwardList { LockBackForwardList::No };
+    NewFrameOpenerPolicy m_newFrameOpenerPolicy { NewFrameOpenerPolicy::Allow };
+    bool m_isFromNavigationAPI { false };
 };
 
 } // namespace WebCore

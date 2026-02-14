@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,6 +28,9 @@
 
 #include "ContentSecurityPolicy.h"
 #include "Document.h"
+#include "DocumentInlines.h"
+#include "JSDOMPromiseDeferred.h"
+#include "Page.h"
 #include "ScriptSourceCode.h"
 #include "SecurityOrigin.h"
 #include "WorkerRunLoop.h"
@@ -36,15 +39,16 @@
 #include "WorkletPendingTasks.h"
 #include <JavaScriptCore/IdentifiersFactory.h>
 #include <wtf/CrossThreadCopier.h>
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
+#include <wtf/text/MakeString.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(Worklet);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(Worklet);
 
 Worklet::Worklet(Document& document)
     : ActiveDOMObject(&document)
-    , m_identifier("worklet:" + Inspector::IdentifiersFactory::createIdentifier())
+    , m_identifier(makeString("worklet:"_s, Inspector::IdentifiersFactory::createIdentifier()))
 {
 }
 
@@ -58,20 +62,20 @@ Document* Worklet::document()
 // https://www.w3.org/TR/worklets-1/#dom-worklet-addmodule
 void Worklet::addModule(const String& moduleURLString, WorkletOptions&& options, DOMPromiseDeferred<void>&& promise)
 {
-    auto* document = this->document();
-    if (!document) {
-        promise.reject(Exception { InvalidStateError, "This frame is detached"_s });
+    RefPtr document = this->document();
+    if (!document || !document->page()) {
+        promise.reject(Exception { ExceptionCode::InvalidStateError, "This frame is detached"_s });
         return;
     }
 
     URL moduleURL = document->completeURL(moduleURLString);
     if (!moduleURL.isValid()) {
-        promise.reject(Exception { SyntaxError, "Module URL is invalid"_s });
+        promise.reject(Exception { ExceptionCode::SyntaxError, "Module URL is invalid"_s });
         return;
     }
 
-    if (!document->contentSecurityPolicy()->allowScriptFromSource(moduleURL)) {
-        promise.reject(Exception { SecurityError, "Not allowed by CSP"_s });
+    if (!document->checkedContentSecurityPolicy()->allowScriptFromSource(moduleURL)) {
+        promise.reject(Exception { ExceptionCode::SecurityError, "Not allowed by CSP"_s });
         return;
     }
 
@@ -84,7 +88,7 @@ void Worklet::addModule(const String& moduleURLString, WorkletOptions&& options,
     for (auto& proxy : m_proxies) {
         proxy->postTaskForModeToWorkletGlobalScope([pendingTasks = pendingTasks.copyRef(), moduleURL = moduleURL.isolatedCopy(), credentials = options.credentials, pendingActivity = makePendingActivity(*this)](ScriptExecutionContext& context) mutable {
             downcast<WorkletGlobalScope>(context).fetchAndInvokeScript(moduleURL, credentials, [pendingTasks = WTFMove(pendingTasks), pendingActivity = WTFMove(pendingActivity)](std::optional<Exception>&& exception) mutable {
-                callOnMainThread([pendingTasks = WTFMove(pendingTasks), exception = crossThreadCopy(exception), pendingActivity = WTFMove(pendingActivity)]() mutable {
+                callOnMainThread([pendingTasks = WTFMove(pendingTasks), exception = crossThreadCopy(WTFMove(exception)), pendingActivity = WTFMove(pendingActivity)]() mutable {
                     if (exception)
                         pendingTasks->abort(WTFMove(*exception));
                     else
@@ -101,11 +105,6 @@ void Worklet::finishPendingTasks(WorkletPendingTasks& tasks)
     ASSERT(m_pendingTasksSet.contains(&tasks));
 
     m_pendingTasksSet.remove(&tasks);
-}
-
-const char* Worklet::activeDOMObjectName() const
-{
-    return "Worklet";
 }
 
 } // namespace WebCore

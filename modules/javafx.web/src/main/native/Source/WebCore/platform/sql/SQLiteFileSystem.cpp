@@ -31,27 +31,32 @@
 #include "config.h"
 #include "SQLiteFileSystem.h"
 
+#include "Logging.h"
 #include "SQLiteDatabase.h"
 #include "SQLiteStatement.h"
 #include <pal/crypto/CryptoDigest.h>
 #include <sqlite3.h>
 #include <wtf/FileSystem.h>
+#include <wtf/HexNumber.h>
+#include <wtf/text/MakeString.h>
 
-#if PLATFORM(IOS_FAMILY)
-#include <pal/spi/ios/SQLite3SPI.h>
+#if PLATFORM(COCOA)
+#include <pal/spi/cocoa/SQLite3SPI.h>
+#endif
+
+#if PLATFORM(COCOA)
+#include <sys/xattr.h>
 #endif
 
 namespace WebCore {
 
-static constexpr std::array<const char *, 3> databaseFileSuffixes { "", "-shm", "-wal" };
+static constexpr std::array<ASCIILiteral, 3> databaseFileSuffixes { ""_s, "-shm"_s, "-wal"_s };
 
-SQLiteFileSystem::SQLiteFileSystem()
-{
-}
+SQLiteFileSystem::SQLiteFileSystem() = default;
 
-String SQLiteFileSystem::appendDatabaseFileNameToPath(const String& path, const String& fileName)
+String SQLiteFileSystem::appendDatabaseFileNameToPath(StringView path, StringView fileName)
 {
-    return FileSystem::pathByAppendingComponent(path, fileName);
+   return FileSystem::pathByAppendingComponent(path, fileName);
 }
 
 bool SQLiteFileSystem::ensureDatabaseDirectoryExists(const String& path)
@@ -82,8 +87,8 @@ bool SQLiteFileSystem::deleteEmptyDatabaseDirectory(const String& path)
 bool SQLiteFileSystem::deleteDatabaseFile(const String& filePath)
 {
     bool fileExists = false;
-    for (const auto* suffix : databaseFileSuffixes) {
-        String path = filePath + suffix;
+    for (auto suffix : databaseFileSuffixes) {
+        auto path = makeString(filePath, suffix);
         FileSystem::deleteFile(path);
         fileExists |= FileSystem::fileExists(path);
     }
@@ -91,13 +96,29 @@ bool SQLiteFileSystem::deleteDatabaseFile(const String& filePath)
     return !fileExists;
 }
 
-void SQLiteFileSystem::moveDatabaseFile(const String& oldFilePath, const String& newFilePath)
+#if PLATFORM(COCOA)
+void SQLiteFileSystem::setCanSuspendLockedFileAttribute(const String& filePath)
 {
-    for (const auto* suffix : databaseFileSuffixes)
-        FileSystem::moveFile(makeString(oldFilePath, suffix), makeString(newFilePath, suffix));
+    for (auto suffix : databaseFileSuffixes) {
+        auto path = makeString(filePath, suffix);
+        char excluded = 0xff;
+        auto result = setxattr(FileSystem::fileSystemRepresentation(path).data(), "com.apple.runningboard.can-suspend-locked", &excluded, sizeof(excluded), 0, 0);
+        if (result < 0 && suffix == ""_s)
+            RELEASE_LOG_ERROR(SQLDatabase, "SQLiteFileSystem::setCanSuspendLockedFileAttribute: setxattr failed: %" PUBLIC_LOG_STRING, strerror(errno));
+    }
+}
+#endif
+
+bool SQLiteFileSystem::moveDatabaseFile(const String& oldFilePath, const String& newFilePath)
+{
+    bool allMoved = true;
+    for (auto suffix : databaseFileSuffixes)
+        allMoved &= FileSystem::moveFile(makeString(oldFilePath, suffix), makeString(newFilePath, suffix));
+
+    return allMoved;
 }
 
-#if PLATFORM(IOS_FAMILY)
+#if PLATFORM(COCOA) && !PLATFORM(JAVA)
 bool SQLiteFileSystem::truncateDatabaseFile(sqlite3* database)
 {
     return sqlite3_file_control(database, 0, SQLITE_TRUNCATE_DATABASE, 0) == SQLITE_OK;
@@ -107,8 +128,8 @@ bool SQLiteFileSystem::truncateDatabaseFile(sqlite3* database)
 uint64_t SQLiteFileSystem::databaseFileSize(const String& filePath)
 {
     uint64_t totalSize = 0;
-    for (const auto* suffix : databaseFileSuffixes) {
-        if (auto fileSize = FileSystem::fileSize(filePath + suffix))
+    for (auto suffix : databaseFileSuffixes) {
+        if (auto fileSize = FileSystem::fileSize(makeString(filePath, suffix)))
             totalSize += *fileSize;
     }
 
@@ -125,23 +146,12 @@ std::optional<WallTime> SQLiteFileSystem::databaseModificationTime(const String&
     return FileSystem::fileModificationTime(fileName);
 }
 
-String SQLiteFileSystem::computeHashForFileName(const String& fileName)
+String SQLiteFileSystem::computeHashForFileName(StringView fileName)
 {
     auto cryptoDigest = PAL::CryptoDigest::create(PAL::CryptoDigest::Algorithm::SHA_256);
     auto utf8FileName = fileName.utf8();
-    cryptoDigest->addBytes(utf8FileName.data(), utf8FileName.length());
-    auto digest = cryptoDigest->computeHash();
-
-    // Convert digest to hex.
-    char* start = 0;
-    unsigned digestLength = digest.size();
-    CString result = CString::newUninitialized(digestLength * 2, start);
-    char* buffer = start;
-    for (size_t i = 0; i < digestLength; ++i) {
-        snprintf(buffer, 3, "%02X", digest.at(i));
-        buffer += 2;
-    }
-    return String::fromUTF8(result);
+    cryptoDigest->addBytes(byteCast<uint8_t>(utf8FileName.span()));
+    return cryptoDigest->toHexString();
 }
 
 } // namespace WebCore

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,6 +30,7 @@
 #include "VM.h"
 #include <mutex>
 #include <wtf/NoTailCalls.h>
+#include <wtf/TZoneMallocInlines.h>
 
 #if USE(GLIB_EVENT_LOOP)
 #include <glib.h>
@@ -38,18 +39,14 @@
 
 namespace JSC {
 
-static inline JSRunLoopTimer::Manager::EpochTime epochTime(Seconds delay)
-{
-    return MonotonicTime::now().secondsSinceEpoch() + delay;
-}
+WTF_MAKE_TZONE_ALLOCATED_IMPL(JSRunLoopTimer::Manager);
 
 JSRunLoopTimer::Manager::PerVMData::PerVMData(Manager& manager, RunLoop& runLoop)
     : runLoop(runLoop)
-    , timer(makeUnique<RunLoop::Timer<Manager>>(runLoop, &manager, &JSRunLoopTimer::Manager::timerDidFireCallback))
+    , timer(makeUnique<RunLoop::Timer>(runLoop, "JSRunLoopTimer::Manager::PerVMData::Timer"_s, &manager, &JSRunLoopTimer::Manager::timerDidFireCallback))
 {
 #if USE(GLIB_EVENT_LOOP)
     timer->setPriority(RunLoopSourcePriority::JavascriptTimer);
-    timer->setName("[JavaScriptCore] JSRunLoopTimer");
 #endif
 }
 
@@ -73,18 +70,21 @@ void JSRunLoopTimer::Manager::timerDidFire()
 
     {
         Locker locker { m_lock };
-        RunLoop* currentRunLoop = &RunLoop::current();
-        EpochTime nowEpochTime = epochTime(0_s);
+        if (!m_mapping.isEmpty()) {
+            RunLoop* currentRunLoop = &RunLoop::currentSingleton();
+            MonotonicTime now = MonotonicTime::now();
         for (auto& entry : m_mapping) {
             PerVMData& data = *entry.value;
             if (data.runLoop.ptr() != currentRunLoop)
                 continue;
 
-            EpochTime scheduleTime = epochTime(s_decade);
+                Seconds interval = s_decade;
+                if (!data.timers.isEmpty()) {
+                    MonotonicTime scheduleTime = now + s_decade;
             for (size_t i = 0; i < data.timers.size(); ++i) {
                 {
                     auto& pair = data.timers[i];
-                    if (pair.second > nowEpochTime) {
+                            if (pair.second > now) {
                         scheduleTime = std::min(pair.second, scheduleTime);
                         continue;
                     }
@@ -97,8 +97,10 @@ void JSRunLoopTimer::Manager::timerDidFire()
                 auto pair = data.timers.takeLast();
                 timersToFire.append(WTFMove(pair.first));
             }
-
-            data.timer->startOneShot(std::max(0_s, scheduleTime - MonotonicTime::now().secondsSinceEpoch()));
+                    interval = std::max(0_s, scheduleTime - now);
+                }
+                data.timer->startOneShot(interval);
+            }
         }
     }
 
@@ -106,7 +108,7 @@ void JSRunLoopTimer::Manager::timerDidFire()
         timer->timerDidFire();
 }
 
-JSRunLoopTimer::Manager& JSRunLoopTimer::Manager::shared()
+JSRunLoopTimer::Manager& JSRunLoopTimer::Manager::singleton()
 {
     static Manager* manager;
     static std::once_flag once;
@@ -136,14 +138,15 @@ void JSRunLoopTimer::Manager::unregisterVM(VM& vm)
 
 void JSRunLoopTimer::Manager::scheduleTimer(JSRunLoopTimer& timer, Seconds delay)
 {
-    EpochTime fireEpochTime = epochTime(delay);
+    MonotonicTime now = MonotonicTime::now();
+    MonotonicTime fireEpochTime = now + delay;
 
     Locker locker { m_lock };
     auto iter = m_mapping.find(timer.m_apiLock);
     RELEASE_ASSERT(iter != m_mapping.end()); // We don't allow calling this after the VM dies.
 
     PerVMData& data = *iter->value;
-    EpochTime scheduleTime = fireEpochTime;
+    MonotonicTime scheduleTime = fireEpochTime;
     bool found = false;
     for (auto& entry : data.timers) {
         if (entry.first.ptr() == &timer) {
@@ -156,7 +159,7 @@ void JSRunLoopTimer::Manager::scheduleTimer(JSRunLoopTimer& timer, Seconds delay
     if (!found)
         data.timers.append({ timer, fireEpochTime });
 
-    data.timer->startOneShot(std::max(0_s, scheduleTime - MonotonicTime::now().secondsSinceEpoch()));
+    data.timer->startOneShot(std::max(0_s, scheduleTime - now));
 }
 
 void JSRunLoopTimer::Manager::cancelTimer(JSRunLoopTimer& timer)
@@ -169,7 +172,10 @@ void JSRunLoopTimer::Manager::cancelTimer(JSRunLoopTimer& timer)
     }
 
     PerVMData& data = *iter->value;
-    EpochTime scheduleTime = epochTime(s_decade);
+    Seconds interval = s_decade;
+    if (!data.timers.isEmpty()) {
+        MonotonicTime now = MonotonicTime::now();
+        MonotonicTime scheduleTime = now + s_decade;
     for (unsigned i = 0; i < data.timers.size(); ++i) {
         {
             auto& entry = data.timers[i];
@@ -186,8 +192,9 @@ void JSRunLoopTimer::Manager::cancelTimer(JSRunLoopTimer& timer)
 
         scheduleTime = std::min(scheduleTime, data.timers[i].second);
     }
-
-    data.timer->startOneShot(std::max(0_s, scheduleTime - MonotonicTime::now().secondsSinceEpoch()));
+        interval = std::max(0_s, scheduleTime - now);
+    }
+    data.timer->startOneShot(interval);
 }
 
 std::optional<Seconds> JSRunLoopTimer::Manager::timeUntilFire(JSRunLoopTimer& timer)
@@ -198,10 +205,8 @@ std::optional<Seconds> JSRunLoopTimer::Manager::timeUntilFire(JSRunLoopTimer& ti
 
     PerVMData& data = *iter->value;
     for (auto& entry : data.timers) {
-        if (entry.first.ptr() == &timer) {
-            EpochTime nowEpochTime = epochTime(0_s);
-            return entry.second - nowEpochTime;
-        }
+        if (entry.first.ptr() == &timer)
+            return entry.second - MonotonicTime::now();
     }
 
     return std::nullopt;
@@ -235,13 +240,11 @@ JSRunLoopTimer::JSRunLoopTimer(VM& vm)
 {
 }
 
-JSRunLoopTimer::~JSRunLoopTimer()
-{
-}
+JSRunLoopTimer::~JSRunLoopTimer() = default;
 
 std::optional<Seconds> JSRunLoopTimer::timeUntilFire()
 {
-    return Manager::shared().timeUntilFire(*this);
+    return Manager::singleton().timeUntilFire(*this);
 }
 
 void JSRunLoopTimer::setTimeUntilFire(Seconds intervalInSeconds)
@@ -249,7 +252,7 @@ void JSRunLoopTimer::setTimeUntilFire(Seconds intervalInSeconds)
     {
         Locker locker { m_lock };
         m_isScheduled = true;
-        Manager::shared().scheduleTimer(*this, intervalInSeconds);
+        Manager::singleton().scheduleTimer(*this, intervalInSeconds);
     }
 
     Locker locker { m_timerCallbacksLock };
@@ -261,7 +264,7 @@ void JSRunLoopTimer::cancelTimer()
 {
     Locker locker { m_lock };
     m_isScheduled = false;
-    Manager::shared().cancelTimer(*this);
+    Manager::singleton().cancelTimer(*this);
 }
 
 void JSRunLoopTimer::addTimerSetNotification(TimerNotificationCallback callback)

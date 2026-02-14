@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,15 +25,17 @@
 
 #include "common.h"
 
+#include <shlwapi.h>
+
 #include "GlassApplication.h"
 #include "GlassClipboard.h"
 #include "GlassScreen.h"
 #include "GlassWindow.h"
 #include "Timer.h"
+#include "RoActivationSupport.h"
 
 #include "com_sun_glass_ui_win_WinApplication.h"
 #include "com_sun_glass_ui_win_WinSystemClipboard.h"
-
 
 /**********************************
  * GlassApplication
@@ -98,7 +100,7 @@ jclass GlassApplication::ClassForName(JNIEnv *env, char *className)
     return foundClass;
 }
 
-GlassApplication::GlassApplication(jobject jrefThis) : BaseWnd()
+GlassApplication::GlassApplication(jobject jrefThis) : BaseWnd(), m_platformSupport(GetEnv(), jrefThis)
 {
     m_grefThis = GetEnv()->NewGlobalRef(jrefThis);
     m_clipboard = NULL;
@@ -121,20 +123,6 @@ GlassApplication::~GlassApplication()
 LPCTSTR GlassApplication::GetWindowClassNameSuffix()
 {
     return szGlassToolkitWindow;
-}
-
-jstring GlassApplication::GetThemeName(JNIEnv* env)
-{
-    HIGHCONTRAST contrastInfo;
-    contrastInfo.cbSize = sizeof(HIGHCONTRAST);
-    ::SystemParametersInfo(SPI_GETHIGHCONTRAST, sizeof(HIGHCONTRAST), &contrastInfo, 0);
-    if (contrastInfo.dwFlags & HCF_HIGHCONTRASTON) {
-        jsize length = (jsize) wcslen(contrastInfo.lpszDefaultScheme);
-        jstring jstr = env->NewString((jchar*) contrastInfo.lpszDefaultScheme, length);
-        if (CheckAndClearException(env)) return NULL;
-        return jstr;
-    }
-    return NULL;
 }
 
 LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
@@ -181,6 +169,10 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
             }
             break;
         case WM_SETTINGCHANGE:
+            if (m_platformSupport.onSettingChanged(wParam, lParam)) {
+                return 0;
+            }
+
             if ((UINT)wParam != SPI_SETWORKAREA) {
                 break;
             }
@@ -188,13 +180,15 @@ LRESULT GlassApplication::WindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
         case WM_DISPLAYCHANGE:
             GlassScreen::HandleDisplayChange();
             break;
-        case WM_THEMECHANGED: {
-            JNIEnv* env = GetEnv();
-            jstring themeName = GlassApplication::GetThemeName(env);
-            jboolean result = env->CallBooleanMethod(m_grefThis, javaIDs.Application.notifyThemeChangedMID, themeName);
-            if (CheckAndClearException(env)) return 1;
-            return !result;
-        }
+        case WM_THEMECHANGED:
+        case WM_SYSCOLORCHANGE:
+        case WM_DWMCOLORIZATIONCOLORCHANGED:
+            if (m_platformSupport.updatePreferences(
+                    PlatformSupport::PreferenceType(PlatformSupport::PT_SYSTEM_COLORS |
+                                                    PlatformSupport::PT_UI_SETTINGS))) {
+                return 0;
+            }
+            break;
     }
     return ::DefWindowProc(GetHWND(), msg, wParam, lParam);
 }
@@ -338,9 +332,9 @@ JNIEXPORT void JNICALL Java_com_sun_glass_ui_win_WinApplication_initIDs
     ASSERT(javaIDs.Application.reportExceptionMID);
     if (CheckAndClearException(env)) return;
 
-    javaIDs.Application.notifyThemeChangedMID =
-        env->GetMethodID(cls, "notifyThemeChanged", "(Ljava/lang/String;)Z");
-    ASSERT(javaIDs.Application.notifyThemeChangedMID);
+    javaIDs.Application.notifyPreferencesChangedMID =
+        env->GetMethodID(cls, "notifyPreferencesChanged", "(Ljava/util/Map;)V");
+    ASSERT(javaIDs.Application.notifyPreferencesChangedMID);
     if (CheckAndClearException(env)) return;
 
     //NOTE: substitute the cls
@@ -453,17 +447,6 @@ JNIEXPORT jobject JNICALL Java_com_sun_glass_ui_win_WinApplication__1enterNested
 
 /*
  * Class:     com_sun_glass_ui_win_WinApplication
- * Method:    _getHighContrastTheme
- * Signature: ()Ljava/lang/String;
- */
-JNIEXPORT jstring JNICALL Java_com_sun_glass_ui_win_WinApplication__1getHighContrastTheme
-  (JNIEnv * env, jobject self)
-{
-    return GlassApplication::GetThemeName(env);
-}
-
-/*
- * Class:     com_sun_glass_ui_win_WinApplication
  * Method:    _leaveNestedEventLoopImpl
  * Signature: (Ljava/lang/Object;)V
  */
@@ -533,6 +516,46 @@ JNIEXPORT jobjectArray JNICALL Java_com_sun_glass_ui_win_WinApplication_staticSc
     (JNIEnv * env, jobject japplication)
 {
     return GlassScreen::CreateJavaScreens(env);
+}
+
+/*
+ * Class:     com_sun_glass_ui_win_WinApplication
+ * Method:    getPlatformPreferences
+ * Signature: ()Ljava/util/Map;
+ */
+JNIEXPORT jobject JNICALL Java_com_sun_glass_ui_win_WinApplication_getPlatformPreferences
+    (JNIEnv * env, jobject self)
+{
+    return GlassApplication::GetPlatformPreferences();
+}
+
+/*
+ * Class:     com_sun_glass_ui_win_WinApplication
+ * Method:    _getDefaultBrowser
+ * Signature: ()Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_com_sun_glass_ui_win_WinApplication__1getDefaultBrowser
+        (JNIEnv *env, jclass cls)
+{
+    LPCWSTR fileExtension = L"https";
+    WCHAR defaultBrowser_c [MAX_PATH];
+    DWORD cchBuffer = MAX_PATH;
+
+    // Use AssocQueryString to get the default browser
+    HRESULT hr = AssocQueryStringW(
+        ASSOCF_NONE,            // No special flags
+        ASSOCSTR_COMMAND,       // Request the command string
+        fileExtension,          // File extension
+        NULL,                   // pszExtra (optional)
+        defaultBrowser_c,       // Output buffer - result
+        &cchBuffer              // Size of the output buffer
+    );
+
+    if (FAILED(hr)) {
+        return NULL;
+    }
+
+    return CreateJString(env, defaultBrowser_c);;
 }
 
 } // extern "C"

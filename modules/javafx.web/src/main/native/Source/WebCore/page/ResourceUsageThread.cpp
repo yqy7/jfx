@@ -29,7 +29,6 @@
 #if ENABLE(RESOURCE_USAGE)
 
 #include "CommonVM.h"
-#include "JSDOMWindow.h"
 #include <thread>
 #include <wtf/MainThread.h>
 #include <wtf/Vector.h>
@@ -118,12 +117,12 @@ void ResourceUsageThread::createThreadIfNeeded()
         return;
 
     m_vm = &commonVM();
-    m_thread = Thread::create("WebCore: ResourceUsage", [this] {
+    m_thread = Thread::create("WebCore: ResourceUsage"_s, [this] {
         threadBody();
     });
 }
 
-NO_RETURN void ResourceUsageThread::threadBody()
+[[noreturn]] void ResourceUsageThread::threadBody()
 {
     // Wait a bit after waking up for the first time.
     sleep(10_ms);

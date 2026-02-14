@@ -1,6 +1,9 @@
 /*
  * Copyright (C) 2007, 2008 Ryan Lortie
  * Copyright (C) 2010 Codethink Limited
+ * Copyright (C) 2022 Endless OS Foundation, LLC
+ *
+ * SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -31,6 +34,7 @@
 #include <glib/grefcount.h>
 #include <string.h>
 
+#include "glib_trace.h"
 
 /*
  * This file includes the structure definition for GVariant and a small
@@ -45,14 +49,6 @@
  * Most GVariant API functions are in gvariant.c.
  */
 
-/**
- * GVariant:
- *
- * #GVariant is an opaque data structure and can only be accessed
- * using the following functions.
- *
- * Since: 2.24
- **/
 struct _GVariant
 /* see below for field member documentation */
 {
@@ -65,6 +61,8 @@ struct _GVariant
     {
       GBytes *bytes;
       gconstpointer data;
+      gsize ordered_offsets_up_to;
+      gsize checked_offsets_up_to;
     } serialised;
 
     struct
@@ -77,7 +75,19 @@ struct _GVariant
   gint state;
   gatomicrefcount ref_count;
   gsize depth;
+
+#if GLIB_SIZEOF_VOID_P == 4
+  /* Keep suffix aligned to 8 bytes */
+  guint _padding;
+#endif
+
+  guint8 suffix[];
 };
+
+/* Ensure our suffix data aligns to largest guaranteed offset
+ * within GVariant, of 8 bytes.
+ */
+G_STATIC_ASSERT (G_STRUCT_OFFSET (GVariant, suffix) % 8 == 0);
 
 /* struct GVariant:
  *
@@ -161,6 +171,42 @@ struct _GVariant
  *                %NULL.  For all other calls, the effect should be as
  *                if .data pointed to the appropriate number of nul
  *                bytes.
+ *
+ *     .ordered_offsets_up_to: If ordered_offsets_up_to == n this means that all
+ *                             the frame offsets up to and including the frame
+ *                             offset determining the end of element n are in
+ *                             order. This guarantees that the bytes of element
+ *                             n don't overlap with any previous element.
+ *
+ *                             For trusted data this is set to G_MAXSIZE and we
+ *                             don't check that the frame offsets are in order.
+ *
+ *                             Note: This doesn't imply the offsets are good in
+ *                             any way apart from their ordering.  In particular
+ *                             offsets may be out of bounds for this value or
+ *                             may imply that the data overlaps the frame
+ *                             offsets themselves.
+ *
+ *                             This field is only relevant for arrays of non
+ *                             fixed width types and for tuples.
+ *
+ *     .checked_offsets_up_to: Similarly to .ordered_offsets_up_to, this stores
+ *                             the index of the highest element, n, whose frame
+ *                             offsets (and all the preceding frame offsets)
+ *                             have been checked for validity.
+ *
+ *                             It is always the case that
+ *                             .checked_offsets_up_to ≥ .ordered_offsets_up_to.
+ *
+ *                             If .checked_offsets_up_to == .ordered_offsets_up_to,
+ *                             then a bad offset has not been found so far.
+ *
+ *                             If .checked_offsets_up_to > .ordered_offsets_up_to,
+ *                             then a bad offset has been found at
+ *                             (.ordered_offsets_up_to + 1).
+ *
+ *                             This field is only relevant for arrays of non
+ *                             fixed width types and for tuples.
  *
  *   .tree: Only valid when the instance is in tree form.
  *
@@ -350,6 +396,29 @@ g_variant_ensure_size (GVariant *value)
 }
 
 /* < private >
+ * g_variant_to_serialised:
+ * @value: a #GVariant
+ *
+ * Gets a GVariantSerialised for a GVariant in state STATE_SERIALISED.
+ */
+inline static GVariantSerialised
+g_variant_to_serialised (GVariant *value)
+{
+  g_assert (value->state & STATE_SERIALISED);
+  {
+    GVariantSerialised serialised = {
+      value->type_info,
+      (gpointer) value->contents.serialised.data,
+      value->size,
+      value->depth,
+      value->contents.serialised.ordered_offsets_up_to,
+      value->contents.serialised.checked_offsets_up_to,
+    };
+    return serialised;
+  }
+}
+
+/* < private >
  * g_variant_serialise:
  * @value: a #GVariant
  * @data: an appropriately-sized buffer
@@ -375,6 +444,8 @@ g_variant_serialise (GVariant *value,
   serialised.size = value->size;
   serialised.data = data;
   serialised.depth = value->depth;
+  serialised.ordered_offsets_up_to = 0;
+  serialised.checked_offsets_up_to = 0;
 
   children = (gpointer *) value->contents.tree.children;
   n_children = value->contents.tree.n_children;
@@ -418,6 +489,17 @@ g_variant_fill_gvs (GVariantSerialised *serialised,
   g_assert (serialised->size == value->size);
   serialised->depth = value->depth;
 
+  if (value->state & STATE_SERIALISED)
+    {
+      serialised->ordered_offsets_up_to = value->contents.serialised.ordered_offsets_up_to;
+      serialised->checked_offsets_up_to = value->contents.serialised.checked_offsets_up_to;
+    }
+  else
+    {
+      serialised->ordered_offsets_up_to = 0;
+      serialised->checked_offsets_up_to = 0;
+    }
+
   if (serialised->data)
     /* g_variant_store() is a public API, so it
      * it will reacquire the lock if it needs to.
@@ -451,6 +533,7 @@ g_variant_ensure_serialised (GVariant *value)
       GBytes *bytes;
       gpointer data;
 
+      TRACE(GLIB_VARIANT_START_SERIALISE(value, value->type_info));
       g_variant_ensure_size (value);
       data = g_malloc (value->size);
       g_variant_serialise (value, data);
@@ -460,7 +543,10 @@ g_variant_ensure_serialised (GVariant *value)
       bytes = g_bytes_new_take (data, value->size);
       value->contents.serialised.data = g_bytes_get_data (bytes, NULL);
       value->contents.serialised.bytes = bytes;
+      value->contents.serialised.ordered_offsets_up_to = G_MAXSIZE;
+      value->contents.serialised.checked_offsets_up_to = G_MAXSIZE;
       value->state |= STATE_SERIALISED;
+      TRACE(GLIB_VARIANT_END_SERIALISE(value, value->type_info));
     }
 }
 
@@ -469,21 +555,31 @@ g_variant_ensure_serialised (GVariant *value)
  * @type: the type of the new instance
  * @serialised: if the instance will be in serialised form
  * @trusted: if the instance will be trusted
+ * @suffix_size: amount of extra bytes to add to allocation
  *
  * Allocates a #GVariant instance and does some common work (such as
  * looking up and filling in the type info), setting the state field,
  * and setting the ref_count to 1.
+ *
+ * Use @suffix_size when you want to store data inside of the GVariant
+ * without having to add an additional GBytes allocation.
  *
  * Returns: a new #GVariant with a floating reference
  */
 static GVariant *
 g_variant_alloc (const GVariantType *type,
                  gboolean            serialised,
-                 gboolean            trusted)
+                 gboolean            trusted,
+                 gsize               suffix_size)
 {
+  G_GNUC_UNUSED gboolean size_check;
   GVariant *value;
+  gsize size;
 
-  value = g_slice_new (GVariant);
+  size_check = g_size_checked_add (&size, sizeof *value, suffix_size);
+  g_assert (size_check);
+
+  value = g_malloc (size);
 #ifdef GSTREAMER_LITE
   if (value == NULL) {
     return NULL;
@@ -525,13 +621,81 @@ g_variant_new_from_bytes (const GVariantType *type,
                           GBytes             *bytes,
                           gboolean            trusted)
 {
+  return g_variant_new_take_bytes (type, g_bytes_ref (bytes), trusted);
+}
+
+/* -- internal -- */
+
+/* < internal >
+ * g_variant_new_preallocated_trusted:
+ * @data: data to copy
+ * @size: the size of data
+ *
+ * Creates a new #GVariant for simple types such as int32, double, or
+ * bytes.
+ *
+ * Instead of allocating a GBytes, the data will be stored at the tail of
+ * the GVariant structures allocation. This can save considerable malloc
+ * overhead.
+ *
+ * The data is always aligned to the maximum alignment GVariant provides
+ * which is 8 bytes and therefore does not need to verify alignment based
+ * on the the @type provided.
+ *
+ * This should only be used for creating GVariant with trusted data.
+ *
+ * Returns: a new #GVariant with a floating reference
+ */
+GVariant *
+g_variant_new_preallocated_trusted (const GVariantType *type,
+                                    gconstpointer       data,
+                                    gsize               size)
+{
+  GVariant *value;
+  gsize expected_size;
+  guint alignment;
+
+  value = g_variant_alloc (type, TRUE, TRUE, size);
+
+  g_variant_type_info_query (value->type_info, &alignment, &expected_size);
+
+  g_assert (expected_size == 0 || size == expected_size);
+
+  value->contents.serialised.ordered_offsets_up_to = G_MAXSIZE;
+  value->contents.serialised.checked_offsets_up_to = G_MAXSIZE;
+  value->contents.serialised.bytes = NULL;
+  value->contents.serialised.data = value->suffix;
+  value->size = size;
+
+  memcpy (value->suffix, data, size);
+
+  TRACE(GLIB_VARIANT_FROM_BUFFER(value, value->type_info, value->ref_count, value->state));
+
+  return value;
+}
+
+/* < internal >
+ * g_variant_new_take_bytes:
+ * @bytes: (transfer full): a #GBytes
+ * @trusted: if the contents of @bytes are trusted
+ *
+ * The same as g_variant_new_from_bytes() but takes ownership
+ * of @bytes.
+ *
+ * Returns: a new #GVariant with a floating reference
+ */
+GVariant *
+g_variant_new_take_bytes (const GVariantType *type,
+                          GBytes             *bytes,
+                          gboolean            trusted)
+{
   GVariant *value;
   guint alignment;
   gsize size;
   GBytes *owned_bytes = NULL;
   GVariantSerialised serialised;
 
-  value = g_variant_alloc (type, TRUE, trusted);
+  value = g_variant_alloc (type, TRUE, trusted, 0);
 #ifdef GSTREAMER_LITE
   if (value == NULL) {
     return NULL;
@@ -541,15 +705,17 @@ g_variant_new_from_bytes (const GVariantType *type,
   g_variant_type_info_query (value->type_info,
                              &alignment, &size);
 
-  /* Ensure the alignment is correct. This is a huge performance hit if it's
-   * not correct, but that's better than aborting if a caller provides data
+  /* Ensure the alignment is correct. This is a huge performance hit if it’s
+   * not correct, but that’s better than aborting if a caller provides data
    * with the wrong alignment (which is likely to happen very occasionally, and
-   * only cause an abort on some architectures - so is unlikely to be caught
+   * only cause an abort on some architectures — so is unlikely to be caught
    * in testing). Callers can always actively ensure they use the correct
    * alignment to avoid the performance hit. */
   serialised.type_info = value->type_info;
   serialised.data = (guchar *) g_bytes_get_data (bytes, &serialised.size);
   serialised.depth = 0;
+  serialised.ordered_offsets_up_to = trusted ? G_MAXSIZE : 0;
+  serialised.checked_offsets_up_to = trusted ? G_MAXSIZE : 0;
 
   if (!g_variant_serialised_check (serialised))
     {
@@ -559,29 +725,37 @@ g_variant_new_from_bytes (const GVariantType *type,
 
       /* posix_memalign() requires the alignment to be a multiple of
        * sizeof(void*), and a power of 2. See g_variant_type_info_query() for
-       * details on the alignment format. */
-      if (posix_memalign (&aligned_data, MAX (sizeof (void *), alignment + 1),
+       * details on the alignment format.
+       *
+       * While calling posix_memalign() with aligned_size==0 is safe on glibc,
+       * POSIX specifies that the behaviour is implementation-defined, so avoid
+       * that and leave aligned_data==NULL in that case.
+       * See https://pubs.opengroup.org/onlinepubs/9699919799/functions/posix_memalign.html */
+      if (aligned_size != 0 &&
+          posix_memalign (&aligned_data, MAX (sizeof (void *), alignment + 1),
                           aligned_size) != 0)
         g_error ("posix_memalign failed");
 
       if (aligned_size != 0)
         memcpy (aligned_data, g_bytes_get_data (bytes, NULL), aligned_size);
 
-      bytes = owned_bytes = g_bytes_new_with_free_func (aligned_data,
-                                                        aligned_size,
-                                                        free, aligned_data);
+      owned_bytes = bytes;
+      bytes = g_bytes_new_with_free_func (aligned_data,
+                                          aligned_size,
+                                          free, aligned_data);
       aligned_data = NULL;
 #else
       /* NOTE: there may be platforms that lack posix_memalign() and also
        * have malloc() that returns non-8-aligned.  if so, we need to try
        * harder here.
        */
-      bytes = owned_bytes = g_bytes_new (g_bytes_get_data (bytes, NULL),
-                                         g_bytes_get_size (bytes));
+      owned_bytes = bytes;
+      bytes = g_bytes_new (g_bytes_get_data (bytes, NULL),
+                           g_bytes_get_size (bytes));
 #endif
     }
 
-  value->contents.serialised.bytes = g_bytes_ref (bytes);
+  value->contents.serialised.bytes = bytes;
 
   if (size && g_bytes_get_size (bytes) != size)
     {
@@ -600,19 +774,22 @@ g_variant_new_from_bytes (const GVariantType *type,
       value->contents.serialised.data = g_bytes_get_data (bytes, &value->size);
     }
 
+  value->contents.serialised.ordered_offsets_up_to = trusted ? G_MAXSIZE : 0;
+  value->contents.serialised.checked_offsets_up_to = trusted ? G_MAXSIZE : 0;
+
   g_clear_pointer (&owned_bytes, g_bytes_unref);
+
+  TRACE(GLIB_VARIANT_FROM_BUFFER(value, value->type_info, value->ref_count, value->state));
 
   return value;
 }
-
-/* -- internal -- */
 
 /* < internal >
  * g_variant_new_from_children:
  * @type: a #GVariantType
  * @children: an array of #GVariant pointers.  Consumed.
  * @n_children: the length of @children
- * @trusted: %TRUE if every child in @children in trusted
+ * @trusted: %TRUE if every child in @children is trusted
  *
  * Constructs a new tree-mode #GVariant instance.  This is the inner
  * interface for creation of new serialized values that gets called from
@@ -631,7 +808,7 @@ g_variant_new_from_children (const GVariantType  *type,
 {
   GVariant *value;
 
-  value = g_variant_alloc (type, FALSE, trusted);
+  value = g_variant_alloc (type, FALSE, trusted, 0);
 #ifdef GSTREAMER_LITE
   if (value == NULL) {
     return NULL;
@@ -639,6 +816,7 @@ g_variant_new_from_children (const GVariantType  *type,
 #endif // GSTREAMER_LITE
   value->contents.tree.children = children;
   value->contents.tree.n_children = n_children;
+  TRACE(GLIB_VARIANT_FROM_CHILDREN(value, value->type_info, value->ref_count, value->state));
 
   return value;
 }
@@ -712,6 +890,8 @@ g_variant_unref (GVariant *value)
 {
   g_return_if_fail (value != NULL);
 
+  TRACE(GLIB_VARIANT_UNREF(value, value->type_info, value->ref_count, value->state));
+
   if (g_atomic_ref_count_dec (&value->ref_count))
     {
       if G_UNLIKELY (value->state & STATE_LOCKED)
@@ -728,7 +908,7 @@ g_variant_unref (GVariant *value)
         g_variant_release_children (value);
 
       memset (value, 0, sizeof (GVariant));
-      g_slice_free (GVariant, value);
+      g_free (value);
     }
 }
 
@@ -746,6 +926,8 @@ GVariant *
 g_variant_ref (GVariant *value)
 {
   g_return_val_if_fail (value != NULL, NULL);
+
+  TRACE(GLIB_VARIANT_REF(value, value->type_info, value->ref_count, value->state));
 
   g_atomic_ref_count_inc (&value->ref_count);
 
@@ -786,17 +968,24 @@ g_variant_ref (GVariant *value)
 GVariant *
 g_variant_ref_sink (GVariant *value)
 {
+  int old_state;
+
   g_return_val_if_fail (value != NULL, NULL);
   g_return_val_if_fail (!g_atomic_ref_count_compare (&value->ref_count, 0), NULL);
 
-  g_variant_lock (value);
+  TRACE(GLIB_VARIANT_REF_SINK(value, value->type_info, value->ref_count, value->state, value->state & STATE_FLOATING));
 
-  if (~value->state & STATE_FLOATING)
-    g_variant_ref (value);
-  else
-    value->state &= ~STATE_FLOATING;
+  old_state = value->state;
 
-  g_variant_unlock (value);
+  while (old_state & STATE_FLOATING)
+    {
+      int new_state = old_state & ~STATE_FLOATING;
+
+      if (g_atomic_int_compare_and_exchange_full (&value->state, old_state, new_state, &old_state))
+        return value;
+    }
+
+  g_atomic_ref_count_inc (&value->ref_count);
 
   return value;
 }
@@ -846,6 +1035,7 @@ g_variant_take_ref (GVariant *value)
   g_return_val_if_fail (value != NULL, NULL);
   g_return_val_if_fail (!g_atomic_ref_count_compare (&value->ref_count, 0), NULL);
 
+  TRACE(GLIB_VARIANT_TAKE_REF(value, value->type_info, value->ref_count, value->state, value->state & STATE_FLOATING));
   g_atomic_int_and (&value->state, ~STATE_FLOATING);
 
   return value;
@@ -969,14 +1159,18 @@ g_variant_get_data_as_bytes (GVariant *value)
 {
   const gchar *bytes_data;
   const gchar *data;
-  gsize bytes_size;
+  gsize bytes_size = 0;
   gsize size;
 
   g_variant_lock (value);
   g_variant_ensure_serialised (value);
   g_variant_unlock (value);
 
-  bytes_data = g_bytes_get_data (value->contents.serialised.bytes, &bytes_size);
+  if (value->contents.serialised.bytes != NULL)
+    bytes_data = g_bytes_get_data (value->contents.serialised.bytes, &bytes_size);
+  else
+    bytes_data = NULL;
+
   data = value->contents.serialised.data;
   size = value->size;
 
@@ -986,11 +1180,13 @@ g_variant_get_data_as_bytes (GVariant *value)
       data = bytes_data;
     }
 
-  if (data == bytes_data && size == bytes_size)
+  if (bytes_data != NULL && data == bytes_data && size == bytes_size)
     return g_bytes_ref (value->contents.serialised.bytes);
-  else
+  else if (bytes_data != NULL)
     return g_bytes_new_from_bytes (value->contents.serialised.bytes,
                                    data - bytes_data, size);
+  else
+    return g_bytes_new (value->contents.serialised.data, size);
 }
 
 
@@ -1028,16 +1224,8 @@ g_variant_n_children (GVariant *value)
   g_variant_lock (value);
 
   if (value->state & STATE_SERIALISED)
-    {
-      GVariantSerialised serialised = {
-        value->type_info,
-        (gpointer) value->contents.serialised.data,
-        value->size,
-        value->depth,
-      };
-
-      n_children = g_variant_serialised_n_children (serialised);
-    }
+    n_children = g_variant_serialised_n_children (
+        g_variant_to_serialised (value));
   else
     n_children = value->contents.tree.n_children;
 
@@ -1083,11 +1271,13 @@ GVariant *
 g_variant_get_child_value (GVariant *value,
                            gsize     index_)
 {
-  g_return_val_if_fail (index_ < g_variant_n_children (value), NULL);
   g_return_val_if_fail (value->depth < G_MAXSIZE, NULL);
 
   if (~g_atomic_int_get (&value->state) & STATE_SERIALISED)
     {
+      /* g_variant_serialised_get_child() does its own checks on index_ */
+      g_return_val_if_fail (index_ < g_variant_n_children (value), NULL);
+
       g_variant_lock (value);
 
       if (~value->state & STATE_SERIALISED)
@@ -1104,12 +1294,7 @@ g_variant_get_child_value (GVariant *value,
     }
 
   {
-    GVariantSerialised serialised = {
-      value->type_info,
-      (gpointer) value->contents.serialised.data,
-      value->size,
-      value->depth,
-    };
+    GVariantSerialised serialised = g_variant_to_serialised (value);
     GVariantSerialised s_child;
     GVariant *child;
 
@@ -1117,6 +1302,10 @@ g_variant_get_child_value (GVariant *value,
      * from the serialized data for the container
      */
     s_child = g_variant_serialised_get_child (serialised, index_);
+
+    /* Update the cached ordered_offsets_up_to, since @serialised will be thrown away when this function exits */
+    value->contents.serialised.ordered_offsets_up_to = MAX (value->contents.serialised.ordered_offsets_up_to, serialised.ordered_offsets_up_to);
+    value->contents.serialised.checked_offsets_up_to = MAX (value->contents.serialised.checked_offsets_up_to, serialised.checked_offsets_up_to);
 
     /* Check whether this would cause nesting too deep. If so, return a fake
      * child. The only situation we expect this to happen in is with a variant,
@@ -1129,11 +1318,12 @@ g_variant_get_child_value (GVariant *value,
         G_VARIANT_MAX_RECURSION_DEPTH - value->depth)
       {
         g_assert (g_variant_is_of_type (value, G_VARIANT_TYPE_VARIANT));
+        g_variant_type_info_unref (s_child.type_info);
         return g_variant_new_tuple (NULL, 0);
       }
 
     /* create a new serialized instance out of it */
-    child = g_slice_new (GVariant);
+    child = g_new (GVariant, 1);
 #ifdef GSTREAMER_LITE
     if (child == NULL) {
       return NULL;
@@ -1148,8 +1338,82 @@ g_variant_get_child_value (GVariant *value,
     child->contents.serialised.bytes =
       g_bytes_ref (value->contents.serialised.bytes);
     child->contents.serialised.data = s_child.data;
+    child->contents.serialised.ordered_offsets_up_to = (value->state & STATE_TRUSTED) ? G_MAXSIZE : s_child.ordered_offsets_up_to;
+    child->contents.serialised.checked_offsets_up_to = (value->state & STATE_TRUSTED) ? G_MAXSIZE : s_child.checked_offsets_up_to;
+
+    TRACE(GLIB_VARIANT_FROM_PARENT(child, child->type_info, child->ref_count, child->state, value));
 
     return child;
+  }
+}
+
+/**
+ * g_variant_maybe_get_child_value:
+ * @value: a container #GVariant
+ * @index_: the index of the child to fetch
+ *
+ * Reads a child item out of a container #GVariant instance, if it is in normal
+ * form. If it is not in normal form, return %NULL.
+ *
+ * This function behaves the same as g_variant_get_child_value(), except that it
+ * returns %NULL if the child is not in normal form. g_variant_get_child_value()
+ * would instead return a new default value of the correct type.
+ *
+ * This is intended to be used internally to avoid unnecessary #GVariant
+ * allocations.
+ *
+ * The returned value is never floating.  You should free it with
+ * g_variant_unref() when you're done with it.
+ *
+ * This function is O(1).
+ *
+ * Returns: (transfer full): the child at the specified index
+ *
+ * Since: 2.74
+ */
+GVariant *
+g_variant_maybe_get_child_value (GVariant *value,
+                                 gsize     index_)
+{
+  g_return_val_if_fail (value->depth < G_MAXSIZE, NULL);
+
+  if (~g_atomic_int_get (&value->state) & STATE_SERIALISED)
+    {
+      /* g_variant_serialised_get_child() does its own checks on index_ */
+      g_return_val_if_fail (index_ < g_variant_n_children (value), NULL);
+
+      g_variant_lock (value);
+
+      if (~value->state & STATE_SERIALISED)
+        {
+          GVariant *child;
+
+          child = g_variant_ref (value->contents.tree.children[index_]);
+          g_variant_unlock (value);
+
+          return child;
+        }
+
+      g_variant_unlock (value);
+    }
+
+  {
+    GVariantSerialised serialised = g_variant_to_serialised (value);
+    GVariantSerialised s_child;
+
+    /* get the serializer to extract the serialized data for the child
+     * from the serialized data for the container
+     */
+    s_child = g_variant_serialised_get_child (serialised, index_);
+
+    if (!(value->state & STATE_TRUSTED) && s_child.data == NULL)
+      {
+        g_variant_type_info_unref (s_child.type_info);
+        return NULL;
+      }
+
+    g_variant_type_info_unref (s_child.type_info);
+    return g_variant_get_child_value (value, index_);
   }
 }
 
@@ -1177,6 +1441,8 @@ void
 g_variant_store (GVariant *value,
                  gpointer  data)
 {
+  g_return_if_fail (data != NULL);
+
   g_variant_lock (value);
 
   if (value->state & STATE_SERIALISED)
@@ -1227,14 +1493,7 @@ g_variant_is_normal_form (GVariant *value)
 
   if (value->state & STATE_SERIALISED)
     {
-      GVariantSerialised serialised = {
-        value->type_info,
-        (gpointer) value->contents.serialised.data,
-        value->size,
-        value->depth
-      };
-
-      if (g_variant_serialised_is_normal (serialised))
+      if (g_variant_serialised_is_normal (g_variant_to_serialised (value)))
         value->state |= STATE_TRUSTED;
     }
   else

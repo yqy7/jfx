@@ -33,28 +33,38 @@
 #include "AccessibilityTreeItem.h"
 #include "Element.h"
 #include "HTMLNames.h"
-
+#include "NodeInlines.h"
 #include <wtf/Deque.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-AccessibilityTree::AccessibilityTree(RenderObject* renderer)
-    : AccessibilityRenderObject(renderer)
+AccessibilityTree::AccessibilityTree(AXID axID, RenderObject& renderer, AXObjectCache& cache)
+    : AccessibilityRenderObject(axID, renderer, cache)
+{
+}
+
+AccessibilityTree::AccessibilityTree(AXID axID, Node& node, AXObjectCache& cache)
+    : AccessibilityRenderObject(axID, node, cache)
 {
 }
 
 AccessibilityTree::~AccessibilityTree() = default;
 
-Ref<AccessibilityTree> AccessibilityTree::create(RenderObject* renderer)
+Ref<AccessibilityTree> AccessibilityTree::create(AXID axID, RenderObject& renderer, AXObjectCache& cache)
 {
-    return adoptRef(*new AccessibilityTree(renderer));
+    return adoptRef(*new AccessibilityTree(axID, renderer, cache));
 }
 
-bool AccessibilityTree::computeAccessibilityIsIgnored() const
+Ref<AccessibilityTree> AccessibilityTree::create(AXID axID, Node& node, AXObjectCache& cache)
 {
-    return accessibilityIsIgnoredByDefault();
+    return adoptRef(*new AccessibilityTree(axID, node, cache));
+}
+
+bool AccessibilityTree::computeIsIgnored() const
+{
+    return isIgnoredByDefault();
 }
 
 AccessibilityRole AccessibilityTree::determineAccessibilityRole()
@@ -62,48 +72,34 @@ AccessibilityRole AccessibilityTree::determineAccessibilityRole()
     if ((m_ariaRole = determineAriaRoleAttribute()) != AccessibilityRole::Tree)
         return AccessibilityRenderObject::determineAccessibilityRole();
 
-    return isTreeValid() ? AccessibilityRole::Tree : AccessibilityRole::Group;
-}
-
-bool AccessibilityTree::nodeHasTreeItemChild(Node& node) const
-{
-    for (auto* child = node.firstChild(); child; child = child->nextSibling()) {
-        if (nodeHasRole(child, "treeitem"))
-            return true;
-    }
-    return false;
+    return isTreeValid() ? AccessibilityRole::Tree : AccessibilityRole::Generic;
 }
 
 bool AccessibilityTree::isTreeValid() const
 {
-    // A valid tree can only have treeitem or group of treeitems as a child
+    // A valid tree can only have treeitem or group of treeitems as a child.
     // https://www.w3.org/TR/wai-aria/#tree
-
-    Node* node = this->node();
+    RefPtr node = this->node();
     if (!node)
         return false;
 
-    Deque<Node*> queue;
-    for (auto* child = node->firstChild(); child; child = child->nextSibling())
-        queue.append(child);
+    Deque<Ref<Node>> queue;
+    for (RefPtr child = node->firstChild(); child; child = queue.last()->nextSibling())
+        queue.append(child.releaseNonNull());
 
     while (!queue.isEmpty()) {
-        auto child = queue.takeFirst();
+        Ref child = queue.takeFirst();
 
-        if (!is<Element>(*child))
+        RefPtr childElement = dynamicDowncast<Element>(child);
+        if (!childElement)
             continue;
-        if (nodeHasRole(child, "treeitem"))
+        if (hasRole(*childElement, "treeitem"_s))
             continue;
-        if (nodeHasRole(child, "presentation")) {
-            if (!nodeHasTreeItemChild(*child))
-                return false;
-            continue;
-        }
-        if (!nodeHasRole(child, "group"))
+        if (!hasAnyRole(*childElement, { "group"_s, "presentation"_s }))
             return false;
 
-        for (auto* groupChild = child->firstChild(); groupChild; groupChild = groupChild->nextSibling())
-            queue.append(groupChild);
+        for (RefPtr groupChild = child->firstChild(); groupChild; groupChild = queue.last()->nextSibling())
+            queue.append(groupChild.releaseNonNull());
     }
     return true;
 }

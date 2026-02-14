@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,21 @@ import java.util.Map;
 
 /**
  * Set of key codes for {@link KeyEvent} objects.
+ *
+ * <p>
+ *
+ * For a given keyboard layout each key is assigned a code which does not vary
+ * and is not affected by the state of the modifier keys. For keys that
+ * generate printable characters the code will usually be based on the
+ * character generated when no modifier key is held down. The exceptions are
+ * {@link KeyCode#A} through {@link KeyCode#Z} which are assigned to keys
+ * even on layouts which don't generate those letters (such as Greek). This
+ * ensures that common letter-based shortcuts are accessible on all layouts.
+ *
+ * <p>
+ *
+ * Keys that generate characters with accents or other diacritic marks are
+ * usually assigned a code of {@link KeyCode#UNDEFINED}.
  * @since JavaFX 2.0
  */
 public enum KeyCode {
@@ -1174,7 +1189,7 @@ public enum KeyCode {
 
     // Need to bundle this in another class to avoid "forward reference" compiler error
     private static class KeyCodeClass {
-        private KeyCodeClass() {};
+        private KeyCodeClass() {}
 
         private static final int FUNCTION = 1;
         private static final int NAVIGATION = 1 << 1;
@@ -1314,7 +1329,7 @@ public enum KeyCode {
     private static final Map<String, KeyCode> nameMap;
     static {
 
-        nameMap = new HashMap<String, KeyCode>(KeyCode.values().length);
+        nameMap = new HashMap<>(KeyCode.values().length);
         for (KeyCode c : KeyCode.values()) {
             nameMap.put(c.name, c);
         }

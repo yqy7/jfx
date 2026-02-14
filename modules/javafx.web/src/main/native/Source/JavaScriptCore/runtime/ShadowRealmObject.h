@@ -42,12 +42,11 @@ public:
         return vm.shadowRealmSpace<mode>();
     }
 
-    static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
-    {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ShadowRealmType, StructureFlags), info());
-    }
+    inline static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
     DECLARE_INFO;
+
+    DECLARE_VISIT_CHILDREN;
 
     static ShadowRealmObject* create(VM&, Structure*, JSGlobalObject*);
 
@@ -56,7 +55,6 @@ public:
 private:
     ShadowRealmObject(VM&, Structure*);
     void finishCreation(VM&);
-    DECLARE_VISIT_CHILDREN;
 
     WriteBarrier<JSGlobalObject> m_globalObject;
 };

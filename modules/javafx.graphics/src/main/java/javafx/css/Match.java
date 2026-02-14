@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,10 +25,16 @@
 
 package javafx.css;
 
-import com.sun.javafx.css.PseudoClassState;
-
 import static javafx.geometry.NodeOrientation.INHERIT;
 
+import com.sun.javafx.css.CompoundSelector;
+import com.sun.javafx.css.ImmutablePseudoClassSetsCache;
+import com.sun.javafx.css.PseudoClassState;
+import com.sun.javafx.css.SimpleSelector;
+
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * Used by {@link Rule} to determine whether or not the selector applies to a
@@ -40,24 +46,57 @@ import static javafx.geometry.NodeOrientation.INHERIT;
  */
 public final class Match implements Comparable<Match> {
 
-    final Selector selector;
-    final PseudoClassState pseudoClasses;
-    final int idCount;
-    final int styleClassCount;
+    static Match of(Selector selector) {
+        return switch(selector) {
+            case SimpleSelector s -> ofSimpleSelector(s);
+            case CompoundSelector cs -> ofCompoundSelector(cs);
+        };
+    }
+
+    private static Match ofCompoundSelector(CompoundSelector selector) {
+        PseudoClassState pseudoClasses = new PseudoClassState();
+        int idCount = 0;
+        int styleClassCount = 0;
+        List<SimpleSelector> containedSelectors = selector.getSelectors();
+
+        for (int n = 0, max = containedSelectors.size(); n < max; n++) {
+            Match match = ofSimpleSelector(containedSelectors.get(n));
+
+            pseudoClasses.addAll(match.getPseudoClasses());
+            idCount += match.idCount;
+            styleClassCount += match.styleClassCount;
+        }
+
+        return new Match(selector, pseudoClasses, idCount, styleClassCount);
+    }
+
+    private static Match ofSimpleSelector(SimpleSelector selector) {
+        int idCount = selector.getId().isEmpty() ? 0 : 1;
+        int styleClassCount = selector.getStyleClassSet().size();
+
+        return new Match(selector, selector.getPseudoClassStates(), idCount, styleClassCount);
+    }
+
+    private final Selector selector;
+    private final Set<PseudoClass> pseudoClasses;
+
+    private final int styleClassCount;
+    private final int idCount;
 
     // CSS3 spec gives weight to id count, then style class count,
     // then pseudoclass count, and finally matching types (i.e., java name count)
-    final int specificity;
+    private final int specificity;
 
-    Match(final Selector selector, PseudoClassState pseudoClasses, int idCount, int styleClassCount) {
-        assert selector != null;
+    Match(final Selector selector, Set<PseudoClass> pseudoClasses, int idCount, int styleClassCount) {
+        Objects.requireNonNull(selector);
+        Objects.requireNonNull(pseudoClasses);
+
         this.selector = selector;
         this.idCount = idCount;
         this.styleClassCount = styleClassCount;
-        this.pseudoClasses = pseudoClasses;
-        int nPseudoClasses = pseudoClasses != null ? pseudoClasses.size() : 0;
-        if (selector instanceof SimpleSelector) {
-            final SimpleSelector simple = (SimpleSelector)selector;
+        this.pseudoClasses = ImmutablePseudoClassSetsCache.of(pseudoClasses);
+        int nPseudoClasses = pseudoClasses.size();
+        if (selector instanceof SimpleSelector simple) {
             if (simple.getNodeOrientation() != INHERIT) {
                 nPseudoClasses += 1;
             }
@@ -67,17 +106,19 @@ public final class Match implements Comparable<Match> {
 
     /**
      * Gets the {@code Selector}.
-     * @return the {@code Selector}
+     *
+     * @return the {@code Selector}, never {@code null}
      */
     public Selector getSelector() {
         return selector;
     }
 
     /**
-     * Gets the pseudo class state.
-     * @return the pseudo class state
+     * Gets the pseudo class states as an immutable set.
+     *
+     * @return the pseudo class state, never {@code null}
      */
-    public PseudoClassState getPseudoClasses() {
+    public Set<PseudoClass> getPseudoClasses() {
         return pseudoClasses;
     }
 

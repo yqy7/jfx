@@ -35,12 +35,13 @@
 
 #if ENABLE(WEB_RTC)
 
+#include "ExceptionOr.h"
 #include "RTCIceCandidateInit.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(RTCIceCandidate);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(RTCIceCandidate);
 
 RTCIceCandidate::RTCIceCandidate(const String& candidate, const String& sdpMid, std::optional<unsigned short> sdpMLineIndex, Fields&& fields)
     : m_candidate(candidate)
@@ -54,7 +55,7 @@ RTCIceCandidate::RTCIceCandidate(const String& candidate, const String& sdpMid, 
 ExceptionOr<Ref<RTCIceCandidate>> RTCIceCandidate::create(const RTCIceCandidateInit& dictionary)
 {
     if (dictionary.sdpMid.isNull() && !dictionary.sdpMLineIndex)
-        return Exception { TypeError, "Candidate must not have both null sdpMid and sdpMLineIndex" };
+        return Exception { ExceptionCode::TypeError, "Candidate must not have both null sdpMid and sdpMLineIndex"_s };
 
     auto fields = valueOrDefault(parseIceCandidateSDP(dictionary.candidate));
     fields.usernameFragment = dictionary.usernameFragment;

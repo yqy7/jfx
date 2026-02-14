@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007-2010, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2007-2023 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Matt Lilek <webkit@mattlilek.com>
  * Copyright (C) 2011 Google Inc. All rights reserved.
  *
@@ -33,20 +33,23 @@
 
 #include "InspectorEnvironment.h"
 #include <wtf/JSONValues.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace Inspector {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(InspectorAgent);
 
 InspectorAgent::InspectorAgent(AgentContext& context)
     : InspectorAgentBase("Inspector"_s)
     , m_environment(context.environment)
-    , m_frontendDispatcher(makeUnique<InspectorFrontendDispatcher>(context.frontendRouter))
+    , m_frontendDispatcher(makeUniqueRef<InspectorFrontendDispatcher>(context.frontendRouter))
     , m_backendDispatcher(InspectorBackendDispatcher::create(context.backendDispatcher, this))
 {
 }
 
 InspectorAgent::~InspectorAgent() = default;
 
-void InspectorAgent::didCreateFrontendAndBackend(FrontendRouter*, BackendDispatcher*)
+void InspectorAgent::didCreateFrontendAndBackend()
 {
 }
 

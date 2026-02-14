@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,8 +33,6 @@ import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.beans.property.ReadOnlyDoubleWrapper;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectPropertyBase;
-import javafx.beans.value.ChangeListener;
-import javafx.collections.ObservableList;
 import javafx.css.CssMetaData;
 import javafx.css.Styleable;
 import javafx.css.StyleableBooleanProperty;
@@ -62,7 +60,6 @@ import java.util.List;
 import java.util.function.Function;
 import com.sun.javafx.util.Logging;
 import com.sun.javafx.util.TempState;
-import com.sun.javafx.binding.ExpressionHelper;
 import javafx.css.converter.BooleanConverter;
 import javafx.css.converter.InsetsConverter;
 import javafx.css.converter.ShapeConverter;
@@ -77,6 +74,7 @@ import com.sun.javafx.scene.NodeHelper;
 import com.sun.javafx.scene.ParentHelper;
 import com.sun.javafx.scene.input.PickResultChooser;
 import com.sun.javafx.scene.layout.RegionHelper;
+import com.sun.javafx.scene.layout.ScaledMath;
 import com.sun.javafx.scene.shape.ShapeHelper;
 import com.sun.javafx.sg.prism.NGNode;
 import com.sun.javafx.sg.prism.NGRegion;
@@ -213,8 +211,6 @@ public class Region extends Parent {
 
     static Vec2d TEMP_VEC2D = new Vec2d();
 
-    private static final double EPSILON = 1e-14;
-
     /* *************************************************************************
      *                                                                         *
      * Static convenience methods for layout                                   *
@@ -264,7 +260,7 @@ public class Region extends Parent {
         return height - snapSpaceY(margin.getTop(), isSnapToPixel) - snapSpaceY(margin.getBottom(), isSnapToPixel);
     }
 
-    private static double getSnapScaleX(Node n) {
+    static double getSnapScaleX(Node n) {
         return _getSnapScaleXimpl(n.getScene());
     }
     private static double _getSnapScaleXimpl(Scene scene) {
@@ -274,7 +270,7 @@ public class Region extends Parent {
         return window.getRenderScaleX();
     }
 
-    private static double getSnapScaleY(Node n) {
+    static double getSnapScaleY(Node n) {
         return _getSnapScaleYimpl(n.getScene());
     }
     private static double _getSnapScaleYimpl(Scene scene) {
@@ -292,38 +288,6 @@ public class Region extends Parent {
         return _getSnapScaleYimpl(getScene());
     }
 
-    private static double scaledRound(double value, double scale) {
-        return Math.round(value * scale) / scale;
-    }
-
-    /**
-     * The value is floored for a given scale using Math.floor.
-     * This method guarantees that:
-     *
-     * scaledFloor(scaledFloor(value, scale), scale) == scaledFloor(value, scale)
-     *
-     * @param value The value that needs to be floored
-     * @param scale The scale that will be used
-     * @return value floored with scale
-     */
-    private static double scaledFloor(double value, double scale) {
-        return Math.floor(value * scale + EPSILON) / scale;
-    }
-
-    /**
-     * The value is ceiled with a given scale using Math.ceil.
-     * This method guarantees that:
-     *
-     * scaledCeil(scaledCeil(value, scale), scale) == scaledCeil(value, scale)
-     *
-     * @param value The value that needs to be ceiled
-     * @param scale The scale that will be used
-     * @return value ceiled with scale
-     */
-    private static double scaledCeil(double value, double scale) {
-        return Math.ceil(value * scale - EPSILON) / scale;
-    }
-
     /**
      * If snapToPixel is true, then the value is rounded using Math.round. Otherwise,
      * the value is simply returned. This method will surely be JIT'd under normal
@@ -337,14 +301,14 @@ public class Region extends Parent {
      * @return value either as passed in or rounded based on snapToPixel
      */
     private double snapSpaceX(double value, boolean snapToPixel) {
-        return snapToPixel ? scaledRound(value, getSnapScaleX()) : value;
+        return snapToPixel ? ScaledMath.round(value, getSnapScaleX()) : value;
     }
     private double snapSpaceY(double value, boolean snapToPixel) {
-        return snapToPixel ? scaledRound(value, getSnapScaleY()) : value;
+        return snapToPixel ? ScaledMath.round(value, getSnapScaleY()) : value;
     }
 
     private static double snapSpace(double value, boolean snapToPixel, double snapScale) {
-        return snapToPixel ? scaledRound(value, snapScale) : value;
+        return snapToPixel ? ScaledMath.round(value, snapScale) : value;
     }
 
     /**
@@ -356,14 +320,14 @@ public class Region extends Parent {
      * @return value either as passed in or ceil'd based on snapToPixel
      */
     private double snapSizeX(double value, boolean snapToPixel) {
-        return snapToPixel ? scaledCeil(value, getSnapScaleX()) : value;
+        return snapToPixel ? ScaledMath.ceil(value, getSnapScaleX()) : value;
     }
     private double snapSizeY(double value, boolean snapToPixel) {
-        return snapToPixel ? scaledCeil(value, getSnapScaleY()) : value;
+        return snapToPixel ? ScaledMath.ceil(value, getSnapScaleY()) : value;
     }
 
     private static double snapSize(double value, boolean snapToPixel, double snapScale) {
-        return snapToPixel ? scaledCeil(value, snapScale) : value;
+        return snapToPixel ? ScaledMath.ceil(value, snapScale) : value;
     }
 
     /**
@@ -375,21 +339,25 @@ public class Region extends Parent {
      * @return value either as passed in or rounded based on snapToPixel
      */
     private double snapPositionX(double value, boolean snapToPixel) {
-        return snapToPixel ? scaledRound(value, getSnapScaleX()) : value;
+        return snapToPixel ? ScaledMath.round(value, getSnapScaleX()) : value;
     }
     private double snapPositionY(double value, boolean snapToPixel) {
-        return snapToPixel ? scaledRound(value, getSnapScaleY()) : value;
+        return snapToPixel ? ScaledMath.round(value, getSnapScaleY()) : value;
     }
 
     private static double snapPosition(double value, boolean snapToPixel, double snapScale) {
-        return snapToPixel ? scaledRound(value, snapScale) : value;
+        return snapToPixel ? ScaledMath.round(value, snapScale) : value;
     }
 
     /**
      * If snapToPixel is true, then the value is either floored (positive values) or
-     * ceiled (negative values) with a scale. This method guarantees that:
+     * ceiled (negative values) with a scale. When the absolute value of the given value
+     * multiplied by the current scale is less than 10^15, then this method guarantees that:
      *
-     * snapPortionX(snapPortionX(value, snapToPixel), snapToPixel) == snapPortionX(value, snapToPixel)
+     * <pre>snapPortionX(snapPortionX(value, snapToPixel), snapToPixel) == snapPortionX(value, snapToPixel)</pre>
+     *
+     * The limit is about 10^15 because double values will no longer be able to represent
+     * larger integers with exact precision beyond this limit.
      *
      * @param value The value that needs to be snapped
      * @param snapToPixel Whether to snap to pixel
@@ -397,21 +365,21 @@ public class Region extends Parent {
      */
     private double snapPortionX(double value, boolean snapToPixel) {
         if (!snapToPixel || value == 0) return value;
+
         double s = getSnapScaleX();
-        value *= s;
-        if (value > 0) {
-            value = Math.max(1, Math.floor(value + EPSILON));
-        } else {
-            value = Math.min(-1, Math.ceil(value - EPSILON));
-        }
-        return value / s;
+
+        return value > 0 ? ScaledMath.floor(value, s) : ScaledMath.ceil(value, s);
     }
 
     /**
      * If snapToPixel is true, then the value is either floored (positive values) or
-     * ceiled (negative values) with a scale. This method guarantees that:
+     * ceiled (negative values) with a scale. When the absolute value of the given value
+     * multiplied by the current scale is less than 10^15, then this method guarantees that:
      *
-     * snapPortionY(snapPortionY(value, snapToPixel), snapToPixel) == snapPortionY(value, snapToPixel)
+     * <pre>snapPortionY(snapPortionY(value, snapToPixel), snapToPixel) == snapPortionY(value, snapToPixel)</pre>
+     *
+     * The limit is about 10^15 because double values will no longer be able to represent
+     * larger integers with exact precision beyond this limit.
      *
      * @param value The value that needs to be snapped
      * @param snapToPixel Whether to snap to pixel
@@ -419,14 +387,10 @@ public class Region extends Parent {
      */
     private double snapPortionY(double value, boolean snapToPixel) {
         if (!snapToPixel || value == 0) return value;
+
         double s = getSnapScaleY();
-        value *= s;
-        if (value > 0) {
-            value = Math.max(1, Math.floor(value + EPSILON));
-        } else {
-            value = Math.min(-1, Math.ceil(value - EPSILON));
-        }
-        return value / s;
+
+        return value > 0 ? ScaledMath.floor(value, s) : ScaledMath.ceil(value, s);
     }
 
     double getAreaBaselineOffset(List<Node> children, Callback<Node, Insets> margins,
@@ -762,7 +726,7 @@ public class Region extends Parent {
                 // we can repaint the region.
                 if (b != null) {
                     for (BackgroundImage i : b.getImages()) {
-                        final Image image = i.image;
+                        final Image image = i.getImage();
                         final Toolkit.ImageAccessor acc = Toolkit.getImageAccessor();
                         if (acc.isAnimation(image) || image.getProgress() < 1) {
                             addImageListener(image);
@@ -773,7 +737,7 @@ public class Region extends Parent {
                 // And we must remove this listener from any old images
                 if (old != null) {
                     for (BackgroundImage i : old.getImages()) {
-                        removeImageListener(i.image);
+                        removeImageListener(i.getImage());
                     }
                 }
 
@@ -821,7 +785,7 @@ public class Region extends Parent {
                 // we can repaint the region.
                 if (b != null) {
                     for (BorderImage i : b.getImages()) {
-                        final Image image = i.image;
+                        final Image image = i.getImage();
                         final Toolkit.ImageAccessor acc = Toolkit.getImageAccessor();
                         if (acc.isAnimation(image) || image.getProgress() < 1) {
                             addImageListener(image);
@@ -832,7 +796,7 @@ public class Region extends Parent {
                 // And we must remove this listener from any old images
                 if (old != null) {
                     for (BorderImage i : old.getImages()) {
-                        removeImageListener(i.image);
+                        removeImageListener(i.getImage());
                     }
                 }
 
@@ -883,7 +847,7 @@ public class Region extends Parent {
      */
     public final ObjectProperty<Insets> opaqueInsetsProperty() {
         if (opaqueInsets == null) {
-            opaqueInsets = new StyleableObjectProperty<Insets>() {
+            opaqueInsets = new StyleableObjectProperty<>() {
                 @Override public Object getBean() { return Region.this; }
                 @Override public String getName() { return "opaqueInsets"; }
                 @Override public CssMetaData<Region, Insets> getCssMetaData() {
@@ -914,34 +878,17 @@ public class Region extends Parent {
     private final InsetsProperty insets = new InsetsProperty();
     public final Insets getInsets() { return insets.get(); }
     public final ReadOnlyObjectProperty<Insets> insetsProperty() { return insets; }
-    private final class InsetsProperty extends ReadOnlyObjectProperty<Insets> {
+    private final class InsetsProperty extends ReadOnlyObjectPropertyBase<Insets> {
         private Insets cache = null;
-        private ExpressionHelper<Insets> helper = null;
 
         @Override public Object getBean() { return Region.this; }
         @Override public String getName() { return "insets"; }
-
-        @Override public void addListener(InvalidationListener listener) {
-            helper = ExpressionHelper.addListener(helper, this, listener);
-        }
-
-        @Override public void removeListener(InvalidationListener listener) {
-            helper = ExpressionHelper.removeListener(helper, listener);
-        }
-
-        @Override public void addListener(ChangeListener<? super Insets> listener) {
-            helper = ExpressionHelper.addListener(helper, this, listener);
-        }
-
-        @Override public void removeListener(ChangeListener<? super Insets> listener) {
-            helper = ExpressionHelper.removeListener(helper, listener);
-        }
 
         void fireValueChanged() {
             cache = null;
             updateSnappedInsets();
             requestLayout();
-            ExpressionHelper.fireValueChangedEvent(helper);
+            fireValueChangedEvent();
         }
 
         @Override public Insets get() {
@@ -975,7 +922,7 @@ public class Region extends Parent {
             }
             return cache;
         }
-    };
+    }
 
     /**
      * cached results of snapped insets, this are used a lot during layout so makes sense
@@ -1237,7 +1184,7 @@ public class Region extends Parent {
      * doesn't meet the application's layout needs.
      * <p>
      * Defaults to the <code>USE_COMPUTED_SIZE</code> flag, which means that
-     * <code>getPrefWidth(forHeight)</code> will return the region's internally
+     * <code>prefWidth(forHeight)</code> will return the region's internally
      * computed preferred width.
      */
     private DoubleProperty prefWidth;
@@ -1262,7 +1209,7 @@ public class Region extends Parent {
      * doesn't meet the application's layout needs.
      * <p>
      * Defaults to the <code>USE_COMPUTED_SIZE</code> flag, which means that
-     * <code>getPrefHeight(forWidth)</code> will return the region's internally
+     * <code>prefHeight(forWidth)</code> will return the region's internally
      * computed preferred width.
      */
     private DoubleProperty prefHeight;
@@ -1302,11 +1249,11 @@ public class Region extends Parent {
      * doesn't meet the application's layout needs.
      * <p>
      * Defaults to the <code>USE_COMPUTED_SIZE</code> flag, which means that
-     * <code>getMaxWidth(forHeight)</code> will return the region's internally
+     * <code>maxWidth(forHeight)</code> will return the region's internally
      * computed maximum width.
      * <p>
      * Setting this value to the <code>USE_PREF_SIZE</code> flag will cause
-     * <code>getMaxWidth(forHeight)</code> to return the region's preferred width,
+     * <code>maxWidth(forHeight)</code> to return the region's preferred width,
      * enabling applications to easily restrict the resizability of the region.
      */
     private DoubleProperty maxWidth;
@@ -1331,11 +1278,11 @@ public class Region extends Parent {
      * doesn't meet the application's layout needs.
      * <p>
      * Defaults to the <code>USE_COMPUTED_SIZE</code> flag, which means that
-     * <code>getMaxHeight(forWidth)</code> will return the region's internally
+     * <code>maxHeight(forWidth)</code> will return the region's internally
      * computed maximum height.
      * <p>
      * Setting this value to the <code>USE_PREF_SIZE</code> flag will cause
-     * <code>getMaxHeight(forWidth)</code> to return the region's preferred height,
+     * <code>maxHeight(forWidth)</code> to return the region's preferred height,
      * enabling applications to easily restrict the resizability of the region.
      */
     private DoubleProperty maxHeight;
@@ -1423,7 +1370,7 @@ public class Region extends Parent {
             NodeHelper.geomChanged(Region.this);
             NodeHelper.markDirty(Region.this, DirtyBits.REGION_SHAPE);
         }
-    };
+    }
 
     /**
      * Specifies whether the shape, if defined, is scaled to match the size of the Region.
@@ -1455,9 +1402,9 @@ public class Region extends Parent {
     }
 
     /**
-     * Defines whether the shape is centered within the Region's width or height.
-     * {@code true} means the shape centered within the Region's width and height,
-     * {@code false} means the shape is positioned at its source position.
+     * Defines whether the shape is centered within the {@code Region}'s width and height.
+     * When {@code true}, the shape is centered within the {@code Region}'s width and height,
+     * otherwise the shape is positioned at its source position.
      *
      * @defaultValue true
      * @since JavaFX 8.0
@@ -1925,47 +1872,37 @@ public class Region extends Parent {
         return computeChildMinAreaWidth(child, -1, margin, -1, false);
     }
 
-    double computeChildMinAreaWidth(Node child, double baselineComplement, Insets margin, double height, boolean fillHeight) {
+    double computeChildMinAreaWidth(Node child, double baselineComplement, Insets margin, double availableHeight, boolean fillHeight) {
         final boolean snap = isSnapToPixel();
         double left = margin != null? snapSpaceX(margin.getLeft(), snap) : 0;
         double right = margin != null? snapSpaceX(margin.getRight(), snap) : 0;
         double alt = -1;
-        if (height != -1 && child.isResizable() && child.getContentBias() == Orientation.VERTICAL) { // width depends on height
+        if (availableHeight != -1 && child.isResizable() && child.getContentBias() == Orientation.VERTICAL) { // width depends on height
             double top = margin != null? snapSpaceY(margin.getTop(), snap) : 0;
             double bottom = (margin != null? snapSpaceY(margin.getBottom(), snap) : 0);
             double bo = child.getBaselineOffset();
             final double contentHeight = bo == BASELINE_OFFSET_SAME_AS_HEIGHT && baselineComplement != -1 ?
-                    height - top - bottom - baselineComplement :
-                     height - top - bottom;
-            if (fillHeight) {
-                alt = snapSizeY(boundedSize(
-                        child.minHeight(-1), contentHeight,
-                        child.maxHeight(-1)));
-            } else {
-                alt = snapSizeY(boundedSize(
-                        child.minHeight(-1),
-                        child.prefHeight(-1),
-                        Math.min(child.maxHeight(-1), contentHeight)));
-            }
+                    availableHeight - top - bottom - baselineComplement :
+                    availableHeight - top - bottom;
+            alt = computedBoundedHeight(child, fillHeight, contentHeight);
         }
         return left + snapSizeX(child.minWidth(alt)) + right;
     }
 
     double computeChildMinAreaHeight(Node child, Insets margin) {
-        return computeChildMinAreaHeight(child, -1, margin, -1);
+        return computeChildMinAreaHeight(child, -1, margin, -1, false);
     }
 
-    double computeChildMinAreaHeight(Node child, double minBaselineComplement, Insets margin, double width) {
+    double computeChildMinAreaHeight(Node child, double minBaselineComplement, Insets margin, double availableWidth, boolean fillWidth) {
         final boolean snap = isSnapToPixel();
         double top =margin != null? snapSpaceY(margin.getTop(), snap) : 0;
         double bottom = margin != null? snapSpaceY(margin.getBottom(), snap) : 0;
 
         double alt = -1;
-        if (child.isResizable() && child.getContentBias() == Orientation.HORIZONTAL) { // height depends on width
-            double left = margin != null? snapSpaceX(margin.getLeft(), snap) : 0;
-            double right = margin != null? snapSpaceX(margin.getRight(), snap) : 0;
-            alt = snapSizeX(width != -1? boundedSize(child.minWidth(-1), width - left - right, child.maxWidth(-1)) :
-                    child.maxWidth(-1));
+        if (availableWidth != -1 && child.isResizable() && child.getContentBias() == Orientation.HORIZONTAL) { // height depends on width
+            double contentWidth = computeContentWidth(margin, availableWidth);
+
+            alt = computeBoundedWidth(child, fillWidth, contentWidth);
         }
 
         // For explanation, see computeChildPrefAreaHeight
@@ -1986,48 +1923,37 @@ public class Region extends Parent {
         return computeChildPrefAreaWidth(child, -1, margin, -1, false);
     }
 
-    double computeChildPrefAreaWidth(Node child, double baselineComplement, Insets margin, double height, boolean fillHeight) {
+    double computeChildPrefAreaWidth(Node child, double baselineComplement, Insets margin, double availableHeight, boolean fillHeight) {
         final boolean snap = isSnapToPixel();
         double left = margin != null? snapSpaceX(margin.getLeft(), snap) : 0;
         double right = margin != null? snapSpaceX(margin.getRight(), snap) : 0;
         double alt = -1;
-        if (height != -1 && child.isResizable() && child.getContentBias() == Orientation.VERTICAL) { // width depends on height
+        if (availableHeight != -1 && child.isResizable() && child.getContentBias() == Orientation.VERTICAL) { // width depends on height
             double top = margin != null? snapSpaceY(margin.getTop(), snap) : 0;
             double bottom = margin != null? snapSpaceY(margin.getBottom(), snap) : 0;
             double bo = child.getBaselineOffset();
             final double contentHeight = bo == BASELINE_OFFSET_SAME_AS_HEIGHT && baselineComplement != -1 ?
-                    height - top - bottom - baselineComplement :
-                     height - top - bottom;
-            if (fillHeight) {
-                alt = snapSizeY(boundedSize(
-                        child.minHeight(-1), contentHeight,
-                        child.maxHeight(-1)));
-            } else {
-                alt = snapSizeY(boundedSize(
-                        child.minHeight(-1),
-                        child.prefHeight(-1),
-                        Math.min(child.maxHeight(-1), contentHeight)));
-            }
+                    availableHeight - top - bottom - baselineComplement :
+                    availableHeight - top - bottom;
+            alt = computedBoundedHeight(child, fillHeight, contentHeight);
         }
         return left + snapSizeX(boundedSize(child.minWidth(alt), child.prefWidth(alt), child.maxWidth(alt))) + right;
     }
 
     double computeChildPrefAreaHeight(Node child, Insets margin) {
-        return computeChildPrefAreaHeight(child, -1, margin, -1);
+        return computeChildPrefAreaHeight(child, -1, margin, -1, false);
     }
 
-    double computeChildPrefAreaHeight(Node child, double prefBaselineComplement, Insets margin, double width) {
+    double computeChildPrefAreaHeight(Node child, double prefBaselineComplement, Insets margin, double availableWidth, boolean fillWidth) {
         final boolean snap = isSnapToPixel();
         double top = margin != null? snapSpaceY(margin.getTop(), snap) : 0;
         double bottom = margin != null? snapSpaceY(margin.getBottom(), snap) : 0;
 
         double alt = -1;
-        if (child.isResizable() && child.getContentBias() == Orientation.HORIZONTAL) { // height depends on width
-            double left = margin != null ? snapSpaceX(margin.getLeft(), snap) : 0;
-            double right = margin != null ? snapSpaceX(margin.getRight(), snap) : 0;
-            alt = snapSizeX(boundedSize(
-                    child.minWidth(-1), width != -1 ? width - left - right
-                    : child.prefWidth(-1), child.maxWidth(-1)));
+        if (availableWidth != -1 && child.isResizable() && child.getContentBias() == Orientation.HORIZONTAL) { // height depends on width
+            double contentWidth = computeContentWidth(margin, availableWidth);
+
+            alt = computeBoundedWidth(child, fillWidth, contentWidth);
         }
 
         if (prefBaselineComplement != -1) {
@@ -2047,7 +1973,7 @@ public class Region extends Parent {
         }
     }
 
-    double computeChildMaxAreaWidth(Node child, double baselineComplement, Insets margin, double height, boolean fillHeight) {
+    double computeChildMaxAreaWidth(Node child, double baselineComplement, Insets margin, double availableHeight, boolean fillHeight) {
         double max = child.maxWidth(-1);
         if (max == Double.MAX_VALUE) {
             return max;
@@ -2056,30 +1982,22 @@ public class Region extends Parent {
         double left = margin != null? snapSpaceX(margin.getLeft(), snap) : 0;
         double right = margin != null? snapSpaceX(margin.getRight(), snap) : 0;
         double alt = -1;
-        if (height != -1 && child.isResizable() && child.getContentBias() == Orientation.VERTICAL) { // width depends on height
+        if (availableHeight != -1 && child.isResizable() && child.getContentBias() == Orientation.VERTICAL) { // width depends on height
             double top = margin != null? snapSpaceY(margin.getTop(), snap) : 0;
             double bottom = (margin != null? snapSpaceY(margin.getBottom(), snap) : 0);
             double bo = child.getBaselineOffset();
             final double contentHeight = bo == BASELINE_OFFSET_SAME_AS_HEIGHT && baselineComplement != -1 ?
-                    height - top - bottom - baselineComplement :
-                     height - top - bottom;
-            if (fillHeight) {
-                alt = snapSizeY(boundedSize(
-                        child.minHeight(-1), contentHeight,
-                        child.maxHeight(-1)));
-            } else {
-                alt = snapSizeY(boundedSize(
-                        child.minHeight(-1),
-                        child.prefHeight(-1),
-                        Math.min(child.maxHeight(-1), contentHeight)));
-            }
+                    availableHeight - top - bottom - baselineComplement :
+                    availableHeight - top - bottom;
+
+            alt = computedBoundedHeight(child, fillHeight, contentHeight);
             max = child.maxWidth(alt);
         }
         // if min > max, min wins, so still need to call boundedSize()
         return left + snapSizeX(boundedSize(child.minWidth(alt), max, Double.MAX_VALUE)) + right;
     }
 
-    double computeChildMaxAreaHeight(Node child, double maxBaselineComplement, Insets margin, double width) {
+    double computeChildMaxAreaHeight(Node child, double maxBaselineComplement, Insets margin, double availableWidth, boolean fillWidth) {
         double max = child.maxHeight(-1);
         if (max == Double.MAX_VALUE) {
             return max;
@@ -2089,18 +2007,17 @@ public class Region extends Parent {
         double top = margin != null? snapSpaceY(margin.getTop(), snap) : 0;
         double bottom = margin != null? snapSpaceY(margin.getBottom(), snap) : 0;
         double alt = -1;
-        if (child.isResizable() && child.getContentBias() == Orientation.HORIZONTAL) { // height depends on width
-            double left = margin != null? snapSpaceX(margin.getLeft(), snap) : 0;
-            double right = margin != null? snapSpaceX(margin.getRight(), snap) : 0;
-            alt = snapSizeX(width != -1? boundedSize(child.minWidth(-1), width - left - right, child.maxWidth(-1)) :
-                child.minWidth(-1));
+        if (availableWidth != -1 && child.isResizable() && child.getContentBias() == Orientation.HORIZONTAL) { // height depends on width
+            double contentWidth = computeContentWidth(margin, availableWidth);
+
+            alt = computeBoundedWidth(child, fillWidth, contentWidth);
             max = child.maxHeight(alt);
         }
         // For explanation, see computeChildPrefAreaHeight
         if (maxBaselineComplement != -1) {
             double baseline = child.getBaselineOffset();
             if (child.isResizable() && baseline == BASELINE_OFFSET_SAME_AS_HEIGHT) {
-                return top + snapSizeY(boundedSize(child.minHeight(alt), child.maxHeight(alt), Double.MAX_VALUE)) + bottom
+                return top + snapSizeY(boundedSize(child.minHeight(alt), max, Double.MAX_VALUE)) + bottom
                         + maxBaselineComplement;
             } else {
                 return top + baseline + maxBaselineComplement + bottom;
@@ -2111,62 +2028,135 @@ public class Region extends Parent {
         }
     }
 
+    /*
+     * Definition of used terms:
+     *
+     * # available width/heights:
+     *
+     * Sizes provided by the container that may be used as a dependent value when
+     * calculating sizes for biased controls. These may be set to -1 to indicate
+     * no such information is available. If given, the sizes include the Margin
+     * of the child. As such the Margin must be removed before passing these
+     * values as a dependent value to min/pref/max width/height functions.
+     *
+     * # content width/heights:
+     *
+     * The space allocated to a child, minus its margins. A content size is
+     * always a real value (not NaN) and never negative.
+     *
+     * # bounded width/heights:
+     *
+     * The space allocated to a child, minus its margins, adjusted according to
+     * its constraints (min <= X <= max). A bounded size is always a real value
+     * (not NaN) and never negative.
+     */
+
+    /*
+     * Given a content width, limits it by the child's constraints. The fill boolean
+     * controls whether the content width or the child's preferred width is used to compute
+     * the bounded width.
+     */
+    private double computeBoundedWidth(Node child, boolean fill, double contentWidth) {
+        double min = child.minWidth(-1);
+        double max = child.maxWidth(-1);
+
+        if (fill) {
+            return snapSizeX(boundedSize(min, contentWidth, max));
+        }
+
+        return snapSizeX(boundedSize(min, child.prefWidth(-1), Math.min(max, contentWidth)));
+    }
+
+    /*
+     * Given a content height, limits it by the child's constraints. The fill boolean
+     * controls whether the content height or the child's preferred height is used to compute
+     * the bounded height.
+     */
+    private double computedBoundedHeight(Node child, boolean fill, double contentHeight) {
+        double min = child.minHeight(-1);
+        double max = child.maxHeight(-1);
+
+        if (fill) {
+            return snapSizeY(boundedSize(min, contentHeight, max));
+        }
+
+        return snapSizeY(boundedSize(min, child.prefHeight(-1), Math.min(max, contentHeight)));
+    }
+
+    /*
+     * Removes the given Margin (if any) from a width which still includes margins
+     * to create a content width.
+     */
+    private double computeContentWidth(Insets margin, double width) {
+        boolean snap = isSnapToPixel();
+        double left = margin != null ? snapSpaceX(margin.getLeft(), snap) : 0;
+        double right = margin != null ? snapSpaceX(margin.getRight(), snap) : 0;
+
+        return width - left - right;
+    }
+
     /* Max of children's minimum area widths */
 
     double computeMaxMinAreaWidth(List<Node> children, Callback<Node, Insets> margins) {
         return getMaxAreaWidth(children, margins, new double[] { -1 }, false, true);
     }
 
-    double computeMaxMinAreaWidth(List<Node> children, Callback<Node, Insets> margins, double height, boolean fillHeight) {
+    double computeMaxMinAreaWidth(List<Node> children, Callback<Node, Insets> margins, double height,
+            boolean fillHeight) {
         return getMaxAreaWidth(children, margins, new double[] { height }, fillHeight, true);
     }
 
-    double computeMaxMinAreaWidth(List<Node> children, Callback<Node, Insets> childMargins, double childHeights[], boolean fillHeight) {
+    double computeMaxMinAreaWidth(List<Node> children, Callback<Node, Insets> childMargins,
+            double[] childHeights, boolean fillHeight) {
         return getMaxAreaWidth(children, childMargins, childHeights, fillHeight, true);
     }
 
     /* Max of children's minimum area heights */
 
-    double computeMaxMinAreaHeight(List<Node>children, Callback<Node, Insets> margins, VPos valignment) {
-        return getMaxAreaHeight(children, margins, null, valignment, true);
+    double computeMaxMinAreaHeight(List<Node> children, Callback<Node, Insets> margins, VPos valignment) {
+        return getMaxAreaHeight(children, margins, null, false, true, valignment);
     }
 
-    double computeMaxMinAreaHeight(List<Node>children, Callback<Node, Insets> margins, VPos valignment, double width) {
-        return getMaxAreaHeight(children, margins, new double[] { width }, valignment, true);
+    double computeMaxMinAreaHeight(List<Node> children, Callback<Node, Insets> margins, double width,
+            boolean fillWidth, VPos valignment) {
+        return getMaxAreaHeight(children, margins, new double[] { width }, fillWidth, true, valignment);
     }
 
-    double computeMaxMinAreaHeight(List<Node>children, Callback<Node, Insets> childMargins, double childWidths[], VPos valignment) {
-        return getMaxAreaHeight(children, childMargins, childWidths, valignment, true);
+    double computeMaxMinAreaHeight(List<Node> children, Callback<Node, Insets> childMargins,
+            double[] childWidths, boolean fillWidth, VPos valignment) {
+        return getMaxAreaHeight(children, childMargins, childWidths, fillWidth, true, valignment);
     }
 
     /* Max of children's pref area widths */
 
-    double computeMaxPrefAreaWidth(List<Node>children, Callback<Node, Insets> margins) {
+    double computeMaxPrefAreaWidth(List<Node> children, Callback<Node, Insets> margins) {
         return getMaxAreaWidth(children, margins, new double[] { -1 }, false, false);
     }
 
-    double computeMaxPrefAreaWidth(List<Node>children, Callback<Node, Insets> margins, double height,
+    double computeMaxPrefAreaWidth(List<Node> children, Callback<Node, Insets> margins, double height,
             boolean fillHeight) {
         return getMaxAreaWidth(children, margins, new double[] { height }, fillHeight, false);
     }
 
-    double computeMaxPrefAreaWidth(List<Node>children, Callback<Node, Insets> childMargins,
-            double childHeights[], boolean fillHeight) {
+    double computeMaxPrefAreaWidth(List<Node> children, Callback<Node, Insets> childMargins,
+            double[] childHeights, boolean fillHeight) {
         return getMaxAreaWidth(children, childMargins, childHeights, fillHeight, false);
     }
 
     /* Max of children's pref area heights */
 
-    double computeMaxPrefAreaHeight(List<Node>children, Callback<Node, Insets> margins, VPos valignment) {
-        return getMaxAreaHeight(children, margins, null, valignment, false);
+    double computeMaxPrefAreaHeight(List<Node> children, Callback<Node, Insets> margins, VPos valignment) {
+        return getMaxAreaHeight(children, margins, null, false, false, valignment);
     }
 
-    double computeMaxPrefAreaHeight(List<Node>children, Callback<Node, Insets> margins, double width, VPos valignment) {
-        return getMaxAreaHeight(children, margins, new double[] { width }, valignment, false);
+    double computeMaxPrefAreaHeight(List<Node> children, Callback<Node, Insets> margins, double width,
+            boolean fillWidth, VPos valignment) {
+        return getMaxAreaHeight(children, margins, new double[] { width }, fillWidth, false, valignment);
     }
 
-    double computeMaxPrefAreaHeight(List<Node>children, Callback<Node, Insets> childMargins, double childWidths[], VPos valignment) {
-        return getMaxAreaHeight(children, childMargins, childWidths, valignment, false);
+    double computeMaxPrefAreaHeight(List<Node> children, Callback<Node, Insets> childMargins,
+            double[] childWidths, boolean fillWidth, VPos valignment) {
+        return getMaxAreaHeight(children, childMargins, childWidths, fillWidth, false, valignment);
     }
 
     /**
@@ -2228,7 +2218,10 @@ public class Region extends Parent {
     }
 
     /* utility method for computing the max of children's min or pref heights, taking into account baseline alignment */
-    private double getMaxAreaHeight(List<Node> children, Callback<Node,Insets> childMargins,  double childWidths[], VPos valignment, boolean minimum) {
+    private double getMaxAreaHeight(
+        List<Node> children, Callback<Node, Insets> childMargins, double[] childWidths,
+        boolean fillWidth, boolean minimum, VPos valignment
+    ) {
         final double singleChildWidth = childWidths == null ? -1 : childWidths.length == 1 ? childWidths[0] : Double.NaN;
         if (valignment == VPos.BASELINE) {
             double maxAbove = 0;
@@ -2259,16 +2252,16 @@ public class Region extends Parent {
                 Insets margin = childMargins.call(child);
                 final double childWidth = Double.isNaN(singleChildWidth) ? childWidths[i] : singleChildWidth;
                 max = Math.max(max, minimum?
-                    computeChildMinAreaHeight(child, -1, margin, childWidth) :
-                        computeChildPrefAreaHeight(child, -1, margin, childWidth));
+                    computeChildMinAreaHeight(child, -1, margin, childWidth, fillWidth) :
+                        computeChildPrefAreaHeight(child, -1, margin, childWidth, fillWidth));
             }
             return max;
         }
     }
 
     /* utility method for computing the max of children's min or pref width, horizontal alignment is ignored for now */
-    private double getMaxAreaWidth(List<javafx.scene.Node> children,
-            Callback<Node, Insets> childMargins, double childHeights[], boolean fillHeight, boolean minimum) {
+    private double getMaxAreaWidth(List<Node> children,
+            Callback<Node, Insets> childMargins, double[] childHeights, boolean fillHeight, boolean minimum) {
         final double singleChildHeight = childHeights == null ? -1 : childHeights.length == 1 ? childHeights[0] : Double.NaN;
 
         double max = 0;
@@ -2277,7 +2270,7 @@ public class Region extends Parent {
             final Insets margin = childMargins.call(child);
             final double childHeight = Double.isNaN(singleChildHeight) ? childHeights[i] : singleChildHeight;
             max = Math.max(max, minimum?
-                computeChildMinAreaWidth(children.get(i), -1, margin, childHeight, fillHeight) :
+                computeChildMinAreaWidth(child, -1, margin, childHeight, fillHeight) :
                     computeChildPrefAreaWidth(child, -1, margin, childHeight, fillHeight));
         }
         return max;
@@ -2607,12 +2600,11 @@ public class Region extends Parent {
             }
         }
 
-
         if (child.isResizable()) {
             Vec2d size = boundedNodeSizeWithBias(child, areaWidth - left - right, areaHeight - top - bottom,
                     fillWidth, fillHeight, TEMP_VEC2D);
             child.resize(snapSize(size.x, isSnapToPixel, snapScaleX),
-                         snapSize(size.y, isSnapToPixel, snapScaleX));
+                         snapSize(size.y, isSnapToPixel, snapScaleY));
         }
         position(child, areaX, areaY, areaWidth, areaHeight, areaBaselineOffset,
                 top, right, bottom, left, halignment, valignment, isSnapToPixel);
@@ -3283,7 +3275,7 @@ public class Region extends Parent {
                 }
 
                 final StrokeType type = bss.getType();
-                double sw = Math.max(bs.getWidths().top, 0d);
+                double sw = Math.max(bs.getWidths().getTop(), 0d);
                 StrokeLineCap cap = bss.getLineCap();
                 StrokeLineJoin join = bss.getLineJoin();
                 float miterlimit = (float) Math.max(bss.getMiterLimit(), 1d);
@@ -3354,9 +3346,9 @@ public class Region extends Parent {
         // since Parent's computeGeomBounds does handle 3D correctly.
         BaseBounds cb = RegionHelper.superComputeGeomBounds(this, bounds, tx);
         /*
-         * This is a work around for RT-7680. Parent returns invalid bounds from
+         * This is a work around for JDK-8109407. Parent returns invalid bounds from
          * computeGeomBoundsImpl when it has no children or if all its children
-         * have invalid bounds. If RT-7680 were fixed, then we could omit this
+         * have invalid bounds. If JDK-8109407 were fixed, then we could omit this
          * first branch of the if and only use the else since the correct value
          * would be computed.
          */
@@ -3442,7 +3434,7 @@ public class Region extends Parent {
      */
      private static class StyleableProperties {
          private static final CssMetaData<Region,Insets> PADDING =
-             new CssMetaData<Region,Insets>("-fx-padding",
+             new CssMetaData<>("-fx-padding",
                  InsetsConverter.getInstance(), Insets.EMPTY) {
 
             @Override public boolean isSettable(Region node) {
@@ -3455,7 +3447,7 @@ public class Region extends Parent {
          };
 
          private static final CssMetaData<Region,Insets> OPAQUE_INSETS =
-                 new CssMetaData<Region,Insets>("-fx-opaque-insets",
+                 new CssMetaData<>("-fx-opaque-insets",
                          InsetsConverter.getInstance(), null) {
 
                      @Override
@@ -3471,7 +3463,7 @@ public class Region extends Parent {
                  };
 
          private static final CssMetaData<Region,Background> BACKGROUND =
-             new CssMetaData<Region,Background>("-fx-region-background",
+             new CssMetaData<>("-fx-region-background",
                  BackgroundConverter.INSTANCE,
                  null,
                  false,
@@ -3487,7 +3479,7 @@ public class Region extends Parent {
          };
 
          private static final CssMetaData<Region,Border> BORDER =
-             new CssMetaData<Region,Border>("-fx-region-border",
+             new CssMetaData<>("-fx-region-border",
                      BorderConverter.getInstance(),
                      null,
                      false,
@@ -3503,7 +3495,7 @@ public class Region extends Parent {
              };
 
          private static final CssMetaData<Region,Shape> SHAPE =
-             new CssMetaData<Region,Shape>("-fx-shape",
+             new CssMetaData<>("-fx-shape",
                  ShapeConverter.getInstance()) {
 
             @Override public boolean isSettable(Region node) {
@@ -3517,7 +3509,7 @@ public class Region extends Parent {
          };
 
          private static final CssMetaData<Region, Boolean> SCALE_SHAPE =
-             new CssMetaData<Region,Boolean>("-fx-scale-shape",
+             new CssMetaData<>("-fx-scale-shape",
                  BooleanConverter.getInstance(), Boolean.TRUE){
 
             @Override public boolean isSettable(Region node) {
@@ -3530,7 +3522,7 @@ public class Region extends Parent {
         };
 
          private static final CssMetaData<Region,Boolean> POSITION_SHAPE =
-             new CssMetaData<Region,Boolean>("-fx-position-shape",
+             new CssMetaData<>("-fx-position-shape",
                  BooleanConverter.getInstance(), Boolean.TRUE){
 
             @Override public boolean isSettable(Region node) {
@@ -3543,7 +3535,7 @@ public class Region extends Parent {
         };
 
          private static final CssMetaData<Region,Boolean> CACHE_SHAPE =
-             new CssMetaData<Region,Boolean>("-fx-cache-shape",
+             new CssMetaData<>("-fx-cache-shape",
                  BooleanConverter.getInstance(), Boolean.TRUE){
 
             @Override public boolean isSettable(Region node) {
@@ -3556,7 +3548,7 @@ public class Region extends Parent {
         };
 
          private static final CssMetaData<Region, Boolean> SNAP_TO_PIXEL =
-             new CssMetaData<Region,Boolean>("-fx-snap-to-pixel",
+             new CssMetaData<>("-fx-snap-to-pixel",
                  BooleanConverter.getInstance(), Boolean.TRUE){
 
             @Override public boolean isSettable(Region node) {
@@ -3570,7 +3562,7 @@ public class Region extends Parent {
         };
 
          private static final CssMetaData<Region, Number> MIN_HEIGHT =
-             new CssMetaData<Region,Number>("-fx-min-height",
+             new CssMetaData<>("-fx-min-height",
                  SizeConverter.getInstance(), USE_COMPUTED_SIZE){
 
             @Override public boolean isSettable(Region node) {
@@ -3584,7 +3576,7 @@ public class Region extends Parent {
         };
 
          private static final CssMetaData<Region, Number> PREF_HEIGHT =
-             new CssMetaData<Region,Number>("-fx-pref-height",
+             new CssMetaData<>("-fx-pref-height",
                  SizeConverter.getInstance(), USE_COMPUTED_SIZE){
 
             @Override public boolean isSettable(Region node) {
@@ -3598,7 +3590,7 @@ public class Region extends Parent {
         };
 
          private static final CssMetaData<Region, Number> MAX_HEIGHT =
-             new CssMetaData<Region,Number>("-fx-max-height",
+             new CssMetaData<>("-fx-max-height",
                  SizeConverter.getInstance(), USE_COMPUTED_SIZE){
 
             @Override public boolean isSettable(Region node) {
@@ -3612,7 +3604,7 @@ public class Region extends Parent {
         };
 
          private static final CssMetaData<Region, Number> MIN_WIDTH =
-             new CssMetaData<Region,Number>("-fx-min-width",
+             new CssMetaData<>("-fx-min-width",
                  SizeConverter.getInstance(), USE_COMPUTED_SIZE){
 
             @Override public boolean isSettable(Region node) {
@@ -3626,7 +3618,7 @@ public class Region extends Parent {
         };
 
          private static final CssMetaData<Region, Number> PREF_WIDTH =
-             new CssMetaData<Region,Number>("-fx-pref-width",
+             new CssMetaData<>("-fx-pref-width",
                  SizeConverter.getInstance(), USE_COMPUTED_SIZE){
 
             @Override public boolean isSettable(Region node) {
@@ -3640,7 +3632,7 @@ public class Region extends Parent {
         };
 
          private static final CssMetaData<Region, Number> MAX_WIDTH =
-             new CssMetaData<Region,Number>("-fx-max-width",
+             new CssMetaData<>("-fx-max-width",
                  SizeConverter.getInstance(), USE_COMPUTED_SIZE){
 
             @Override public boolean isSettable(Region node) {
@@ -3657,7 +3649,7 @@ public class Region extends Parent {
          static {
 
             final List<CssMetaData<? extends Styleable, ?>> styleables =
-                new ArrayList<CssMetaData<? extends Styleable, ?>>(Parent.getClassCssMetaData());
+                new ArrayList<>(Parent.getClassCssMetaData());
             styleables.add(PADDING);
             styleables.add(BACKGROUND);
             styleables.add(BORDER);

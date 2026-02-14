@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -45,7 +45,7 @@ public class FlatteningPathIterator implements PathIterator {
 
     int limit;              // Maximum number of recursion levels
 
-    // hold field must be volatile to work around a Mac runtime bug (see RT-12386)
+    // hold field must be volatile to work around a Mac runtime bug (see JDK-8111925)
     volatile float hold[] = new float[14];   // The cache of interpolated coords
                     // Note that this must be long enough
                     // to store a full cubic segment and
@@ -155,6 +155,7 @@ public class FlatteningPathIterator implements PathIterator {
      * @see PathIterator#WIND_EVEN_ODD
      * @see PathIterator#WIND_NON_ZERO
      */
+    @Override
     public int getWindingRule() {
         return src.getWindingRule();
     }
@@ -164,6 +165,7 @@ public class FlatteningPathIterator implements PathIterator {
      * @return <code>true</code> if all the segments have
      * been read; <code>false</code> otherwise.
      */
+    @Override
     public boolean isDone() {
     return done;
     }
@@ -191,6 +193,7 @@ public class FlatteningPathIterator implements PathIterator {
      * along the primary direction of traversal as long as there are
      * more points in that direction.
      */
+    @Override
     public void next() {
         next(true);
     }
@@ -344,14 +347,15 @@ public class FlatteningPathIterator implements PathIterator {
      * @see PathIterator#SEG_LINETO
      * @see PathIterator#SEG_CLOSE
      */
+    @Override
     public int currentSegment(float[] coords) {
         if (isDone()) {
             throw new NoSuchElementException("flattening iterator out of bounds");
         }
         int type = holdType;
         if (type != SEG_CLOSE) {
-            coords[0] = (float) hold[holdIndex + 0];
-            coords[1] = (float) hold[holdIndex + 1];
+            coords[0] = hold[holdIndex + 0];
+            coords[1] = hold[holdIndex + 1];
             if (type != SEG_MOVETO) {
             type = SEG_LINETO;
             }

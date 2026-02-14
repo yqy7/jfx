@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,12 @@
 
 package test.javafx.scene.control.cell;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ObservableValue;
 import javafx.scene.control.CheckBox;
@@ -34,9 +39,8 @@ import javafx.scene.control.ListView;
 import javafx.scene.control.cell.CheckBoxListCell;
 import javafx.util.Callback;
 import javafx.util.StringConverter;
-
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class CheckBoxListCellTest {
 
@@ -44,10 +48,11 @@ public class CheckBoxListCellTest {
     private Callback<Object, ObservableValue<Boolean>> callback;
     private StringConverter<Object> converter;
 
-    @Before public void setup() {
+    @BeforeEach
+    public void setup() {
         booleanProperty = new SimpleBooleanProperty(false);
         callback = param -> booleanProperty;
-        converter = new StringConverter<Object>() {
+        converter = new StringConverter<>() {
             @Override public String toString(Object object) {
                 return null;
             }
@@ -235,10 +240,12 @@ public class CheckBoxListCellTest {
      *
      **************************************************************************/
 
-    @Test(expected=NullPointerException.class)
+    @Test
     public void test_getSelectedPropertyIsNull() {
-        CheckBoxListCell<Object> cell = new CheckBoxListCell<>();
-        cell.updateItem("TEST", false);
+        assertThrows(NullPointerException.class, () -> {
+            CheckBoxListCell<Object> cell = new CheckBoxListCell<>();
+            cell.updateItem("TEST", false);
+        });
     }
 
     @Test public void test_updateItem_isEmpty_graphicIsNull() {
@@ -277,7 +284,7 @@ public class CheckBoxListCellTest {
 
     @Test public void test_updateItem_isNotEmpty_textIsNotNull_nonNullConverter() {
         CheckBoxListCell<Object> cell = new CheckBoxListCell<>(callback);
-        cell.setConverter(new StringConverter<Object>() {
+        cell.setConverter(new StringConverter<>() {
             @Override public Object fromString(String string) {
                 return null;
             }

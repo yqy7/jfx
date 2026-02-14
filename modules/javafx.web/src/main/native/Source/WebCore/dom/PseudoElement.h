@@ -32,13 +32,16 @@
 namespace WebCore {
 
 class PseudoElement final : public Element {
-    WTF_MAKE_ISO_ALLOCATED(PseudoElement);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(PseudoElement);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(PseudoElement);
 public:
     static Ref<PseudoElement> create(Element& host, PseudoId);
     virtual ~PseudoElement();
 
-    Element* hostElement() const { return m_hostElement; }
+    Element* hostElement() const { return m_hostElement.get(); }
     void clearHostElement();
+
+    PseudoId pseudoId() const { return m_pseudoId; }
 
     bool rendererIsNeeded(const RenderStyle&) override;
 
@@ -48,9 +51,7 @@ public:
 private:
     PseudoElement(Element&, PseudoId);
 
-    PseudoId customPseudoId() const override { return m_pseudoId; }
-
-    Element* m_hostElement;
+    WeakPtr<Element, WeakPtrImplWithEventTargetData> m_hostElement;
     PseudoId m_pseudoId;
 };
 

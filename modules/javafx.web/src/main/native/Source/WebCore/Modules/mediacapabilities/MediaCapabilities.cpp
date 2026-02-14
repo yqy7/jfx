@@ -27,12 +27,11 @@
 #include "MediaCapabilities.h"
 
 #include "ContentType.h"
-#include "Document.h"
+#include "DocumentInlines.h"
 #include "EventLoop.h"
 #include "JSDOMPromiseDeferred.h"
 #include "JSMediaCapabilitiesDecodingInfo.h"
 #include "JSMediaCapabilitiesEncodingInfo.h"
-#include "LibWebRTCProvider.h"
 #include "Logging.h"
 #include "MediaCapabilitiesDecodingInfo.h"
 #include "MediaCapabilitiesEncodingInfo.h"
@@ -42,6 +41,7 @@
 #include "MediaEngineConfigurationFactory.h"
 #include "Page.h"
 #include "Settings.h"
+#include "WebRTCProvider.h"
 #include <wtf/Logger.h>
 #include <wtf/SortedArrayMap.h>
 
@@ -52,21 +52,21 @@ static bool isValidMediaMIMEType(const ContentType& contentType)
     // A "bucket" MIME types is one whose container type does not uniquely specify a codec.
     // See: https://tools.ietf.org/html/rfc6381
     static constexpr ComparableASCIILiteral bucketMIMETypeArray[] = {
-        "application/mp21",
-        "application/mp4",
-        "audio/3gpp",
-        "audio/3gpp2",
-        "audio/mp4",
-        "audio/ogg",
-        "audio/vnd.apple.mpegurl",
-        "audio/webm",
-        "video/3gpp",
-        "video/3gpp2",
-        "video/mp4",
-        "video/ogg",
-        "video/quicktime",
-        "video/vnd.apple.mpegurl",
-        "video/webm",
+        "application/mp21"_s,
+        "application/mp4"_s,
+        "audio/3gpp"_s,
+        "audio/3gpp2"_s,
+        "audio/mp4"_s,
+        "audio/ogg"_s,
+        "audio/vnd.apple.mpegurl"_s,
+        "audio/webm"_s,
+        "video/3gpp"_s,
+        "video/3gpp2"_s,
+        "video/mp4"_s,
+        "video/ogg"_s,
+        "video/quicktime"_s,
+        "video/vnd.apple.mpegurl"_s,
+        "video/webm"_s,
     };
     static constexpr SortedArraySet bucketMIMETypes { bucketMIMETypeArray };
 
@@ -96,7 +96,7 @@ static bool isValidVideoMIMEType(const ContentType& contentType)
         return false;
 
     auto containerType = contentType.containerType();
-    if (!startsWithLettersIgnoringASCIICase(containerType, "video/") && !startsWithLettersIgnoringASCIICase(containerType, "application/"))
+    if (!startsWithLettersIgnoringASCIICase(containerType, "video/"_s) && !startsWithLettersIgnoringASCIICase(containerType, "application/"_s))
         return false;
 
     return true;
@@ -112,7 +112,7 @@ static bool isValidAudioMIMEType(const ContentType& contentType)
         return false;
 
     auto containerType = contentType.containerType();
-    if (!startsWithLettersIgnoringASCIICase(containerType, "audio/") && !startsWithLettersIgnoringASCIICase(containerType, "application/"))
+    if (!startsWithLettersIgnoringASCIICase(containerType, "audio/"_s) && !startsWithLettersIgnoringASCIICase(containerType, "application/"_s))
         return false;
 
     return true;
@@ -168,7 +168,7 @@ static bool isValidMediaConfiguration(const MediaConfiguration& configuration)
 static void gatherDecodingInfo(Document& document, MediaDecodingConfiguration&& configuration, MediaEngineConfigurationFactory::DecodingConfigurationCallback&& callback)
 {
     RELEASE_LOG_INFO(Media, "Gathering decoding MediaCapabilities");
-    MediaEngineConfigurationFactory::DecodingConfigurationCallback decodingCallback = [callback = WTFMove(callback)](auto&& result) mutable {
+    MediaEngineConfigurationFactory::DecodingConfigurationCallback decodingCallback = [callback = WTFMove(callback)](MediaCapabilitiesDecodingInfo&& result) mutable {
         RELEASE_LOG_INFO(Media, "Finished gathering decoding MediaCapabilities");
         callback(WTFMove(result));
     };
@@ -176,18 +176,23 @@ static void gatherDecodingInfo(Document& document, MediaDecodingConfiguration&& 
     if (!document.settings().mediaCapabilitiesExtensionsEnabled() && configuration.video)
         configuration.video.value().alphaChannel.reset();
 
+    configuration.allowedMediaContainerTypes = document.settings().allowedMediaContainerTypes();
+    configuration.allowedMediaCodecTypes = document.settings().allowedMediaCodecTypes();
+
 #if ENABLE(VP9)
     configuration.canExposeVP9 = document.settings().vp9DecoderEnabled();
 #endif
 
+    RefPtr protectedPage = document.page();
+    if (protectedPage)
+        configuration.pageIdentifier = protectedPage->identifier();
+
 #if ENABLE(WEB_RTC)
     if (configuration.type == MediaDecodingType::WebRTC) {
-        if (auto* page = document.page())
-            page->libWebRTCProvider().createDecodingConfiguration(WTFMove(configuration), WTFMove(decodingCallback));
+        if (protectedPage)
+            protectedPage->webRTCProvider().createDecodingConfiguration(WTFMove(configuration), WTFMove(decodingCallback));
         return;
     }
-#else
-    UNUSED_PARAM(document);
 #endif
     MediaEngineConfigurationFactory::createDecodingConfiguration(WTFMove(configuration), WTFMove(decodingCallback));
 }
@@ -203,7 +208,7 @@ static void gatherEncodingInfo(Document& document, MediaEncodingConfiguration&& 
 #if ENABLE(WEB_RTC)
     if (configuration.type == MediaEncodingType::WebRTC) {
         if (auto* page = document.page())
-            page->libWebRTCProvider().createEncodingConfiguration(WTFMove(configuration), WTFMove(encodingCallback));
+            page->webRTCProvider().createEncodingConfiguration(WTFMove(configuration), WTFMove(encodingCallback));
         return;
     }
 #else
@@ -234,7 +239,7 @@ void MediaCapabilities::decodingInfo(ScriptExecutionContext& context, MediaDecod
     // 3. If configuration.audio is present and is not a valid audio configuration, return a Promise rejected with a TypeError.
     if (!isValidMediaConfiguration(configuration)) {
         RELEASE_LOG_INFO(Media, "Invalid decoding media configuration");
-        promise->reject(TypeError);
+        promise->reject(ExceptionCode::TypeError);
         return;
     }
 
@@ -248,14 +253,14 @@ void MediaCapabilities::decodingInfo(ScriptExecutionContext& context, MediaDecod
         });
     };
 
-    if (is<Document>(context)) {
-        gatherDecodingInfo(downcast<Document>(context), WTFMove(configuration), WTFMove(callback));
+    if (RefPtr document = dynamicDowncast<Document>(context)) {
+        gatherDecodingInfo(*document, WTFMove(configuration), WTFMove(callback));
         return;
     }
 
     m_decodingTasks.add(++m_nextTaskIdentifier, WTFMove(callback));
     context.postTaskToResponsibleDocument([configuration = WTFMove(configuration).isolatedCopy(), contextIdentifier = context.identifier(), weakThis = WeakPtr { this }, taskIdentifier = m_nextTaskIdentifier](auto& document) mutable {
-        gatherDecodingInfo(document, WTFMove(configuration), [contextIdentifier, weakThis = WTFMove(weakThis), taskIdentifier](auto&& result) mutable {
+        gatherDecodingInfo(document, WTFMove(configuration), [contextIdentifier, weakThis = WTFMove(weakThis), taskIdentifier](MediaCapabilitiesDecodingInfo&& result) mutable {
             ScriptExecutionContext::postTaskTo(contextIdentifier, [weakThis = WTFMove(weakThis), taskIdentifier, result = WTFMove(result).isolatedCopy()](auto&) mutable {
                 if (!weakThis)
                     return;
@@ -291,7 +296,7 @@ void MediaCapabilities::encodingInfo(ScriptExecutionContext& context, MediaEncod
     // encoding modules.
     if (!isValidMediaConfiguration(configuration)) {
         RELEASE_LOG_INFO(Media, "Invalid encoding media configuration");
-        promise->reject(TypeError);
+        promise->reject(ExceptionCode::TypeError);
         return;
     }
 
@@ -305,8 +310,8 @@ void MediaCapabilities::encodingInfo(ScriptExecutionContext& context, MediaEncod
         });
     };
 
-    if (is<Document>(context)) {
-        gatherEncodingInfo(downcast<Document>(context), WTFMove(configuration), WTFMove(callback));
+    if (RefPtr document = dynamicDowncast<Document>(context)) {
+        gatherEncodingInfo(*document, WTFMove(configuration), WTFMove(callback));
         return;
     }
 

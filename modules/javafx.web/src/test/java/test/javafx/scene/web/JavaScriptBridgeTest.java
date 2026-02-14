@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,8 +28,9 @@ package test.javafx.scene.web;
 import javafx.scene.web.WebEngine;
 import netscape.javascript.JSException;
 import netscape.javascript.JSObject;
-import static org.junit.Assert.*;
-import org.junit.Test;
+import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.w3c.dom.Document;
 
 public class JavaScriptBridgeTest extends TestBase {
@@ -39,7 +40,7 @@ public class JavaScriptBridgeTest extends TestBase {
         parent.setMember(name, javaObject);
     }
 
-    public @Test void testJSBridge1() throws InterruptedException {
+    public @Test void testJSBridge1() {
         final Document doc = getDocumentFor("src/test/resources/test/html/dom.html");
         final WebEngine web = getEngine();
 
@@ -85,10 +86,10 @@ public class JavaScriptBridgeTest extends TestBase {
             Object bd2 = win.getMember("bd");
             assertSame(bodyNode, bd2);
 
-            // RT-14174
+            // JDK-8113479
             ((JSObject) web.executeScript("new String('test me')"))
                 .call("charAt", new Object[] {1.0});
-            // RT-14175
+            // JDK-8113008
             try {
                 ((JSObject) web.executeScript("new String('test me')"))
                     .call("toUpperCase", (Object[]) null);
@@ -112,16 +113,16 @@ public class JavaScriptBridgeTest extends TestBase {
             catch (Throwable ex) {
                 assertTrue(ex instanceof NullPointerException);
             }
-            // RT-14178
+            // JDK-8113243
             ((JSObject) web.executeScript("new String('test me')"))
                 .setMember("iamwrong", null);
-            // RT-14241
+            // JDK-8112761
             ((JSObject) web.executeScript("new Array(1, 2, 3);"))
                 .setSlot(0, 155);
         });
     }
 
-    public @Test void testJSBridge2() throws InterruptedException {
+    public @Test void testJSBridge2() {
         submit(() -> {
             JSObject strO = (JSObject)
                     getEngine().executeScript("new String('test me')");
@@ -135,7 +136,7 @@ public class JavaScriptBridgeTest extends TestBase {
         });
     }
 
-    public @Test void testJSBridge3() throws InterruptedException {
+    public @Test void testJSBridge3() {
         //final Document doc = getDocumentFor("src/test/resources/test/html/dom.html");
         final WebEngine web = getEngine();
 
@@ -143,7 +144,7 @@ public class JavaScriptBridgeTest extends TestBase {
             Object wino = web.executeScript("parent.parent");
             assertTrue(wino instanceof JSObject);
             JSObject win = (JSObject) wino;
-            java.util.Stack<Object> st = new java.util.Stack<Object>();
+            java.util.Stack<Object> st = new java.util.Stack<>();
             bind("myStack", st);
             win.setMember("myStack2", st);
             web.executeScript("myStack.push(\"abc\")");
@@ -157,11 +158,11 @@ public class JavaScriptBridgeTest extends TestBase {
         });
     }
 
-    public @Test void testJSBridge4() throws InterruptedException {
+    public @Test void testJSBridge4() {
         final WebEngine web = getEngine();
 
         submit(() -> {
-            // Based on RT-19205 "JavaScript2Java Bridge: float and double
+            // Based on JDK-8127135 "JavaScript2Java Bridge: float and double
             // values can be lost when assigned to JS variables".
             float a = (float) 15.5;
             double b = 26.75;
@@ -187,7 +188,7 @@ public class JavaScriptBridgeTest extends TestBase {
             assertEquals(26.75, d.b, 0.1);
             assertEquals(26.75, e.b, 0.1);
 
-            // Based on RT-19209 "JavaScript2Java Bridge: assigning a JS
+            // Based on JDK-8127580 "JavaScript2Java Bridge: assigning a JS
             // object to a field of Java object produces garbage value"
             Carry carry = new Carry();
             bind("carry", carry);
@@ -196,7 +197,7 @@ public class JavaScriptBridgeTest extends TestBase {
             assertEquals(Boolean.TRUE, o);
             assertEquals("[object Window]", carry.o.toString());
 
-            // Based on RT-19204 "JavaScript2Java Bridge:
+            // Based on JDK-8118086 "JavaScript2Java Bridge:
             // setting a char field of an object produces an exception"
             char ch = 'C';
             carry = new Carry();
@@ -207,7 +208,7 @@ public class JavaScriptBridgeTest extends TestBase {
         });
     }
 
-    @Test public void testJSBridge5() throws InterruptedException {
+    @Test public void testJSBridge5() {
         final Document doc = getDocumentFor("src/test/resources/test/html/dom.html");
         final WebEngine web = getEngine();
 
@@ -223,7 +224,7 @@ public class JavaScriptBridgeTest extends TestBase {
         });
     }
 
-    @Test public void testJSCall1() throws InterruptedException {
+    @Test public void testJSCall1() {
         final WebEngine web = getEngine();
         submit(() -> {
             assertEquals("123.7", web.executeScript("123.67.toFixed(1)"));
@@ -237,7 +238,7 @@ public class JavaScriptBridgeTest extends TestBase {
          });
     }
 
-    @Test public void testNullMemberName() throws InterruptedException {
+    @Test public void testNullMemberName() {
         submit(() -> {
             JSObject parent = (JSObject) getEngine().executeScript("parent");
 
@@ -299,11 +300,11 @@ public class JavaScriptBridgeTest extends TestBase {
         }
     }
 
-    public @Test void testCallStatic() throws InterruptedException {
+    public @Test void testCallStatic() {
         final WebEngine web = getEngine();
 
         submit(() -> {
-            // Test RT-19099
+            // Test JDK-8119560
             java.io.File x = new java.io.File("foo.txt1");
             bind("x", x);
             try {
@@ -541,7 +542,7 @@ public class JavaScriptBridgeTest extends TestBase {
         });
     }
 
-    public @Test void testBridgeExplicitOverloading() throws InterruptedException {
+    public @Test void testBridgeExplicitOverloading() {
         final WebEngine web = getEngine();
 
         submit(() -> {
@@ -572,7 +573,7 @@ public class JavaScriptBridgeTest extends TestBase {
             web.executeScript("sb['append(char[],int,int)'](carr, 1, 2)");
             assertEquals("123 5 5.5 abc 987 klmlm", sb.toString());
 
-            java.util.List<Integer> alist = new java.util.ArrayList<Integer>();
+            java.util.List<Integer> alist = new java.util.ArrayList<>();
             alist.add(98);
             alist.add(87);
             alist.add(76);
@@ -600,7 +601,7 @@ public class JavaScriptBridgeTest extends TestBase {
         executeShouldFail(web, expression, "is not a function");
     }
 
-    public @Test void testThrowJava() throws InterruptedException {
+    public @Test void testThrowJava() {
         final WebEngine web = getEngine();
 
         submit(() -> {
@@ -618,8 +619,8 @@ public class JavaScriptBridgeTest extends TestBase {
         });
     }
 
-    // RT-37859
-    public @Test void testThrowJava2() throws InterruptedException {
+    // JDK-8097240
+    public @Test void testThrowJava2() {
         final WebEngine web = getEngine();
 
         submit(() -> {
@@ -652,7 +653,7 @@ public class JavaScriptBridgeTest extends TestBase {
     }
 
 
-    public @Test void testBridgeArray1() throws InterruptedException {
+    public @Test void testBridgeArray1() {
         final WebEngine web = getEngine();
 
         submit(() -> {
@@ -665,7 +666,7 @@ public class JavaScriptBridgeTest extends TestBase {
          });
     }
 
-    public @Test void testBridgeBadOverloading() throws InterruptedException {
+    public @Test void testBridgeBadOverloading() {
         final WebEngine web = getEngine();
 
         submit(() -> {
@@ -685,17 +686,19 @@ public class JavaScriptBridgeTest extends TestBase {
     }
 
     // JDK-8187568
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testcheckJSPeerTostring() {
         final JSObject doc = (JSObject) executeScript("document");
         loadContent("<h1></h1>");
-        submit(() -> {
-            getEngine().executeScript(doc.toString());
+        assertThrows(NullPointerException.class, () -> {
+            submit(() -> {
+                getEngine().executeScript(doc.toString());
+            });
         });
     }
 
     // JDK-8187568
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testcheckJSPeerGetMember() {
         final JSObject doc = (JSObject) executeScript("document");
         submit(() -> {
@@ -703,42 +706,50 @@ public class JavaScriptBridgeTest extends TestBase {
         });
 
         loadContent("<h1></h1>");
-        submit(() -> {
-            doc.getMember("beforeload");
+        assertThrows(NullPointerException.class, () -> {
+            submit(() -> {
+                doc.getMember("beforeload");
+            });
         });
     }
 
     // JDK-8187568
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testcheckJSPeerSetMember() {
         final JSObject doc = (JSObject) executeScript("document");
         loadContent("<h1></h1>");
-        submit(() -> {
-            doc.setMember("newMember", "newvalue");
+        assertThrows(NullPointerException.class, () -> {
+            submit(() -> {
+                doc.setMember("newMember", "newvalue");
+            });
         });
     }
 
     // JDK-8187568
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testcheckJSPeerRemoveMember() {
         final JSObject doc = (JSObject) executeScript("document");
         submit(() -> {
             doc.setMember("oldMember", "oldmember");
         });
         loadContent("<h1></h1>");
-        submit(() -> {
-            doc.removeMember("oldMember");
+        assertThrows(NullPointerException.class, () -> {
+            submit(() -> {
+                doc.removeMember("oldMember");
+            });
         });
     }
 
     // JDK-8187568
-    @Test(expected=NullPointerException.class)
-    public void testcheckJSPeerEval() {
+    @Test
+    void testcheckJSPeerEval() {
         final JSObject doc = (JSObject) executeScript("document");
         executeScript("var x = 10;");
         loadContent("<h1></h1>");
-        submit(() -> {
-            doc.eval("x");
+        assertThrows(NullPointerException.class, () -> {
+            submit(() -> {
+                doc.eval("x");
+            });
         });
     }
 }

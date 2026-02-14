@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,47 +25,104 @@
 
 #pragma once
 
+#import "CommandsMixin.h"
+#import "WebGPU.h"
+#import "WebGPUExt.h"
 #import <wtf/FastMalloc.h>
+#import <wtf/HashMap.h>
 #import <wtf/Ref.h>
 #import <wtf/RefCounted.h>
+#import <wtf/RetainReleaseSwift.h>
+#import <wtf/TZoneMalloc.h>
+#import <wtf/Vector.h>
+#import <wtf/WeakPtr.h>
+
+struct WGPUComputePassEncoderImpl {
+};
 
 namespace WebGPU {
 
 class BindGroup;
 class Buffer;
+class CommandEncoder;
 class ComputePipeline;
+class Device;
 class QuerySet;
 
-class ComputePassEncoder : public RefCounted<ComputePassEncoder> {
-    WTF_MAKE_FAST_ALLOCATED;
+struct BindableResources;
+
+// https://gpuweb.github.io/gpuweb/#gpucomputepassencoder
+class ComputePassEncoder : public WGPUComputePassEncoderImpl, public RefCounted<ComputePassEncoder>, public CommandsMixin {
+    WTF_MAKE_TZONE_ALLOCATED(ComputePassEncoder);
 public:
-    static Ref<ComputePassEncoder> create(id <MTLComputeCommandEncoder> computeCommandEncoder)
+    static Ref<ComputePassEncoder> create(id<MTLComputeCommandEncoder> computeCommandEncoder, const WGPUComputePassDescriptor& descriptor, CommandEncoder& parentEncoder, Device& device)
     {
-        return adoptRef(*new ComputePassEncoder(computeCommandEncoder));
+        return adoptRef(*new ComputePassEncoder(computeCommandEncoder, descriptor, parentEncoder, device));
+    }
+    static Ref<ComputePassEncoder> createInvalid(CommandEncoder& parentEncoder, Device& device, NSString* errorString)
+    {
+        return adoptRef(*new ComputePassEncoder(parentEncoder, device, errorString));
     }
 
     ~ComputePassEncoder();
 
-    void beginPipelineStatisticsQuery(const QuerySet&, uint32_t queryIndex);
     void dispatch(uint32_t x, uint32_t y, uint32_t z);
     void dispatchIndirect(const Buffer& indirectBuffer, uint64_t indirectOffset);
     void endPass();
-    void endPipelineStatisticsQuery();
-    void insertDebugMarker(const char* markerLabel);
+    void insertDebugMarker(String&& markerLabel);
     void popDebugGroup();
-    void pushDebugGroup(const char* groupLabel);
-    void setBindGroup(uint32_t groupIndex, const BindGroup&, uint32_t dynamicOffsetCount, const uint32_t* dynamicOffsets);
+    void pushDebugGroup(String&& groupLabel);
+
+    void setBindGroup(uint32_t groupIndex, const BindGroup*, std::optional<Vector<uint32_t>>&& dynamicOffsets);
     void setPipeline(const ComputePipeline&);
-    void setLabel(const char*);
+    void setLabel(String&&);
+
+    Device& device() const { return m_device; }
+
+    bool isValid() const;
+    id<MTLComputeCommandEncoder> computeCommandEncoder() const;
 
 private:
-    ComputePassEncoder(id <MTLComputeCommandEncoder>);
+    ComputePassEncoder(id<MTLComputeCommandEncoder>, const WGPUComputePassDescriptor&, CommandEncoder&, Device&);
+    ComputePassEncoder(CommandEncoder&, Device&, NSString*);
 
-    id <MTLComputeCommandEncoder> m_computeCommandEncoder { nil };
-};
+    bool validatePopDebugGroup() const;
+
+    void makeInvalid(NSString* = nil);
+    void executePreDispatchCommands(const Buffer* = nullptr);
+    id<MTLBuffer> runPredispatchIndirectCallValidation(const Buffer&, uint64_t);
+
+    Ref<CommandEncoder> protectedParentEncoder() { return m_parentEncoder; }
+    Ref<Device> protectedDevice() const { return m_device; }
+
+    id<MTLComputeCommandEncoder> m_computeCommandEncoder { nil };
+
+    uint64_t m_debugGroupStackSize { 0 };
+
+    const Ref<Device> m_device;
+    MTLSize m_threadsPerThreadgroup;
+    Vector<uint32_t> m_computeDynamicOffsets;
+    Vector<uint32_t> m_priorComputeDynamicOffsets;
+    RefPtr<const ComputePipeline> m_pipeline;
+    const Ref<CommandEncoder> m_parentEncoder;
+    HashMap<uint32_t, Vector<uint32_t>, DefaultHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>> m_bindGroupDynamicOffsets;
+    HashMap<uint32_t, Vector<const BindableResources*>, DefaultHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>> m_bindGroupResources;
+    HashMap<uint32_t, RefPtr<const BindGroup>, DefaultHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>> m_bindGroups;
+    std::array<uint32_t, 32> m_maxDynamicOffsetAtIndex;
+    NSString *m_lastErrorString { nil };
+    bool m_passEnded { false };
+// FIXME: remove @safe once rdar://151039766 lands
+} __attribute__((swift_attr("@safe"))) SWIFT_SHARED_REFERENCE(refComputePassEncoder, derefComputePassEncoder);
+
 
 } // namespace WebGPU
 
-struct WGPUComputePassEncoderImpl {
-    Ref<WebGPU::ComputePassEncoder> computePassEncoder;
-};
+inline void refComputePassEncoder(WebGPU::ComputePassEncoder* obj)
+{
+    ref(obj);
+}
+
+inline void derefComputePassEncoder(WebGPU::ComputePassEncoder* obj)
+{
+    deref(obj);
+}

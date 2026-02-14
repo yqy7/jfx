@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2019-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,10 +31,13 @@
 #include "HandlerInfo.h"
 #include "InstructionStream.h"
 #include "MacroAssemblerCodeRef.h"
+#include "WasmFormat.h"
 #include "WasmHandlerInfo.h"
 #include "WasmLLIntTierUpCounter.h"
 #include "WasmOps.h"
+#include <wtf/FixedBitVector.h>
 #include <wtf/HashMap.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/Vector.h>
 
 namespace JSC {
@@ -48,7 +51,7 @@ class BytecodeGeneratorBase;
 namespace Wasm {
 
 class LLIntCallee;
-class Signature;
+class TypeDefinition;
 struct GeneratorTraits;
 
 struct JumpTableEntry {
@@ -61,7 +64,7 @@ struct JumpTableEntry {
 using JumpTable = FixedVector<JumpTableEntry>;
 
 class FunctionCodeBlockGenerator {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(FunctionCodeBlockGenerator);
     WTF_MAKE_NONCOPYABLE(FunctionCodeBlockGenerator);
 
     friend BytecodeGeneratorBase<GeneratorTraits>;
@@ -70,18 +73,24 @@ class FunctionCodeBlockGenerator {
     friend class LLIntCallee;
 
 public:
-    FunctionCodeBlockGenerator(uint32_t functionIndex)
+    FunctionCodeBlockGenerator(FunctionCodeIndex functionIndex)
         : m_functionIndex(functionIndex)
     {
     }
 
-    uint32_t functionIndex() const { return m_functionIndex; }
+    FunctionCodeIndex functionIndex() const { return m_functionIndex; }
     unsigned numVars() const { return m_numVars; }
     unsigned numCalleeLocals() const { return m_numCalleeLocals; }
     uint32_t numArguments() const { return m_numArguments; }
     const Vector<Type>& constantTypes() const { return m_constantTypes; }
     const Vector<uint64_t>& constants() const { return m_constants; }
-    const InstructionStream& instructions() const { return *m_instructions; }
+    const Vector<uint64_t>& constantRegisters() const { return m_constants; }
+    const WasmInstructionStream& instructions() const { return *m_instructions; }
+    bool hasTailCallSuccessors() const { return m_hasTailCallSuccessors; }
+    const BitVector& tailCallSuccessors() const { return m_tailCallSuccessors; }
+    bool tailCallClobbersInstance() const { return m_tailCallClobbersInstance ; }
+    void setTailCall(uint32_t, bool);
+    void setTailCallClobbersInstance() { m_tailCallClobbersInstance = true; }
 
     void setNumVars(unsigned numVars) { m_numVars = numVars; }
     void setNumCalleeLocals(unsigned numCalleeLocals) { m_numCalleeLocals = numCalleeLocals; }
@@ -93,29 +102,29 @@ public:
         return m_constantTypes[reg.toConstantIndex()];
     }
 
-    void setInstructions(std::unique_ptr<InstructionStream>);
-    void addJumpTarget(InstructionStream::Offset jumpTarget) { m_jumpTargets.append(jumpTarget); }
-    InstructionStream::Offset numberOfJumpTargets() { return m_jumpTargets.size(); }
-    InstructionStream::Offset lastJumpTarget() { return m_jumpTargets.last(); }
+    void setInstructions(std::unique_ptr<WasmInstructionStream>);
+    void addJumpTarget(WasmInstructionStream::Offset jumpTarget) { m_jumpTargets.append(jumpTarget); }
+    WasmInstructionStream::Offset numberOfJumpTargets() { return m_jumpTargets.size(); }
+    WasmInstructionStream::Offset lastJumpTarget() { return m_jumpTargets.last(); }
 
-    void addOutOfLineJumpTarget(InstructionStream::Offset, int target);
-    InstructionStream::Offset outOfLineJumpOffset(InstructionStream::Offset);
-    InstructionStream::Offset outOfLineJumpOffset(const InstructionStream::Ref& instruction)
+    void addOutOfLineJumpTarget(WasmInstructionStream::Offset, int target);
+    WasmInstructionStream::Offset outOfLineJumpOffset(WasmInstructionStream::Offset);
+    WasmInstructionStream::Offset outOfLineJumpOffset(const WasmInstructionStream::Ref& instruction)
     {
         return outOfLineJumpOffset(instruction.offset());
     }
 
-    inline InstructionStream::Offset bytecodeOffset(const Instruction* returnAddress)
+    inline WasmInstructionStream::Offset bytecodeOffset(const WasmInstruction* returnAddress)
     {
         const auto* instructionsBegin = m_instructions->at(0).ptr();
-        const auto* instructionsEnd = reinterpret_cast<const Instruction*>(reinterpret_cast<uintptr_t>(instructionsBegin) + m_instructions->size());
+        const auto* instructionsEnd = reinterpret_cast<const WasmInstruction*>(reinterpret_cast<uintptr_t>(instructionsBegin) + m_instructions->size());
         RELEASE_ASSERT(returnAddress >= instructionsBegin && returnAddress < instructionsEnd);
         return returnAddress - instructionsBegin;
     }
 
-    HashMap<InstructionStream::Offset, LLIntTierUpCounter::OSREntryData>& tierUpCounter() { return m_tierUpCounter; }
+    UncheckedKeyHashMap<WasmInstructionStream::Offset, LLIntTierUpCounter::OSREntryData>& tierUpCounter() { return m_tierUpCounter; }
 
-    unsigned addSignature(const Signature&);
+    unsigned addSignature(const TypeDefinition&);
 
     JumpTable& addJumpTable(size_t numberOfEntries);
     unsigned numberOfJumpTables() const;
@@ -125,25 +134,28 @@ public:
     void addExceptionHandler(const UnlinkedHandlerInfo& handler) { m_exceptionHandlers.append(handler); }
 
 private:
-    using OutOfLineJumpTargets = HashMap<InstructionStream::Offset, int>;
+    using OutOfLineJumpTargets = UncheckedKeyHashMap<WasmInstructionStream::Offset, int>;
 
-    uint32_t m_functionIndex;
+    FunctionCodeIndex m_functionIndex;
 
     // Used for the number of WebAssembly locals, as in https://webassembly.github.io/spec/core/syntax/modules.html#syntax-local
     unsigned m_numVars { 0 };
     // Number of VirtualRegister. The naming is unfortunate, but has to match UnlinkedCodeBlock
     unsigned m_numCalleeLocals { 0 };
     uint32_t m_numArguments { 0 };
+    bool m_hasTailCallSuccessors { false };
+    bool m_tailCallClobbersInstance { false };
     Vector<Type> m_constantTypes;
     Vector<uint64_t> m_constants;
-    std::unique_ptr<InstructionStream> m_instructions;
+    std::unique_ptr<WasmInstructionStream> m_instructions;
     const void* m_instructionsRawPointer { nullptr };
-    Vector<InstructionStream::Offset> m_jumpTargets;
-    Vector<const Signature*> m_signatures;
+    Vector<WasmInstructionStream::Offset> m_jumpTargets;
+    Vector<const TypeDefinition*> m_signatures;
     OutOfLineJumpTargets m_outOfLineJumpTargets;
-    HashMap<InstructionStream::Offset, LLIntTierUpCounter::OSREntryData> m_tierUpCounter;
+    UncheckedKeyHashMap<WasmInstructionStream::Offset, LLIntTierUpCounter::OSREntryData> m_tierUpCounter;
     Vector<JumpTable> m_jumpTables;
     Vector<UnlinkedHandlerInfo> m_exceptionHandlers;
+    BitVector m_tailCallSuccessors;
 };
 
 } } // namespace JSC::Wasm

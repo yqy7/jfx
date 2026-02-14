@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,14 +25,14 @@
 
 package test.javafx.scene.control.skin;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-
-import com.sun.javafx.scene.control.skin.Utils;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import javafx.beans.value.ObservableValue;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Group;
+import javafx.scene.Scene;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Label;
 import javafx.scene.control.OverrunStyle;
@@ -41,18 +41,18 @@ import javafx.scene.control.skin.LabelSkin;
 import javafx.scene.control.skin.LabelSkinBaseShim;
 import javafx.scene.control.skin.LabeledSkinBaseShim;
 import javafx.scene.effect.BlendMode;
+import javafx.scene.layout.HBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextAlignment;
-import com.sun.javafx.tk.Toolkit;
-import javafx.scene.Group;
-import javafx.scene.Scene;
 import javafx.stage.Stage;
-
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.scene.control.skin.Utils;
+import com.sun.javafx.tk.Toolkit;
+import test.com.sun.javafx.scene.control.infrastructure.StageLoader;
 
 /**
  * Need to test:
@@ -64,7 +64,8 @@ public class LabelSkinTest {
     private LabelSkinMock skin;
     private Text text;
 
-    @Before public void setup() {
+    @BeforeEach
+    public void setup() {
         label = new Label();
         skin = new LabelSkinMock(label);
         // Set some padding so that any places where padding was being
@@ -1249,8 +1250,7 @@ public class LabelSkinTest {
         label.setGraphicTextGap(2);
         label.setGraphic(r);
         label.setContentDisplay(ContentDisplay.TOP);
-        final double lineHeight = Utils.computeTextHeight(label.getFont(), " ", 0, text.getBoundsType());
-        assertEquals(14 + 23 + lineHeight + 2, label.prefHeight(-1), 0);
+        assertEquals(14 + 23, label.prefHeight(-1), 0);
     }
 
     @Test public void whenTextIsEmptyAndGraphicIsSetWithTOPContentDisplay_computePrefHeight_ReturnsRightAnswer() {
@@ -1260,8 +1260,7 @@ public class LabelSkinTest {
         label.setGraphicTextGap(2);
         label.setGraphic(r);
         label.setContentDisplay(ContentDisplay.TOP);
-        final double lineHeight = Utils.computeTextHeight(label.getFont(), " ", 0, text.getBoundsType());
-        assertEquals(14 + 23 + lineHeight + 2, label.prefHeight(-1), 0);
+        assertEquals(14 + 23, label.prefHeight(-1), 0);
     }
 
     @Test public void whenTextIsSetAndGraphicIsSetWithTOPContentDisplay_computePrefHeight_ReturnsRightAnswer() {
@@ -1312,8 +1311,7 @@ public class LabelSkinTest {
         label.setGraphicTextGap(2);
         label.setGraphic(r);
         label.setContentDisplay(ContentDisplay.BOTTOM);
-        final double lineHeight = Utils.computeTextHeight(label.getFont(), " ", 0, text.getBoundsType());
-        assertEquals(14 + 23 + lineHeight + 2, label.prefHeight(-1), 0);
+        assertEquals(14 + 23, label.prefHeight(-1), 0);
     }
 
     @Test public void whenTextIsEmptyAndGraphicIsSetWithBOTTOMContentDisplay_computePrefHeight_ReturnsRightAnswer() {
@@ -1323,8 +1321,7 @@ public class LabelSkinTest {
         label.setGraphicTextGap(2);
         label.setGraphic(r);
         label.setContentDisplay(ContentDisplay.BOTTOM);
-        final double lineHeight = Utils.computeTextHeight(label.getFont(), " ", 0, text.getBoundsType());
-        assertEquals(14 + 23 + lineHeight + 2, label.prefHeight(-1), 0);
+        assertEquals(14 + 23, label.prefHeight(-1), 0);
     }
 
     @Test public void whenTextIsSetAndGraphicIsSetWithBOTTOMContentDisplay_computePrefHeight_ReturnsRightAnswer() {
@@ -1807,8 +1804,7 @@ public class LabelSkinTest {
         label.setGraphicTextGap(2);
         label.setGraphic(r);
         label.setContentDisplay(ContentDisplay.TOP);
-        final double lineHeight = Utils.computeTextHeight(label.getFont(), " ", 0, text.getBoundsType());
-        assertEquals(14 + 23 + lineHeight + 2, label.maxHeight(-1), 0);
+        assertEquals(14 + 23, label.maxHeight(-1), 0);
     }
 
     @Test public void whenTextIsEmptyAndGraphicIsSetWithTOPContentDisplay_computeMaxHeight_ReturnsRightAnswer() {
@@ -1818,8 +1814,7 @@ public class LabelSkinTest {
         label.setGraphicTextGap(2);
         label.setGraphic(r);
         label.setContentDisplay(ContentDisplay.TOP);
-        final double lineHeight = Utils.computeTextHeight(label.getFont(), " ", 0, text.getBoundsType());
-        assertEquals(14 + 23 + lineHeight + 2, label.maxHeight(-1), 0);
+        assertEquals(14 + 23, label.maxHeight(-1), 0);
     }
 
     @Test public void whenTextIsSetAndGraphicIsSetWithTOPContentDisplay_computeMaxHeight_ReturnsRightAnswer() {
@@ -1870,8 +1865,7 @@ public class LabelSkinTest {
         label.setGraphicTextGap(2);
         label.setGraphic(r);
         label.setContentDisplay(ContentDisplay.BOTTOM);
-        final double lineHeight = Utils.computeTextHeight(label.getFont(), " ", 0, text.getBoundsType());
-        assertEquals(14 + 23 + lineHeight + 2, label.maxHeight(-1), 0);
+        assertEquals(14 + 23, label.maxHeight(-1), 0);
     }
 
     @Test public void whenTextIsEmptyAndGraphicIsSetWithBOTTOMContentDisplay_computeMaxHeight_ReturnsRightAnswer() {
@@ -1881,8 +1875,7 @@ public class LabelSkinTest {
         label.setGraphicTextGap(2);
         label.setGraphic(r);
         label.setContentDisplay(ContentDisplay.BOTTOM);
-        final double lineHeight = Utils.computeTextHeight(label.getFont(), " ", 0, text.getBoundsType());
-        assertEquals(14 + 23 + lineHeight + 2, label.maxHeight(-1), 0);
+        assertEquals(14 + 23, label.maxHeight(-1), 0);
     }
 
     @Test public void whenTextIsSetAndGraphicIsSetWithBOTTOMContentDisplay_computeMaxHeight_ReturnsRightAnswer() {
@@ -2098,6 +2091,48 @@ public class LabelSkinTest {
         skin.updateDisplayedText();
         assertEquals("foo __bar", LabelSkinBaseShim.getText(label).getText());
     }
+
+    /*********************************************************************
+     *
+     * Tests for bug reports                                             *
+     *
+     ********************************************************************/
+
+    //Test for JDK-8172849
+    @Test
+    public void testBaselineAlignmentWhenTextIsSetAndGraphicIsSet() {
+        Label label1 = new Label("Label1");
+        LabelSkinMock label1Skin = new LabelSkinMock(label1);
+        label1.setSkin(label1Skin);
+
+        Label label2 = new Label("Label2");
+        LabelSkinMock label2Skin = new LabelSkinMock(label2);
+        label2.setSkin(label2Skin);
+
+        Rectangle r = new Rectangle(15, 5);
+        label2.setGraphic(r);
+
+        Toolkit tk = Toolkit.getToolkit();
+        HBox hBox = new HBox(label1, label2);
+        hBox.setAlignment(Pos.BASELINE_LEFT);
+        StageLoader sl = new StageLoader(hBox);
+        tk.firePulse();
+
+        double label2Height = label2.getHeight();
+        assertEquals(label1.getBaselineOffset(), label2.getBaselineOffset(), 0);
+        r.setHeight(50);
+        tk.firePulse();
+        assertEquals(label1.getBaselineOffset(), (label2.getBaselineOffset() - (r.getHeight()-label2Height)/2), 0);
+        sl.dispose();
+    }
+
+
+    /********************************************************************************
+     *                                                                              *
+     * Custom skin class implemntation to fetch default skin field values and       *
+     * monitor change in label properties.                                          *
+     *                                                                              *
+     *******************************************************************************/
 
     public static final class LabelSkinMock extends LabelSkin {
         boolean propertyChanged = false;

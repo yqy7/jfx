@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2016-2021 Apple Inc. All rights reserved.
+ *  Copyright (C) 2016-2022 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -21,14 +21,24 @@
 
 #include "ArrayPrototype.h"
 #include "ButterflyInlines.h"
+#include "ClonedArguments.h"
+#include "DirectArguments.h"
 #include "Error.h"
 #include "JSArray.h"
 #include "JSCellInlines.h"
+#include "ScopedArguments.h"
 #include "Structure.h"
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 namespace JSC {
 
-inline IndexingType JSArray::mergeIndexingTypeForCopying(IndexingType other)
+inline Structure* JSArray::createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype, IndexingType indexingType)
+{
+    return Structure::create(vm, globalObject, prototype, TypeInfo(ArrayType, StructureFlags), info(), indexingType);
+}
+
+inline IndexingType JSArray::mergeIndexingTypeForCopying(IndexingType other, bool allowPromotion)
 {
     IndexingType type = indexingType();
     if (!(type & IsArray && other & IsArray))
@@ -52,33 +62,55 @@ inline IndexingType JSArray::mergeIndexingTypeForCopying(IndexingType other)
         return type;
     }
 
+    if (allowPromotion) {
+        if ((type == ArrayWithInt32 || type == ArrayWithDouble) && (other == ArrayWithInt32 || other == ArrayWithDouble)) {
+            if (type == other)
+                return type;
+            return ArrayWithDouble;
+        }
+    }
+
     if (type != other)
         return NonArray;
 
     return type;
 }
 
-inline bool JSArray::canFastCopy(VM& vm, JSArray* otherArray)
+ALWAYS_INLINE bool JSArray::holesMustForwardToPrototype() const
 {
-    if (otherArray == this)
+    Structure* structure = this->structure();
+    if (type() == ArrayType) [[likely]] {
+        JSGlobalObject* globalObject = structure->globalObject();
+        if (structure->hasMonoProto() && structure->storedPrototype() == globalObject->arrayPrototype() && globalObject->arrayPrototypeChainIsSane()) [[likely]]
         return false;
+    }
+    return structure->holesMustForwardToPrototype(const_cast<JSArray*>(this));
+}
+
+inline bool JSArray::canFastCopy(JSArray* otherArray) const
+{
     if (hasAnyArrayStorage(indexingType()) || hasAnyArrayStorage(otherArray->indexingType()))
         return false;
-    // FIXME: We should have a watchpoint for indexed properties on Array.prototype and Object.prototype
-    // instead of walking the prototype chain. https://bugs.webkit.org/show_bug.cgi?id=155592
-    if (structure(vm)->holesMustForwardToPrototype(vm, this)
-        || otherArray->structure(vm)->holesMustForwardToPrototype(vm, otherArray))
+    if (holesMustForwardToPrototype() || otherArray->holesMustForwardToPrototype())
         return false;
     return true;
 }
 
-inline bool JSArray::canDoFastIndexedAccess(VM& vm)
+inline bool JSArray::canFastAppend(JSArray* otherArray) const
+{
+    // Append can modify itself, thus, we cannot do fast-append if |this| and otherArray are the same.
+    if (otherArray == this)
+        return false;
+    return canFastCopy(otherArray);
+}
+
+inline bool JSArray::canDoFastIndexedAccess() const
 {
     JSGlobalObject* globalObject = this->globalObject();
     if (!globalObject->arrayPrototypeChainIsSane())
         return false;
 
-    Structure* structure = this->structure(vm);
+    Structure* structure = this->structure();
     // This is the fast case. Many arrays will be an original array.
     if (globalObject->isOriginalArrayStructure(structure))
         return true;
@@ -86,21 +118,55 @@ inline bool JSArray::canDoFastIndexedAccess(VM& vm)
     if (structure->mayInterceptIndexedAccesses())
         return false;
 
-    if (getPrototypeDirect(vm) != globalObject->arrayPrototype())
+    if (getPrototypeDirect() != globalObject->arrayPrototype())
         return false;
 
     return true;
 }
 
-ALWAYS_INLINE double toLength(JSGlobalObject* globalObject, JSObject* obj)
+ALWAYS_INLINE bool JSArray::definitelyNegativeOneMiss() const
+{
+    JSGlobalObject* globalObject = this->globalObject();
+    if (!globalObject->arrayPrototypeChainIsSane())
+        return false;
+
+    if (!globalObject->arrayNegativeOneWatchpointSet().isStillValid())
+        return false;
+
+    Structure* structure = this->structure();
+    // This is the fast case. Many arrays will be an original array.
+    if (globalObject->isOriginalArrayStructure(structure))
+        return true;
+
+    if (getPrototypeDirect() != globalObject->arrayPrototype())
+        return false;
+
+    if (structure->seenProperties().bits())
+        return false;
+
+    return true;
+}
+
+
+ALWAYS_INLINE uint64_t toLength(JSGlobalObject* globalObject, JSObject* object)
 {
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
-    if (LIKELY(isJSArray(obj)))
-        return jsCast<JSArray*>(obj)->length();
+    if (isJSArray(object)) [[likely]]
+        return jsCast<JSArray*>(object)->length();
 
-    JSValue lengthValue = obj->get(globalObject, vm.propertyNames->length);
-    RETURN_IF_EXCEPTION(scope, PNaN);
+    switch (object->type()) {
+    case DirectArgumentsType:
+        RELEASE_AND_RETURN(scope, jsCast<DirectArguments*>(object)->length(globalObject));
+    case ScopedArgumentsType:
+        RELEASE_AND_RETURN(scope, jsCast<ScopedArguments*>(object)->length(globalObject));
+    case ClonedArgumentsType:
+        RELEASE_AND_RETURN(scope, jsCast<ClonedArguments*>(object)->length(globalObject));
+    default:
+        break;
+    }
+    JSValue lengthValue = object->get(globalObject, vm.propertyNames->length);
+    RETURN_IF_EXCEPTION(scope, { });
     RELEASE_AND_RETURN(scope, lengthValue.toLength(globalObject));
 }
 
@@ -116,7 +182,7 @@ ALWAYS_INLINE void JSArray::pushInline(JSGlobalObject* globalObject, JSValue val
     switch (indexingMode()) {
     case ArrayClass: {
         createInitialUndecided(vm, 0);
-        FALLTHROUGH;
+        [[fallthrough]];
     }
 
     case ArrayWithUndecided: {
@@ -142,8 +208,8 @@ ALWAYS_INLINE void JSArray::pushInline(JSGlobalObject* globalObject, JSValue val
             return;
         }
 
-        if (UNLIKELY(length > MAX_ARRAY_INDEX)) {
-            methodTable(vm)->putByIndex(this, globalObject, length, value, true);
+        if (length > MAX_ARRAY_INDEX) [[unlikely]] {
+            methodTable()->putByIndex(this, globalObject, length, value, true);
             if (!scope.exception())
                 throwException(globalObject, scope, createRangeError(globalObject, LengthExceededTheMaximumArrayLengthError));
             return;
@@ -164,8 +230,8 @@ ALWAYS_INLINE void JSArray::pushInline(JSGlobalObject* globalObject, JSValue val
             return;
         }
 
-        if (UNLIKELY(length > MAX_ARRAY_INDEX)) {
-            methodTable(vm)->putByIndex(this, globalObject, length, value, true);
+        if (length > MAX_ARRAY_INDEX) [[unlikely]] {
+            methodTable()->putByIndex(this, globalObject, length, value, true);
             if (!scope.exception())
                 throwException(globalObject, scope, createRangeError(globalObject, LengthExceededTheMaximumArrayLengthError));
             return;
@@ -177,6 +243,7 @@ ALWAYS_INLINE void JSArray::pushInline(JSGlobalObject* globalObject, JSValue val
     }
 
     case ArrayWithDouble: {
+        ASSERT(Options::allowDoubleShape());
         if (!value.isNumber()) {
             convertDoubleToContiguous(vm);
             scope.release();
@@ -199,8 +266,8 @@ ALWAYS_INLINE void JSArray::pushInline(JSGlobalObject* globalObject, JSValue val
             return;
         }
 
-        if (UNLIKELY(length > MAX_ARRAY_INDEX)) {
-            methodTable(vm)->putByIndex(this, globalObject, length, value, true);
+        if (length > MAX_ARRAY_INDEX) [[unlikely]] {
+            methodTable()->putByIndex(this, globalObject, length, value, true);
             if (!scope.exception())
                 throwException(globalObject, scope, createRangeError(globalObject, LengthExceededTheMaximumArrayLengthError));
             return;
@@ -223,7 +290,7 @@ ALWAYS_INLINE void JSArray::pushInline(JSGlobalObject* globalObject, JSValue val
             }
             return;
         }
-        FALLTHROUGH;
+        [[fallthrough]];
     }
 
     case ArrayWithArrayStorage: {
@@ -239,8 +306,8 @@ ALWAYS_INLINE void JSArray::pushInline(JSGlobalObject* globalObject, JSValue val
         }
 
         // Pushing to an array of invalid length (2^31-1) stores the property, but throws a range error.
-        if (UNLIKELY(storage->length() > MAX_ARRAY_INDEX)) {
-            methodTable(vm)->putByIndex(this, globalObject, storage->length(), value, true);
+        if (storage->length() > MAX_ARRAY_INDEX) [[unlikely]] {
+            methodTable()->putByIndex(this, globalObject, storage->length(), value, true);
             // Per ES5.1 15.4.4.7 step 6 & 15.4.5.1 step 3.d.
             if (!scope.exception())
                 throwException(globalObject, scope, createRangeError(globalObject, LengthExceededTheMaximumArrayLengthError));
@@ -258,4 +325,33 @@ ALWAYS_INLINE void JSArray::pushInline(JSGlobalObject* globalObject, JSValue val
     }
 }
 
+ALWAYS_INLINE JSValue getProperty(JSGlobalObject* globalObject, JSObject* object, uint64_t index)
+{
+    if (JSValue result = object->tryGetIndexQuickly(index))
+        return result;
+
+    // Don't return undefined if the property is not found.
+    return object->getIfPropertyExists(globalObject, index);
+}
+
+ALWAYS_INLINE bool isHole(double value)
+{
+    return std::isnan(value);
+}
+
+template<typename T>
+ALWAYS_INLINE bool containsHole(const T* data, unsigned length)
+{
+    if constexpr (std::is_same_v<T, double>) {
+    for (unsigned i = 0; i < length; ++i) {
+        if (isHole(data[i]))
+            return true;
+    }
+    return false;
+    } else
+        return WTF::find64(std::bit_cast<const uint64_t*>(data), JSValue::encode(JSValue()), length);
+}
+
 } // namespace JSC
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

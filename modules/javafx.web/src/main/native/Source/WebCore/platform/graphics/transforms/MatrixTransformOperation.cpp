@@ -28,6 +28,22 @@
 
 namespace WebCore {
 
+Ref<MatrixTransformOperation> MatrixTransformOperation::create(const TransformationMatrix& t)
+{
+    return adoptRef(*new MatrixTransformOperation(t));
+}
+
+MatrixTransformOperation::MatrixTransformOperation(const TransformationMatrix& t)
+    : TransformOperation(TransformOperation::Type::Matrix)
+    , m_a(t.a())
+    , m_b(t.b())
+    , m_c(t.c())
+    , m_d(t.d())
+    , m_e(t.e())
+    , m_f(t.f())
+{
+}
+
 bool MatrixTransformOperation::operator==(const TransformOperation& other) const
 {
     if (!isSameType(other))
@@ -61,13 +77,13 @@ Ref<TransformOperation> MatrixTransformOperation::blend(const TransformOperation
 
 void MatrixTransformOperation::dump(TextStream& ts) const
 {
-    ts << "("
-        << TextStream::FormatNumberRespectingIntegers(m_a) << ", "
-        << TextStream::FormatNumberRespectingIntegers(m_b) << ", "
-        << TextStream::FormatNumberRespectingIntegers(m_c) << ", "
-        << TextStream::FormatNumberRespectingIntegers(m_d) << ", "
-        << TextStream::FormatNumberRespectingIntegers(m_e) << ", "
-        << TextStream::FormatNumberRespectingIntegers(m_f) << ")";
+    ts << '('
+        << TextStream::FormatNumberRespectingIntegers(m_a) << ", "_s
+        << TextStream::FormatNumberRespectingIntegers(m_b) << ", "_s
+        << TextStream::FormatNumberRespectingIntegers(m_c) << ", "_s
+        << TextStream::FormatNumberRespectingIntegers(m_d) << ", "_s
+        << TextStream::FormatNumberRespectingIntegers(m_e) << ", "_s
+        << TextStream::FormatNumberRespectingIntegers(m_f) << ')';
 }
 
 } // namespace WebCore

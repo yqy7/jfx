@@ -42,7 +42,7 @@ static JSC_DECLARE_HOST_FUNCTION(intlRelativeTimeFormatPrototypeFuncResolvedOpti
 
 namespace JSC {
 
-const ClassInfo IntlRelativeTimeFormatPrototype::s_info = { "Intl.RelativeTimeFormat", &Base::s_info, &relativeTimeFormatPrototypeTable, nullptr, CREATE_METHOD_TABLE(IntlRelativeTimeFormatPrototype) };
+const ClassInfo IntlRelativeTimeFormatPrototype::s_info = { "Intl.RelativeTimeFormat"_s, &Base::s_info, &relativeTimeFormatPrototypeTable, nullptr, CREATE_METHOD_TABLE(IntlRelativeTimeFormatPrototype) };
 
 /* Source for IntlRelativeTimeFormatPrototype.lut.h
 @begin relativeTimeFormatPrototypeTable
@@ -72,7 +72,7 @@ IntlRelativeTimeFormatPrototype::IntlRelativeTimeFormatPrototype(VM& vm, Structu
 void IntlRelativeTimeFormatPrototype::finishCreation(VM& vm)
 {
     Base::finishCreation(vm);
-    ASSERT(inherits(vm, info()));
+    ASSERT(inherits(info()));
     JSC_TO_STRING_TAG_WITHOUT_TRANSITION();
 }
 
@@ -82,8 +82,8 @@ JSC_DEFINE_HOST_FUNCTION(intlRelativeTimeFormatPrototypeFuncFormat, (JSGlobalObj
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    auto* relativeTimeFormat = jsDynamicCast<IntlRelativeTimeFormat*>(vm, callFrame->thisValue());
-    if (!relativeTimeFormat)
+    auto* relativeTimeFormat = jsDynamicCast<IntlRelativeTimeFormat*>(callFrame->thisValue());
+    if (!relativeTimeFormat) [[unlikely]]
         return JSValue::encode(throwTypeError(globalObject, scope, "Intl.RelativeTimeFormat.prototype.format called on value that's not a RelativeTimeFormat"_s));
 
     double value = callFrame->argument(0).toNumber(globalObject);
@@ -101,8 +101,8 @@ JSC_DEFINE_HOST_FUNCTION(intlRelativeTimeFormatPrototypeFuncFormatToParts, (JSGl
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    auto* relativeTimeFormat = jsDynamicCast<IntlRelativeTimeFormat*>(vm, callFrame->thisValue());
-    if (!relativeTimeFormat)
+    auto* relativeTimeFormat = jsDynamicCast<IntlRelativeTimeFormat*>(callFrame->thisValue());
+    if (!relativeTimeFormat) [[unlikely]]
         return JSValue::encode(throwTypeError(globalObject, scope, "Intl.RelativeTimeFormat.prototype.formatToParts called on value that's not a RelativeTimeFormat"_s));
 
     double value = callFrame->argument(0).toNumber(globalObject);
@@ -120,8 +120,8 @@ JSC_DEFINE_HOST_FUNCTION(intlRelativeTimeFormatPrototypeFuncResolvedOptions, (JS
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    auto* relativeTimeFormat = jsDynamicCast<IntlRelativeTimeFormat*>(vm, callFrame->thisValue());
-    if (!relativeTimeFormat)
+    auto* relativeTimeFormat = jsDynamicCast<IntlRelativeTimeFormat*>(callFrame->thisValue());
+    if (!relativeTimeFormat) [[unlikely]]
         return JSValue::encode(throwTypeError(globalObject, scope, "Intl.RelativeTimeFormat.prototype.resolvedOptions called on value that's not a RelativeTimeFormat"_s));
 
     RELEASE_AND_RETURN(scope, JSValue::encode(relativeTimeFormat->resolvedOptions(globalObject)));

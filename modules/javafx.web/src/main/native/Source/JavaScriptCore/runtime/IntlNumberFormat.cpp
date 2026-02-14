@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2015 Andy VanWagoner (andy@vanwagoner.family)
  * Copyright (C) 2016 Sukolsak Sakshuwong (sukolsak@gmail.com)
- * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2023 Apple Inc. All rights reserved.
  * Copyright (C) 2020 Sony Interactive Entertainment Inc.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -35,43 +35,39 @@
 #include "JSBoundFunction.h"
 #include "JSCInlines.h"
 #include "ObjectConstructor.h"
+#include "ParseInt.h"
 #include <wtf/Range.h>
+#include <wtf/text/MakeString.h>
 #include <wtf/unicode/icu/ICUHelpers.h>
 
 #ifdef U_HIDE_DRAFT_API
 #undef U_HIDE_DRAFT_API
 #endif
-#if HAVE(ICU_U_NUMBER_FORMATTER)
 #include <unicode/unumberformatter.h>
-#endif
-#if HAVE(ICU_U_NUMBER_RANGE_FORMATTER)
 #include <unicode/unumberrangeformatter.h>
-#endif
 #define U_HIDE_DRAFT_API 1
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 namespace JSC {
 
-const ClassInfo IntlNumberFormat::s_info = { "Object", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(IntlNumberFormat) };
+const ClassInfo IntlNumberFormat::s_info = { "Object"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(IntlNumberFormat) };
 
 namespace IntlNumberFormatInternal {
 static constexpr bool verbose = false;
 }
 
-#if HAVE(ICU_U_NUMBER_FORMATTER)
 void UNumberFormatterDeleter::operator()(UNumberFormatter* formatter)
 {
     if (formatter)
         unumf_close(formatter);
 }
-#endif
 
-#if HAVE(ICU_U_NUMBER_RANGE_FORMATTER)
 void UNumberRangeFormatterDeleter::operator()(UNumberRangeFormatter* formatter)
 {
     if (formatter)
         unumrf_close(formatter);
 }
-#endif
 
 IntlNumberFormat* IntlNumberFormat::create(VM& vm, Structure* structure)
 {
@@ -88,12 +84,6 @@ Structure* IntlNumberFormat::createStructure(VM& vm, JSGlobalObject* globalObjec
 IntlNumberFormat::IntlNumberFormat(VM& vm, Structure* structure)
     : Base(vm, structure)
 {
-}
-
-void IntlNumberFormat::finishCreation(VM& vm)
-{
-    Base::finishCreation(vm);
-    ASSERT(inherits(vm, info()));
 }
 
 template<typename Visitor>
@@ -119,18 +109,17 @@ Vector<String> IntlNumberFormat::localeData(const String& locale, RelevantExtens
 static inline unsigned computeCurrencySortKey(const String& currency)
 {
     ASSERT(currency.length() == 3);
-    ASSERT(currency.isAllSpecialCharacters<isASCIIUpper>());
+    ASSERT(currency.containsOnly<isASCIIUpper>());
     return (currency[0] << 16) + (currency[1] << 8) + currency[2];
 }
 
-static inline unsigned computeCurrencySortKey(const char* currency)
+static inline unsigned computeCurrencySortKey(const std::array<const char, 3>& currency)
 {
-    ASSERT(strlen(currency) == 3);
-    ASSERT(isAllSpecialCharacters<isASCIIUpper>(currency, 3));
+    ASSERT(containsOnly<isASCIIUpper>(std::span { currency }));
     return (currency[0] << 16) + (currency[1] << 8) + currency[2];
 }
 
-static unsigned extractCurrencySortKey(std::pair<const char*, unsigned>* currencyMinorUnit)
+static unsigned extractCurrencySortKey(std::pair<std::array<const char, 3>, unsigned>* currencyMinorUnit)
 {
     return computeCurrencySortKey(currencyMinorUnit->first);
 }
@@ -140,35 +129,35 @@ static unsigned computeCurrencyDigits(const String& currency)
     // 11.1.1 The abstract operation CurrencyDigits (currency)
     // "If the ISO 4217 currency and funds code list contains currency as an alphabetic code,
     // then return the minor unit value corresponding to the currency from the list; else return 2.
-    static constexpr std::pair<const char*, unsigned> currencyMinorUnits[] = {
-        { "BHD", 3 },
-        { "BIF", 0 },
-        { "BYR", 0 },
-        { "CLF", 4 },
-        { "CLP", 0 },
-        { "DJF", 0 },
-        { "GNF", 0 },
-        { "IQD", 3 },
-        { "ISK", 0 },
-        { "JOD", 3 },
-        { "JPY", 0 },
-        { "KMF", 0 },
-        { "KRW", 0 },
-        { "KWD", 3 },
-        { "LYD", 3 },
-        { "OMR", 3 },
-        { "PYG", 0 },
-        { "RWF", 0 },
-        { "TND", 3 },
-        { "UGX", 0 },
-        { "UYI", 0 },
-        { "VND", 0 },
-        { "VUV", 0 },
-        { "XAF", 0 },
-        { "XOF", 0 },
-        { "XPF", 0 }
+    static constexpr std::pair<std::array<const char, 3>, unsigned> currencyMinorUnits[] = {
+        { { 'B', 'H', 'D' }, 3 },
+        { { 'B', 'I', 'F' }, 0 },
+        { { 'B', 'Y', 'R' }, 0 },
+        { { 'C', 'L', 'F' }, 4 },
+        { { 'C', 'L', 'P' }, 0 },
+        { { 'D', 'J', 'F' }, 0 },
+        { { 'G', 'N', 'F' }, 0 },
+        { { 'I', 'Q', 'D' }, 3 },
+        { { 'I', 'S', 'K' }, 0 },
+        { { 'J', 'O', 'D' }, 3 },
+        { { 'J', 'P', 'Y' }, 0 },
+        { { 'K', 'M', 'F' }, 0 },
+        { { 'K', 'R', 'W' }, 0 },
+        { { 'K', 'W', 'D' }, 3 },
+        { { 'L', 'Y', 'D' }, 3 },
+        { { 'O', 'M', 'R' }, 3 },
+        { { 'P', 'Y', 'G' }, 0 },
+        { { 'R', 'W', 'F' }, 0 },
+        { { 'T', 'N', 'D' }, 3 },
+        { { 'U', 'G', 'X' }, 0 },
+        { { 'U', 'Y', 'I' }, 0 },
+        { { 'V', 'N', 'D' }, 0 },
+        { { 'V', 'U', 'V' }, 0 },
+        { { 'X', 'A', 'F' }, 0 },
+        { { 'X', 'O', 'F' }, 0 },
+        { { 'X', 'P', 'F' }, 0 }
     };
-    auto* currencyMinorUnit = tryBinarySearch<std::pair<const char*, unsigned>>(currencyMinorUnits, WTF_ARRAY_LENGTH(currencyMinorUnits), computeCurrencySortKey(currency), extractCurrencySortKey);
+    auto* currencyMinorUnit = tryBinarySearch<std::pair<std::array<const char, 3>, unsigned>>(currencyMinorUnits, std::size(currencyMinorUnits), computeCurrencySortKey(currency), extractCurrencySortKey);
     if (currencyMinorUnit)
         return currencyMinorUnit->second;
     return 2;
@@ -223,7 +212,7 @@ static std::optional<WellFormedUnit> wellFormedUnitIdentifier(StringView unitIde
         return std::nullopt;
 
     // If the result of IsSanctionedSimpleUnitIdentifier(numerator) is false, then return false.
-    auto numerator = unitIdentifier.substring(0, position);
+    auto numerator = unitIdentifier.left(position);
     auto numeratorUnit = sanctionedSimpleUnitIdentifier(numerator);
     if (!numeratorUnit)
         return std::nullopt;
@@ -236,6 +225,11 @@ static std::optional<WellFormedUnit> wellFormedUnitIdentifier(StringView unitIde
 
     return WellFormedUnit(numeratorUnit.value(), denominatorUnit.value());
 }
+
+// We intentionally avoid using ICU's UNUM_APPROXIMATELY_SIGN_FIELD and define the same value here.
+// UNUM_APPROXIMATELY_SIGN_FIELD can be defined in the header after ICU 71. But dylib ICU can be newer while ICU header version is old.
+// We can define UNUM_APPROXIMATELY_SIGN_FIELD here so that we can support old ICU header + newer ICU library combination.
+static constexpr UNumberFormatFields UNUM_APPROXIMATELY_SIGN_FIELD = static_cast<UNumberFormatFields>(UNUM_COMPACT_FIELD + 1);
 
 static ASCIILiteral partTypeString(UNumberFormatFields field, IntlNumberFormat::Style style, bool sign, IntlMathematicalValue::NumberType type)
 {
@@ -271,12 +265,14 @@ static ASCIILiteral partTypeString(UNumberFormatFields field, IntlNumberFormat::
         return (style == IntlNumberFormat::Style::Unit) ? "unit"_s : "percentSign"_s;
     case UNUM_SIGN_FIELD:
         return sign ? "minusSign"_s : "plusSign"_s;
-#if HAVE(ICU_U_NUMBER_FORMATTER)
     case UNUM_MEASURE_UNIT_FIELD:
         return "unit"_s;
     case UNUM_COMPACT_FIELD:
         return "compact"_s;
-#endif
+IGNORE_GCC_WARNINGS_BEGIN("switch")
+    case UNUM_APPROXIMATELY_SIGN_FIELD:
+        return "approximatelySign"_s;
+IGNORE_GCC_WARNINGS_END
     // These should not show up because there is no way to specify them in NumberFormat options.
     // If they do, they don't fit well into any of known part types, so consider it an "unknown".
     case UNUM_PERMILL_FIELD:
@@ -304,7 +300,7 @@ void IntlNumberFormat::initializeNumberFormat(JSGlobalObject* globalObject, JSVa
     LocaleMatcher localeMatcher = intlOption<LocaleMatcher>(globalObject, options, vm.propertyNames->localeMatcher, { { "lookup"_s, LocaleMatcher::Lookup }, { "best fit"_s, LocaleMatcher::BestFit } }, "localeMatcher must be either \"lookup\" or \"best fit\""_s, LocaleMatcher::BestFit);
     RETURN_IF_EXCEPTION(scope, void());
 
-    String numberingSystem = intlStringOption(globalObject, options, vm.propertyNames->numberingSystem, { }, nullptr, nullptr);
+    String numberingSystem = intlStringOption(globalObject, options, vm.propertyNames->numberingSystem, { }, { }, { });
     RETURN_IF_EXCEPTION(scope, void());
     if (!numberingSystem.isNull()) {
         if (!isUnicodeLocaleIdentifierType(numberingSystem)) {
@@ -328,7 +324,7 @@ void IntlNumberFormat::initializeNumberFormat(JSGlobalObject* globalObject, JSVa
     m_style = intlOption<Style>(globalObject, options, vm.propertyNames->style, { { "decimal"_s, Style::Decimal }, { "percent"_s, Style::Percent }, { "currency"_s, Style::Currency }, { "unit"_s, Style::Unit } }, "style must be either \"decimal\", \"percent\", \"currency\", or \"unit\""_s, Style::Decimal);
     RETURN_IF_EXCEPTION(scope, void());
 
-    String currency = intlStringOption(globalObject, options, Identifier::fromString(vm, "currency"), { }, nullptr, nullptr);
+    String currency = intlStringOption(globalObject, options, Identifier::fromString(vm, "currency"_s), { }, { }, { });
     RETURN_IF_EXCEPTION(scope, void());
     if (!currency.isNull()) {
         if (!isWellFormedCurrencyCode(currency)) {
@@ -349,13 +345,16 @@ void IntlNumberFormat::initializeNumberFormat(JSGlobalObject* globalObject, JSVa
         currencyDigits = computeCurrencyDigits(currency);
     }
 
-    m_currencyDisplay = intlOption<CurrencyDisplay>(globalObject, options, Identifier::fromString(vm, "currencyDisplay"), { { "code"_s, CurrencyDisplay::Code }, { "symbol"_s, CurrencyDisplay::Symbol }, { "narrowSymbol"_s, CurrencyDisplay::NarrowSymbol }, { "name"_s, CurrencyDisplay::Name } }, "currencyDisplay must be either \"code\", \"symbol\", or \"name\""_s, CurrencyDisplay::Symbol);
+    if (Options::useMoreCurrencyDisplayChoices())
+        m_currencyDisplay = intlOption<CurrencyDisplay>(globalObject, options, Identifier::fromString(vm, "currencyDisplay"_s), { { "code"_s, CurrencyDisplay::Code }, { "symbol"_s, CurrencyDisplay::Symbol }, { "formalSymbol"_s, CurrencyDisplay::FormalSymbol },  { "narrowSymbol"_s, CurrencyDisplay::NarrowSymbol }, { "name"_s, CurrencyDisplay::Name }, { "never"_s, CurrencyDisplay::Never } }, "currencyDisplay must be either \"code\", \"symbol\", \"formalSymbol\", \"narrowSymbol\", \"name\" or \"never\""_s, CurrencyDisplay::Symbol);
+    else
+    m_currencyDisplay = intlOption<CurrencyDisplay>(globalObject, options, Identifier::fromString(vm, "currencyDisplay"_s), { { "code"_s, CurrencyDisplay::Code }, { "symbol"_s, CurrencyDisplay::Symbol }, { "narrowSymbol"_s, CurrencyDisplay::NarrowSymbol }, { "name"_s, CurrencyDisplay::Name } }, "currencyDisplay must be either \"code\", \"symbol\", or \"name\""_s, CurrencyDisplay::Symbol);
     RETURN_IF_EXCEPTION(scope, void());
 
-    m_currencySign = intlOption<CurrencySign>(globalObject, options, Identifier::fromString(vm, "currencySign"), { { "standard"_s, CurrencySign::Standard }, { "accounting"_s, CurrencySign::Accounting } }, "currencySign must be either \"standard\" or \"accounting\""_s, CurrencySign::Standard);
+    m_currencySign = intlOption<CurrencySign>(globalObject, options, Identifier::fromString(vm, "currencySign"_s), { { "standard"_s, CurrencySign::Standard }, { "accounting"_s, CurrencySign::Accounting } }, "currencySign must be either \"standard\" or \"accounting\""_s, CurrencySign::Standard);
     RETURN_IF_EXCEPTION(scope, void());
 
-    String unit = intlStringOption(globalObject, options, Identifier::fromString(vm, "unit"), { }, nullptr, nullptr);
+    String unit = intlStringOption(globalObject, options, Identifier::fromString(vm, "unit"_s), { }, { }, { });
     RETURN_IF_EXCEPTION(scope, void());
     std::optional<WellFormedUnit> wellFormedUnit;
     if (!unit.isNull()) {
@@ -370,140 +369,72 @@ void IntlNumberFormat::initializeNumberFormat(JSGlobalObject* globalObject, JSVa
         return;
     }
 
-    m_unitDisplay = intlOption<UnitDisplay>(globalObject, options, Identifier::fromString(vm, "unitDisplay"), { { "short"_s, UnitDisplay::Short }, { "narrow"_s, UnitDisplay::Narrow }, { "long"_s, UnitDisplay::Long } }, "unitDisplay must be either \"short\", \"narrow\", or \"long\""_s, UnitDisplay::Short);
+    m_unitDisplay = intlOption<UnitDisplay>(globalObject, options, Identifier::fromString(vm, "unitDisplay"_s), { { "short"_s, UnitDisplay::Short }, { "narrow"_s, UnitDisplay::Narrow }, { "long"_s, UnitDisplay::Long } }, "unitDisplay must be either \"short\", \"narrow\", or \"long\""_s, UnitDisplay::Short);
     RETURN_IF_EXCEPTION(scope, void());
 
     unsigned minimumFractionDigitsDefault = (m_style == Style::Currency) ? currencyDigits : 0;
     unsigned maximumFractionDigitsDefault = (m_style == Style::Currency) ? currencyDigits : (m_style == Style::Percent) ? 0 : 3;
 
-    m_notation = intlOption<IntlNotation>(globalObject, options, Identifier::fromString(vm, "notation"), { { "standard"_s, IntlNotation::Standard }, { "scientific"_s, IntlNotation::Scientific }, { "engineering"_s, IntlNotation::Engineering }, { "compact"_s, IntlNotation::Compact } }, "notation must be either \"standard\", \"scientific\", \"engineering\", or \"compact\""_s, IntlNotation::Standard);
+    m_notation = intlOption<IntlNotation>(globalObject, options, Identifier::fromString(vm, "notation"_s), { { "standard"_s, IntlNotation::Standard }, { "scientific"_s, IntlNotation::Scientific }, { "engineering"_s, IntlNotation::Engineering }, { "compact"_s, IntlNotation::Compact } }, "notation must be either \"standard\", \"scientific\", \"engineering\", or \"compact\""_s, IntlNotation::Standard);
     RETURN_IF_EXCEPTION(scope, void());
 
     setNumberFormatDigitOptions(globalObject, this, options, minimumFractionDigitsDefault, maximumFractionDigitsDefault, m_notation);
     RETURN_IF_EXCEPTION(scope, void());
 
-    m_roundingIncrement = intlNumberOption(globalObject, options, vm.propertyNames->roundingIncrement, 1, 5000, 1);
-    RETURN_IF_EXCEPTION(scope, void());
-    static constexpr const unsigned roundingIncrementCandidates[] = {
-        1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000
-    };
-    if (std::none_of(roundingIncrementCandidates, roundingIncrementCandidates + std::size(roundingIncrementCandidates),
-        [&](unsigned candidate) {
-            return candidate == m_roundingIncrement;
-        })) {
-        throwRangeError(globalObject, scope, "roundingIncrement must be one of 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000"_s);
-        return;
-    }
-    if (m_roundingIncrement != 1 && m_roundingType != IntlRoundingType::FractionDigits) {
-        throwRangeError(globalObject, scope, "rounding type is not fraction-digits while roundingIncrement is specified"_s);
-        return;
-    }
-
-    m_trailingZeroDisplay = intlOption<TrailingZeroDisplay>(globalObject, options, vm.propertyNames->trailingZeroDisplay, { { "auto"_s, TrailingZeroDisplay::Auto }, { "stripIfInteger"_s, TrailingZeroDisplay::StripIfInteger } }, "trailingZeroDisplay must be either \"auto\" or \"stripIfInteger\""_s, TrailingZeroDisplay::Auto);
-    RETURN_IF_EXCEPTION(scope, void());
-
-    m_compactDisplay = intlOption<CompactDisplay>(globalObject, options, Identifier::fromString(vm, "compactDisplay"), { { "short"_s, CompactDisplay::Short }, { "long"_s, CompactDisplay::Long } }, "compactDisplay must be either \"short\" or \"long\""_s, CompactDisplay::Short);
+    m_compactDisplay = intlOption<CompactDisplay>(globalObject, options, Identifier::fromString(vm, "compactDisplay"_s), { { "short"_s, CompactDisplay::Short }, { "long"_s, CompactDisplay::Long } }, "compactDisplay must be either \"short\" or \"long\""_s, CompactDisplay::Short);
     RETURN_IF_EXCEPTION(scope, void());
 
     UseGrouping defaultUseGrouping = UseGrouping::Auto;
     if (m_notation == IntlNotation::Compact)
         defaultUseGrouping = UseGrouping::Min2;
 
-    m_useGrouping = intlStringOrBooleanOption<UseGrouping>(globalObject, options, Identifier::fromString(vm, "useGrouping"), UseGrouping::Always, UseGrouping::False, { { "min2"_s, UseGrouping::Min2 }, { "auto"_s, UseGrouping::Auto }, { "always"_s, UseGrouping::Always } }, "useGrouping must be either true, false, \"min2\", \"auto\", or \"always\""_s, defaultUseGrouping);
+    m_useGrouping = intlStringOrBooleanOption<UseGrouping>(globalObject, options, Identifier::fromString(vm, "useGrouping"_s), UseGrouping::Always, UseGrouping::False, { { "min2"_s, UseGrouping::Min2 }, { "auto"_s, UseGrouping::Auto }, { "always"_s, UseGrouping::Always } }, "useGrouping must be either true, false, \"min2\", \"auto\", or \"always\""_s, defaultUseGrouping);
     RETURN_IF_EXCEPTION(scope, void());
 
-    m_signDisplay = intlOption<SignDisplay>(globalObject, options, Identifier::fromString(vm, "signDisplay"), { { "auto"_s, SignDisplay::Auto }, { "never"_s, SignDisplay::Never }, { "always"_s, SignDisplay::Always }, { "exceptZero"_s, SignDisplay::ExceptZero }, { "negative"_s, SignDisplay::Negative } }, "signDisplay must be either \"auto\", \"never\", \"always\", \"exceptZero\", or \"negative\""_s, SignDisplay::Auto);
+    m_signDisplay = intlOption<SignDisplay>(globalObject, options, Identifier::fromString(vm, "signDisplay"_s), { { "auto"_s, SignDisplay::Auto }, { "never"_s, SignDisplay::Never }, { "always"_s, SignDisplay::Always }, { "exceptZero"_s, SignDisplay::ExceptZero }, { "negative"_s, SignDisplay::Negative } }, "signDisplay must be either \"auto\", \"never\", \"always\", \"exceptZero\", or \"negative\""_s, SignDisplay::Auto);
     RETURN_IF_EXCEPTION(scope, void());
 
-    m_roundingMode = intlOption<RoundingMode>(globalObject, options, vm.propertyNames->roundingMode, {
-            { "ceil"_s, RoundingMode::Ceil },
-            { "floor"_s, RoundingMode::Floor },
-            { "expand"_s, RoundingMode::Expand },
-            { "trunc"_s, RoundingMode::Trunc },
-            { "halfCeil"_s, RoundingMode::HalfCeil },
-            { "halfFloor"_s, RoundingMode::HalfFloor },
-            { "halfExpand"_s, RoundingMode::HalfExpand },
-            { "halfTrunc"_s, RoundingMode::HalfTrunc },
-            { "halfEven"_s, RoundingMode::HalfEven }
-        }, "roundingMode must be either \"ceil\", \"floor\", \"expand\", \"trunc\", \"halfCeil\", \"halfFloor\", \"halfExpand\", \"halfTrunc\", or \"halfEven\""_s, RoundingMode::HalfExpand);
-    RETURN_IF_EXCEPTION(scope, void());
-
-    CString dataLocaleWithExtensions = makeString(resolved.dataLocale, "-u-nu-", m_numberingSystem).utf8();
+    CString dataLocaleWithExtensions = makeString(resolved.dataLocale, "-u-nu-"_s, m_numberingSystem).utf8();
     dataLogLnIf(IntlNumberFormatInternal::verbose, "dataLocaleWithExtensions:(", dataLocaleWithExtensions , ")");
 
     // Options are obtained. Configure formatter here.
 
-#if HAVE(ICU_U_NUMBER_FORMATTER)
     // Constructing ICU Number Skeletons to configure UNumberFormatter.
     // https://github.com/unicode-org/icu/blob/master/docs/userguide/format_parse/numbers/skeletons.md
 
     StringBuilder skeletonBuilder;
-
-    switch (m_roundingMode) {
-    case RoundingMode::Ceil:
-        skeletonBuilder.append("rounding-mode-ceiling");
-        break;
-    case RoundingMode::Floor:
-        skeletonBuilder.append("rounding-mode-floor");
-        break;
-    case RoundingMode::Expand:
-        skeletonBuilder.append("rounding-mode-up");
-        break;
-    case RoundingMode::Trunc:
-        skeletonBuilder.append("rounding-mode-down");
-        break;
-    case RoundingMode::HalfCeil: {
-        // Only ICU69~ supports half-ceiling. Ignore this option if linked ICU does not support it.
-        // https://github.com/unicode-org/icu/commit/e8dfea9bb6bb27596731173b352759e44ad06b21
-        if (WTF::ICU::majorVersion() >= 69)
-            skeletonBuilder.append("rounding-mode-half-ceiling");
-        else
-            skeletonBuilder.append("rounding-mode-half-up"); // Default option.
-        break;
-    }
-    case RoundingMode::HalfFloor: {
-        // Only ICU69~ supports half-ceil. Ignore this option if linked ICU does not support it.
-        // https://github.com/unicode-org/icu/commit/e8dfea9bb6bb27596731173b352759e44ad06b21
-        if (WTF::ICU::majorVersion() >= 69)
-            skeletonBuilder.append("rounding-mode-half-floor");
-        else
-            skeletonBuilder.append("rounding-mode-half-up"); // Default option.
-        break;
-    }
-    case RoundingMode::HalfExpand:
-        skeletonBuilder.append("rounding-mode-half-up");
-        break;
-    case RoundingMode::HalfTrunc:
-        skeletonBuilder.append("rounding-mode-half-down");
-        break;
-    case RoundingMode::HalfEven:
-        skeletonBuilder.append("rounding-mode-half-even");
-        break;
-    }
 
     switch (m_style) {
     case Style::Decimal:
         // No skeleton is needed.
         break;
     case Style::Percent:
-        skeletonBuilder.append(" percent scale/100");
+        skeletonBuilder.append(" percent scale/100"_s);
         break;
     case Style::Currency: {
-        skeletonBuilder.append(" currency/", currency);
+        skeletonBuilder.append(" currency/"_s, currency);
 
         // https://github.com/unicode-org/icu/blob/master/docs/userguide/format_parse/numbers/skeletons.md#unit-width
         switch (m_currencyDisplay) {
         case CurrencyDisplay::Code:
-            skeletonBuilder.append(" unit-width-iso-code");
+            skeletonBuilder.append(" unit-width-iso-code"_s);
             break;
         case CurrencyDisplay::Symbol:
             // Default option. Do not specify unit-width.
             break;
+        case CurrencyDisplay::FormalSymbol:
+            ASSERT(Options::useMoreCurrencyDisplayChoices());
+            skeletonBuilder.append(" unit-width-formal"_s);
+            break;
         case CurrencyDisplay::NarrowSymbol:
-            skeletonBuilder.append(" unit-width-narrow");
+            skeletonBuilder.append(" unit-width-narrow"_s);
             break;
         case CurrencyDisplay::Name:
-            skeletonBuilder.append(" unit-width-full-name");
+            skeletonBuilder.append(" unit-width-full-name"_s);
+            break;
+        case CurrencyDisplay::Never:
+            ASSERT(Options::useMoreCurrencyDisplayChoices());
+            skeletonBuilder.append(" unit-width-hidden"_s);
             break;
         }
         break;
@@ -512,24 +443,24 @@ void IntlNumberFormat::initializeNumberFormat(JSGlobalObject* globalObject, JSVa
         // The measure-unit stem takes one required option: the unit identifier of the unit to be formatted.
         // The full unit identifier is required: both the type and the subtype (for example, length-meter).
         // https://github.com/unicode-org/icu/blob/master/docs/userguide/format_parse/numbers/skeletons.md#unit
-        skeletonBuilder.append(" measure-unit/");
+        skeletonBuilder.append(" measure-unit/"_s);
         auto numeratorUnit = wellFormedUnit->numerator;
         skeletonBuilder.append(numeratorUnit.type, '-', numeratorUnit.subType);
         if (auto denominatorUnitValue = wellFormedUnit->denominator) {
             auto denominatorUnit = denominatorUnitValue.value();
-            skeletonBuilder.append(" per-measure-unit/", denominatorUnit.type, '-', denominatorUnit.subType);
+            skeletonBuilder.append(" per-measure-unit/"_s, denominatorUnit.type, '-', denominatorUnit.subType);
         }
 
         // https://github.com/unicode-org/icu/blob/master/docs/userguide/format_parse/numbers/skeletons.md#unit-width
         switch (m_unitDisplay) {
         case UnitDisplay::Short:
-            skeletonBuilder.append(" unit-width-short");
+            skeletonBuilder.append(" unit-width-short"_s);
             break;
         case UnitDisplay::Narrow:
-            skeletonBuilder.append(" unit-width-narrow");
+            skeletonBuilder.append(" unit-width-narrow"_s);
             break;
         case UnitDisplay::Long:
-            skeletonBuilder.append(" unit-width-full-name");
+            skeletonBuilder.append(" unit-width-full-name"_s);
             break;
         }
         break;
@@ -537,41 +468,7 @@ void IntlNumberFormat::initializeNumberFormat(JSGlobalObject* globalObject, JSVa
     }
 
     appendNumberFormatDigitOptionsToSkeleton(this, skeletonBuilder);
-
-    // Configure this just after precision.
-    // https://github.com/unicode-org/icu/blob/main/docs/userguide/format_parse/numbers/skeletons.md#trailing-zero-display
-    switch (m_trailingZeroDisplay) {
-    case TrailingZeroDisplay::Auto:
-        break;
-    case TrailingZeroDisplay::StripIfInteger:
-        // Only ICU69~ supports trailing zero display. Ignore this option if linked ICU does not support it.
-        // https://github.com/unicode-org/icu/commit/b79c299f90d4023ac237db3d0335d568bf21cd36
-        if (WTF::ICU::majorVersion() >= 69)
-            skeletonBuilder.append("/w");
-        break;
-    }
-
-    // https://github.com/unicode-org/icu/blob/master/docs/userguide/format_parse/numbers/skeletons.md#notation
-    switch (m_notation) {
-    case IntlNotation::Standard:
-        break;
-    case IntlNotation::Scientific:
-        skeletonBuilder.append(" scientific");
-        break;
-    case IntlNotation::Engineering:
-        skeletonBuilder.append(" engineering");
-        break;
-    case IntlNotation::Compact:
-        switch (m_compactDisplay) {
-        case CompactDisplay::Short:
-            skeletonBuilder.append(" compact-short");
-            break;
-        case CompactDisplay::Long:
-            skeletonBuilder.append(" compact-long");
-            break;
-        }
-        break;
-    }
+    appendNumberFormatNotationOptionsToSkeleton(this, skeletonBuilder);
 
     // https://github.com/unicode-org/icu/blob/master/docs/userguide/format_parse/numbers/skeletons.md#sign-display
     // CurrencySign's accounting is a part of SignDisplay in ICU.
@@ -579,34 +476,30 @@ void IntlNumberFormat::initializeNumberFormat(JSGlobalObject* globalObject, JSVa
     switch (m_signDisplay) {
     case SignDisplay::Auto:
         if (useAccounting)
-            skeletonBuilder.append(" sign-accounting");
+            skeletonBuilder.append(" sign-accounting"_s);
         else
-            skeletonBuilder.append(" sign-auto");
+            skeletonBuilder.append(" sign-auto"_s);
         break;
     case SignDisplay::Never:
-        skeletonBuilder.append(" sign-never");
+        skeletonBuilder.append(" sign-never"_s);
         break;
     case SignDisplay::Always:
         if (useAccounting)
-            skeletonBuilder.append(" sign-accounting-always");
+            skeletonBuilder.append(" sign-accounting-always"_s);
         else
-            skeletonBuilder.append(" sign-always");
+            skeletonBuilder.append(" sign-always"_s);
         break;
     case SignDisplay::ExceptZero:
         if (useAccounting)
-            skeletonBuilder.append(" sign-accounting-except-zero");
+            skeletonBuilder.append(" sign-accounting-except-zero"_s);
         else
-            skeletonBuilder.append(" sign-except-zero");
+            skeletonBuilder.append(" sign-except-zero"_s);
         break;
     case SignDisplay::Negative:
-        // Only ICU69~ supports negative sign display. Ignore this option if linked ICU does not support it.
-        // https://github.com/unicode-org/icu/commit/1aa0dad8e06ecc99bff442dd37f6daa2d39d9a5a
-        if (WTF::ICU::majorVersion() >= 69) {
             if (useAccounting)
-                skeletonBuilder.append(" sign-accounting-negative");
+                skeletonBuilder.append(" sign-accounting-negative"_s);
             else
-                skeletonBuilder.append(" sign-negative");
-        }
+                skeletonBuilder.append(" sign-negative"_s);
         break;
     }
 
@@ -614,16 +507,16 @@ void IntlNumberFormat::initializeNumberFormat(JSGlobalObject* globalObject, JSVa
     // https://github.com/unicode-org/icu/blob/main/docs/userguide/format_parse/numbers/skeletons.md#grouping
     switch (m_useGrouping) {
     case UseGrouping::False:
-        skeletonBuilder.append(" group-off");
+        skeletonBuilder.append(" group-off"_s);
         break;
     case UseGrouping::Min2:
-        skeletonBuilder.append(" group-min2");
+        skeletonBuilder.append(" group-min2"_s);
         break;
     case UseGrouping::Auto:
-        skeletonBuilder.append(" group-auto");
+        skeletonBuilder.append(" group-auto"_s);
         break;
     case UseGrouping::Always:
-        skeletonBuilder.append(" group-on-aligned");
+        skeletonBuilder.append(" group-on-aligned"_s);
         break;
     }
 
@@ -639,120 +532,11 @@ void IntlNumberFormat::initializeNumberFormat(JSGlobalObject* globalObject, JSVa
         return;
     }
 
-#if HAVE(ICU_U_NUMBER_RANGE_FORMATTER)
     m_numberRangeFormatter = std::unique_ptr<UNumberRangeFormatter, UNumberRangeFormatterDeleter>(unumrf_openForSkeletonWithCollapseAndIdentityFallback(upconverted.get(), skeletonView.length(), UNUM_RANGE_COLLAPSE_AUTO, UNUM_IDENTITY_FALLBACK_APPROXIMATELY, dataLocaleWithExtensions.data(), nullptr, &status));
     if (U_FAILURE(status)) {
         throwTypeError(globalObject, scope, "failed to initialize NumberFormat"_s);
         return;
     }
-#endif
-#else
-    UNumberFormatStyle style = UNUM_DEFAULT;
-    switch (m_style) {
-    case Style::Decimal:
-        style = UNUM_DECIMAL;
-        break;
-    case Style::Percent:
-        style = UNUM_PERCENT;
-        break;
-    case Style::Currency:
-        switch (m_currencyDisplay) {
-        case CurrencyDisplay::Code:
-            style = UNUM_CURRENCY_ISO;
-            break;
-        case CurrencyDisplay::Symbol:
-            style = UNUM_CURRENCY;
-            break;
-        case CurrencyDisplay::NarrowSymbol:
-            style = UNUM_CURRENCY; // Use the same option to "symbol" since linked-ICU does not support it.
-            break;
-        case CurrencyDisplay::Name:
-            style = UNUM_CURRENCY_PLURAL;
-            break;
-        }
-        switch (m_currencySign) {
-        case CurrencySign::Standard:
-            break;
-        case CurrencySign::Accounting:
-            // Ignore this case since linked ICU does not support it.
-            break;
-        }
-        break;
-    case Style::Unit:
-        // Ignore this case since linked ICU does not support it.
-        break;
-    }
-
-    switch (m_notation) {
-    case IntlNotation::Standard:
-        break;
-    case IntlNotation::Scientific:
-    case IntlNotation::Engineering:
-    case IntlNotation::Compact:
-        // Ignore this case since linked ICU does not support it.
-        break;
-    }
-
-    switch (m_signDisplay) {
-    case SignDisplay::Auto:
-        break;
-    case SignDisplay::Never:
-    case SignDisplay::Always:
-    case SignDisplay::ExceptZero:
-    case SignDisplay::Negative:
-        // Ignore this case since linked ICU does not support it.
-        break;
-    }
-
-    UErrorCode status = U_ZERO_ERROR;
-    m_numberFormat = std::unique_ptr<UNumberFormat, ICUDeleter<unum_close>>(unum_open(style, nullptr, 0, dataLocaleWithExtensions.data(), nullptr, &status));
-    if (U_FAILURE(status)) {
-        throwTypeError(globalObject, scope, "failed to initialize NumberFormat"_s);
-        return;
-    }
-
-    if (m_style == Style::Currency) {
-        unum_setTextAttribute(m_numberFormat.get(), UNUM_CURRENCY_CODE, StringView(m_currency).upconvertedCharacters(), m_currency.length(), &status);
-        if (U_FAILURE(status)) {
-            throwTypeError(globalObject, scope, "failed to initialize NumberFormat"_s);
-            return;
-        }
-    }
-
-    switch (m_roundingType) {
-    case IntlRoundingType::FractionDigits:
-        unum_setAttribute(m_numberFormat.get(), UNUM_MIN_INTEGER_DIGITS, m_minimumIntegerDigits);
-        unum_setAttribute(m_numberFormat.get(), UNUM_MIN_FRACTION_DIGITS, m_minimumFractionDigits);
-        unum_setAttribute(m_numberFormat.get(), UNUM_MAX_FRACTION_DIGITS, m_maximumFractionDigits);
-        break;
-    case IntlRoundingType::SignificantDigits:
-        unum_setAttribute(m_numberFormat.get(), UNUM_SIGNIFICANT_DIGITS_USED, true);
-        unum_setAttribute(m_numberFormat.get(), UNUM_MIN_SIGNIFICANT_DIGITS, m_minimumSignificantDigits);
-        unum_setAttribute(m_numberFormat.get(), UNUM_MAX_SIGNIFICANT_DIGITS, m_maximumSignificantDigits);
-        break;
-    case IntlRoundingType::MorePrecision:
-        // Ignore this case since linked ICU does not support it.
-        break;
-    case IntlRoundingType::LessPrecision:
-        // Ignore this case since linked ICU does not support it.
-        break;
-    }
-
-    switch (m_useGrouping) {
-    case UseGrouping::False:
-        unum_setAttribute(m_numberFormat.get(), UNUM_GROUPING_USED, false);
-        break;
-    case UseGrouping::Min2:
-        // Ignore this case since linked ICU does not support it.
-        break;
-    case UseGrouping::Auto:
-        break;
-    case UseGrouping::Always:
-        unum_setAttribute(m_numberFormat.get(), UNUM_GROUPING_USED, true);
-        break;
-    }
-    unum_setAttribute(m_numberFormat.get(), UNUM_ROUNDING_MODE, UNUM_ROUND_HALFUP);
-#endif
 }
 
 // https://tc39.es/ecma402/#sec-formatnumber
@@ -761,8 +545,9 @@ JSValue IntlNumberFormat::format(JSGlobalObject* globalObject, double value) con
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    Vector<UChar, 32> buffer;
-#if HAVE(ICU_U_NUMBER_FORMATTER)
+    value = purifyNaN(value);
+
+    Vector<char16_t, 32> buffer;
     ASSERT(m_numberFormatter);
     UErrorCode status = U_ZERO_ERROR;
     auto formattedNumber = std::unique_ptr<UFormattedNumber, ICUDeleter<unumf_closeResult>>(unumf_openResult(&status));
@@ -774,12 +559,6 @@ JSValue IntlNumberFormat::format(JSGlobalObject* globalObject, double value) con
     status = callBufferProducingFunction(unumf_resultToString, formattedNumber.get(), buffer);
     if (U_FAILURE(status))
         return throwTypeError(globalObject, scope, "Failed to format a number."_s);
-#else
-    ASSERT(m_numberFormat);
-    auto status = callBufferProducingFunction(unum_formatDouble, m_numberFormat.get(), value, buffer, nullptr);
-    if (U_FAILURE(status))
-        return throwTypeError(globalObject, scope, "Failed to format a number."_s);
-#endif
     return jsString(vm, String(WTFMove(buffer)));
 }
 
@@ -792,8 +571,7 @@ JSValue IntlNumberFormat::format(JSGlobalObject* globalObject, IntlMathematicalV
     value.ensureNonDouble();
     const auto& string = value.getString();
 
-    Vector<UChar, 32> buffer;
-#if HAVE(ICU_U_NUMBER_FORMATTER)
+    Vector<char16_t, 32> buffer;
     ASSERT(m_numberFormatter);
     UErrorCode status = U_ZERO_ERROR;
     auto formattedNumber = std::unique_ptr<UFormattedNumber, ICUDeleter<unumf_closeResult>>(unumf_openResult(&status));
@@ -805,16 +583,9 @@ JSValue IntlNumberFormat::format(JSGlobalObject* globalObject, IntlMathematicalV
     status = callBufferProducingFunction(unumf_resultToString, formattedNumber.get(), buffer);
     if (U_FAILURE(status))
         return throwTypeError(globalObject, scope, "Failed to format a BigInt."_s);
-#else
-    ASSERT(m_numberFormat);
-    auto status = callBufferProducingFunction(unum_formatDecimal, m_numberFormat.get(), string.data(), string.length(), buffer, nullptr);
-    if (U_FAILURE(status))
-        return throwTypeError(globalObject, scope, "Failed to format a BigInt."_s);
-#endif
     return jsString(vm, String(WTFMove(buffer)));
 }
 
-#if HAVE(ICU_U_NUMBER_RANGE_FORMATTER)
 JSValue IntlNumberFormat::formatRange(JSGlobalObject* globalObject, double start, double end) const
 {
     VM& vm = globalObject->vm();
@@ -824,12 +595,6 @@ JSValue IntlNumberFormat::formatRange(JSGlobalObject* globalObject, double start
 
     if (std::isnan(start) || std::isnan(end))
         return throwRangeError(globalObject, scope, "Passed numbers are out of range"_s);
-
-    if (end < start)
-        return throwRangeError(globalObject, scope, "start is larger than end"_s);
-
-    if (isNegativeZero(end) && start >= 0)
-        return throwRangeError(globalObject, scope, "start is larger than end"_s);
 
     UErrorCode status = U_ZERO_ERROR;
     auto range = std::unique_ptr<UFormattedNumberRange, ICUDeleter<unumrf_closeResult>>(unumrf_openResult(&status));
@@ -845,11 +610,11 @@ JSValue IntlNumberFormat::formatRange(JSGlobalObject* globalObject, double start
         return throwTypeError(globalObject, scope, "failed to format a range"_s);
 
     int32_t length = 0;
-    const UChar* string = ufmtval_getString(formattedValue, &length, &status);
+    const char16_t* string = ufmtval_getString(formattedValue, &length, &status);
     if (U_FAILURE(status))
         return throwTypeError(globalObject, scope, "failed to format a range"_s);
 
-    return jsString(vm, String(string, length));
+    return jsString(vm, String({ string, static_cast<size_t>(length) }));
 }
 
 JSValue IntlNumberFormat::formatRange(JSGlobalObject* globalObject, IntlMathematicalValue&& start, IntlMathematicalValue&& end) const
@@ -882,13 +647,12 @@ JSValue IntlNumberFormat::formatRange(JSGlobalObject* globalObject, IntlMathemat
         return throwTypeError(globalObject, scope, "failed to format a range"_s);
 
     int32_t length = 0;
-    const UChar* string = ufmtval_getString(formattedValue, &length, &status);
+    const char16_t* string = ufmtval_getString(formattedValue, &length, &status);
     if (U_FAILURE(status))
         return throwTypeError(globalObject, scope, "failed to format a range"_s);
 
-    return jsString(vm, String(string, length));
+    return jsString(vm, String({ string, static_cast<size_t>(length) }));
 }
-#endif
 
 static constexpr int32_t literalField = -1;
 struct IntlNumberFormatField {
@@ -1001,7 +765,6 @@ static Vector<IntlNumberFormatField> flattenFields(Vector<IntlNumberFormatField>
     return flatten;
 }
 
-#if HAVE(ICU_U_NUMBER_RANGE_FORMATTER_FORMAT_RANGE_TO_PARTS)
 static bool numberFieldsPracticallyEqual(const UFormattedValue* formattedValue, UErrorCode& status)
 {
     auto iterator = std::unique_ptr<UConstrainedFieldPosition, ICUDeleter<ucfpos_close>>(ucfpos_open(&status));
@@ -1028,12 +791,12 @@ void IntlNumberFormat::formatRangeToPartsInternal(JSGlobalObject* globalObject, 
     UErrorCode status = U_ZERO_ERROR;
 
     int32_t formattedStringLength = 0;
-    const UChar* formattedStringPointer = ufmtval_getString(formattedValue, &formattedStringLength, &status);
+    const char16_t* formattedStringPointer = ufmtval_getString(formattedValue, &formattedStringLength, &status);
     if (U_FAILURE(status)) {
         throwTypeError(globalObject, scope, "Failed to format number range"_s);
         return;
     }
-    String resultString(formattedStringPointer, formattedStringLength);
+    StringView resultStringView(std::span(formattedStringPointer, formattedStringLength));
 
     // We care multiple categories (UFIELD_CATEGORY_DATE and UFIELD_CATEGORY_DATE_INTERVAL_SPAN).
     // So we do not constraint iterator.
@@ -1118,7 +881,7 @@ void IntlNumberFormat::formatRangeToPartsInternal(JSGlobalObject* globalObject, 
             return sharedString;
         };
 
-        auto value = jsString(vm, resultString.substring(beginIndex, length));
+        auto value = jsString(vm, resultStringView.substring(beginIndex, length));
         JSObject* part = constructEmptyObject(globalObject);
         part->putDirect(vm, vm.propertyNames->type, type);
         part->putDirect(vm, vm.propertyNames->value, value);
@@ -1137,7 +900,7 @@ void IntlNumberFormat::formatRangeToPartsInternal(JSGlobalObject* globalObject, 
             sign = end.sign();
         }
         auto fieldType = field.m_field;
-        auto partType = fieldType == literalField ? literalString : jsString(vm, partTypeString(UNumberFormatFields(fieldType), style, sign, numberType));
+        auto partType = fieldType == literalField ? literalString : jsNontrivialString(vm, partTypeString(UNumberFormatFields(fieldType), style, sign, numberType));
         JSObject* part = createPart(partType, field.m_range.begin(), field.m_range.distance());
         parts->push(globalObject, part);
         RETURN_IF_EXCEPTION(scope, void());
@@ -1154,12 +917,6 @@ JSValue IntlNumberFormat::formatRangeToParts(JSGlobalObject* globalObject, doubl
     if (std::isnan(start) || std::isnan(end))
         return throwRangeError(globalObject, scope, "Passed numbers are out of range"_s);
 
-    if (end < start)
-        return throwRangeError(globalObject, scope, "start is larger than end"_s);
-
-    if (isNegativeZero(end) && start >= 0)
-        return throwRangeError(globalObject, scope, "start is larger than end"_s);
-
     UErrorCode status = U_ZERO_ERROR;
     auto range = std::unique_ptr<UFormattedNumberRange, ICUDeleter<unumrf_closeResult>>(unumrf_openResult(&status));
     if (U_FAILURE(status))
@@ -1173,6 +930,8 @@ JSValue IntlNumberFormat::formatRangeToParts(JSGlobalObject* globalObject, doubl
     if (U_FAILURE(status))
         return throwTypeError(globalObject, scope, "failed to format a range"_s);
 
+    // After ICU 71, approximatelySign is supported. We use the old path only for < 71.
+    if (WTF::ICU::majorVersion() < 71) {
     bool equal = numberFieldsPracticallyEqual(formattedValue, status);
     if (U_FAILURE(status)) {
         throwTypeError(globalObject, scope, "Failed to format number range"_s);
@@ -1181,6 +940,7 @@ JSValue IntlNumberFormat::formatRangeToParts(JSGlobalObject* globalObject, doubl
 
     if (equal)
         RELEASE_AND_RETURN(scope, formatToParts(globalObject, start, jsNontrivialString(vm, "shared"_s)));
+    }
 
     JSArray* parts = JSArray::tryCreate(vm, globalObject->arrayStructureForIndexingTypeDuringAllocation(ArrayWithContiguous), 0);
     if (!parts) {
@@ -1223,6 +983,8 @@ JSValue IntlNumberFormat::formatRangeToParts(JSGlobalObject* globalObject, IntlM
     if (U_FAILURE(status))
         return throwTypeError(globalObject, scope, "failed to format a range"_s);
 
+    // After ICU 71, approximatelySign is supported. We use the old path only for < 71.
+    if (WTF::ICU::majorVersion() < 71) {
     bool equal = numberFieldsPracticallyEqual(formattedValue, status);
     if (U_FAILURE(status)) {
         throwTypeError(globalObject, scope, "Failed to format number range"_s);
@@ -1231,6 +993,7 @@ JSValue IntlNumberFormat::formatRangeToParts(JSGlobalObject* globalObject, IntlM
 
     if (equal)
         RELEASE_AND_RETURN(scope, formatToParts(globalObject, WTFMove(start), jsNontrivialString(vm, "shared"_s)));
+    }
 
     JSArray* parts = JSArray::tryCreate(vm, globalObject->arrayStructureForIndexingTypeDuringAllocation(ArrayWithContiguous), 0);
     if (!parts) {
@@ -1243,7 +1006,6 @@ JSValue IntlNumberFormat::formatRangeToParts(JSGlobalObject* globalObject, IntlM
 
     return parts;
 }
-#endif
 
 ASCIILiteral IntlNumberFormat::styleString(Style style)
 {
@@ -1258,7 +1020,7 @@ ASCIILiteral IntlNumberFormat::styleString(Style style)
         return "unit"_s;
     }
     ASSERT_NOT_REACHED();
-    return ASCIILiteral::null();
+    return { };
 }
 
 ASCIILiteral IntlNumberFormat::currencyDisplayString(CurrencyDisplay currencyDisplay)
@@ -1272,9 +1034,15 @@ ASCIILiteral IntlNumberFormat::currencyDisplayString(CurrencyDisplay currencyDis
         return "narrowSymbol"_s;
     case CurrencyDisplay::Name:
         return "name"_s;
+    case CurrencyDisplay::FormalSymbol:
+        ASSERT(Options::useMoreCurrencyDisplayChoices());
+        return "formalSymbol"_s;
+    case CurrencyDisplay::Never:
+        ASSERT(Options::useMoreCurrencyDisplayChoices());
+        return "never"_s;
     }
     ASSERT_NOT_REACHED();
-    return ASCIILiteral::null();
+    return { };
 }
 
 ASCIILiteral IntlNumberFormat::notationString(IntlNotation notation)
@@ -1290,7 +1058,7 @@ ASCIILiteral IntlNumberFormat::notationString(IntlNotation notation)
         return "compact"_s;
     }
     ASSERT_NOT_REACHED();
-    return ASCIILiteral::null();
+    return { };
 }
 
 ASCIILiteral IntlNumberFormat::currencySignString(CurrencySign currencySign)
@@ -1302,7 +1070,7 @@ ASCIILiteral IntlNumberFormat::currencySignString(CurrencySign currencySign)
         return "accounting"_s;
     }
     ASSERT_NOT_REACHED();
-    return ASCIILiteral::null();
+    return { };
 }
 
 ASCIILiteral IntlNumberFormat::unitDisplayString(UnitDisplay unitDisplay)
@@ -1316,7 +1084,7 @@ ASCIILiteral IntlNumberFormat::unitDisplayString(UnitDisplay unitDisplay)
         return "long"_s;
     }
     ASSERT_NOT_REACHED();
-    return ASCIILiteral::null();
+    return { };
 }
 
 ASCIILiteral IntlNumberFormat::compactDisplayString(CompactDisplay compactDisplay)
@@ -1328,7 +1096,7 @@ ASCIILiteral IntlNumberFormat::compactDisplayString(CompactDisplay compactDispla
         return "long"_s;
     }
     ASSERT_NOT_REACHED();
-    return ASCIILiteral::null();
+    return { };
 }
 
 ASCIILiteral IntlNumberFormat::signDisplayString(SignDisplay signDisplay)
@@ -1346,7 +1114,7 @@ ASCIILiteral IntlNumberFormat::signDisplayString(SignDisplay signDisplay)
         return "negative"_s;
     }
     ASSERT_NOT_REACHED();
-    return ASCIILiteral::null();
+    return { };
 }
 
 ASCIILiteral IntlNumberFormat::roundingModeString(RoundingMode roundingMode)
@@ -1372,19 +1140,19 @@ ASCIILiteral IntlNumberFormat::roundingModeString(RoundingMode roundingMode)
         return "halfEven"_s;
     }
     ASSERT_NOT_REACHED();
-    return ASCIILiteral::null();
+    return { };
 }
 
-ASCIILiteral IntlNumberFormat::trailingZeroDisplayString(TrailingZeroDisplay trailingZeroDisplay)
+ASCIILiteral IntlNumberFormat::trailingZeroDisplayString(IntlTrailingZeroDisplay trailingZeroDisplay)
 {
     switch (trailingZeroDisplay) {
-    case TrailingZeroDisplay::Auto:
+    case IntlTrailingZeroDisplay::Auto:
         return "auto"_s;
-    case TrailingZeroDisplay::StripIfInteger:
+    case IntlTrailingZeroDisplay::StripIfInteger:
         return "stripIfInteger"_s;
     }
     ASSERT_NOT_REACHED();
-    return ASCIILiteral::null();
+    return { };
 }
 
 ASCIILiteral IntlNumberFormat::roundingPriorityString(IntlRoundingType roundingType)
@@ -1399,7 +1167,7 @@ ASCIILiteral IntlNumberFormat::roundingPriorityString(IntlRoundingType roundingT
         return "lessPrecision"_s;
     }
     ASSERT_NOT_REACHED();
-    return ASCIILiteral::null();
+    return { };
 }
 
 JSValue IntlNumberFormat::useGroupingValue(VM& vm, UseGrouping useGrouping)
@@ -1430,13 +1198,13 @@ JSObject* IntlNumberFormat::resolvedOptions(JSGlobalObject* globalObject) const
     case Style::Percent:
         break;
     case Style::Currency:
-        options->putDirect(vm, Identifier::fromString(vm, "currency"), jsNontrivialString(vm, m_currency));
-        options->putDirect(vm, Identifier::fromString(vm, "currencyDisplay"), jsNontrivialString(vm, currencyDisplayString(m_currencyDisplay)));
-        options->putDirect(vm, Identifier::fromString(vm, "currencySign"), jsNontrivialString(vm, currencySignString(m_currencySign)));
+        options->putDirect(vm, Identifier::fromString(vm, "currency"_s), jsNontrivialString(vm, m_currency));
+        options->putDirect(vm, Identifier::fromString(vm, "currencyDisplay"_s), jsNontrivialString(vm, currencyDisplayString(m_currencyDisplay)));
+        options->putDirect(vm, Identifier::fromString(vm, "currencySign"_s), jsNontrivialString(vm, currencySignString(m_currencySign)));
         break;
     case Style::Unit:
-        options->putDirect(vm, Identifier::fromString(vm, "unit"), jsNontrivialString(vm, m_unit));
-        options->putDirect(vm, Identifier::fromString(vm, "unitDisplay"), jsNontrivialString(vm, unitDisplayString(m_unitDisplay)));
+        options->putDirect(vm, Identifier::fromString(vm, "unit"_s), jsNontrivialString(vm, m_unit));
+        options->putDirect(vm, Identifier::fromString(vm, "unitDisplay"_s), jsNontrivialString(vm, unitDisplayString(m_unitDisplay)));
         break;
     }
     options->putDirect(vm, vm.propertyNames->minimumIntegerDigits, jsNumber(m_minimumIntegerDigits));
@@ -1457,15 +1225,15 @@ JSObject* IntlNumberFormat::resolvedOptions(JSGlobalObject* globalObject) const
         options->putDirect(vm, vm.propertyNames->maximumSignificantDigits, jsNumber(m_maximumSignificantDigits));
         break;
     }
-    options->putDirect(vm, Identifier::fromString(vm, "useGrouping"), useGroupingValue(vm, m_useGrouping));
-    options->putDirect(vm, Identifier::fromString(vm, "notation"), jsNontrivialString(vm, notationString(m_notation)));
+    options->putDirect(vm, Identifier::fromString(vm, "useGrouping"_s), useGroupingValue(vm, m_useGrouping));
+    options->putDirect(vm, Identifier::fromString(vm, "notation"_s), jsNontrivialString(vm, notationString(m_notation)));
     if (m_notation == IntlNotation::Compact)
-        options->putDirect(vm, Identifier::fromString(vm, "compactDisplay"), jsNontrivialString(vm, compactDisplayString(m_compactDisplay)));
-    options->putDirect(vm, Identifier::fromString(vm, "signDisplay"), jsNontrivialString(vm, signDisplayString(m_signDisplay)));
-    options->putDirect(vm, vm.propertyNames->roundingMode, jsNontrivialString(vm, roundingModeString(m_roundingMode)));
+        options->putDirect(vm, Identifier::fromString(vm, "compactDisplay"_s), jsNontrivialString(vm, compactDisplayString(m_compactDisplay)));
+    options->putDirect(vm, Identifier::fromString(vm, "signDisplay"_s), jsNontrivialString(vm, signDisplayString(m_signDisplay)));
     options->putDirect(vm, vm.propertyNames->roundingIncrement, jsNumber(m_roundingIncrement));
-    options->putDirect(vm, vm.propertyNames->trailingZeroDisplay, jsNontrivialString(vm, trailingZeroDisplayString(m_trailingZeroDisplay)));
+    options->putDirect(vm, vm.propertyNames->roundingMode, jsNontrivialString(vm, roundingModeString(m_roundingMode)));
     options->putDirect(vm, vm.propertyNames->roundingPriority, jsNontrivialString(vm, roundingPriorityString(m_roundingType)));
+    options->putDirect(vm, vm.propertyNames->trailingZeroDisplay, jsNontrivialString(vm, trailingZeroDisplayString(m_trailingZeroDisplay)));
     return options;
 }
 
@@ -1503,11 +1271,11 @@ void IntlNumberFormat::formatToPartsInternal(JSGlobalObject* globalObject, Style
     auto literalString = jsNontrivialString(vm, "literal"_s);
     Identifier unitName;
     if (unit)
-        unitName = Identifier::fromString(vm, "unit");
+        unitName = Identifier::fromString(vm, "unit"_s);
 
     for (auto& field : flatten) {
         auto fieldType = field.m_field;
-        auto partType = fieldType == literalField ? literalString : jsString(vm, partTypeString(UNumberFormatFields(fieldType), style, sign, numberType));
+        auto partType = fieldType == literalField ? literalString : jsNontrivialString(vm, partTypeString(UNumberFormatFields(fieldType), style, sign, numberType));
         auto partValue = jsSubstring(vm, formatted, field.m_range.begin(), field.m_range.distance());
         JSObject* part = constructEmptyObject(globalObject);
         part->putDirect(vm, vm.propertyNames->type, partType);
@@ -1527,13 +1295,14 @@ JSValue IntlNumberFormat::formatToParts(JSGlobalObject* globalObject, double val
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
+    value = purifyNaN(value);
+
     UErrorCode status = U_ZERO_ERROR;
     auto fieldItr = std::unique_ptr<UFieldPositionIterator, UFieldPositionIteratorDeleter>(ufieldpositer_open(&status));
     if (U_FAILURE(status))
         return throwTypeError(globalObject, scope, "failed to open field position iterator"_s);
 
-    Vector<UChar, 32> result;
-#if HAVE(ICU_U_NUMBER_FORMATTER)
+    Vector<char16_t, 32> result;
     ASSERT(m_numberFormatter);
     auto formattedNumber = std::unique_ptr<UFormattedNumber, ICUDeleter<unumf_closeResult>>(unumf_openResult(&status));
     if (U_FAILURE(status))
@@ -1548,13 +1317,6 @@ JSValue IntlNumberFormat::formatToParts(JSGlobalObject* globalObject, double val
     if (U_FAILURE(status))
         return throwTypeError(globalObject, scope, "Failed to format a number."_s);
     IntlFieldIterator iterator(*fieldItr.get());
-#else
-    ASSERT(m_numberFormat);
-    status = callBufferProducingFunction(unum_formatDoubleForFields, m_numberFormat.get(), value, result, fieldItr.get());
-    if (U_FAILURE(status))
-        return throwTypeError(globalObject, scope, "failed to format a number."_s);
-    IntlFieldIterator iterator(*fieldItr.get());
-#endif
 
     auto resultString = String(WTFMove(result));
 
@@ -1568,7 +1330,6 @@ JSValue IntlNumberFormat::formatToParts(JSGlobalObject* globalObject, double val
     return parts;
 }
 
-#if HAVE(ICU_U_NUMBER_FORMATTER)
 JSValue IntlNumberFormat::formatToParts(JSGlobalObject* globalObject, IntlMathematicalValue&& value, JSString* sourceType) const
 {
     VM& vm = globalObject->vm();
@@ -1582,7 +1343,7 @@ JSValue IntlNumberFormat::formatToParts(JSGlobalObject* globalObject, IntlMathem
     if (U_FAILURE(status))
         return throwTypeError(globalObject, scope, "failed to open field position iterator"_s);
 
-    Vector<UChar, 32> result;
+    Vector<char16_t, 32> result;
     ASSERT(m_numberFormatter);
     auto formattedNumber = std::unique_ptr<UFormattedNumber, ICUDeleter<unumf_closeResult>>(unumf_openResult(&status));
     if (U_FAILURE(status))
@@ -1613,6 +1374,79 @@ JSValue IntlNumberFormat::formatToParts(JSGlobalObject* globalObject, IntlMathem
 
     return parts;
 }
+
+IntlMathematicalValue IntlMathematicalValue::parseString(JSGlobalObject* globalObject, StringView view)
+{
+    VM& vm = globalObject->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
+    auto trimmed = view.trim([](auto character) {
+        return isStrWhiteSpace(character);
+    });
+
+    if (!trimmed.length())
+        return IntlMathematicalValue { 0.0 };
+
+    if (trimmed.length() > 2 && trimmed[0] == '0') {
+        auto character = trimmed[1];
+        auto remaining = trimmed.substring(2);
+        int32_t radix = 0;
+        if (character == 'b' || character == 'B') {
+            radix = 2;
+            if (!remaining.containsOnly<isASCIIBinaryDigit>())
+                return IntlMathematicalValue { PNaN };
+        } else if (character == 'o' || character == 'O') {
+            radix = 8;
+            if (!remaining.containsOnly<isASCIIOctalDigit>())
+                return IntlMathematicalValue { PNaN };
+        } else if (character == 'x' || character == 'X') {
+            radix = 16;
+            if (!remaining.containsOnly<isASCIIHexDigit>())
+                return IntlMathematicalValue { PNaN };
+        }
+
+        if (radix) {
+            double result = parseInt(remaining, radix);
+            if (result <= maxSafeInteger())
+                return IntlMathematicalValue { result };
+
+            JSValue bigInt = JSBigInt::parseInt(globalObject, vm, remaining, radix, JSBigInt::ErrorParseMode::IgnoreExceptions, JSBigInt::ParseIntSign::Unsigned);
+            if (!bigInt)
+                return IntlMathematicalValue { PNaN };
+
+#if USE(BIGINT32)
+            if (bigInt.isBigInt32())
+                return IntlMathematicalValue { value.bigInt32AsInt32() };
 #endif
 
+            auto* heapBigInt = bigInt.asHeapBigInt();
+            auto string = heapBigInt->toString(globalObject, 10);
+            RETURN_IF_EXCEPTION(scope, { });
+
+            return IntlMathematicalValue {
+                IntlMathematicalValue::NumberType::Integer,
+                false,
+                string.ascii(),
+            };
+        }
+    }
+
+    if (trimmed == "Infinity"_s || trimmed == "+Infinity"_s)
+        return IntlMathematicalValue { std::numeric_limits<double>::infinity() };
+
+    if (trimmed == "-Infinity"_s)
+        return IntlMathematicalValue { -std::numeric_limits<double>::infinity() };
+
+    size_t parsedLength = 0;
+    double result = parseDouble(trimmed, parsedLength);
+    if (parsedLength != trimmed.length())
+        return IntlMathematicalValue { PNaN };
+    if (!std::isfinite(result))
+        return IntlMathematicalValue { result };
+
+    return IntlMathematicalValue { IntlMathematicalValue::NumberType::Integer, trimmed[0] == '-', trimmed.utf8() };
+}
+
 } // namespace JSC
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,10 +25,10 @@
 
 #pragma once
 
-#if ENABLE(SERVICE_WORKER)
-
 #include "FetchIdentifier.h"
+#include "ResourceResponse.h"
 #include "ScriptExecutionContextIdentifier.h"
+#include "ServiceWorkerTypes.h"
 #include <wtf/Ref.h>
 #include <wtf/ThreadSafeRefCounted.h>
 
@@ -40,7 +40,6 @@ class FormData;
 class NetworkLoadMetrics;
 class ResourceError;
 class ResourceRequest;
-class ResourceResponse;
 class ServiceWorkerGlobalScope;
 class ServiceWorkerGlobalScope;
 class SharedBuffer;
@@ -51,20 +50,32 @@ public:
     virtual ~Client() = default;
 
     virtual void didReceiveRedirection(const ResourceResponse&) = 0;
-    virtual void didReceiveResponse(const ResourceResponse&) = 0;
+    virtual void didReceiveResponse(ResourceResponse&&) = 0;
     virtual void didReceiveData(const SharedBuffer&) = 0;
     virtual void didReceiveFormDataAndFinish(Ref<FormData>&&) = 0;
     virtual void didFail(const ResourceError&) = 0;
     virtual void didFinish(const NetworkLoadMetrics&) = 0;
     virtual void didNotHandle() = 0;
-    virtual void cancel() = 0;
-    virtual void continueDidReceiveResponse() = 0;
-    virtual void convertFetchToDownload() = 0;
+    virtual void setCancelledCallback(Function<void()>&&) = 0;
+    virtual void usePreload() = 0;
+    virtual void contextIsStopping() = 0;
+
+    void cancel();
+    bool isCancelled() const { return m_isCancelled; }
+
+private:
+    virtual void doCancel() = 0;
+    bool m_isCancelled { false };
 };
 
-void dispatchFetchEvent(Ref<Client>&&, ServiceWorkerGlobalScope&, ResourceRequest&&, String&& referrer, FetchOptions&&, FetchIdentifier, bool isServiceWorkerNavigationPreloadEnabled, String&& clientIdentifier, String&& resultingClientIdentifier);
+inline void Client::cancel()
+{
+    ASSERT(!m_isCancelled);
+    m_isCancelled = true;
+    doCancel();
+}
+
+void dispatchFetchEvent(Ref<Client>&&, ServiceWorkerGlobalScope&, ResourceRequest&&, String&& referrer, FetchOptions&&, SWServerConnectionIdentifier, FetchIdentifier, bool isServiceWorkerNavigationPreloadEnabled, String&& clientIdentifier, String&& resultingClientIdentifier);
 };
 
 } // namespace WebCore
-
-#endif // ENABLE(SERVICE_WORKER)

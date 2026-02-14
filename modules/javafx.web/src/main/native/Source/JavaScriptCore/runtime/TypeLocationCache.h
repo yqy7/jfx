@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2014 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,13 +44,7 @@ public:
         };
 
         LocationKey() {}
-        bool operator==(const LocationKey& other) const
-        {
-            return m_globalVariableID == other.m_globalVariableID
-                && m_sourceID == other.m_sourceID
-                && m_start == other.m_start
-                && m_end == other.m_end;
-        }
+        friend bool operator==(const LocationKey&, const LocationKey&) = default;
 
         unsigned hash() const
         {
@@ -65,7 +59,7 @@ public:
 
     std::pair<TypeLocation*, bool> getTypeLocation(GlobalVariableID, SourceID, unsigned start, unsigned end, RefPtr<TypeSet>&&, VM*);
 private:
-    using LocationMap = HashMap<GenericHashKey<LocationKey, LocationKey::Hash>, TypeLocation*>;
+    using LocationMap = UncheckedKeyHashMap<GenericHashKey<LocationKey, LocationKey::Hash>, TypeLocation*>;
     LocationMap m_locationMap;
 };
 

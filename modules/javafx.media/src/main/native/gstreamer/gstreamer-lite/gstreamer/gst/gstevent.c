@@ -79,7 +79,6 @@
 #include "gstevent.h"
 #include "gstenumtypes.h"
 #include "gstutils.h"
-#include "gstquark.h"
 #include "gstvalue.h"
 
 GType _gst_event_type = 0;
@@ -213,6 +212,33 @@ gst_event_type_get_flags (GstEventType type)
   return ret;
 }
 
+/**
+ * gst_event_type_to_sticky_ordering
+ * @type: a #GstEventType
+ *
+ * Converts the #GstEventType to an unsigned integer that
+ * represents the ordering of sticky events when re-sending them.
+ * A lower value represents a higher-priority event.
+ *
+ * Returns: an unsigned integer
+ * Since: 1.22
+ */
+/* FIXME 2.0: Remove the sticky event order overrides once
+ * the event type numbers are fixed */
+guint
+gst_event_type_to_sticky_ordering (GstEventType type)
+{
+  guint sticky_order = type;
+
+  /* Fix up the sticky event ordering for events where the
+   * type was chosen poorly */
+  if (type == GST_EVENT_INSTANT_RATE_CHANGE) {
+    sticky_order = GST_EVENT_SEGMENT + 1;
+  }
+
+  return sticky_order;
+}
+
 static void
 _gst_event_free (GstEvent * event)
 {
@@ -234,7 +260,7 @@ _gst_event_free (GstEvent * event)
   memset (event, 0xff, sizeof (GstEventImpl));
 #endif
 
-  g_slice_free1 (sizeof (GstEventImpl), event);
+  g_free (event);
 }
 
 static void gst_event_init (GstEventImpl * event, GstEventType type);
@@ -245,7 +271,7 @@ _gst_event_copy (GstEvent * event)
   GstEventImpl *copy;
   GstStructure *s;
 
-  copy = g_slice_new0 (GstEventImpl);
+  copy = g_new0 (GstEventImpl, 1);
 
   gst_event_init (copy, GST_EVENT_TYPE (event));
 
@@ -298,14 +324,14 @@ gst_event_init (GstEventImpl * event, GstEventType type)
  * New custom events can also be created by subclassing the event type if
  * needed.
  *
- * Returns: (transfer full) (nullable): the new custom event.
+ * Returns: (transfer full): the new custom event.
  */
 GstEvent *
 gst_event_new_custom (GstEventType type, GstStructure * structure)
 {
   GstEventImpl *event;
 
-  event = g_slice_new0 (GstEventImpl);
+  event = g_new0 (GstEventImpl, 1);
 
   GST_CAT_DEBUG (GST_CAT_EVENT, "creating new event %p %s %d", event,
       gst_event_type_get_name (type), type);
@@ -326,7 +352,7 @@ gst_event_new_custom (GstEventType type, GstStructure * structure)
   /* ERRORS */
 had_parent:
   {
-    g_slice_free1 (sizeof (GstEventImpl), event);
+    g_free (event);
     g_warning ("structure is already owned by another object");
     return NULL;
   }
@@ -354,15 +380,15 @@ gst_event_get_structure (GstEvent * event)
 
 /**
  * gst_event_writable_structure:
- * @event: The #GstEvent.
+ * @event: A writable #GstEvent.
  *
  * Get a writable version of the structure.
  *
  * Returns: (transfer none): The structure of the event. The structure
  * is still owned by the event, which means that you should not free
  * it and that the pointer becomes invalid when you free the event.
- * This function checks if @event is writable and will never return
- * %NULL.
+ * This function ensures that @event is writable, and if so, will
+ * never return %NULL.
  *
  * MT safe.
  */
@@ -378,8 +404,8 @@ gst_event_writable_structure (GstEvent * event)
 
   if (structure == NULL) {
     structure =
-        gst_structure_new_id_empty (gst_event_type_to_quark (GST_EVENT_TYPE
-            (event)));
+        gst_structure_new_static_str_empty (gst_event_type_get_name
+        (GST_EVENT_TYPE (event)));
     gst_structure_set_parent_refcount (structure, &event->mini_object.refcount);
     GST_EVENT_STRUCTURE (event) = structure;
   }
@@ -418,16 +444,13 @@ gst_event_has_name (GstEvent * event, const gchar * name)
  * Returns: %TRUE if @name matches the name of the event structure.
  *
  * Since: 1.18
+ *
+ * Deprecated: 1.26: Use gst_event_has_name().
  */
 gboolean
 gst_event_has_name_id (GstEvent * event, GQuark name)
 {
-  g_return_val_if_fail (GST_IS_EVENT (event), FALSE);
-
-  if (GST_EVENT_STRUCTURE (event) == NULL)
-    return FALSE;
-
-  return (GST_EVENT_STRUCTURE (event)->name == name);
+  return gst_event_has_name (event, g_quark_to_string (name));
 }
 
 /**
@@ -582,8 +605,8 @@ gst_event_new_flush_stop (gboolean reset_time)
   GST_CAT_INFO (GST_CAT_EVENT, "creating flush stop %d", reset_time);
 
   event = gst_event_new_custom (GST_EVENT_FLUSH_STOP,
-      gst_structure_new_id (GST_QUARK (EVENT_FLUSH_STOP),
-          GST_QUARK (RESET_TIME), G_TYPE_BOOLEAN, reset_time, NULL));
+      gst_structure_new_static_str ("GstEventFlushStop",
+          "reset-time", G_TYPE_BOOLEAN, reset_time, NULL));
 
   return event;
 }
@@ -591,7 +614,7 @@ gst_event_new_flush_stop (gboolean reset_time)
 /**
  * gst_event_parse_flush_stop:
  * @event: The event to parse
- * @reset_time: (out): if time should be reset
+ * @reset_time: (out) (optional): if time should be reset
  *
  * Parse the FLUSH_STOP event and retrieve the @reset_time member.
  */
@@ -606,8 +629,7 @@ gst_event_parse_flush_stop (GstEvent * event, gboolean * reset_time)
   structure = GST_EVENT_STRUCTURE (event);
   if (G_LIKELY (reset_time))
     *reset_time =
-        g_value_get_boolean (gst_structure_id_get_value (structure,
-            GST_QUARK (RESET_TIME)));
+        g_value_get_boolean (gst_structure_get_value (structure, "reset-time"));
 }
 
 /**
@@ -626,8 +648,7 @@ gst_event_parse_flush_stop (GstEvent * event, gboolean * reset_time)
  *
  * Note: The list of @streams can not be empty.
  *
- * Returns: (transfer full): a new select-streams event or %NULL in case of
- * an error (like an empty streams list).
+ * Returns: (transfer full): a new select-streams event.
  *
  * Since: 1.10
  */
@@ -642,7 +663,7 @@ gst_event_new_select_streams (GList * streams)
   g_return_val_if_fail (streams != NULL, NULL);
 
   GST_CAT_INFO (GST_CAT_EVENT, "Creating new select-streams event");
-  struc = gst_structure_new_id_empty (GST_QUARK (EVENT_SELECT_STREAMS));
+  struc = gst_structure_new_static_str_empty ("GstEventSelectStreams");
   g_value_init (&val, GST_TYPE_LIST);
   /* Fill struc with streams */
   for (tmpl = streams; tmpl; tmpl = tmpl->next) {
@@ -652,7 +673,7 @@ gst_event_new_select_streams (GList * streams)
     g_value_set_string (&strval, str);
     gst_value_list_append_and_take_value (&val, &strval);
   }
-  gst_structure_id_take_value (struc, GST_QUARK (STREAMS), &val);
+  gst_structure_take_value (struc, "streams", &val);
   event = gst_event_new_custom (GST_EVENT_SELECT_STREAMS, struc);
 
   return event;
@@ -661,7 +682,7 @@ gst_event_new_select_streams (GList * streams)
 /**
  * gst_event_parse_select_streams:
  * @event: The event to parse
- * @streams: (out) (element-type utf8) (transfer full): the streams
+ * @streams: (out) (optional) (element-type utf8) (transfer full): the streams
  *
  * Parse the SELECT_STREAMS event and retrieve the contained streams.
  *
@@ -678,8 +699,7 @@ gst_event_parse_select_streams (GstEvent * event, GList ** streams)
 
   structure = GST_EVENT_STRUCTURE (event);
   if (G_LIKELY (streams)) {
-    const GValue *vlist =
-        gst_structure_id_get_value (structure, GST_QUARK (STREAMS));
+    const GValue *vlist = gst_structure_get_value (structure, "streams");
     guint i, sz = gst_value_list_get_size (vlist);
     for (i = 0; i < sz; i++) {
       const GValue *strv = gst_value_list_get_value (vlist, i);
@@ -715,8 +735,8 @@ gst_event_new_stream_group_done (guint group_id)
 
   g_return_val_if_fail (group_id != GST_GROUP_ID_INVALID, NULL);
 
-  s = gst_structure_new_id (GST_QUARK (EVENT_STREAM_GROUP_DONE),
-      GST_QUARK (GROUP_ID), G_TYPE_UINT, group_id, NULL);
+  s = gst_structure_new_static_str ("GstEventStreamGroupDone",
+      "group-id", G_TYPE_UINT, group_id, NULL);
 
   return gst_event_new_custom (GST_EVENT_STREAM_GROUP_DONE, s);
 }
@@ -724,7 +744,7 @@ gst_event_new_stream_group_done (guint group_id)
 /**
  * gst_event_parse_stream_group_done:
  * @event: a stream-group-done event.
- * @group_id: (out): address of variable to store the group id into
+ * @group_id: (out) (optional): address of variable to store the group id into
  *
  * Parse a stream-group-done @event and store the result in the given
  * @group_id location.
@@ -738,8 +758,8 @@ gst_event_parse_stream_group_done (GstEvent * event, guint * group_id)
   g_return_if_fail (GST_EVENT_TYPE (event) == GST_EVENT_STREAM_GROUP_DONE);
 
   if (group_id) {
-    gst_structure_id_get (GST_EVENT_STRUCTURE (event),
-        GST_QUARK (GROUP_ID), G_TYPE_UINT, group_id, NULL);
+    gst_structure_get (GST_EVENT_STRUCTURE (event),
+        "group-id", G_TYPE_UINT, group_id, NULL);
   }
 }
 
@@ -794,9 +814,9 @@ gst_event_new_gap (GstClockTime timestamp, GstClockTime duration)
       GST_TIME_ARGS (duration));
 
   event = gst_event_new_custom (GST_EVENT_GAP,
-      gst_structure_new_id (GST_QUARK (EVENT_GAP),
-          GST_QUARK (TIMESTAMP), GST_TYPE_CLOCK_TIME, timestamp,
-          GST_QUARK (DURATION), GST_TYPE_CLOCK_TIME, duration, NULL));
+      gst_structure_new_static_str ("GstEventGap",
+          "timestamp", GST_TYPE_CLOCK_TIME, timestamp,
+          "duration", GST_TYPE_CLOCK_TIME, duration, NULL));
 
   return event;
 }
@@ -804,9 +824,9 @@ gst_event_new_gap (GstClockTime timestamp, GstClockTime duration)
 /**
  * gst_event_parse_gap:
  * @event: a #GstEvent of type #GST_EVENT_GAP
- * @timestamp: (out) (allow-none): location where to store the
+ * @timestamp: (out) (optional): location where to store the
  *     start time (pts) of the gap, or %NULL
- * @duration: (out) (allow-none): location where to store the duration of
+ * @duration: (out) (optional): location where to store the duration of
  *     the gap, or %NULL
  *
  * Extract timestamp and duration from a new GAP event.
@@ -821,9 +841,9 @@ gst_event_parse_gap (GstEvent * event, GstClockTime * timestamp,
   g_return_if_fail (GST_EVENT_TYPE (event) == GST_EVENT_GAP);
 
   structure = GST_EVENT_STRUCTURE (event);
-  gst_structure_id_get (structure,
-      GST_QUARK (TIMESTAMP), GST_TYPE_CLOCK_TIME, timestamp,
-      GST_QUARK (DURATION), GST_TYPE_CLOCK_TIME, duration, NULL);
+  gst_structure_get (structure,
+      "timestamp", GST_TYPE_CLOCK_TIME, timestamp,
+      "duration", GST_TYPE_CLOCK_TIME, duration, NULL);
 }
 
 #ifndef GSTREAMER_LITE
@@ -844,14 +864,14 @@ gst_event_set_gap_flags (GstEvent * event, GstGapFlags flags)
   g_return_if_fail (GST_EVENT_TYPE (event) == GST_EVENT_GAP);
   g_return_if_fail (gst_event_is_writable (event));
 
-  gst_structure_id_set (GST_EVENT_STRUCTURE (event),
-      GST_QUARK (GAP_FLAGS), GST_TYPE_GAP_FLAGS, flags, NULL);
+  gst_structure_set (GST_EVENT_STRUCTURE (event),
+      "gap-flags", GST_TYPE_GAP_FLAGS, flags, NULL);
 }
 
 /**
  * gst_event_parse_gap_flags:
  * @event: a #GstEvent of type #GST_EVENT_GAP
- * @flags: (out): a #GstGapFlags or %NULL
+ * @flags: (out) (optional): a #GstGapFlags or %NULL
  *
  * Retrieve the gap flags that may have been set on a gap event with
  * gst_event_set_gap_flags().
@@ -868,8 +888,8 @@ gst_event_parse_gap_flags (GstEvent * event, GstGapFlags * flags)
   if (flags)
     *flags = 0;
 
-  gst_structure_id_get (GST_EVENT_STRUCTURE (event),
-      GST_QUARK (GAP_FLAGS), GST_TYPE_GAP_FLAGS, flags, NULL);
+  gst_structure_get (GST_EVENT_STRUCTURE (event),
+      "gap-flags", GST_TYPE_GAP_FLAGS, flags, NULL);
 }
 #endif // GSTREAMER_LITE
 
@@ -881,7 +901,7 @@ gst_event_parse_gap_flags (GstEvent * event, GstGapFlags * flags)
  * synchronized with the buffer flow and contains the format of the buffers
  * that will follow after the event.
  *
- * Returns: (transfer full) (nullable): the new CAPS event.
+ * Returns: (transfer full): the new CAPS event.
  */
 GstEvent *
 gst_event_new_caps (GstCaps * caps)
@@ -894,8 +914,8 @@ gst_event_new_caps (GstCaps * caps)
   GST_CAT_INFO (GST_CAT_EVENT, "creating caps event %" GST_PTR_FORMAT, caps);
 
   event = gst_event_new_custom (GST_EVENT_CAPS,
-      gst_structure_new_id (GST_QUARK (EVENT_CAPS),
-          GST_QUARK (CAPS), GST_TYPE_CAPS, caps, NULL));
+      gst_structure_new_static_str ("GstEventCaps", "caps", GST_TYPE_CAPS, caps,
+          NULL));
 
   return event;
 }
@@ -903,7 +923,7 @@ gst_event_new_caps (GstCaps * caps)
 /**
  * gst_event_parse_caps:
  * @event: The event to parse
- * @caps: (out) (transfer none): A pointer to the caps
+ * @caps: (out) (optional) (transfer none): A pointer to the caps
  *
  * Get the caps from @event. The caps remains valid as long as @event remains
  * valid.
@@ -918,9 +938,7 @@ gst_event_parse_caps (GstEvent * event, GstCaps ** caps)
 
   structure = GST_EVENT_STRUCTURE (event);
   if (G_LIKELY (caps))
-    *caps =
-        g_value_get_boxed (gst_structure_id_get_value (structure,
-            GST_QUARK (CAPS)));
+    *caps = g_value_get_boxed (gst_structure_get_value (structure, "caps"));
 }
 
 /**
@@ -959,7 +977,7 @@ gst_event_parse_caps (GstEvent * event, GstCaps ** caps)
  *
  *   time + (TIMESTAMP(buf) - start) * ABS (rate * applied_rate)
  *
- * Returns: (transfer full) (nullable): the new SEGMENT event.
+ * Returns: (transfer full): the new SEGMENT event.
  */
 GstEvent *
 gst_event_new_segment (const GstSegment * segment)
@@ -975,8 +993,8 @@ gst_event_new_segment (const GstSegment * segment)
       segment);
 
   event = gst_event_new_custom (GST_EVENT_SEGMENT,
-      gst_structure_new_id (GST_QUARK (EVENT_SEGMENT),
-          GST_QUARK (SEGMENT), GST_TYPE_SEGMENT, segment, NULL));
+      gst_structure_new_static_str ("GstEventSegment",
+          "segment", GST_TYPE_SEGMENT, segment, NULL));
 
   return event;
 }
@@ -984,7 +1002,7 @@ gst_event_new_segment (const GstSegment * segment)
 /**
  * gst_event_parse_segment:
  * @event: The event to parse
- * @segment: (out) (transfer none): a pointer to a #GstSegment
+ * @segment: (out) (optional) (transfer none): a pointer to a #GstSegment
  *
  * Parses a segment @event and stores the result in the given @segment location.
  * @segment remains valid only until the @event is freed. Don't modify the segment
@@ -1000,8 +1018,8 @@ gst_event_parse_segment (GstEvent * event, const GstSegment ** segment)
 
   if (segment) {
     structure = GST_EVENT_STRUCTURE (event);
-    *segment = g_value_get_boxed (gst_structure_id_get_value (structure,
-            GST_QUARK (SEGMENT)));
+    *segment = g_value_get_boxed (gst_structure_get_value (structure,
+            "segment"));
   }
 }
 
@@ -1051,17 +1069,18 @@ gst_event_new_tag (GstTagList * taglist)
 
   g_return_val_if_fail (taglist != NULL, NULL);
 
-  s = gst_structure_new_empty (names[gst_tag_list_get_scope (taglist)]);
+  s = gst_structure_new_static_str_empty (names[gst_tag_list_get_scope
+          (taglist)]);
   g_value_init (&val, GST_TYPE_TAG_LIST);
   g_value_take_boxed (&val, taglist);
-  gst_structure_id_take_value (s, GST_QUARK (TAGLIST), &val);
+  gst_structure_take_value (s, "taglist", &val);
   return gst_event_new_custom (GST_EVENT_TAG, s);
 }
 
 /**
  * gst_event_parse_tag:
  * @event: a tag event
- * @taglist: (out) (transfer none): pointer to metadata list
+ * @taglist: (out) (optional) (transfer none): pointer to metadata list
  *
  * Parses a tag @event and stores the results in the given @taglist location.
  * No reference to the taglist will be returned, it remains valid only until
@@ -1076,8 +1095,7 @@ gst_event_parse_tag (GstEvent * event, GstTagList ** taglist)
   g_return_if_fail (GST_IS_EVENT (event));
   g_return_if_fail (GST_EVENT_TYPE (event) == GST_EVENT_TAG);
 
-  val = gst_structure_id_get_value (GST_EVENT_STRUCTURE (event),
-      GST_QUARK (TAGLIST));
+  val = gst_structure_get_value (GST_EVENT_STRUCTURE (event), "taglist");
 
   if (taglist)
     *taglist = (GstTagList *) g_value_get_boxed (val);
@@ -1110,11 +1128,10 @@ gst_event_new_buffer_size (GstFormat format, gint64 minsize,
       ", maxsize %" G_GINT64_FORMAT ", async %d", gst_format_get_name (format),
       minsize, maxsize, async);
 
-  structure = gst_structure_new_id (GST_QUARK (EVENT_BUFFER_SIZE),
-      GST_QUARK (FORMAT), GST_TYPE_FORMAT, format,
-      GST_QUARK (MINSIZE), G_TYPE_INT64, minsize,
-      GST_QUARK (MAXSIZE), G_TYPE_INT64, maxsize,
-      GST_QUARK (ASYNC), G_TYPE_BOOLEAN, async, NULL);
+  structure = gst_structure_new_static_str ("GstEventBufferSize",
+      "format", GST_TYPE_FORMAT, format,
+      "minsize", G_TYPE_INT64, minsize,
+      "maxsize", G_TYPE_INT64, maxsize, "async", G_TYPE_BOOLEAN, async, NULL);
   event = gst_event_new_custom (GST_EVENT_BUFFERSIZE, structure);
 
   return event;
@@ -1123,10 +1140,10 @@ gst_event_new_buffer_size (GstFormat format, gint64 minsize,
 /**
  * gst_event_parse_buffer_size:
  * @event: The event to query
- * @format: (out): A pointer to store the format in
- * @minsize: (out): A pointer to store the minsize in
- * @maxsize: (out): A pointer to store the maxsize in
- * @async: (out): A pointer to store the async-flag in
+ * @format: (out) (optional): A pointer to store the format in
+ * @minsize: (out) (optional): A pointer to store the minsize in
+ * @maxsize: (out) (optional): A pointer to store the maxsize in
+ * @async: (out) (optional): A pointer to store the async-flag in
  *
  * Get the format, minsize, maxsize and async-flag in the buffersize event.
  */
@@ -1142,20 +1159,15 @@ gst_event_parse_buffer_size (GstEvent * event, GstFormat * format,
   structure = GST_EVENT_STRUCTURE (event);
   if (format)
     *format = (GstFormat)
-        g_value_get_enum (gst_structure_id_get_value (structure,
-            GST_QUARK (FORMAT)));
+        g_value_get_enum (gst_structure_get_value (structure, "format"));
   if (minsize)
     *minsize =
-        g_value_get_int64 (gst_structure_id_get_value (structure,
-            GST_QUARK (MINSIZE)));
+        g_value_get_int64 (gst_structure_get_value (structure, "minsize"));
   if (maxsize)
     *maxsize =
-        g_value_get_int64 (gst_structure_id_get_value (structure,
-            GST_QUARK (MAXSIZE)));
+        g_value_get_int64 (gst_structure_get_value (structure, "maxsize"));
   if (async)
-    *async =
-        g_value_get_boolean (gst_structure_id_get_value (structure,
-            GST_QUARK (ASYNC)));
+    *async = g_value_get_boolean (gst_structure_get_value (structure, "async"));
 }
 
 /**
@@ -1208,7 +1220,7 @@ gst_event_parse_buffer_size (GstEvent * event, GstFormat * format,
  * The application can use general event probes to intercept the QoS
  * event and implement custom application specific QoS handling.
  *
- * Returns: (transfer full) (nullable): a new QOS event.
+ * Returns: (transfer full): a new QOS event.
  */
 GstEvent *
 gst_event_new_qos (GstQOSType type, gdouble proportion,
@@ -1225,11 +1237,10 @@ gst_event_new_qos (GstQOSType type, gdouble proportion,
       ", timestamp %" GST_TIME_FORMAT, type, proportion,
       diff, GST_TIME_ARGS (timestamp));
 
-  structure = gst_structure_new_id (GST_QUARK (EVENT_QOS),
-      GST_QUARK (TYPE), GST_TYPE_QOS_TYPE, type,
-      GST_QUARK (PROPORTION), G_TYPE_DOUBLE, proportion,
-      GST_QUARK (DIFF), G_TYPE_INT64, diff,
-      GST_QUARK (TIMESTAMP), G_TYPE_UINT64, timestamp, NULL);
+  structure = gst_structure_new_static_str ("GstEventQOS",
+      "type", GST_TYPE_QOS_TYPE, type,
+      "proportion", G_TYPE_DOUBLE, proportion,
+      "diff", G_TYPE_INT64, diff, "timestamp", G_TYPE_UINT64, timestamp, NULL);
   event = gst_event_new_custom (GST_EVENT_QOS, structure);
 
   return event;
@@ -1238,10 +1249,10 @@ gst_event_new_qos (GstQOSType type, gdouble proportion,
 /**
  * gst_event_parse_qos:
  * @event: The event to query
- * @type: (out): A pointer to store the QoS type in
- * @proportion: (out): A pointer to store the proportion in
- * @diff: (out): A pointer to store the diff in
- * @timestamp: (out): A pointer to store the timestamp in
+ * @type: (out) (optional): A pointer to store the QoS type in
+ * @proportion: (out) (optional): A pointer to store the proportion in
+ * @diff: (out) (optional): A pointer to store the diff in
+ * @timestamp: (out) (optional): A pointer to store the timestamp in
  *
  * Get the type, proportion, diff and timestamp in the qos event. See
  * gst_event_new_qos() for more information about the different QoS values.
@@ -1260,25 +1271,20 @@ gst_event_parse_qos (GstEvent * event, GstQOSType * type,
   structure = GST_EVENT_STRUCTURE (event);
   if (type)
     *type = (GstQOSType)
-        g_value_get_enum (gst_structure_id_get_value (structure,
-            GST_QUARK (TYPE)));
+        g_value_get_enum (gst_structure_get_value (structure, "type"));
   if (proportion)
     *proportion =
-        g_value_get_double (gst_structure_id_get_value (structure,
-            GST_QUARK (PROPORTION)));
+        g_value_get_double (gst_structure_get_value (structure, "proportion"));
   if (diff)
-    *diff =
-        g_value_get_int64 (gst_structure_id_get_value (structure,
-            GST_QUARK (DIFF)));
+    *diff = g_value_get_int64 (gst_structure_get_value (structure, "diff"));
   if (timestamp) {
     gint64 offset = gst_event_get_running_time_offset (event);
     GstClockTimeDiff diff_ =
-        g_value_get_int64 (gst_structure_id_get_value (structure,
-            GST_QUARK (DIFF)));
+        g_value_get_int64 (gst_structure_get_value (structure,
+            "diff"));
 
     *timestamp =
-        g_value_get_uint64 (gst_structure_id_get_value (structure,
-            GST_QUARK (TIMESTAMP)));
+        g_value_get_uint64 (gst_structure_get_value (structure, "timestamp"));
     /* Catch underflows */
     if (*timestamp > -offset)
       *timestamp += offset;
@@ -1334,7 +1340,7 @@ gst_event_parse_qos (GstEvent * event, GstQOSType * type,
  * #GST_QUERY_POSITION and update the playback segment current position with a
  * #GST_SEEK_TYPE_SET to the desired position.
  *
- * Returns: (transfer full) (nullable): a new seek event.
+ * Returns: (transfer full): a new seek event.
  */
 GstEvent *
 gst_event_new_seek (gdouble rate, GstFormat format, GstSeekFlags flags,
@@ -1377,16 +1383,15 @@ gst_event_new_seek (gdouble rate, GstFormat format, GstSeekFlags flags,
         stop);
   }
 
-  structure = gst_structure_new_id (GST_QUARK (EVENT_SEEK),
-      GST_QUARK (RATE), G_TYPE_DOUBLE, rate,
-      GST_QUARK (FORMAT), GST_TYPE_FORMAT, format,
-      GST_QUARK (FLAGS), GST_TYPE_SEEK_FLAGS, flags,
-      GST_QUARK (CUR_TYPE), GST_TYPE_SEEK_TYPE, start_type,
-      GST_QUARK (CUR), G_TYPE_INT64, start,
-      GST_QUARK (STOP_TYPE), GST_TYPE_SEEK_TYPE, stop_type,
-      GST_QUARK (STOP), G_TYPE_INT64, stop,
-      GST_QUARK (TRICKMODE_INTERVAL), GST_TYPE_CLOCK_TIME, (GstClockTime) 0,
-      NULL);
+  structure = gst_structure_new_static_str ("GstEventSeek",
+      "rate", G_TYPE_DOUBLE, rate,
+      "format", GST_TYPE_FORMAT, format,
+      "flags", GST_TYPE_SEEK_FLAGS, flags,
+      "cur-type", GST_TYPE_SEEK_TYPE, start_type,
+      "cur", G_TYPE_INT64, start,
+      "stop-type", GST_TYPE_SEEK_TYPE, stop_type,
+      "stop", G_TYPE_INT64, stop,
+      "trickmode-interval", GST_TYPE_CLOCK_TIME, (GstClockTime) 0, NULL);
   event = gst_event_new_custom (GST_EVENT_SEEK, structure);
 
   return event;
@@ -1395,13 +1400,13 @@ gst_event_new_seek (gdouble rate, GstFormat format, GstSeekFlags flags,
 /**
  * gst_event_parse_seek:
  * @event: a seek event
- * @rate: (out): result location for the rate
- * @format: (out): result location for the stream format
- * @flags:  (out): result location for the #GstSeekFlags
- * @start_type: (out): result location for the #GstSeekType of the start position
- * @start: (out): result location for the start position expressed in @format
- * @stop_type:  (out): result location for the #GstSeekType of the stop position
- * @stop: (out): result location for the stop position expressed in @format
+ * @rate: (out) (optional): result location for the rate
+ * @format: (out) (optional): result location for the stream format
+ * @flags:  (out) (optional): result location for the #GstSeekFlags
+ * @start_type: (out) (optional): result location for the #GstSeekType of the start position
+ * @start: (out) (optional): result location for the start position expressed in @format
+ * @stop_type:  (out) (optional): result location for the #GstSeekType of the stop position
+ * @stop: (out) (optional): result location for the stop position expressed in @format
  *
  * Parses a seek @event and stores the results in the given result locations.
  */
@@ -1417,33 +1422,23 @@ gst_event_parse_seek (GstEvent * event, gdouble * rate,
 
   structure = GST_EVENT_STRUCTURE (event);
   if (rate)
-    *rate =
-        g_value_get_double (gst_structure_id_get_value (structure,
-            GST_QUARK (RATE)));
+    *rate = g_value_get_double (gst_structure_get_value (structure, "rate"));
   if (format)
     *format = (GstFormat)
-        g_value_get_enum (gst_structure_id_get_value (structure,
-            GST_QUARK (FORMAT)));
+        g_value_get_enum (gst_structure_get_value (structure, "format"));
   if (flags)
     *flags = (GstSeekFlags)
-        g_value_get_flags (gst_structure_id_get_value (structure,
-            GST_QUARK (FLAGS)));
+        g_value_get_flags (gst_structure_get_value (structure, "flags"));
   if (start_type)
     *start_type = (GstSeekType)
-        g_value_get_enum (gst_structure_id_get_value (structure,
-            GST_QUARK (CUR_TYPE)));
+        g_value_get_enum (gst_structure_get_value (structure, "cur-type"));
   if (start)
-    *start =
-        g_value_get_int64 (gst_structure_id_get_value (structure,
-            GST_QUARK (CUR)));
+    *start = g_value_get_int64 (gst_structure_get_value (structure, "cur"));
   if (stop_type)
     *stop_type = (GstSeekType)
-        g_value_get_enum (gst_structure_id_get_value (structure,
-            GST_QUARK (STOP_TYPE)));
+        g_value_get_enum (gst_structure_get_value (structure, "stop-type"));
   if (stop)
-    *stop =
-        g_value_get_int64 (gst_structure_id_get_value (structure,
-            GST_QUARK (STOP)));
+    *stop = g_value_get_int64 (gst_structure_get_value (structure, "stop"));
 }
 
 /**
@@ -1463,13 +1458,13 @@ gst_event_set_seek_trickmode_interval (GstEvent * event, GstClockTime interval)
   g_return_if_fail (gst_event_is_writable (event));
   g_return_if_fail (GST_CLOCK_TIME_IS_VALID (interval));
 
-  gst_structure_id_set (GST_EVENT_STRUCTURE (event),
-      GST_QUARK (TRICKMODE_INTERVAL), GST_TYPE_CLOCK_TIME, interval, NULL);
+  gst_structure_set_static_str (GST_EVENT_STRUCTURE (event),
+      "trickmode-interval", GST_TYPE_CLOCK_TIME, interval, NULL);
 }
 
 /**
  * gst_event_parse_seek_trickmode_interval:
- * @interval: (out)
+ * @interval: (out) (optional): interval
  *
  * Retrieve the trickmode interval that may have been set on a
  * seek event with gst_event_set_seek_trickmode_interval().
@@ -1487,14 +1482,15 @@ gst_event_parse_seek_trickmode_interval (GstEvent * event,
   if (interval)
     *interval = GST_CLOCK_TIME_NONE;
 
-  gst_structure_id_get (GST_EVENT_STRUCTURE (event),
-      GST_QUARK (TRICKMODE_INTERVAL), GST_TYPE_CLOCK_TIME, interval, NULL);
+  gst_structure_get (GST_EVENT_STRUCTURE (event),
+      "trickmode-interval", GST_TYPE_CLOCK_TIME, interval, NULL);
 }
 
 /**
  * gst_event_new_navigation:
  * @structure: (transfer full): description of the event. The event will take
- *     ownership of the structure.
+ *     ownership of the structure. See #GstNavigation for more specific
+ *     constructors.
  *
  * Create a new navigation event from the given description.
  *
@@ -1532,8 +1528,8 @@ gst_event_new_latency (GstClockTime latency)
   GST_CAT_INFO (GST_CAT_EVENT,
       "creating latency event %" GST_TIME_FORMAT, GST_TIME_ARGS (latency));
 
-  structure = gst_structure_new_id (GST_QUARK (EVENT_LATENCY),
-      GST_QUARK (LATENCY), G_TYPE_UINT64, latency, NULL);
+  structure = gst_structure_new_static_str ("GstEventLatency",
+      "latency", G_TYPE_UINT64, latency, NULL);
   event = gst_event_new_custom (GST_EVENT_LATENCY, structure);
 
   return event;
@@ -1542,7 +1538,7 @@ gst_event_new_latency (GstClockTime latency)
 /**
  * gst_event_parse_latency:
  * @event: The event to query
- * @latency: (out): A pointer to store the latency in.
+ * @latency: (out) (optional): A pointer to store the latency in.
  *
  * Get the latency in the latency event.
  */
@@ -1554,8 +1550,8 @@ gst_event_parse_latency (GstEvent * event, GstClockTime * latency)
 
   if (latency)
     *latency =
-        g_value_get_uint64 (gst_structure_id_get_value (GST_EVENT_STRUCTURE
-            (event), GST_QUARK (LATENCY)));
+        g_value_get_uint64 (gst_structure_get_value (GST_EVENT_STRUCTURE
+            (event), "latency"));
 }
 
 /**
@@ -1580,7 +1576,7 @@ gst_event_parse_latency (GstEvent * event, GstClockTime * latency)
  * The @intermediate flag instructs the pipeline that this step operation is
  * part of a larger step operation.
  *
- * Returns: (transfer full) (nullable): a new #GstEvent
+ * Returns: (transfer full): a new #GstEvent
  */
 GstEvent *
 gst_event_new_step (GstFormat format, guint64 amount, gdouble rate,
@@ -1593,12 +1589,12 @@ gst_event_new_step (GstFormat format, guint64 amount, gdouble rate,
 
   GST_CAT_INFO (GST_CAT_EVENT, "creating step event");
 
-  structure = gst_structure_new_id (GST_QUARK (EVENT_STEP),
-      GST_QUARK (FORMAT), GST_TYPE_FORMAT, format,
-      GST_QUARK (AMOUNT), G_TYPE_UINT64, amount,
-      GST_QUARK (RATE), G_TYPE_DOUBLE, rate,
-      GST_QUARK (FLUSH), G_TYPE_BOOLEAN, flush,
-      GST_QUARK (INTERMEDIATE), G_TYPE_BOOLEAN, intermediate, NULL);
+  structure = gst_structure_new_static_str ("GstEventStep",
+      "format", GST_TYPE_FORMAT, format,
+      "amount", G_TYPE_UINT64, amount,
+      "rate", G_TYPE_DOUBLE, rate,
+      "flush", G_TYPE_BOOLEAN, flush,
+      "intermediate", G_TYPE_BOOLEAN, intermediate, NULL);
   event = gst_event_new_custom (GST_EVENT_STEP, structure);
 
   return event;
@@ -1607,11 +1603,11 @@ gst_event_new_step (GstFormat format, guint64 amount, gdouble rate,
 /**
  * gst_event_parse_step:
  * @event: The event to query
- * @format: (out) (allow-none): a pointer to store the format in
- * @amount: (out) (allow-none): a pointer to store the amount in
- * @rate: (out) (allow-none): a pointer to store the rate in
- * @flush: (out) (allow-none): a pointer to store the flush boolean in
- * @intermediate: (out) (allow-none): a pointer to store the intermediate
+ * @format: (out) (optional): a pointer to store the format in
+ * @amount: (out) (optional): a pointer to store the amount in
+ * @rate: (out) (optional): a pointer to store the rate in
+ * @flush: (out) (optional): a pointer to store the flush boolean in
+ * @intermediate: (out) (optional): a pointer to store the intermediate
  *     boolean in
  *
  * Parse the step event.
@@ -1628,20 +1624,18 @@ gst_event_parse_step (GstEvent * event, GstFormat * format, guint64 * amount,
   structure = GST_EVENT_STRUCTURE (event);
   if (format)
     *format =
-        (GstFormat) g_value_get_enum (gst_structure_id_get_value (structure,
-            GST_QUARK (FORMAT)));
+        (GstFormat) g_value_get_enum (gst_structure_get_value (structure,
+            "format"));
   if (amount)
-    *amount = g_value_get_uint64 (gst_structure_id_get_value (structure,
-            GST_QUARK (AMOUNT)));
+    *amount = g_value_get_uint64 (gst_structure_get_value (structure,
+            "amount"));
   if (rate)
-    *rate = g_value_get_double (gst_structure_id_get_value (structure,
-            GST_QUARK (RATE)));
+    *rate = g_value_get_double (gst_structure_get_value (structure, "rate"));
   if (flush)
-    *flush = g_value_get_boolean (gst_structure_id_get_value (structure,
-            GST_QUARK (FLUSH)));
+    *flush = g_value_get_boolean (gst_structure_get_value (structure, "flush"));
   if (intermediate)
-    *intermediate = g_value_get_boolean (gst_structure_id_get_value (structure,
-            GST_QUARK (INTERMEDIATE)));
+    *intermediate = g_value_get_boolean (gst_structure_get_value (structure,
+            "intermediate"));
 }
 
 /**
@@ -1690,8 +1684,9 @@ gst_event_new_sink_message (const gchar * name, GstMessage * msg)
 
   GST_CAT_INFO (GST_CAT_EVENT, "creating sink-message event");
 
-  structure = gst_structure_new_id (g_quark_from_string (name),
-      GST_QUARK (MESSAGE), GST_TYPE_MESSAGE, msg, NULL);
+  structure =
+      gst_structure_new_static_str (name, "message", GST_TYPE_MESSAGE, msg,
+      NULL);
   event = gst_event_new_custom (GST_EVENT_SINK_MESSAGE, structure);
 
   return event;
@@ -1700,7 +1695,7 @@ gst_event_new_sink_message (const gchar * name, GstMessage * msg)
 /**
  * gst_event_parse_sink_message:
  * @event: The event to query
- * @msg: (out) (transfer full): a pointer to store the #GstMessage in.
+ * @msg: (out) (optional) (transfer full): a pointer to store the #GstMessage in.
  *
  * Parse the sink-message event. Unref @msg after usage.
  */
@@ -1715,8 +1710,8 @@ gst_event_parse_sink_message (GstEvent * event, GstMessage ** msg)
   structure = GST_EVENT_STRUCTURE (event);
   if (msg)
     *msg =
-        GST_MESSAGE (g_value_dup_boxed (gst_structure_id_get_value
-            (structure, GST_QUARK (MESSAGE))));
+        GST_MESSAGE (g_value_dup_boxed (gst_structure_get_value
+            (structure, "message")));
 }
 
 /**
@@ -1754,9 +1749,9 @@ gst_event_new_stream_start (const gchar * stream_id)
 
   g_return_val_if_fail (stream_id != NULL, NULL);
 
-  s = gst_structure_new_id (GST_QUARK (EVENT_STREAM_START),
-      GST_QUARK (STREAM_ID), G_TYPE_STRING, stream_id,
-      GST_QUARK (FLAGS), GST_TYPE_STREAM_FLAGS, GST_STREAM_FLAG_NONE, NULL);
+  s = gst_structure_new_static_str ("GstEventStreamStart",
+      "stream-id", G_TYPE_STRING, stream_id,
+      "flags", GST_TYPE_STREAM_FLAGS, GST_STREAM_FLAG_NONE, NULL);
 
   return gst_event_new_custom (GST_EVENT_STREAM_START, s);
 }
@@ -1764,7 +1759,7 @@ gst_event_new_stream_start (const gchar * stream_id)
 /**
  * gst_event_parse_stream_start:
  * @event: a stream-start event.
- * @stream_id: (out) (transfer none): pointer to store the stream-id
+ * @stream_id: (out) (optional) (transfer none): pointer to store the stream-id
  *
  * Parse a stream-id @event and store the result in the given @stream_id
  * location. The string stored in @stream_id must not be modified and will
@@ -1781,7 +1776,7 @@ gst_event_parse_stream_start (GstEvent * event, const gchar ** stream_id)
   g_return_if_fail (GST_EVENT_TYPE (event) == GST_EVENT_STREAM_START);
 
   structure = gst_event_get_structure (event);
-  val = gst_structure_id_get_value (structure, GST_QUARK (STREAM_ID));
+  val = gst_structure_get_value (structure, "stream-id");
 
   if (stream_id)
     *stream_id = g_value_get_string (val);
@@ -1803,14 +1798,14 @@ gst_event_set_stream (GstEvent * event, GstStream * stream)
   g_return_if_fail (GST_EVENT_TYPE (event) == GST_EVENT_STREAM_START);
   g_return_if_fail (gst_event_is_writable (event));
 
-  gst_structure_id_set (GST_EVENT_STRUCTURE (event),
-      GST_QUARK (STREAM), GST_TYPE_STREAM, stream, NULL);
+  gst_structure_set (GST_EVENT_STRUCTURE (event),
+      "stream", GST_TYPE_STREAM, stream, NULL);
 }
 
 /**
  * gst_event_parse_stream:
  * @event: a stream-start event
- * @stream: (out) (transfer full): address of variable to store the stream
+ * @stream: (out) (optional) (transfer full): address of variable to store the stream
  *
  * Parse a stream-start @event and extract the #GstStream from it.
  *
@@ -1824,8 +1819,8 @@ gst_event_parse_stream (GstEvent * event, GstStream ** stream)
 
   if (stream) {
     *stream = NULL;
-    gst_structure_id_get (GST_EVENT_STRUCTURE (event),
-        GST_QUARK (STREAM), GST_TYPE_STREAM, stream, NULL);
+    gst_structure_get (GST_EVENT_STRUCTURE (event),
+        "stream", GST_TYPE_STREAM, stream, NULL);
   }
 }
 
@@ -1843,14 +1838,14 @@ gst_event_set_stream_flags (GstEvent * event, GstStreamFlags flags)
   g_return_if_fail (GST_EVENT_TYPE (event) == GST_EVENT_STREAM_START);
   g_return_if_fail (gst_event_is_writable (event));
 
-  gst_structure_id_set (GST_EVENT_STRUCTURE (event),
-      GST_QUARK (FLAGS), GST_TYPE_STREAM_FLAGS, flags, NULL);
+  gst_structure_set (GST_EVENT_STRUCTURE (event),
+      "flags", GST_TYPE_STREAM_FLAGS, flags, NULL);
 }
 
 /**
  * gst_event_parse_stream_flags:
  * @event: a stream-start event
- * @flags: (out): address of variable where to store the stream flags
+ * @flags: (out) (optional): address of variable where to store the stream flags
  *
  * Since: 1.2
  */
@@ -1862,8 +1857,8 @@ gst_event_parse_stream_flags (GstEvent * event, GstStreamFlags * flags)
 
   if (flags) {
     *flags = 0;
-    gst_structure_id_get (GST_EVENT_STRUCTURE (event),
-        GST_QUARK (FLAGS), GST_TYPE_STREAM_FLAGS, flags, NULL);
+    gst_structure_get (GST_EVENT_STRUCTURE (event),
+        "flags", GST_TYPE_STREAM_FLAGS, flags, NULL);
   }
 }
 
@@ -1890,14 +1885,14 @@ gst_event_set_group_id (GstEvent * event, guint group_id)
   g_return_if_fail (gst_event_is_writable (event));
   g_return_if_fail (group_id != GST_GROUP_ID_INVALID);
 
-  gst_structure_id_set (GST_EVENT_STRUCTURE (event),
-      GST_QUARK (GROUP_ID), G_TYPE_UINT, group_id, NULL);
+  gst_structure_set (GST_EVENT_STRUCTURE (event),
+      "group-id", G_TYPE_UINT, group_id, NULL);
 }
 
 /**
  * gst_event_parse_group_id:
  * @event: a stream-start event
- * @group_id: (out): address of variable where to store the group id
+ * @group_id: (out) (optional): address of variable where to store the group id
  *
  * Returns: %TRUE if a group id was set on the event and could be parsed,
  *   %FALSE otherwise.
@@ -1913,8 +1908,8 @@ gst_event_parse_group_id (GstEvent * event, guint * group_id)
 
   if (group_id) {
     *group_id = 0;
-    return gst_structure_id_get (GST_EVENT_STRUCTURE (event),
-        GST_QUARK (GROUP_ID), G_TYPE_UINT, group_id, NULL);
+    return gst_structure_get (GST_EVENT_STRUCTURE (event),
+        "group-id", G_TYPE_UINT, group_id, NULL);
   }
 
   return TRUE;
@@ -1922,7 +1917,7 @@ gst_event_parse_group_id (GstEvent * event, guint * group_id)
 
 /**
  * gst_event_new_stream_collection:
- * @collection: Active collection for this data flow
+ * @collection: (transfer none): Active collection for this data flow
  *
  * Create a new STREAM_COLLECTION event. The stream collection event can only
  * travel downstream synchronized with the buffer flow.
@@ -1945,8 +1940,8 @@ gst_event_new_stream_collection (GstStreamCollection * collection)
   g_return_val_if_fail (collection != NULL, NULL);
   g_return_val_if_fail (GST_IS_STREAM_COLLECTION (collection), NULL);
 
-  s = gst_structure_new_id (GST_QUARK (EVENT_STREAM_COLLECTION),
-      GST_QUARK (COLLECTION), GST_TYPE_STREAM_COLLECTION, collection, NULL);
+  s = gst_structure_new_static_str ("stream-collection",
+      "collection", GST_TYPE_STREAM_COLLECTION, collection, NULL);
 
   return gst_event_new_custom (GST_EVENT_STREAM_COLLECTION, s);
 }
@@ -1954,7 +1949,7 @@ gst_event_new_stream_collection (GstStreamCollection * collection)
 /**
  * gst_event_parse_stream_collection:
  * @event: a stream-collection event
- * @collection: (out): pointer to store the collection
+ * @collection: (out) (optional) (transfer full): pointer to store the collection.
  *
  * Retrieve new #GstStreamCollection from STREAM_COLLECTION event @event.
  *
@@ -1972,8 +1967,8 @@ gst_event_parse_stream_collection (GstEvent * event,
   structure = gst_event_get_structure (event);
 
   if (collection) {
-    gst_structure_id_get (structure,
-        GST_QUARK (COLLECTION), GST_TYPE_STREAM_COLLECTION, collection, NULL);
+    gst_structure_get (structure,
+        "collection", GST_TYPE_STREAM_COLLECTION, collection, NULL);
   }
 }
 
@@ -1991,7 +1986,7 @@ GstEvent *
 gst_event_new_toc (GstToc * toc, gboolean updated)
 {
   GstStructure *toc_struct;
-  GQuark id;
+  const gchar *name;
 
   g_return_val_if_fail (toc != NULL, NULL);
 
@@ -2000,13 +1995,12 @@ gst_event_new_toc (GstToc * toc, gboolean updated)
   /* need different structure names so sticky_multi event stuff on pads
    * works, i.e. both TOC events are kept around */
   if (gst_toc_get_scope (toc) == GST_TOC_SCOPE_GLOBAL)
-    id = GST_QUARK (EVENT_TOC_GLOBAL);
+    name = "GstEventTocGlobal";
   else
-    id = GST_QUARK (EVENT_TOC_CURRENT);
+    name = "GstEventTocCurrent";
 
-  toc_struct = gst_structure_new_id (id,
-      GST_QUARK (TOC), GST_TYPE_TOC, toc,
-      GST_QUARK (UPDATED), G_TYPE_BOOLEAN, updated, NULL);
+  toc_struct = gst_structure_new_static_str (name,
+      "toc", GST_TYPE_TOC, toc, "updated", G_TYPE_BOOLEAN, updated, NULL);
 
   return gst_event_new_custom (GST_EVENT_TOC, toc_struct);
 }
@@ -2014,8 +2008,8 @@ gst_event_new_toc (GstToc * toc, gboolean updated)
 /**
  * gst_event_parse_toc:
  * @event: a TOC event.
- * @toc: (out) (transfer full): pointer to #GstToc structure.
- * @updated: (out): pointer to store TOC updated flag.
+ * @toc: (out) (optional) (transfer full): pointer to #GstToc structure.
+ * @updated: (out) (optional): pointer to store TOC updated flag.
  *
  * Parse a TOC @event and store the results in the given @toc and @updated locations.
  */
@@ -2030,9 +2024,8 @@ gst_event_parse_toc (GstEvent * event, GstToc ** toc, gboolean * updated)
 
   structure = gst_event_get_structure (event);
 
-  gst_structure_id_get (structure,
-      GST_QUARK (TOC), GST_TYPE_TOC, toc,
-      GST_QUARK (UPDATED), G_TYPE_BOOLEAN, updated, NULL);
+  gst_structure_get (structure,
+      "toc", GST_TYPE_TOC, toc, "updated", G_TYPE_BOOLEAN, updated, NULL);
 }
 
 /**
@@ -2054,8 +2047,8 @@ gst_event_new_toc_select (const gchar * uid)
 
   GST_CAT_INFO (GST_CAT_EVENT, "creating toc select event for UID: %s", uid);
 
-  structure = gst_structure_new_id (GST_QUARK (EVENT_TOC_SELECT),
-      GST_QUARK (UID), G_TYPE_STRING, uid, NULL);
+  structure = gst_structure_new_static_str ("GstEventTocSelect",
+      "uid", G_TYPE_STRING, uid, NULL);
 
   return gst_event_new_custom (GST_EVENT_TOC_SELECT, structure);
 }
@@ -2063,7 +2056,7 @@ gst_event_new_toc_select (const gchar * uid)
 /**
  * gst_event_parse_toc_select:
  * @event: a TOC select event.
- * @uid: (out) (transfer full) (allow-none): storage for the selection UID.
+ * @uid: (out) (transfer full) (optional): storage for the selection UID.
  *
  * Parse a TOC select @event and store the results in the given @uid location.
  */
@@ -2077,7 +2070,7 @@ gst_event_parse_toc_select (GstEvent * event, gchar ** uid)
   g_return_if_fail (GST_EVENT_TYPE (event) == GST_EVENT_TOC_SELECT);
 
   structure = gst_event_get_structure (event);
-  val = gst_structure_id_get_value (structure, GST_QUARK (UID));
+  val = gst_structure_get_value (structure, "uid");
 
   if (uid != NULL)
     *uid = g_value_dup_string (val);
@@ -2124,8 +2117,7 @@ gst_event_parse_toc_select (GstEvent * event, gchar ** uid)
  * event of a particular @origin and @system_id will
  * be stuck to the output pad of the sending element.
  *
- * Returns: a #GST_EVENT_PROTECTION event, if successful; %NULL
- * if unsuccessful.
+ * Returns: (transfer full): a #GST_EVENT_PROTECTION event.
  *
  * Since: 1.6
  */
@@ -2159,11 +2151,11 @@ gst_event_new_protection (const gchar * system_id,
 /**
  * gst_event_parse_protection:
  * @event: a #GST_EVENT_PROTECTION event.
- * @system_id: (out) (allow-none) (transfer none): pointer to store the UUID
+ * @system_id: (out) (optional) (transfer none): pointer to store the UUID
  * string uniquely identifying a content protection system.
- * @data: (out) (allow-none) (transfer none): pointer to store a #GstBuffer
+ * @data: (out) (optional) (transfer none): pointer to store a #GstBuffer
  * holding protection system specific information.
- * @origin: (out) (allow-none) (transfer none): pointer to store a value that
+ * @origin: (out) (optional) (transfer none): pointer to store a value that
  * indicates where the protection information carried by @event was extracted
  * from.
  *
@@ -2215,9 +2207,9 @@ gst_event_new_segment_done (GstFormat format, gint64 position)
 
   GST_CAT_INFO (GST_CAT_EVENT, "creating segment-done event");
 
-  structure = gst_structure_new_id (GST_QUARK (EVENT_SEGMENT_DONE),
-      GST_QUARK (FORMAT), GST_TYPE_FORMAT, format,
-      GST_QUARK (POSITION), G_TYPE_INT64, position, NULL);
+  structure = gst_structure_new_static_str ("GstEventSegmentDone",
+      "format", GST_TYPE_FORMAT, format,
+      "position", G_TYPE_INT64, position, NULL);
 
   event = gst_event_new_custom (GST_EVENT_SEGMENT_DONE, structure);
 
@@ -2227,8 +2219,8 @@ gst_event_new_segment_done (GstFormat format, gint64 position)
 /**
  * gst_event_parse_segment_done:
  * @event: A valid #GstEvent of type GST_EVENT_SEGMENT_DONE.
- * @format: (out) (allow-none): Result location for the format, or %NULL
- * @position: (out) (allow-none): Result location for the position, or %NULL
+ * @format: (out) (optional): Result location for the format, or %NULL
+ * @position: (out) (optional): Result location for the position, or %NULL
  *
  * Extracts the position and format from the segment done message.
  *
@@ -2245,11 +2237,11 @@ gst_event_parse_segment_done (GstEvent * event, GstFormat * format,
 
   structure = gst_event_get_structure (event);
 
-  val = gst_structure_id_get_value (structure, GST_QUARK (FORMAT));
+  val = gst_structure_get_value (structure, "format");
   if (format != NULL)
     *format = g_value_get_enum (val);
 
-  val = gst_structure_id_get_value (structure, GST_QUARK (POSITION));
+  val = gst_structure_get_value (structure, "position");
   if (position != NULL)
     *position = g_value_get_int64 (val);
 }
@@ -2287,9 +2279,9 @@ gst_event_new_instant_rate_change (gdouble rate_multiplier,
       rate_multiplier, new_flags);
 
   event = gst_event_new_custom (GST_EVENT_INSTANT_RATE_CHANGE,
-      gst_structure_new_id (GST_QUARK (EVENT_INSTANT_RATE_CHANGE),
-          GST_QUARK (RATE), G_TYPE_DOUBLE, rate_multiplier,
-          GST_QUARK (FLAGS), GST_TYPE_SEGMENT_FLAGS, new_flags, NULL));
+      gst_structure_new_static_str ("GstEventInstantRateChange",
+          "rate", G_TYPE_DOUBLE, rate_multiplier,
+          "flags", GST_TYPE_SEGMENT_FLAGS, new_flags, NULL));
 
   return event;
 }
@@ -2297,9 +2289,9 @@ gst_event_new_instant_rate_change (gdouble rate_multiplier,
 /**
  * gst_event_parse_instant_rate_change:
  * @event: a #GstEvent of type #GST_EVENT_INSTANT_RATE_CHANGE
- * @rate_multiplier: (out) (allow-none): location in which to store the rate
+ * @rate_multiplier: (out) (optional): location in which to store the rate
  *     multiplier of the instant-rate-change event, or %NULL
- * @new_flags: (out) (allow-none): location in which to store the new
+ * @new_flags: (out) (optional): location in which to store the new
  *     segment flags of the instant-rate-change event, or %NULL
  *
  * Extract rate and flags from an instant-rate-change event.
@@ -2316,9 +2308,8 @@ gst_event_parse_instant_rate_change (GstEvent * event,
   g_return_if_fail (GST_EVENT_TYPE (event) == GST_EVENT_INSTANT_RATE_CHANGE);
 
   structure = GST_EVENT_STRUCTURE (event);
-  gst_structure_id_get (structure, GST_QUARK (RATE), G_TYPE_DOUBLE,
-      rate_multiplier, GST_QUARK (FLAGS), GST_TYPE_SEGMENT_FLAGS, new_flags,
-      NULL);
+  gst_structure_get (structure, "rate", G_TYPE_DOUBLE,
+      rate_multiplier, "flags", GST_TYPE_SEGMENT_FLAGS, new_flags, NULL);
 }
 
 /**
@@ -2361,10 +2352,10 @@ gst_event_new_instant_rate_sync_time (gdouble rate_multiplier,
       GST_TIME_ARGS (running_time), GST_TIME_ARGS (upstream_running_time));
 
   event = gst_event_new_custom (GST_EVENT_INSTANT_RATE_SYNC_TIME,
-      gst_structure_new_id (GST_QUARK (EVENT_INSTANT_RATE_SYNC_TIME),
-          GST_QUARK (RATE), G_TYPE_DOUBLE, rate_multiplier,
-          GST_QUARK (RUNNING_TIME), GST_TYPE_CLOCK_TIME, running_time,
-          GST_QUARK (UPSTREAM_RUNNING_TIME), GST_TYPE_CLOCK_TIME,
+      gst_structure_new_static_str ("GstEventInstantRateSyncTime",
+          "rate", G_TYPE_DOUBLE, rate_multiplier,
+          "running-time", GST_TYPE_CLOCK_TIME, running_time,
+          "upstream-running-time", GST_TYPE_CLOCK_TIME,
           upstream_running_time, NULL));
 
   return event;
@@ -2373,11 +2364,11 @@ gst_event_new_instant_rate_sync_time (gdouble rate_multiplier,
 /**
  * gst_event_parse_instant_rate_sync_time:
  * @event: a #GstEvent of type #GST_EVENT_INSTANT_RATE_CHANGE
- * @rate_multiplier: (out) (allow-none): location where to store the rate of
+ * @rate_multiplier: (out) (optional): location where to store the rate of
  *     the instant-rate-sync-time event, or %NULL
- * @running_time: (out) (allow-none): location in which to store the running time
+ * @running_time: (out) (optional): location in which to store the running time
  *     of the instant-rate-sync-time event, or %NULL
- * @upstream_running_time: (out) (allow-none): location in which to store the
+ * @upstream_running_time: (out) (optional): location in which to store the
  *     upstream running time of the instant-rate-sync-time event, or %NULL
  *
  * Extract the rate multiplier and running times from an instant-rate-sync-time event.
@@ -2395,9 +2386,9 @@ gst_event_parse_instant_rate_sync_time (GstEvent * event,
   g_return_if_fail (GST_EVENT_TYPE (event) == GST_EVENT_INSTANT_RATE_SYNC_TIME);
 
   structure = GST_EVENT_STRUCTURE (event);
-  gst_structure_id_get (structure, GST_QUARK (RATE), G_TYPE_DOUBLE,
-      rate_multiplier, GST_QUARK (RUNNING_TIME), GST_TYPE_CLOCK_TIME,
-      running_time, GST_QUARK (UPSTREAM_RUNNING_TIME), GST_TYPE_CLOCK_TIME,
+  gst_structure_get (structure, "rate", G_TYPE_DOUBLE,
+      rate_multiplier, "running-time", GST_TYPE_CLOCK_TIME,
+      running_time, "upstream-running-time", GST_TYPE_CLOCK_TIME,
       upstream_running_time, NULL);
 }
 
@@ -2405,7 +2396,7 @@ gst_event_parse_instant_rate_sync_time (GstEvent * event,
  * gst_event_replace: (skip)
  * @old_event: (inout) (transfer full) (nullable): pointer to a
  *     pointer to a #GstEvent to be replaced.
- * @new_event: (allow-none) (transfer none): pointer to a #GstEvent that will
+ * @new_event: (nullable) (transfer none): pointer to a #GstEvent that will
  *     replace the event pointed to by @old_event.
  *
  * Modifies a pointer to a #GstEvent to point to a different #GstEvent. The
@@ -2444,7 +2435,7 @@ gst_event_steal (GstEvent ** old_event)
  * gst_event_take: (skip)
  * @old_event: (inout) (transfer full) (nullable): pointer to a
  *     pointer to a #GstEvent to be stolen.
- * @new_event: (allow-none) (transfer full): pointer to a #GstEvent that will
+ * @new_event: (nullable) (transfer full): pointer to a #GstEvent that will
  *     replace the event pointed to by @old_event.
  *
  * Modifies a pointer to a #GstEvent to point to a different #GstEvent. This

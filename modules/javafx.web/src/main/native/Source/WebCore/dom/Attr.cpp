@@ -20,37 +20,43 @@
  * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
  * Boston, MA 02110-1301, USA.
  */
+
 #include "config.h"
 #include "Attr.h"
 
 #include "AttributeChangeInvalidation.h"
+#include "CSSStyleProperties.h"
+#include "CommonAtomStrings.h"
 #include "Document.h"
 #include "ElementInlines.h"
 #include "Event.h"
 #include "HTMLNames.h"
+#include "MutableStyleProperties.h"
+#include "NodeInlines.h"
 #include "ScopedEventQueue.h"
-#include "StyleProperties.h"
+#include "SerializedNode.h"
 #include "StyledElement.h"
 #include "TextNodeTraversal.h"
+#include "TreeScopeInlines.h"
 #include "XMLNSNames.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/AtomString.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(Attr);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(Attr);
 
 using namespace HTMLNames;
 
 Attr::Attr(Element& element, const QualifiedName& name)
-    : Node(element.document(), CreateOther)
-    , m_element(&element)
+    : Node(element.document(), ATTRIBUTE_NODE, { })
+    , m_element(element)
     , m_name(name)
 {
 }
 
 Attr::Attr(Document& document, const QualifiedName& name, const AtomString& standaloneValue)
-    : Node(document, CreateOther)
+    : Node(document, ATTRIBUTE_NODE, { })
     , m_name(name)
     , m_standaloneValue(standaloneValue)
 {
@@ -70,6 +76,9 @@ Attr::~Attr()
 {
     ASSERT_WITH_SECURITY_IMPLICATION(!isInShadowTree());
     ASSERT_WITH_SECURITY_IMPLICATION(treeScope().rootNode().isDocumentNode());
+
+    // Unable to protect the document here as it may have started destruction.
+    willBeDeletedFrom(document());
 }
 
 ExceptionOr<void> Attr::setPrefix(const AtomString& prefix)
@@ -79,59 +88,65 @@ ExceptionOr<void> Attr::setPrefix(const AtomString& prefix)
         return result.releaseException();
 
     if ((prefix == xmlnsAtom() && namespaceURI() != XMLNSNames::xmlnsNamespaceURI) || qualifiedName() == xmlnsAtom())
-        return Exception { NamespaceError };
+        return Exception { ExceptionCode::NamespaceError };
 
     const AtomString& newPrefix = prefix.isEmpty() ? nullAtom() : prefix;
-    if (m_element)
-        elementAttribute().setPrefix(newPrefix);
+    if (RefPtr element = m_element.get())
+        element->ensureUniqueElementData().findAttributeByName(qualifiedName())->setPrefix(newPrefix);
+
     m_name.setPrefix(newPrefix);
 
     return { };
 }
 
-void Attr::setValue(const AtomString& value)
+#if PLATFORM(JAVA)
+Element* Attr::ownerElement() const {
+    return m_element.get();
+}
+#endif
+ExceptionOr<void> Attr::setValue(const AtomString& value)
 {
-    if (m_element)
-        m_element->setAttribute(qualifiedName(), value);
+    if (RefPtr element = m_element.get())
+        return element->setAttribute(qualifiedName(), value, true);
     else
         m_standaloneValue = value;
+
+    return { };
 }
 
 ExceptionOr<void> Attr::setNodeValue(const String& value)
 {
-    setValue(value);
-    return { };
+    return setValue(value.isNull() ? emptyAtom() : AtomString(value));
 }
 
-Ref<Node> Attr::cloneNodeInternal(Document& targetDocument, CloningOperation)
+Ref<Node> Attr::cloneNodeInternal(Document& document, CloningOperation, CustomElementRegistry*) const
 {
-    return adoptRef(*new Attr(targetDocument, qualifiedName(), value()));
+    return adoptRef(*new Attr(document, qualifiedName(), value()));
 }
 
-CSSStyleDeclaration* Attr::style()
+SerializedNode Attr::serializeNode(CloningOperation) const
+{
+    return { SerializedNode::Attr { { m_name }, value() } };
+}
+
+CSSStyleProperties* Attr::style()
 {
     // This is not part of the DOM API, and therefore not available to webpages. However, WebKit SPI
     // lets clients use this via the Objective-C and JavaScript bindings.
-    auto styledElement = dynamicDowncast<StyledElement>(m_element);
+    RefPtr styledElement = dynamicDowncast<StyledElement>(m_element.get());
     if (!styledElement)
         return nullptr;
-    m_style = MutableStyleProperties::create();
-    styledElement->collectPresentationalHintsForAttribute(qualifiedName(), value(), *m_style);
-    return &m_style->ensureCSSStyleDeclaration();
+    Ref style = MutableStyleProperties::create();
+    m_style = style.copyRef();
+    styledElement->collectPresentationalHintsForAttribute(qualifiedName(), value(), style);
+    return &style->ensureCSSStyleProperties();
 }
 
-const AtomString& Attr::value() const
+AtomString Attr::value() const
 {
-    if (m_element)
-        return m_element->getAttribute(qualifiedName());
+    if (RefPtr element = m_element.get())
+        return element->getAttributeForBindings(qualifiedName());
     return m_standaloneValue;
-}
-
-Attribute& Attr::elementAttribute()
-{
-    ASSERT(m_element);
-    ASSERT(m_element->elementData());
-    return *m_element->ensureUniqueElementData().findAttributeByName(qualifiedName());
 }
 
 void Attr::detachFromElementWithValue(const AtomString& value)
@@ -140,13 +155,13 @@ void Attr::detachFromElementWithValue(const AtomString& value)
     ASSERT(m_standaloneValue.isNull());
     m_standaloneValue = value;
     m_element = nullptr;
-    setTreeScopeRecursively(document());
+    setTreeScopeRecursively(Ref<Document> { document() });
 }
 
 void Attr::attachToElement(Element& element)
 {
     ASSERT(!m_element);
-    m_element = &element;
+    m_element = element;
     m_standaloneValue = nullAtom();
     setTreeScopeRecursively(element.treeScope());
 }

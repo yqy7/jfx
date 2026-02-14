@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,36 +27,48 @@
 
 #include "GPUAdapter.h"
 #include "GPURequestAdapterOptions.h"
-#include "JSDOMPromiseDeferred.h"
+#include "GPUTextureFormat.h"
+#include "JSDOMPromiseDeferredForward.h"
+#include "WebGPU.h"
 #include <optional>
-#include <pal/graphics/WebGPU/WebGPU.h>
 #include <wtf/Deque.h>
 #include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
 
 namespace WebCore {
 
+class GPUCompositorIntegration;
+class GPUPresentationContext;
+struct GPUPresentationContextDescriptor;
+class GraphicsContext;
+class NativeImage;
+class WGSLLanguageFeatures;
+
 class GPU : public RefCounted<GPU> {
 public:
-    static Ref<GPU> create()
+    static Ref<GPU> create(Ref<WebGPU::GPU>&& backing)
     {
-        return adoptRef(*new GPU());
+        return adoptRef(*new GPU(WTFMove(backing)));
     }
+    ~GPU();
 
     using RequestAdapterPromise = DOMPromiseDeferred<IDLNullable<IDLInterface<GPUAdapter>>>;
     void requestAdapter(const std::optional<GPURequestAdapterOptions>&, RequestAdapterPromise&&);
 
-    void setBacking(PAL::WebGPU::GPU&);
+    GPUTextureFormat getPreferredCanvasFormat() const;
+    WGSLLanguageFeatures& wgslLanguageFeatures() const { return m_wgslLanguageFeatures; }
 
+    RefPtr<GPUPresentationContext> createPresentationContext(const GPUPresentationContextDescriptor&);
+
+    RefPtr<GPUCompositorIntegration> createCompositorIntegration();
+
+    void paintToCanvas(NativeImage&, const IntSize&, GraphicsContext&);
 private:
-    GPU() = default;
+    GPU(Ref<WebGPU::GPU>&&);
 
-    struct PendingRequestAdapterArguments {
-        std::optional<GPURequestAdapterOptions> options;
-        RequestAdapterPromise promise;
-    };
-    Deque<PendingRequestAdapterArguments> m_pendingRequestAdapterArguments;
-    RefPtr<PAL::WebGPU::GPU> m_backing;
+    struct PendingRequestAdapterArguments;
+    const Ref<WebGPU::GPU> m_backing;
+    const Ref<WGSLLanguageFeatures> m_wgslLanguageFeatures;
 };
 
 }

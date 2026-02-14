@@ -47,45 +47,46 @@ typedef JGObject PlatformPatternPtr;
 
 namespace WebCore {
 
-class AffineTransform;
 class GraphicsContext;
 
-class Pattern final : public RefCounted<Pattern> {
-public:
-    struct Parameters {
-        Parameters(bool repeatX = true, bool repeatY = true, AffineTransform patternSpaceTransform = { })
-            : patternSpaceTransform(patternSpaceTransform)
-            , repeatX(repeatX)
+struct PatternParameters {
+    PatternParameters(bool repeatX = true, bool repeatY = true, AffineTransform patternSpaceTransform = { })
+            : repeatX(repeatX)
             , repeatY(repeatY)
+            , patternSpaceTransform(patternSpaceTransform)
         {
         }
-        template<class Encoder> void encode(Encoder&) const;
-        template<class Decoder> static std::optional<Parameters> decode(Decoder&);
-        AffineTransform patternSpaceTransform;
         bool repeatX;
         bool repeatY;
-    };
+        AffineTransform patternSpaceTransform;
+};
 
+class Pattern final : public ThreadSafeRefCounted<Pattern> {
+public:
+    using Parameters = PatternParameters;
     WEBCORE_EXPORT static Ref<Pattern> create(SourceImage&& tileImage, const Parameters& = { });
     WEBCORE_EXPORT ~Pattern();
 
-    const SourceImage& tileImage() const { return m_tileImage; }
-    RefPtr<NativeImage> tileNativeImage() const { return m_tileImage.nativeImage(); }
-    RefPtr<ImageBuffer> tileImageBuffer() const { return m_tileImage.imageBuffer(); }
+    WEBCORE_EXPORT const SourceImage& tileImage() const;
+    WEBCORE_EXPORT void setTileImage(SourceImage&&);
+
+    RefPtr<NativeImage> tileNativeImage() const;
+    RefPtr<ImageBuffer> tileImageBuffer() const;
+
     const Parameters& parameters() const { return m_parameters; }
 
     // Pattern space is an abstract space that maps to the default user space by the transformation 'userSpaceTransform'
+#if USE(SKIA)
+    PlatformPatternPtr createPlatformPattern(const AffineTransform& userSpaceTransform, const SkSamplingOptions&) const;
+#else
     PlatformPatternPtr createPlatformPattern(const AffineTransform& userSpaceTransform) const;
+#endif
 
-    void setTileImage(SourceImage&& tileImage) { m_tileImage = WTFMove(tileImage); }
     void setPatternSpaceTransform(const AffineTransform&);
 
     const AffineTransform& patternSpaceTransform() const { return m_parameters.patternSpaceTransform; };
     bool repeatX() const { return m_parameters.repeatX; }
     bool repeatY() const { return m_parameters.repeatY; }
-
-    template<class Encoder> void encode(Encoder&) const;
-    template<class Decoder> static std::optional<Ref<Pattern>> decode(Decoder&);
 
 private:
     Pattern(SourceImage&&, const Parameters&);
@@ -94,56 +95,5 @@ private:
     Parameters m_parameters;
 };
 
-template<class Encoder>
-void Pattern::Parameters::encode(Encoder& encoder) const
-{
-    encoder << patternSpaceTransform;
-    encoder << repeatX;
-    encoder << repeatY;
-}
-
-template<class Decoder>
-std::optional<Pattern::Parameters> Pattern::Parameters::decode(Decoder& decoder)
-{
-    std::optional<AffineTransform> patternSpaceTransform;
-    decoder >> patternSpaceTransform;
-    if (!patternSpaceTransform)
-        return std::nullopt;
-
-    std::optional<bool> repeatX;
-    decoder >> repeatX;
-    if (!repeatX)
-        return std::nullopt;
-
-    std::optional<bool> repeatY;
-    decoder >> repeatY;
-    if (!repeatY)
-        return std::nullopt;
-
-    return {{ *repeatX, *repeatY, *patternSpaceTransform }};
-}
-
-template<class Encoder>
-void Pattern::encode(Encoder& encoder) const
-{
-    encoder << m_tileImage;
-    encoder << m_parameters;
-}
-
-template<class Decoder>
-std::optional<Ref<Pattern>> Pattern::decode(Decoder& decoder)
-{
-    std::optional<SourceImage> tileImage;
-    decoder >> tileImage;
-    if (!tileImage)
-        return std::nullopt;
-
-    std::optional<Parameters> parameters;
-    decoder >> parameters;
-    if (!parameters)
-        return std::nullopt;
-
-    return Pattern::create(WTFMove(*tileImage), *parameters);
-}
 
 } //namespace

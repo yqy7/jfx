@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,21 +25,23 @@
 
 #pragma once
 
-#if ENABLE(SERVICE_WORKER)
-
 #include "ActiveDOMObject.h"
+#include "CookieStoreManager.h"
 #include "EventTarget.h"
-#include "JSDOMPromiseDeferred.h"
+#include "JSDOMPromiseDeferredForward.h"
 #include "Notification.h"
 #include "NotificationOptions.h"
 #include "PushPermissionState.h"
 #include "PushSubscription.h"
+#include "PushSubscriptionOwner.h"
 #include "SWClientConnection.h"
 #include "ServiceWorkerRegistrationData.h"
 #include "Supplementable.h"
 #include "Timer.h"
+#include <wtf/Forward.h>
 #include <wtf/ListHashSet.h>
-#include <wtf/Vector.h>
+#include <wtf/Ref.h>
+#include <wtf/RefPtr.h>
 #include <wtf/WeakHashSet.h>
 
 namespace WebCore {
@@ -49,10 +51,15 @@ class NavigationPreloadManager;
 class ScriptExecutionContext;
 class ServiceWorker;
 class ServiceWorkerContainer;
+class WebCoreOpaqueRoot;
+struct CookieStoreGetOptions;
 
-class ServiceWorkerRegistration final : public RefCounted<ServiceWorkerRegistration>, public Supplementable<ServiceWorkerRegistration>, public EventTargetWithInlineData, public ActiveDOMObject {
-    WTF_MAKE_ISO_ALLOCATED_EXPORT(ServiceWorkerRegistration, WEBCORE_EXPORT);
+class ServiceWorkerRegistration final : public RefCounted<ServiceWorkerRegistration>, public Supplementable<ServiceWorkerRegistration>, public EventTarget, public ActiveDOMObject, public PushSubscriptionOwner {
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED_EXPORT(ServiceWorkerRegistration, WEBCORE_EXPORT);
 public:
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
+
     static Ref<ServiceWorkerRegistration> getOrCreate(ScriptExecutionContext&, Ref<ServiceWorkerContainer>&&, ServiceWorkerRegistrationData&&);
 
     WEBCORE_EXPORT ~ServiceWorkerRegistration();
@@ -62,6 +69,8 @@ public:
     ServiceWorker* installing();
     ServiceWorker* waiting();
     ServiceWorker* active();
+
+    bool isActive() const final { return !!m_activeWorker; }
 
     ServiceWorker* getNewestWorker() const;
 
@@ -79,12 +88,9 @@ public:
     void unregister(Ref<DeferredPromise>&&);
 
     void subscribeToPushService(const Vector<uint8_t>& applicationServerKey, DOMPromiseDeferred<IDLInterface<PushSubscription>>&&);
-    void unsubscribeFromPushService(PushSubscriptionIdentifier, DOMPromiseDeferred<IDLBoolean>&&);
+    void unsubscribeFromPushService(std::optional<PushSubscriptionIdentifier>, DOMPromiseDeferred<IDLBoolean>&&);
     void getPushSubscription(DOMPromiseDeferred<IDLNullable<IDLInterface<PushSubscription>>>&&);
     void getPushPermissionState(DOMPromiseDeferred<IDLEnumeration<PushPermissionState>>&&);
-
-    using RefCounted::ref;
-    using RefCounted::deref;
 
     const ServiceWorkerRegistrationData& data() const { return m_registrationData; }
 
@@ -99,29 +105,29 @@ public:
         String tag;
     };
 
-    void showNotification(ScriptExecutionContext&, const String& title, const NotificationOptions&, DOMPromiseDeferred<void>&&);
-    void getNotifications(ScriptExecutionContext&, const GetNotificationOptions& filter, DOMPromiseDeferred<IDLSequence<IDLInterface<Notification>>>);
-
-    void addNotificationToList(Notification&);
-    void removeNotificationFromList(Notification&);
-    Vector<Ref<Notification>> filteredNotificationList(const String& filteredTag);
+    void showNotification(ScriptExecutionContext&, String&& title, NotificationOptions&&, Ref<DeferredPromise>&&);
+    void getNotifications(const GetNotificationOptions& filter, DOMPromiseDeferred<IDLSequence<IDLInterface<Notification>>>);
 #endif
+
+    CookieStoreManager& cookies();
+    void addCookieChangeSubscriptions(Vector<CookieStoreGetOptions>&&, Ref<DeferredPromise>&&);
+    void removeCookieChangeSubscriptions(Vector<CookieStoreGetOptions>&&, Ref<DeferredPromise>&&);
+    void cookieChangeSubscriptions(Ref<DeferredPromise>&&);
 
 private:
     ServiceWorkerRegistration(ScriptExecutionContext&, Ref<ServiceWorkerContainer>&&, ServiceWorkerRegistrationData&&);
 
-    EventTargetInterface eventTargetInterface() const final;
+    enum EventTargetInterfaceType eventTargetInterface() const final;
     ScriptExecutionContext* scriptExecutionContext() const final;
     void refEventTarget() final { ref(); }
     void derefEventTarget() final { deref(); }
 
     // ActiveDOMObject.
-    const char* activeDOMObjectName() const final;
     void stop() final;
     bool virtualHasPendingActivity() const final;
 
     ServiceWorkerRegistrationData m_registrationData;
-    Ref<ServiceWorkerContainer> m_container;
+    const Ref<ServiceWorkerContainer> m_container;
 
     RefPtr<ServiceWorker> m_installingWorker;
     RefPtr<ServiceWorker> m_waitingWorker;
@@ -129,12 +135,9 @@ private:
 
     std::unique_ptr<NavigationPreloadManager> m_navigationPreload;
 
-#if ENABLE(NOTIFICATION_EVENT)
-    ListHashSet<Notification*> m_notificationList;
-    WeakHashSet<Notification> m_notificationSet;
-#endif
+    RefPtr<CookieStoreManager> m_cookieStoreManager;
 };
 
-} // namespace WebCore
+WebCoreOpaqueRoot root(ServiceWorkerRegistration*);
 
-#endif // ENABLE(SERVICE_WORKER)
+} // namespace WebCore

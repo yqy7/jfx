@@ -34,7 +34,7 @@
 
 PAS_BEGIN_EXTERN_C;
 
-const char* pas_page_base_config_get_kind_string(pas_page_base_config* config)
+const char* pas_page_base_config_get_kind_string(const pas_page_base_config* config)
 {
     switch (config->page_config_kind) {
     case pas_page_config_kind_segregated:
@@ -42,7 +42,7 @@ const char* pas_page_base_config_get_kind_string(pas_page_base_config* config)
     case pas_page_config_kind_bitfit:
         return pas_bitfit_page_config_kind_get_string(pas_page_base_config_get_bitfit(config)->kind);
     }
-    PAS_ASSERT(!"Should not be reached");
+    PAS_ASSERT_NOT_REACHED();
     return NULL;
 }
 

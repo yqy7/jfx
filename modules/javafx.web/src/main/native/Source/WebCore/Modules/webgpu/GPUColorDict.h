@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2021-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,15 +25,14 @@
 
 #pragma once
 
-#include <pal/graphics/WebGPU/WebGPUColor.h>
-#include <variant>
+#include "WebGPUColor.h"
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 struct GPUColorDict {
-    PAL::WebGPU::ColorDict convertToBacking() const
+    WebGPU::ColorDict convertToBacking() const
     {
         return {
             r,
@@ -49,13 +48,13 @@ struct GPUColorDict {
     double a { 0 };
 };
 
-using GPUColor = std::variant<Vector<double>, GPUColorDict>;
+using GPUColor = Variant<Vector<double>, GPUColorDict>;
 
-inline PAL::WebGPU::Color convertToBacking(const GPUColor& color)
+inline WebGPU::Color convertToBacking(const GPUColor& color)
 {
-    return WTF::switchOn(color, [] (const Vector<double>& vector) -> PAL::WebGPU::Color {
+    return WTF::switchOn(color, [](const Vector<double>& vector) -> WebGPU::Color {
         return vector;
-    }, [] (const GPUColorDict& color) -> PAL::WebGPU::Color {
+    }, [](const GPUColorDict& color) -> WebGPU::Color {
         return color.convertToBacking();
     });
 }

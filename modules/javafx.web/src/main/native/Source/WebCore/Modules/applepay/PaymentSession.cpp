@@ -30,17 +30,18 @@
 
 #include "Document.h"
 #include "DocumentLoader.h"
-#include "FeaturePolicy.h"
+#include "FrameDestructionObserverInlines.h"
+#include "PermissionsPolicy.h"
 #include "SecurityOrigin.h"
 
 namespace WebCore {
 
-static bool isSecure(DocumentLoader& documentLoader)
+bool PaymentSession::isSecureForSession(const URL& url, const std::optional<const CertificateInfo>& certificateInfo)
 {
-    if (!documentLoader.response().url().protocolIs("https"))
+    if (!url.protocolIs("https"_s))
         return false;
 
-    if (!documentLoader.response().certificateInfo() || documentLoader.response().certificateInfo()->containsNonRootSHA1SignedCertificate())
+    if (!certificateInfo || certificateInfo->containsNonRootSHA1SignedCertificate())
         return false;
 
     return true;
@@ -48,29 +49,33 @@ static bool isSecure(DocumentLoader& documentLoader)
 
 ExceptionOr<void> PaymentSession::canCreateSession(Document& document)
 {
-    if (!isFeaturePolicyAllowedByDocumentAndAllOwners(FeaturePolicy::Type::Payment, document, LogFeaturePolicyFailure::Yes))
-        return Exception { SecurityError, "Third-party iframes are not allowed to request payments unless explicitly allowed via Feature-Policy (payment)"_s };
+    if (!PermissionsPolicy::isFeatureEnabled(PermissionsPolicy::Feature::Payment, document))
+        return Exception { ExceptionCode::SecurityError, "Third-party iframes are not allowed to request payments unless explicitly allowed via Feature-Policy (payment)"_s };
 
-    if (!document.frame())
-        return Exception { InvalidAccessError, "Trying to start an Apple Pay session from an inactive document." };
+    RefPtr<Frame> currentFrame = document.frame();
+    if (!currentFrame)
+        return Exception { ExceptionCode::InvalidAccessError, "Trying to start an Apple Pay session from an inactive document."_s };
 
-    if (!isSecure(*document.loader()))
-        return Exception { InvalidAccessError, "Trying to start an Apple Pay session from an insecure document." };
+    if (!currentFrame->frameCanCreatePaymentSession())
+        return Exception { ExceptionCode::InvalidAccessError, "Trying to start an Apple Pay session from an insecure document."_s };
 
-    auto& topDocument = document.topDocument();
-    if (&document != &topDocument) {
-        auto& topOrigin = topDocument.topOrigin();
+    if (!document.isTopDocument()) {
+        do {
+            RefPtr parent = currentFrame->tree().parent();
+            if (!parent) {
+                if (!currentFrame->isMainFrame())
+                    return Exception { ExceptionCode::InvalidAccessError, "Trying to start an Apple Pay session from a document in an unparented frame"_s };
+                return { };
+    }
 
-        if (!document.securityOrigin().isSameSchemeHostPort(topOrigin))
-            return Exception { InvalidAccessError, "Trying to start an Apple Pay session from a document with an different security origin than its top-level frame." };
+            if (!parent->frameCanCreatePaymentSession())
+                return Exception { ExceptionCode::InvalidAccessError, "Trying to start an Apple Pay session from a document with an insecure parent frame."_s };
 
-        for (auto* ancestorDocument = document.parentDocument(); ancestorDocument != &topDocument; ancestorDocument = ancestorDocument->parentDocument()) {
-            if (!isSecure(*ancestorDocument->loader()))
-                return Exception { InvalidAccessError, "Trying to start an Apple Pay session from a document with an insecure parent frame." };
+            if (parent->isMainFrame())
+                break;
 
-            if (!ancestorDocument->securityOrigin().isSameSchemeHostPort(topOrigin))
-                return Exception { InvalidAccessError, "Trying to start an Apple Pay session from a document with an different security origin than its top-level frame." };
-        }
+            currentFrame = WTFMove(parent);
+        } while (true);
     }
 
     return { };

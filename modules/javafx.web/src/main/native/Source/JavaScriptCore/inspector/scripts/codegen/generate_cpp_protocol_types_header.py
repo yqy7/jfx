@@ -84,9 +84,9 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
 
     def _generate_secondary_header_includes(self):
         header_includes = [
-            (["JavaScriptCore", "WebKit"], ("JavaScriptCore", "inspector/InspectorProtocolTypes.h")),
-            (["JavaScriptCore", "WebKit"], ("WTF", "wtf/JSONValues.h")),
-            (["JavaScriptCore", "WebKit"], ("WTF", "wtf/text/WTFString.h")),
+            (["JavaScriptCore", "WebKit", "WebDriverBidi"], ("JavaScriptCore", "inspector/InspectorProtocolTypes.h")),
+            (["JavaScriptCore", "WebKit", "WebDriverBidi"], ("WTF", "wtf/JSONValues.h")),
+            (["JavaScriptCore", "WebKit", "WebDriverBidi"], ("WTF", "wtf/text/WTFString.h")),
         ]
         return '\n'.join(self.generate_includes_from_entries(header_includes))
 
@@ -266,16 +266,10 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
         for type_member in required_members:
             lines.append(self._generate_builder_setter_for_member(type_member, domain))
         lines.append(Template(CppTemplates.ProtocolObjectBuilderDeclarationPostlude).substitute(None, **builder_args))
+        for member in [member for member in required_members if member.is_nullable]:
+            lines.append(self._generate_unchecked_setter_for_member(member, domain))
         for member in optional_members:
             lines.append(self._generate_unchecked_setter_for_member(member, domain))
-
-        if Generator.type_has_open_fields(type_declaration.type):
-            lines.append('')
-            lines.append('    // Property names for type generated as open.')
-            open_members = Generator.open_fields(type_declaration)
-            for type_member in open_members:
-                export_macro = self.model().framework.setting('export_macro', None)
-                lines.append('    %s static const ASCIILiteral %sKey;' % (export_macro, type_member.member_name))
 
         lines.append('};')
         return self.wrap_with_guard_for_condition(type_declaration.condition, '\n'.join(lines))
@@ -347,10 +341,18 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
         lines.append('')
         lines.append('        Builder<STATE | %(camelName)sSet>& set%(camelName)s(%(memberType)s %(memberName)s)' % setter_args)
         lines.append('        {')
-        lines.append('            COMPILE_ASSERT(!(STATE & %(camelName)sSet), property_%(memberKey)s_already_set);' % setter_args)
+        lines.append('            static_assert(!(STATE & %(camelName)sSet), "property %(memberKey)s already set");' % setter_args)
         lines.append('            m_result->%(setter)s("%(memberKey)s"_s, %(memberValue)s);' % setter_args)
         lines.append('            return castState<%(camelName)sSet>();' % setter_args)
         lines.append('        }')
+        if type_member.is_nullable:
+            lines.append('')
+            lines.append('        Builder<STATE | %(camelName)sSet>& set%(camelName)sIsNull()' % setter_args)
+            lines.append('        {')
+            lines.append('            static_assert(!(STATE & %(camelName)sSet), "property %(memberKey)s already set");' % setter_args)
+            lines.append('            m_result->setValue("%(memberKey)s"_s, JSON::Value::null());' % setter_args)
+            lines.append('            return castState<%(camelName)sSet>();' % setter_args)
+            lines.append('        }')
         return '\n'.join(lines)
 
     def _generate_unchecked_setter_for_member(self, type_member, domain):
@@ -377,6 +379,12 @@ class CppProtocolTypesHeaderGenerator(CppGenerator):
         lines.append('    {')
         lines.append('        JSON::ObjectBase::%(setter)s("%(memberKey)s"_s, %(memberValue)s);' % setter_args)
         lines.append('    }')
+        if type_member.is_nullable:
+            lines.append('')
+            lines.append('    void set%(camelName)sIsNull()' % setter_args)
+            lines.append('    {')
+            lines.append('        JSON::ObjectBase::setValue("%(memberKey)s"_s, JSON::Value::null());' % setter_args)
+            lines.append('    }')
         return '\n'.join(lines)
 
     def _generate_forward_declarations_for_binding_traits(self, domains):

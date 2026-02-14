@@ -26,7 +26,9 @@
 #include "config.h"
 #include "ContentExtension.h"
 
+#include "CSSParserContext.h"
 #include "CompiledContentExtension.h"
+#include "ContentExtensionParser.h"
 #include "ContentExtensionsBackend.h"
 #include "StyleSheetContents.h"
 #include <wtf/text/StringBuilder.h>
@@ -46,20 +48,19 @@ ContentExtension::ContentExtension(const String& identifier, Ref<CompiledContent
     , m_extensionBaseURL(WTFMove(extensionBaseURL))
 {
     DFABytecodeInterpreter interpreter(m_compiledExtension->urlFiltersBytecode());
-    for (uint64_t action : interpreter.actionsMatchingEverything())
-        m_universalActions.append(action);
+    m_universalActions = copyToVector(interpreter.actionsMatchingEverything());
 
     if (shouldCompileCSS == ShouldCompileCSS::Yes)
         compileGlobalDisplayNoneStyleSheet();
     m_universalActions.shrinkToFit();
 }
 
-uint32_t ContentExtension::findFirstIgnorePreviousRules() const
+uint32_t ContentExtension::findFirstIgnoreRule() const
 {
     auto serializedActions = m_compiledExtension->serializedActions();
     uint32_t currentActionIndex = 0;
     while (currentActionIndex < serializedActions.size()) {
-        if (serializedActions[currentActionIndex] == WTF::alternativeIndexV<IgnorePreviousRulesAction, ActionData>)
+        if (serializedActions[currentActionIndex] == WTF::alternativeIndexV<IgnorePreviousRulesAction, ActionData> || serializedActions[currentActionIndex] == WTF::alternativeIndexV<IgnoreFollowingRulesAction, ActionData>)
             return currentActionIndex;
         currentActionIndex += DeserializedAction::serializedLength(serializedActions, currentActionIndex);
     }
@@ -73,13 +74,14 @@ StyleSheetContents* ContentExtension::globalDisplayNoneStyleSheet()
 
 void ContentExtension::compileGlobalDisplayNoneStyleSheet()
 {
-    uint32_t firstIgnorePreviousRules = findFirstIgnorePreviousRules();
+    uint32_t firstIgnoreRule = findFirstIgnoreRule();
 
     auto serializedActions = m_compiledExtension->serializedActions();
 
     auto inGlobalDisplayNoneStyleSheet = [&](const uint32_t location) {
-        RELEASE_ASSERT(location < serializedActions.size());
-        return location < firstIgnorePreviousRules && serializedActions[location] == WTF::alternativeIndexV<CSSDisplayNoneSelectorAction, ActionData>;
+        auto serializedActionSize = serializedActions.size();
+        RELEASE_ASSERT(location < serializedActionSize, location, serializedActionSize);
+        return location < firstIgnoreRule && serializedActions[location] == WTF::alternativeIndexV<CSSDisplayNoneSelectorAction, ActionData>;
     };
 
     StringBuilder css;
@@ -99,7 +101,7 @@ void ContentExtension::compileGlobalDisplayNoneStyleSheet()
     css.append(ContentExtensionsBackend::displayNoneCSSRule());
     css.append('}');
 
-    m_globalDisplayNoneStyleSheet = StyleSheetContents::create();
+    m_globalDisplayNoneStyleSheet = StyleSheetContents::create(contentExtensionCSSParserContext());
     m_globalDisplayNoneStyleSheet->setIsUserStyleSheet(true);
     if (!m_globalDisplayNoneStyleSheet->parseString(css.toString()))
         m_globalDisplayNoneStyleSheet = nullptr;

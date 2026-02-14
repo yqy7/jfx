@@ -21,17 +21,20 @@
 #include "config.h"
 #include "HTMLProgressElement.h"
 
-#include "ElementIterator.h"
+#include "AXObjectCache.h"
+#include "ContainerNodeInlines.h"
 #include "HTMLNames.h"
 #include "HTMLParserIdioms.h"
 #include "ProgressShadowElement.h"
+#include "PseudoClassChangeInvalidation.h"
 #include "RenderProgress.h"
 #include "ShadowRoot.h"
-#include <wtf/IsoMallocInlines.h>
+#include "TypedElementDescendantIteratorInlines.h"
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLProgressElement);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(HTMLProgressElement);
 
 using namespace HTMLNames;
 
@@ -39,72 +42,66 @@ const double HTMLProgressElement::IndeterminatePosition = -1;
 const double HTMLProgressElement::InvalidPosition = -2;
 
 HTMLProgressElement::HTMLProgressElement(const QualifiedName& tagName, Document& document)
-    : LabelableElement(tagName, document)
-    , m_value(0)
+    : HTMLElement(tagName, document, TypeFlag::HasCustomStyleResolveCallbacks)
 {
     ASSERT(hasTagName(progressTag));
-    setHasCustomStyleResolveCallbacks();
 }
 
 HTMLProgressElement::~HTMLProgressElement() = default;
 
 Ref<HTMLProgressElement> HTMLProgressElement::create(const QualifiedName& tagName, Document& document)
 {
-    Ref<HTMLProgressElement> progress = adoptRef(*new HTMLProgressElement(tagName, document));
+    Ref progress = adoptRef(*new HTMLProgressElement(tagName, document));
     progress->ensureUserAgentShadowRoot();
     return progress;
 }
 
 RenderPtr<RenderElement> HTMLProgressElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
 {
-    if (!style.hasEffectiveAppearance())
+    if (!style.hasUsedAppearance())
         return RenderElement::createFor(*this, WTFMove(style));
 
     return createRenderer<RenderProgress>(*this, WTFMove(style));
 }
 
-bool HTMLProgressElement::childShouldCreateRenderer(const Node& child) const
-{
-    return hasShadowRootParent(child) && HTMLElement::childShouldCreateRenderer(child);
-}
-
 RenderProgress* HTMLProgressElement::renderProgress() const
 {
-    if (is<RenderProgress>(renderer()))
-        return downcast<RenderProgress>(renderer());
-    return downcast<RenderProgress>(descendantsOfType<Element>(*userAgentShadowRoot()).first()->renderer());
+    if (auto* renderProgress = dynamicDowncast<RenderProgress>(renderer()))
+        return renderProgress;
+    return downcast<RenderProgress>(descendantsOfType<Element>(*protectedUserAgentShadowRoot()).first()->renderer());
 }
 
-void HTMLProgressElement::parseAttribute(const QualifiedName& name, const AtomString& value)
+RefPtr<ProgressValueElement> HTMLProgressElement::protectedValueElement()
 {
-    if (name == valueAttr)
+    return m_valueElement.get();
+}
+
+void HTMLProgressElement::attributeChanged(const QualifiedName& name, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason attributeModificationReason)
+{
+    if (name == valueAttr) {
+        updateDeterminateState();
         didElementStateChange();
-    else if (name == maxAttr)
+    } else if (name == maxAttr)
         didElementStateChange();
     else
-        LabelableElement::parseAttribute(name, value);
+        HTMLElement::attributeChanged(name, oldValue, newValue, attributeModificationReason);
 }
 
 void HTMLProgressElement::didAttachRenderers()
 {
-    if (RenderProgress* render = renderProgress())
-        render->updateFromElement();
+    if (CheckedPtr renderer = renderProgress())
+        renderer->updateFromElement();
 }
 
 double HTMLProgressElement::value() const
 {
-    double value = parseToDoubleForNumberType(attributeWithoutSynchronization(valueAttr));
+    double value = parseHTMLFloatingPointNumberValue(attributeWithoutSynchronization(valueAttr));
     return !std::isfinite(value) || value < 0 ? 0 : std::min(value, max());
-}
-
-void HTMLProgressElement::setValue(double value)
-{
-    setAttributeWithoutSynchronization(valueAttr, AtomString::number(value));
 }
 
 double HTMLProgressElement::max() const
 {
-    double max = parseToDoubleForNumberType(attributeWithoutSynchronization(maxAttr));
+    double max = parseHTMLFloatingPointNumberValue(attributeWithoutSynchronization(maxAttr));
     return !std::isfinite(max) || max <= 0 ? 1 : max;
 }
 
@@ -121,39 +118,43 @@ double HTMLProgressElement::position() const
     return value() / max();
 }
 
-bool HTMLProgressElement::isDeterminate() const
+void HTMLProgressElement::updateDeterminateState()
 {
-    return hasAttributeWithoutSynchronization(valueAttr);
+    bool newIsDeterminate = hasAttributeWithoutSynchronization(valueAttr);
+    if (m_isDeterminate == newIsDeterminate)
+        return;
+    Style::PseudoClassChangeInvalidation styleInvalidation(*this, CSSSelector::PseudoClass::Indeterminate, !newIsDeterminate);
+    m_isDeterminate = newIsDeterminate;
 }
 
 void HTMLProgressElement::didElementStateChange()
 {
-    m_value->setWidthPercentage(position() * 100);
-    if (RenderProgress* render = renderProgress()) {
-        bool wasDeterminate = render->isDeterminate();
-        render->updateFromElement();
-        if (wasDeterminate != isDeterminate())
-            invalidateStyleForSubtree();
-    }
+    protectedValueElement()->setInlineSizePercentage(position() * 100);
+    if (CheckedPtr renderer = renderProgress())
+        renderer->updateFromElement();
+
+    if (CheckedPtr cache = protectedDocument()->existingAXObjectCache())
+        cache->valueChanged(*this);
 }
 
 void HTMLProgressElement::didAddUserAgentShadowRoot(ShadowRoot& root)
 {
-    ASSERT(!m_value);
+    ASSERT(!m_valueElement);
 
-    auto inner = ProgressInnerElement::create(document());
+    Ref document = this->document();
+    Ref inner = ProgressInnerElement::create(document);
     root.appendChild(inner);
 
-    auto bar = ProgressBarElement::create(document());
-    auto value = ProgressValueElement::create(document());
-    m_value = value.ptr();
-    m_value->setWidthPercentage(HTMLProgressElement::IndeterminatePosition * 100);
-    bar->appendChild(value);
+    Ref bar = ProgressBarElement::create(document);
+    Ref valueElement = ProgressValueElement::create(document);
+    valueElement->setInlineSizePercentage(HTMLProgressElement::IndeterminatePosition * 100);
+    bar->appendChild(valueElement);
+    m_valueElement = WTFMove(valueElement);
 
     inner->appendChild(bar);
 }
 
-bool HTMLProgressElement::shouldAppearIndeterminate() const
+bool HTMLProgressElement::matchesIndeterminatePseudoClass() const
 {
     return !isDeterminate();
 }

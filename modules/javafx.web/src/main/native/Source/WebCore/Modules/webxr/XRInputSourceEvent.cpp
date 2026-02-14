@@ -28,13 +28,14 @@
 
 #if ENABLE(WEBXR)
 
+#include "ContextDestructionObserverInlines.h"
 #include "WebXRFrame.h"
 #include "WebXRInputSource.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(XRInputSourceEvent);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(XRInputSourceEvent);
 
 Ref<XRInputSourceEvent> XRInputSourceEvent::create(const AtomString& type, const Init& initializer, IsTrusted isTrusted)
 {
@@ -42,7 +43,7 @@ Ref<XRInputSourceEvent> XRInputSourceEvent::create(const AtomString& type, const
 }
 
 XRInputSourceEvent::XRInputSourceEvent(const AtomString& type, const Init& initializer, IsTrusted isTrusted)
-    : Event(type, initializer, isTrusted)
+    : Event(EventInterfaceType::XRInputSourceEvent, type, initializer, isTrusted)
     , m_frame(initializer.frame)
     , m_inputSource(initializer.inputSource)
 {

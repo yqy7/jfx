@@ -29,10 +29,12 @@
 
 #include "UserStyleSheet.h"
 #include <memory>
-#include <wtf/FastMalloc.h>
-#include <wtf/HashMap.h>
+#include <wtf/CheckedRef.h>
 #include <wtf/RefPtr.h>
+#include <wtf/RobinHoodHashMap.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/Vector.h>
+#include <wtf/WeakRef.h>
 #include <wtf/text/WTFString.h>
 
 #if ENABLE(CONTENT_EXTENSIONS)
@@ -47,17 +49,22 @@ class Node;
 class StyleSheet;
 class StyleSheetContents;
 class StyleSheetList;
+class WeakPtrImplWithEventTargetData;
 
-class ExtensionStyleSheets {
-    WTF_MAKE_FAST_ALLOCATED;
+class ExtensionStyleSheets final : public CanMakeCheckedPtr<ExtensionStyleSheets> {
+    WTF_MAKE_TZONE_ALLOCATED(ExtensionStyleSheets);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(ExtensionStyleSheets);
 public:
     explicit ExtensionStyleSheets(Document&);
+    ~ExtensionStyleSheets();
 
     CSSStyleSheet* pageUserSheet();
     const Vector<RefPtr<CSSStyleSheet>>& documentUserStyleSheets() const { return m_userStyleSheets; }
     const Vector<RefPtr<CSSStyleSheet>>& injectedUserStyleSheets() const;
     const Vector<RefPtr<CSSStyleSheet>>& injectedAuthorStyleSheets() const;
     const Vector<RefPtr<CSSStyleSheet>>& authorStyleSheetsForTesting() const { return m_authorStyleSheetsForTesting; }
+
+    bool hasCachedInjectedStyleSheets() const;
 
     void clearPageUserSheet();
     void updatePageUserSheet();
@@ -81,13 +88,15 @@ public:
     void detachFromDocument();
 
 private:
-    Document& m_document;
+    Ref<Document> protectedDocument() const;
+
+    WeakRef<Document, WeakPtrImplWithEventTargetData> m_document;
 
     RefPtr<CSSStyleSheet> m_pageUserSheet;
 
     mutable Vector<RefPtr<CSSStyleSheet>> m_injectedUserStyleSheets;
     mutable Vector<RefPtr<CSSStyleSheet>> m_injectedAuthorStyleSheets;
-    mutable HashMap<RefPtr<CSSStyleSheet>, String> m_injectedStyleSheetToSource;
+    mutable HashMap<Ref<CSSStyleSheet>, String> m_injectedStyleSheetToSource;
     mutable bool m_injectedStyleSheetCacheValid { false };
 
     Vector<RefPtr<CSSStyleSheet>> m_userStyleSheets;
@@ -95,8 +104,8 @@ private:
     Vector<UserStyleSheet> m_pageSpecificStyleSheets;
 
 #if ENABLE(CONTENT_EXTENSIONS)
-    HashMap<String, RefPtr<CSSStyleSheet>> m_contentExtensionSheets;
-    HashMap<String, RefPtr<ContentExtensions::ContentExtensionStyleSheet>> m_contentExtensionSelectorSheets;
+    MemoryCompactRobinHoodHashMap<String, RefPtr<CSSStyleSheet>> m_contentExtensionSheets;
+    MemoryCompactRobinHoodHashMap<String, RefPtr<ContentExtensions::ContentExtensionStyleSheet>> m_contentExtensionSelectorSheets;
 #endif
 };
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,35 +25,37 @@
 
 package test.javafx.scene;
 
-import javafx.application.Platform;
-import javafx.scene.Group;
-import javafx.scene.control.Button;
-import javafx.scene.Scene;
-import javafx.stage.Stage;
-import junit.framework.Assert;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import test.util.Util;
-import test.util.memory.JMemoryBuddy;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-
-import static org.junit.Assert.fail;
-import static org.junit.Assert.assertTrue;
+import javafx.application.Platform;
+import javafx.scene.Group;
+import javafx.scene.Scene;
+import javafx.scene.control.Button;
+import javafx.stage.Stage;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import test.util.Util;
+import test.util.memory.JMemoryBuddy;
 
 
 public class StyleMemoryLeakTest {
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() throws Exception {
         CountDownLatch startupLatch = new CountDownLatch(1);
-        Platform.startup(() -> {
-            Platform.setImplicitExit(false);
+        Platform.setImplicitExit(false);
+
+        Util.startup(startupLatch, () -> {
             startupLatch.countDown();
         });
-        assertTrue("Timeout waiting for FX runtime to start", startupLatch.await(15, TimeUnit.SECONDS));
+    }
+
+    @AfterAll
+    public static void teardownOnce() {
+        Util.shutdown();
     }
 
     @Test
@@ -75,7 +77,7 @@ public class StyleMemoryLeakTest {
             });
 
             try {
-                assertTrue("Timeout waiting test stage", showingLatch.await(15, TimeUnit.SECONDS));
+                assertTrue(showingLatch.await(15, TimeUnit.SECONDS), "Timeout waiting test stage");
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
@@ -88,10 +90,5 @@ public class StyleMemoryLeakTest {
             checker.assertCollectable(stage.get());
             checker.setAsReferenced(toBeRemoved);
         });
-    }
-
-    @AfterClass
-    public static void teardownOnce() {
-        Platform.exit();
     }
 }

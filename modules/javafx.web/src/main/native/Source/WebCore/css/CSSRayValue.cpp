@@ -29,30 +29,34 @@
 #include "config.h"
 #include "CSSRayValue.h"
 
+#include "CSSPrimitiveNumericTypes+CSSValueVisitation.h"
+#include "CSSPrimitiveNumericTypes+Serialization.h"
+#include "CSSPrimitiveValueMappings.h"
+#include "CSSValueKeywords.h"
+#include <wtf/text/StringBuilder.h>
+
 namespace WebCore {
 
-String CSSRayValue::customCSSText() const
+String CSSRayValue::customCSSText(const CSS::SerializationContext& context) const
 {
     StringBuilder builder;
+    CSS::serializationForCSS(builder, context, m_ray);
 
-    builder.append("ray(");
-    builder.append(m_angle->cssText());
-    builder.append(" ");
-    builder.append(m_size->cssText());
-
-    if (m_isContaining)
-        builder.append(" contain");
-
-    builder.append(")");
+    if (m_coordinateBox != CSSBoxType::BoxMissing)
+        builder.append(' ', nameLiteralForSerialization(toCSSValueID(m_coordinateBox)));
 
     return builder.toString();
 }
 
 bool CSSRayValue::equals(const CSSRayValue& other) const
 {
-    return compareCSSValue(m_angle, other.m_angle)
-        && compareCSSValue(m_size, other.m_size)
-        && m_isContaining == other.m_isContaining;
+    return m_ray == other.m_ray
+        && m_coordinateBox == other.m_coordinateBox;
 }
 
+IterationStatus CSSRayValue::customVisitChildren(NOESCAPE const Function<IterationStatus(CSSValue&)>& func) const
+{
+    return CSS::visitCSSValueChildren(func, m_ray);
 }
+
+} // namespace WebCore

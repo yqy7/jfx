@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,23 +25,23 @@
 
 package test.javafx.scene.control.cell;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ObservableValue;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.TreeCell;
-import javafx.scene.control.TreeView;
 import javafx.scene.control.TreeItem;
+import javafx.scene.control.TreeView;
 import javafx.scene.control.cell.CheckBoxTreeCell;
 import javafx.util.Callback;
 import javafx.util.StringConverter;
-
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class CheckBoxTreeCellTest {
 
@@ -49,10 +49,11 @@ public class CheckBoxTreeCellTest {
     private Callback<TreeItem<Object>, ObservableValue<Boolean>> callback;
     private StringConverter<TreeItem<Object>> converter;
 
-    @Before public void setup() {
+    @BeforeEach
+    public void setup() {
         booleanProperty = new SimpleBooleanProperty(false);
         callback = param -> booleanProperty;
-        converter = new StringConverter<TreeItem<Object>>() {
+        converter = new StringConverter<>() {
             @Override public String toString(TreeItem<Object> object) {
                 return null;
             }
@@ -282,10 +283,12 @@ public class CheckBoxTreeCellTest {
      *
      **************************************************************************/
 
-    @Test(expected=NullPointerException.class)
+    @Test
     public void test_getSelectedPropertyIsNull() {
-        CheckBoxTreeCell<Object> cell = new CheckBoxTreeCell<>(null);
-        cell.updateItem("TEST", false);
+        assertThrows(NullPointerException.class, () -> {
+            CheckBoxTreeCell<Object> cell = new CheckBoxTreeCell<>(null);
+            cell.updateItem("TEST", false);
+        });
     }
 
     @Test public void test_updateItem_isEmpty_graphicIsNull() {
@@ -310,7 +313,7 @@ public class CheckBoxTreeCellTest {
     @Test public void test_updateItem_isNotEmpty_textIsNotNull() {
         CheckBoxTreeCell<Object> cell = new CheckBoxTreeCell<>(callback);
 
-        TreeItem<Object> treeItem = new TreeItem<Object>("TREEITEM TEST");
+        TreeItem<Object> treeItem = new TreeItem<>("TREEITEM TEST");
         cell.updateTreeItem(treeItem);
         cell.updateItem("TEST", false);
         assertNotNull(cell.getText());
@@ -321,7 +324,7 @@ public class CheckBoxTreeCellTest {
         CheckBoxTreeCell<Object> cell = new CheckBoxTreeCell<>(callback);
         cell.setConverter(null);
 
-        TreeItem<Object> treeItem = new TreeItem<Object>("TREEITEM TEST");
+        TreeItem<Object> treeItem = new TreeItem<>("TREEITEM TEST");
         cell.updateTreeItem(treeItem);
         cell.updateItem("TEST", false);
         assertNotNull(cell.getText());

@@ -22,17 +22,17 @@
 #pragma once
 
 #include "ActiveDOMObject.h"
-#include "BlobURL.h"
-#include "ExceptionOr.h"
+#include "EventTargetInterfaces.h"
 #include "FormData.h"
 #include "ResourceResponse.h"
 #include "SharedBuffer.h"
 #include "ThreadableLoaderClient.h"
+#include "Timer.h"
+#include "URLKeepingBlobAlive.h"
 #include "UserGestureIndicator.h"
 #include <wtf/URL.h>
 #include "XMLHttpRequestEventTarget.h"
-#include "XMLHttpRequestProgressEventThrottle.h"
-#include <variant>
+#include <wtf/CancellableTask.h>
 #include <wtf/text/StringBuilder.h>
 
 namespace JSC {
@@ -49,12 +49,21 @@ class SecurityOrigin;
 class TextResourceDecoder;
 class ThreadableLoader;
 class URLSearchParams;
+class XMLHttpRequestProgressEventThrottle;
 class XMLHttpRequestUpload;
+enum class ExceptionCode : uint8_t;
 struct OwnedString;
+template<typename> class ExceptionOr;
 
 class XMLHttpRequest final : public ActiveDOMObject, public RefCounted<XMLHttpRequest>, private ThreadableLoaderClient, public XMLHttpRequestEventTarget {
-    WTF_MAKE_ISO_ALLOCATED(XMLHttpRequest);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED_EXPORT(XMLHttpRequest, WEBCORE_EXPORT);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(XMLHttpRequest);
 public:
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
+
+    USING_CAN_MAKE_WEAKPTR(EventTarget);
+
     static Ref<XMLHttpRequest> create(ScriptExecutionContext&);
     WEBCORE_EXPORT ~XMLHttpRequest();
 
@@ -69,15 +78,15 @@ public:
 
     virtual void didReachTimeout();
 
-    EventTargetInterface eventTargetInterface() const override { return XMLHttpRequestEventTargetInterfaceType; }
+    enum EventTargetInterfaceType eventTargetInterface() const override { return EventTargetInterfaceType::XMLHttpRequest; }
     ScriptExecutionContext* scriptExecutionContext() const override { return ActiveDOMObject::scriptExecutionContext(); }
 
-    using SendTypes = std::variant<RefPtr<Document>, RefPtr<Blob>, RefPtr<JSC::ArrayBufferView>, RefPtr<JSC::ArrayBuffer>, RefPtr<DOMFormData>, String, RefPtr<URLSearchParams>>;
+    using SendTypes = Variant<RefPtr<Document>, RefPtr<Blob>, RefPtr<JSC::ArrayBufferView>, RefPtr<JSC::ArrayBuffer>, RefPtr<DOMFormData>, String, RefPtr<URLSearchParams>>;
 
     const URL& url() const { return m_url; }
     String statusText() const;
     int status() const;
-    State readyState() const;
+    State readyState() const { return static_cast<State>(m_readyState); }
     bool withCredentials() const { return m_includeCredentials; }
     ExceptionOr<void> setWithCredentials(bool);
     ExceptionOr<void> open(const String& method, const String& url);
@@ -92,7 +101,7 @@ public:
     String getResponseHeader(const String& name) const;
     ExceptionOr<OwnedString> responseText();
     String responseTextIgnoringResponseType() const { return m_responseBuilder.toStringPreserveCapacity(); }
-    enum class FinalMIMEType { Yes, No };
+    enum class FinalMIMEType : bool { No, Yes };
     String responseMIMEType(FinalMIMEType = FinalMIMEType::No) const;
 
     Document* optionalResponseXML() const { return m_responseDocument.get(); }
@@ -117,7 +126,7 @@ public:
         Text = 5,
     };
     ExceptionOr<void> setResponseType(ResponseType);
-    ResponseType responseType() const;
+    ResponseType responseType() const { return static_cast<ResponseType>(m_responseType); }
 
     String responseURL() const;
 
@@ -126,19 +135,19 @@ public:
 
     const ResourceResponse& resourceResponse() const { return m_response; }
 
-    using RefCounted<XMLHttpRequest>::ref;
-    using RefCounted<XMLHttpRequest>::deref;
-
     size_t memoryCost() const;
 
     using EventTarget::dispatchEvent;
     void dispatchEvent(Event&) override;
+
+    void dispatchThrottledProgressEventIfNeeded();
 
 private:
     friend class XMLHttpRequestUpload;
     explicit XMLHttpRequest(ScriptExecutionContext&);
 
     void updateHasRelevantEventListener();
+    void handleCancellation();
 
     // EventTarget.
     void eventListenersDidChange() final;
@@ -150,7 +159,6 @@ private:
     void suspend(ReasonForSuspension) override;
     void resume() override;
     void stop() override;
-    const char* activeDOMObjectName() const override;
     bool virtualHasPendingActivity() const final;
 
     void refEventTarget() override { ref(); }
@@ -161,10 +169,10 @@ private:
 
     // ThreadableLoaderClient
     void didSendData(unsigned long long bytesSent, unsigned long long totalBytesToBeSent) override;
-    void didReceiveResponse(ResourceLoaderIdentifier, const ResourceResponse&) override;
+    void didReceiveResponse(ScriptExecutionContextIdentifier, std::optional<ResourceLoaderIdentifier>, const ResourceResponse&) override;
     void didReceiveData(const SharedBuffer&) override;
-    void didFinishLoading(ResourceLoaderIdentifier, const NetworkLoadMetrics&) override;
-    void didFail(const ResourceError&) override;
+    void didFinishLoading(ScriptExecutionContextIdentifier, std::optional<ResourceLoaderIdentifier>, const NetworkLoadMetrics&) override;
+    void didFail(std::optional<ScriptExecutionContextIdentifier>, const ResourceError&) override;
     void notifyIsDone(bool) final;
 
     std::optional<ExceptionOr<void>> prepareToSend();
@@ -175,7 +183,7 @@ private:
     ExceptionOr<void> send(DOMFormData&);
     ExceptionOr<void> send(JSC::ArrayBuffer&);
     ExceptionOr<void> send(JSC::ArrayBufferView&);
-    ExceptionOr<void> sendBytesData(const void*, size_t);
+    ExceptionOr<void> sendBytesData(std::span<const uint8_t>);
 
     void changeState(State);
     void callReadyStateChangeListener();
@@ -207,17 +215,15 @@ private:
     unsigned m_error : 1;
     unsigned m_uploadListenerFlag : 1;
     unsigned m_uploadComplete : 1;
-    unsigned m_wasAbortedByClient : 1;
     unsigned m_responseCacheIsValid : 1;
     unsigned m_readyState : 3; // State
     unsigned m_responseType : 3; // ResponseType
 
     unsigned m_timeoutMilliseconds { 0 };
 
-    std::unique_ptr<XMLHttpRequestUpload> m_upload;
+    const std::unique_ptr<XMLHttpRequestUpload> m_upload;
 
-    URL m_url;
-    BlobURLHandle m_blobURLLifetimeExtension;
+    URLKeepingBlobAlive m_url;
     String m_method;
     HTTPHeaderMap m_requestHeaders;
     RefPtr<FormData> m_requestEntityBody;
@@ -244,7 +250,7 @@ private:
     // Used for progress event tracking.
     long long m_receivedLength { 0 };
 
-    XMLHttpRequestProgressEventThrottle m_progressEventThrottle;
+    const UniqueRef<XMLHttpRequestProgressEventThrottle> m_progressEventThrottle;
 
     mutable String m_allResponseHeaders;
 
@@ -254,17 +260,9 @@ private:
 
     std::optional<ExceptionCode> m_exceptionCode;
     RefPtr<UserGestureToken> m_userGestureToken;
-    std::atomic<bool> m_hasRelevantEventListener;
+    bool m_hasRelevantEventListener { false };
+    TaskCancellationGroup m_abortErrorGroup;
+    bool m_wasDidSendDataCalledForTotalBytes { false };
 };
-
-inline auto XMLHttpRequest::responseType() const -> ResponseType
-{
-    return static_cast<ResponseType>(m_responseType);
-}
-
-inline auto XMLHttpRequest::readyState() const -> State
-{
-    return static_cast<State>(m_readyState);
-}
 
 } // namespace WebCore

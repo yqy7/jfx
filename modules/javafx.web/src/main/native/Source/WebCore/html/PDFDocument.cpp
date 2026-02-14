@@ -25,27 +25,34 @@
 #include "config.h"
 #include "PDFDocument.h"
 
+#if ENABLE(PDFJS)
+
 #include "AddEventListenerOptions.h"
-#include "DOMWindow.h"
+#include "DocumentInlines.h"
 #include "DocumentLoader.h"
 #include "EventListener.h"
 #include "EventNames.h"
-#include "Frame.h"
 #include "HTMLAnchorElement.h"
 #include "HTMLBodyElement.h"
+#include "HTMLHeadElement.h"
 #include "HTMLHtmlElement.h"
 #include "HTMLIFrameElement.h"
+#include "HTMLLinkElement.h"
 #include "HTMLNames.h"
 #include "HTMLScriptElement.h"
+#include "LocalDOMWindow.h"
+#include "LocalFrame.h"
 #include "RawDataDocumentParser.h"
 #include "ScriptController.h"
 #include "Settings.h"
-#include <wtf/IsoMallocInlines.h>
-#include <wtf/text/StringConcatenateNumbers.h>
+#include "UserScriptTypes.h"
+#include "WindowPostMessageOptions.h"
+#include <JavaScriptCore/ObjectConstructor.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(PDFDocument);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(PDFDocument);
 
 using namespace HTMLNames;
 
@@ -59,14 +66,14 @@ public:
     }
 
 private:
-    PDFDocumentParser(PDFDocument& document)
+    explicit PDFDocumentParser(PDFDocument& document)
         : RawDataDocumentParser(document)
     {
     }
 
     PDFDocument& document() const;
 
-    void appendBytes(DocumentWriter&, const uint8_t*, size_t) override;
+    void appendBytes(DocumentWriter&, std::span<const uint8_t>) override;
     void finish() override;
 };
 
@@ -77,7 +84,7 @@ inline PDFDocument& PDFDocumentParser::document() const
     return downcast<PDFDocument>(*RawDataDocumentParser::document());
 }
 
-void PDFDocumentParser::appendBytes(DocumentWriter&, const uint8_t*, size_t)
+void PDFDocumentParser::appendBytes(DocumentWriter&, std::span<const uint8_t>)
 {
     document().updateDuringParsing();
 }
@@ -103,17 +110,17 @@ private:
     bool operator==(const EventListener&) const override;
     void handleEvent(ScriptExecutionContext&, Event&) override;
 
-    WeakPtr<PDFDocument> m_document;
+    WeakPtr<PDFDocument, WeakPtrImplWithEventTargetData> m_document;
 };
 
 void PDFDocumentEventListener::handleEvent(ScriptExecutionContext&, Event& event)
 {
     if (is<HTMLIFrameElement>(event.target()) && event.type() == eventNames().loadEvent) {
-        m_document->injectContentScript();
+        m_document->injectStyleAndContentScript();
     } else if (is<HTMLScriptElement>(event.target()) && event.type() == eventNames().loadEvent) {
         m_document->setContentScriptLoaded(true);
         if (m_document->isFinishedParsing())
-            m_document->sendPDFArrayBuffer();
+            m_document->finishLoadingPDF();
     } else
         ASSERT_NOT_REACHED();
 }
@@ -126,10 +133,12 @@ bool PDFDocumentEventListener::operator==(const EventListener& other) const
 
 /* PDFDocument */
 
-PDFDocument::PDFDocument(Frame& frame, const URL& url)
+PDFDocument::PDFDocument(LocalFrame& frame, const URL& url)
     : HTMLDocument(&frame, frame.settings(), url, { }, { DocumentClass::PDF })
 {
 }
+
+PDFDocument::~PDFDocument() = default;
 
 Ref<DocumentParser> PDFDocument::createParser()
 {
@@ -138,24 +147,24 @@ Ref<DocumentParser> PDFDocument::createParser()
 
 void PDFDocument::createDocumentStructure()
 {
-    // The empty file parameter prevents default pdf from loading.
-    auto viewerURL = "webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=";
-    auto rootElement = HTMLHtmlElement::create(*this);
+    // Description of parameters:
+    // - Empty `?file=` parameter prevents default pdf from loading.
+    auto viewerURL = "webkit-pdfjs-viewer://pdfjs/web/viewer.html?file="_s;
+    Ref rootElement = HTMLHtmlElement::create(*this);
     appendChild(rootElement);
-    rootElement->insertedByParser();
 
     frame()->injectUserScripts(UserScriptInjectionTime::DocumentStart);
 
-    auto body = HTMLBodyElement::create(*this);
-    body->setAttribute(styleAttr, AtomString("margin: 0px;height: 100vh;", AtomString::ConstructFromLiteral));
+    Ref body = HTMLBodyElement::create(*this);
+    body->setAttribute(styleAttr, "margin: 0px;height: 100vh;"_s);
     rootElement->appendChild(body);
 
     m_iframe = HTMLIFrameElement::create(HTMLNames::iframeTag, *this);
     m_iframe->setAttribute(srcAttr, AtomString(viewerURL));
-    m_iframe->setAttribute(styleAttr, AtomString("width: 100%; height: 100%; border: 0; display: block;", AtomString::ConstructFromLiteral));
+    m_iframe->setAttribute(styleAttr, "width: 100%; height: 100%; border: 0; display: block;"_s);
 
     m_listener = PDFDocumentEventListener::create(*this);
-    m_iframe->addEventListener("load", *m_listener, false);
+    m_iframe->addEventListener(eventNames().loadEvent, *m_listener, false);
 
     body->appendChild(*m_iframe);
 }
@@ -171,47 +180,86 @@ void PDFDocument::finishedParsing()
     ASSERT(m_iframe);
     m_isFinishedParsing = true;
     if (m_isContentScriptLoaded)
-        sendPDFArrayBuffer();
+        finishLoadingPDF();
+}
+
+void PDFDocument::postMessageToIframe(const String& name, JSC::JSObject* data)
+{
+    auto globalObject = this->globalObject();
+    auto& vm = globalObject->vm();
+    JSC::JSLockHolder lock(vm);
+
+    JSC::JSObject* message = constructEmptyObject(globalObject);
+    message->putDirect(vm, vm.propertyNames->message, JSC::jsNontrivialString(vm, name));
+    if (data)
+        message->putDirect(vm, JSC::Identifier::fromString(vm, "data"_s), data);
+
+    auto* contentFrame = dynamicDowncast<LocalFrame>(m_iframe->contentFrame());
+    if (!contentFrame)
+        return;
+    auto* contentWindow = contentFrame->window();
+    auto* contentWindowGlobalObject = m_iframe->contentDocument()->globalObject();
+
+    WindowPostMessageOptions options;
+    if (data)
+        options = WindowPostMessageOptions { "/"_s, Vector { JSC::Strong<JSC::JSObject> { vm, data } } };
+    auto returnValue = contentWindow->postMessage(*contentWindowGlobalObject, *contentWindow, message, WTFMove(options));
+    if (returnValue.hasException())
+        returnValue.releaseException();
 }
 
 void PDFDocument::sendPDFArrayBuffer()
 {
-    using namespace JSC;
+    auto* documentLoader = loader();
+    ASSERT(documentLoader);
+    if (auto mainResourceData = documentLoader->mainResourceData()) {
+        if (auto arrayBuffer = mainResourceData->tryCreateArrayBuffer()) {
+    auto& vm = globalObject()->vm();
+    JSC::JSLockHolder lock(vm);
+    auto* dataObject = JSC::JSArrayBuffer::create(vm, globalObject()->arrayBufferStructure(arrayBuffer->sharingMode()), WTFMove(arrayBuffer));
+    postMessageToIframe("open-pdf"_s, dataObject);
+        }
+    }
+}
 
-    auto* frame = m_iframe->contentFrame();
-    // FIXME: https://bugs.webkit.org/show_bug.cgi?id=236668 - Use postMessage
-    auto openFunction = frame->script().executeScriptIgnoringException("PDFJSContentScript.open").getObject();
+void PDFDocument::finishLoadingPDF()
+{
+    sendPDFArrayBuffer();
 
-    auto globalObject = this->globalObject();
-    auto& vm = globalObject->vm();
-
-    JSLockHolder lock(vm);
-    auto callData = getCallData(vm, openFunction);
-    ASSERT(callData.type != CallData::Type::None);
-    MarkedArgumentBuffer arguments;
-    auto arrayBuffer = loader()->mainResourceData()->tryCreateArrayBuffer();
-    if (!arrayBuffer) {
-        ASSERT_NOT_REACHED();
-        return;
+    if (m_script) {
+        m_script->removeEventListener(eventNames().loadEvent, *m_listener, { });
+        m_script = nullptr;
     }
 
-    auto sharingMode = arrayBuffer->sharingMode();
-    arguments.append(JSArrayBuffer::create(vm, globalObject->arrayBufferStructure(sharingMode), WTFMove(arrayBuffer)));
-    ASSERT(!arguments.hasOverflowed());
-
-    call(globalObject, openFunction, callData, globalObject, arguments);
+    m_listener = nullptr;
 }
 
-void PDFDocument::injectContentScript()
+void PDFDocument::injectStyleAndContentScript()
 {
-    auto contentDocument = m_iframe->contentDocument();
+    if (m_injectedStyleAndScript)
+        return;
+
+    auto* contentDocument = m_iframe->contentDocument();
+    ASSERT(contentDocument->head());
+    Ref link = HTMLLinkElement::create(HTMLNames::linkTag, *contentDocument, false);
+    link->setAttribute(relAttr, "stylesheet"_s);
+#if PLATFORM(COCOA)
+    link->setAttribute(hrefAttr, "webkit-pdfjs-viewer://pdfjs/extras/cocoa/style.css"_s);
+#elif PLATFORM(GTK) || PLATFORM(WPE)
+    link->setAttribute(hrefAttr, "webkit-pdfjs-viewer://pdfjs/extras/adwaita/style.css"_s);
+#endif
+    contentDocument->head()->appendChild(link);
+
     ASSERT(contentDocument->body());
+    m_script = HTMLScriptElement::create(scriptTag, *contentDocument, false);
+    ASSERT(m_listener);
+    m_script->addEventListener(eventNames().loadEvent, *m_listener, false);
+    m_script->setAttribute(srcAttr, "webkit-pdfjs-viewer://pdfjs/extras/content-script.js"_s);
+    contentDocument->body()->appendChild(*m_script);
 
-    auto script = HTMLScriptElement::create(scriptTag, *contentDocument, false);
-    script->addEventListener("load", m_listener.releaseNonNull(), false);
-
-    script->setAttribute(srcAttr, "webkit-pdfjs-viewer://pdfjs/extras/content-script.js");
-    contentDocument->body()->appendChild(script);
+    m_injectedStyleAndScript = true;
 }
 
-}
+} // namepsace WebCore
+
+#endif // ENABLE(PDFJS)

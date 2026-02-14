@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2025 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,44 +24,49 @@
 #include "Chrome.h"
 #include "ChromeClient.h"
 #include "CommonVM.h"
+#include "ContainerNodeInlines.h"
 #include "ContentSecurityPolicy.h"
 #include "DocumentLoader.h"
 #include "ElementInlines.h"
+#include "EventLoop.h"
 #include "EventNames.h"
-#include "Frame.h"
-#include "FrameLoaderClient.h"
+#include "GCReachableRef.h"
 #include "HTMLImageLoader.h"
 #include "JSDOMConvertBoolean.h"
 #include "JSDOMConvertInterface.h"
 #include "JSDOMConvertStrings.h"
 #include "JSShadowRoot.h"
 #include "LegacySchemeRegistry.h"
+#include "LocalFrame.h"
+#include "LocalFrameLoaderClient.h"
 #include "LocalizedStrings.h"
 #include "Logging.h"
 #include "MouseEvent.h"
 #include "Page.h"
 #include "PlatformMouseEvent.h"
 #include "PluginViewBase.h"
+#include "RemoteFrame.h"
 #include "RenderImage.h"
 #include "RenderTreeUpdater.h"
 #include "ScriptController.h"
+#include "ScriptDisallowedScope.h"
 #include "SecurityOrigin.h"
 #include "Settings.h"
 #include "ShadowRoot.h"
 #include "StyleTreeResolver.h"
 #include "SubframeLoader.h"
-#include "TypedElementDescendantIterator.h"
+#include "TypedElementDescendantIteratorInlines.h"
 #include "UserGestureIndicator.h"
 #include <JavaScriptCore/CatchScope.h>
 #include <JavaScriptCore/JSGlobalObjectInlines.h>
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLPlugInImageElement);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(HTMLPlugInImageElement);
 
 HTMLPlugInImageElement::HTMLPlugInImageElement(const QualifiedName& tagName, Document& document)
-    : HTMLPlugInElement(tagName, document)
+    : HTMLPlugInElement(tagName, document, TypeFlag::HasDidMoveToNewDocument)
 {
 }
 
@@ -79,7 +84,7 @@ RenderEmbeddedObject* HTMLPlugInImageElement::renderEmbeddedObject() const
 
 bool HTMLPlugInImageElement::isImageType()
 {
-    if (m_serviceType.isEmpty() && protocolIs(m_url, "data"))
+    if (m_serviceType.isEmpty() && protocolIs(m_url, "data"_s))
         m_serviceType = mimeTypeFromDataURL(m_url);
 
     if (RefPtr frame = document().frame())
@@ -93,12 +98,13 @@ bool HTMLPlugInImageElement::canLoadURL(const String& relativeURL) const
     return canLoadURL(document().completeURL(relativeURL));
 }
 
-// Note that unlike HTMLFrameElementBase::canLoadURL this uses SecurityOrigin::canAccess.
 bool HTMLPlugInImageElement::canLoadURL(const URL& completeURL) const
 {
     if (completeURL.protocolIsJavaScript()) {
+        if (is<RemoteFrame>(contentFrame()))
+            return false;
         RefPtr<Document> contentDocument = this->contentDocument();
-        if (contentDocument && !document().securityOrigin().isSameOriginDomain(contentDocument->securityOrigin()))
+        if (contentDocument && !document().protectedSecurityOrigin()->isSameOriginDomain(contentDocument->securityOrigin()))
             return false;
     }
 
@@ -134,7 +140,7 @@ RenderPtr<RenderElement> HTMLPlugInImageElement::createElementRenderer(RenderSty
         return RenderElement::createFor(*this, WTFMove(style));
 
     if (isImageType())
-        return createRenderer<RenderImage>(*this, WTFMove(style));
+        return createRenderer<RenderImage>(RenderObject::Type::Image, *this, WTFMove(style));
 
     return HTMLPlugInElement::createElementRenderer(WTFMove(style), insertionPosition);
 }
@@ -144,10 +150,10 @@ bool HTMLPlugInImageElement::childShouldCreateRenderer(const Node& child) const
     return HTMLPlugInElement::childShouldCreateRenderer(child);
 }
 
-void HTMLPlugInImageElement::willRecalcStyle(Style::Change change)
+void HTMLPlugInImageElement::willRecalcStyle(OptionSet<Style::Change> change)
 {
     // Make sure style recalcs scheduled by a child shadow tree don't trigger reconstruction and cause flicker.
-    if (change == Style::Change::None && styleValidity() == Style::Validity::Valid)
+    if (!change && styleValidity() == Style::Validity::Valid)
         return;
 
     // FIXME: There shoudn't be need to force render tree reconstruction here.
@@ -156,7 +162,7 @@ void HTMLPlugInImageElement::willRecalcStyle(Style::Change change)
         invalidateStyleAndRenderersForSubtree();
 }
 
-void HTMLPlugInImageElement::didRecalcStyle(Style::Change styleChange)
+void HTMLPlugInImageElement::didRecalcStyle(OptionSet<Style::Change> styleChange)
 {
     scheduleUpdateForAfterStyleResolution();
 
@@ -169,10 +175,12 @@ void HTMLPlugInImageElement::didAttachRenderers()
     scheduleUpdateForAfterStyleResolution();
 
     // Update the RenderImageResource of the associated RenderImage.
-    if (m_imageLoader && is<RenderImage>(renderer())) {
-        auto& renderImageResource = downcast<RenderImage>(*renderer()).imageResource();
+    if (m_imageLoader) {
+        if (auto* renderImage = dynamicDowncast<RenderImage>(renderer())) {
+            auto& renderImageResource = renderImage->imageResource();
         if (!renderImageResource.cachedImage())
-            renderImageResource.setCachedImage(m_imageLoader->image());
+                renderImageResource.setCachedImage(m_imageLoader->protectedImage());
+    }
     }
 
     HTMLPlugInElement::didAttachRenderers();
@@ -180,9 +188,8 @@ void HTMLPlugInImageElement::didAttachRenderers()
 
 void HTMLPlugInImageElement::willDetachRenderers()
 {
-    RefPtr widget = pluginWidget(PluginLoadingPolicy::DoNotLoad);
-    if (is<PluginViewBase>(widget))
-        downcast<PluginViewBase>(*widget).willDetachRenderer();
+    if (RefPtr widget = pluginWidget(PluginLoadingPolicy::DoNotLoad))
+        widget->willDetachRenderer();
 
     HTMLPlugInElement::willDetachRenderers();
 }
@@ -196,8 +203,8 @@ void HTMLPlugInImageElement::scheduleUpdateForAfterStyleResolution()
 
     m_hasUpdateScheduledForAfterStyleResolution = true;
 
-    Style::deprecatedQueuePostResolutionCallback([protectedThis = Ref { *this }] {
-        protectedThis->updateAfterStyleResolution();
+    document().eventLoop().queueTask(TaskSource::DOMManipulation, [element = GCReachableRef { *this }] {
+        element->updateAfterStyleResolution();
     });
 }
 
@@ -212,7 +219,7 @@ void HTMLPlugInImageElement::updateAfterStyleResolution()
     if (renderer() && !useFallbackContent()) {
         if (isImageType()) {
             if (!m_imageLoader)
-                m_imageLoader = makeUnique<HTMLImageLoader>(*this);
+                lazyInitialize(m_imageLoader, makeUniqueWithoutRefCountedCheck<HTMLImageLoader>(*this));
             if (m_needsImageReload)
                 m_imageLoader->updateFromElementIgnoringPreviousError();
             else
@@ -267,14 +274,7 @@ void HTMLPlugInImageElement::resumeFromDocumentSuspension()
 
 bool HTMLPlugInImageElement::shouldBypassCSPForPDFPlugin(const String& contentType) const
 {
-#if ENABLE(PDFKIT_PLUGIN)
-    // We only consider bypassing this CSP check if plugins are disabled. In that case we know that
-    // any plugin used is a browser implementation detail. It is not safe to skip this check
-    // if plugins are enabled in case an external plugin is used to load PDF content.
-    // FIXME: Check for alternative PDF plugins here so we can bypass this CSP check for PDFPlugin even when plugins are enabled.
-    if (document().frame()->arePluginsEnabled())
-        return false;
-
+#if ENABLE(PDF_PLUGIN)
     return document().frame()->loader().client().shouldUsePDFPlugin(contentType, document().url().path());
 #else
     UNUSED_PARAM(contentType);
@@ -288,24 +288,25 @@ bool HTMLPlugInImageElement::canLoadPlugInContent(const String& relativeURL, con
     if (isInUserAgentShadowTree())
         return true;
 
+    Ref document = this->document();
     URL completedURL;
     if (!relativeURL.isEmpty())
-        completedURL = document().completeURL(relativeURL);
+        completedURL = document->completeURL(relativeURL);
 
-    ASSERT(document().contentSecurityPolicy());
-    const ContentSecurityPolicy& contentSecurityPolicy = *document().contentSecurityPolicy();
+    ASSERT(document->contentSecurityPolicy());
+    CheckedRef contentSecurityPolicy = *document->contentSecurityPolicy();
 
-    contentSecurityPolicy.upgradeInsecureRequestIfNeeded(completedURL, ContentSecurityPolicy::InsecureRequestType::Load);
+    contentSecurityPolicy->upgradeInsecureRequestIfNeeded(completedURL, ContentSecurityPolicy::InsecureRequestType::Load);
 
-    if (!shouldBypassCSPForPDFPlugin(mimeType) && !contentSecurityPolicy.allowObjectFromSource(completedURL))
+    if (!shouldBypassCSPForPDFPlugin(mimeType) && !contentSecurityPolicy->allowObjectFromSource(completedURL))
         return false;
 
-    auto& declaredMimeType = document().isPluginDocument() && document().ownerElement() ?
-        document().ownerElement()->attributeWithoutSynchronization(HTMLNames::typeAttr) : attributeWithoutSynchronization(HTMLNames::typeAttr);
-    return contentSecurityPolicy.allowPluginType(mimeType, declaredMimeType, completedURL);
+    auto& declaredMIMEType = document->isPluginDocument() && document->ownerElement() ?
+        document->ownerElement()->attributeWithoutSynchronization(HTMLNames::typeAttr) : attributeWithoutSynchronization(HTMLNames::typeAttr);
+    return contentSecurityPolicy->allowPluginType(mimeType, declaredMIMEType, completedURL);
 }
 
-bool HTMLPlugInImageElement::requestObject(const String& relativeURL, const String& mimeType, const Vector<String>& paramNames, const Vector<String>& paramValues)
+bool HTMLPlugInImageElement::requestObject(const String& relativeURL, const String& mimeType, const Vector<AtomString>& paramNames, const Vector<AtomString>& paramValues)
 {
     ASSERT(document().frame());
 
@@ -313,14 +314,26 @@ bool HTMLPlugInImageElement::requestObject(const String& relativeURL, const Stri
         return false;
 
     if (!canLoadPlugInContent(relativeURL, mimeType)) {
-        renderEmbeddedObject()->setPluginUnavailabilityReason(RenderEmbeddedObject::PluginBlockedByContentSecurityPolicy);
+        renderEmbeddedObject()->setPluginUnavailabilityReason(PluginUnavailabilityReason::PluginBlockedByContentSecurityPolicy);
         return false;
     }
 
     if (HTMLPlugInElement::requestObject(relativeURL, mimeType, paramNames, paramValues))
         return true;
 
-    return document().frame()->loader().subframeLoader().requestObject(*this, relativeURL, getNameAttribute(), mimeType, paramNames, paramValues);
+    Ref document = this->document();
+    if (ScriptDisallowedScope::InMainThread::isScriptAllowed())
+        return document->frame()->loader().subframeLoader().requestObject(*this, relativeURL, getNameAttribute(), mimeType, paramNames, paramValues);
+
+    document->eventLoop().queueTask(TaskSource::Networking, [this, protectedThis = Ref { *this }, relativeURL, nameAttribute = getNameAttribute(), mimeType, paramNames, paramValues, document]() mutable {
+        if (!this->isConnected() || &this->document() != document.ptr())
+            return;
+        RefPtr frame = this->document().frame();
+        if (!frame)
+            return;
+        frame->loader().subframeLoader().requestObject(*this, relativeURL, nameAttribute, mimeType, paramNames, paramValues);
+    });
+    return true;
 }
 
 void HTMLPlugInImageElement::updateImageLoaderWithNewURLSoon()

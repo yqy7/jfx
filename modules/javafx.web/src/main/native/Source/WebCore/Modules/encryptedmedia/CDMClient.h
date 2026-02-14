@@ -34,16 +34,25 @@
 #include <wtf/WeakPtr.h>
 
 namespace WebCore {
+class CDMClient;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::CDMClient> : std::true_type { };
+}
+
+namespace WebCore {
 
 class CDMInstance;
-class FragmentedSharedBuffer;
+class SharedBuffer;
 
 class CDMClient : public CanMakeWeakPtr<CDMClient> {
 public:
     virtual ~CDMClient() = default;
 
     virtual void cdmClientAttemptToResumePlaybackIfNecessary() = 0;
-    virtual void cdmClientUnrequestedInitializationDataReceived(const String&, Ref<FragmentedSharedBuffer>&&) = 0;
+    virtual void cdmClientUnrequestedInitializationDataReceived(const String&, Ref<SharedBuffer>&&) = 0;
 };
 
 } // namespace WebCore

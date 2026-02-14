@@ -35,7 +35,7 @@ namespace JSC {
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(IntlLocaleConstructor);
 
-const ClassInfo IntlLocaleConstructor::s_info = { "Function", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(IntlLocaleConstructor) };
+const ClassInfo IntlLocaleConstructor::s_info = { "Function"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(IntlLocaleConstructor) };
 
 IntlLocaleConstructor* IntlLocaleConstructor::create(VM& vm, Structure* structure, IntlLocalePrototype* localePrototype)
 {
@@ -92,7 +92,7 @@ JSC_DEFINE_HOST_FUNCTION(callIntlLocale, (JSGlobalObject* globalObject, CallFram
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "Locale"));
+    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "Locale"_s));
 }
 
 } // namespace JSC

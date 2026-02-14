@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,25 +24,16 @@
  */
 package javafx.scene.control.skin;
 
-import com.sun.javafx.scene.ParentHelper;
-import com.sun.javafx.scene.control.behavior.BehaviorBase;
-import com.sun.javafx.scene.traversal.Algorithm;
-import com.sun.javafx.scene.control.FakeFocusTextField;
-import com.sun.javafx.scene.traversal.Direction;
-import com.sun.javafx.scene.traversal.ParentTraversalEngine;
-import javafx.scene.control.Accordion;
-import javafx.scene.control.Button;
-import javafx.scene.control.Control;
-import javafx.scene.control.SkinBase;
-import com.sun.javafx.scene.control.behavior.SpinnerBehavior;
-import com.sun.javafx.scene.traversal.TraversalContext;
-import javafx.collections.ListChangeListener;
+import java.util.List;
+
 import javafx.css.PseudoClass;
 import javafx.geometry.HPos;
 import javafx.geometry.VPos;
 import javafx.scene.AccessibleAction;
 import javafx.scene.AccessibleRole;
 import javafx.scene.Node;
+import javafx.scene.control.Control;
+import javafx.scene.control.SkinBase;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.TextField;
 import javafx.scene.input.KeyCode;
@@ -50,11 +41,19 @@ import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 
-import java.util.List;
+import com.sun.javafx.scene.ParentHelper;
+import com.sun.javafx.scene.control.FakeFocusTextField;
+import com.sun.javafx.scene.control.ListenerHelper;
+import com.sun.javafx.scene.control.behavior.SpinnerBehavior;
+import com.sun.javafx.scene.traversal.Algorithm;
+import com.sun.javafx.scene.traversal.Direction;
+import com.sun.javafx.scene.traversal.ParentTraversalEngine;
+import com.sun.javafx.scene.traversal.TraversalContext;
 
 /**
  * Default skin implementation for the {@link Spinner} control.
  *
+ * @param <T> the type of all values that can be iterated through in the Spinner
  * @see Spinner
  * @since 9
  */
@@ -83,9 +82,8 @@ public class SpinnerSkin<T> extends SkinBase<Spinner<T>> {
     private static final int SPLIT_ARROWS_HORIZONTAL    = 5;
 
     private int layoutMode = 0;
-
-    private final SpinnerBehavior behavior;
-
+    /* Package-private for testing purposes */
+    final SpinnerBehavior behavior;
 
 
     /* *************************************************************************
@@ -106,13 +104,15 @@ public class SpinnerSkin<T> extends SkinBase<Spinner<T>> {
 
         // install default input map for the Button control
         behavior = new SpinnerBehavior<>(control);
-//        control.setInputMap(behavior.getInputMap());
 
         textField = control.getEditor();
-        getChildren().add(textField);
+
+        ListenerHelper lh = ListenerHelper.get(this);
 
         updateStyleClass();
-        control.getStyleClass().addListener((ListChangeListener<String>) c -> updateStyleClass());
+        lh.addListChangeListener(control.getStyleClass(), (ch) -> {
+            updateStyleClass();
+        });
 
         // increment / decrement arrows
         incrementArrow = new Region();
@@ -123,6 +123,7 @@ public class SpinnerSkin<T> extends SkinBase<Spinner<T>> {
         incrementArrow.setMouseTransparent(true);
 
         incrementArrowButton = new StackPane() {
+            @Override
             public void executeAccessibleAction(AccessibleAction action, Object... parameters) {
                 switch (action) {
                     case FIRE: getSkinnable().increment(); break;
@@ -148,6 +149,7 @@ public class SpinnerSkin<T> extends SkinBase<Spinner<T>> {
         decrementArrow.setMouseTransparent(true);
 
         decrementArrowButton = new StackPane() {
+            @Override
             public void executeAccessibleAction(AccessibleAction action, Object... parameters) {
                 switch (action) {
                     case FIRE: getSkinnable().decrement(); break;
@@ -170,26 +172,26 @@ public class SpinnerSkin<T> extends SkinBase<Spinner<T>> {
         // Fixes in the same vein as ComboBoxListViewSkin
 
         // move fake focus in to the textfield if the spinner is editable
-        control.focusedProperty().addListener((ov, t, hasFocus) -> {
-            // Fix for the regression noted in a comment in RT-29885.
-            ((FakeFocusTextField)textField).setFakeFocus(hasFocus);
+        lh.addChangeListener(control.focusedProperty(), (op) -> {
+            // Fix for the regression noted in a comment in JDK-8115009.
+            ((FakeFocusTextField)textField).setFakeFocus(control.isFocused());
         });
 
-        control.addEventFilter(KeyEvent.ANY, ke -> {
+        lh.addEventFilter(control, KeyEvent.ANY, (ke) -> {
             if (control.isEditable()) {
                 // This prevents a stack overflow from our rebroadcasting of the
                 // event to the textfield that occurs in the final else statement
                 // of the conditions below.
                 if (ke.getTarget().equals(textField)) return;
 
-                // Fix for RT-38527 which led to a stack overflow
+                // Fix for JDK-8095537 which led to a stack overflow
                 if (ke.getCode() == KeyCode.ESCAPE) return;
 
                 // This and the additional check of isIncDecKeyEvent in
                 // textField's event filter fix JDK-8185937.
                 if (isIncDecKeyEvent(ke)) return;
 
-                // Fix for the regression noted in a comment in RT-29885.
+                // Fix for the regression noted in a comment in JDK-8115009.
                 // This forwards the event down into the TextField when
                 // the key event is actually received by the Spinner.
                 textField.fireEvent(ke.copyFor(textField, textField));
@@ -205,35 +207,35 @@ public class SpinnerSkin<T> extends SkinBase<Spinner<T>> {
         // Spinner control. Without this the up/down/left/right arrow keys don't
         // work when you click inside the TextField area (but they do in the case
         // of tabbing in).
-        textField.addEventFilter(KeyEvent.ANY, ke -> {
+        lh.addEventFilter(textField, KeyEvent.ANY, (ke) -> {
             if (! control.isEditable() || isIncDecKeyEvent(ke)) {
                 control.fireEvent(ke.copyFor(control, control));
                 ke.consume();
             }
         });
 
-        textField.focusedProperty().addListener((ov, t, hasFocus) -> {
-            // Fix for RT-29885
+        lh.addChangeListener(textField.focusedProperty(), (op) -> {
+            boolean hasFocus = textField.isFocused();
+            // Fix for JDK-8115009
             control.getProperties().put("FOCUSED", hasFocus);
-            // --- end of RT-29885
+            // --- end of JDK-8115009
 
-            // RT-21454 starts here
+            // JDK-8120120 starts here
             if (! hasFocus) {
                 pseudoClassStateChanged(CONTAINS_FOCUS_PSEUDOCLASS_STATE, false);
             } else {
                 pseudoClassStateChanged(CONTAINS_FOCUS_PSEUDOCLASS_STATE, true);
             }
-            // --- end of RT-21454
+            // --- end of JDK-8120120
         });
 
         // end of comboBox-esque fixes
 
         textField.focusTraversableProperty().bind(control.editableProperty());
 
-
         // Following code borrowed from ComboBoxPopupControl, to resolve the
-        // issue initially identified in RT-36902, but specifically (for Spinner)
-        // identified in RT-40625
+        // issue initially identified in JDK-8094715, but specifically (for Spinner)
+        // identified in JDK-8092584
         ParentHelper.setTraversalEngine(control,
                 new ParentTraversalEngine(control, new Algorithm() {
 
@@ -249,6 +251,11 @@ public class SpinnerSkin<T> extends SkinBase<Spinner<T>> {
                 return null;
             }
         }));
+
+        lh.addChangeListener(control.sceneProperty(), (op) -> {
+            // Stop spinning when sceneProperty is modified
+            behavior.stopSpinning();
+        });
     }
 
     private boolean isIncDecKeyEvent(KeyEvent ke) {
@@ -262,13 +269,27 @@ public class SpinnerSkin<T> extends SkinBase<Spinner<T>> {
      *                                                                         *
      **************************************************************************/
 
+    @Override
+    public void install() {
+        // when replacing the skin, the textField (which comes from the control), must first be uninstalled
+        // by the old skin in its dispose(), followed by (re-)adding it here.
+        getChildren().add(textField);
+    }
+
     /** {@inheritDoc} */
-    @Override public void dispose() {
-        super.dispose();
+    @Override
+    public void dispose() {
+        if (getSkinnable() == null) {
+            return;
+        }
+
+        getChildren().removeAll(textField, incrementArrowButton, decrementArrowButton);
 
         if (behavior != null) {
             behavior.dispose();
         }
+
+        super.dispose();
     }
 
     /** {@inheritDoc} */
@@ -396,7 +417,7 @@ public class SpinnerSkin<T> extends SkinBase<Spinner<T>> {
     }
 
     // Overridden so that we use the textfield as the baseline, rather than the arrow.
-    // See RT-30754 for more information.
+    // See JDK-8115826 for more information.
     /** {@inheritDoc} */
     @Override protected double computeBaselineOffset(double topInset, double rightInset, double bottomInset, double leftInset) {
         return textField.getLayoutBounds().getMinY() + textField.getLayoutY() + textField.getBaselineOffset();

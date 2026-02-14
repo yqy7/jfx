@@ -59,7 +59,8 @@ CPP_SOURCES = dshowwrapper/Allocator.cpp \
               dshowwrapper/dshowwrapper.cpp \
               dshowwrapper/Sink.cpp \
               dshowwrapper/Src.cpp \
-              mfwrapper/mfwrapper.cpp
+              mfwrapper/mfwrapper.cpp \
+              mfwrapper/mfgstbuffer.cpp
 
 COMPILER_FLAGS = -nologo -W3 -WX- -EHsc -GS -fp:precise \
                  -Zc:wchar_t -Zc:forScope- -analyze- -errorReport:queue -Gm-
@@ -77,6 +78,7 @@ INCLUDES =  $(addprefix -I$(SRCBASE_DIR)/,$(DIRLIST)) \
 
 CFLAGS =   -DWIN32 \
            -D_WINDOWS \
+           -D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR \
            -D_USRDLL \
            -DENABLE_PULL_MODE=1 \
            -DENABLE_SOURCE_SEEKING=1 \
@@ -91,7 +93,7 @@ CFLAGS =   -DWIN32 \
            -D_WINDLL \
            -D_MBCS \
            -DINITGUID \
-	   $(INCLUDES) \
+           $(INCLUDES) \
            $(COMPILER_FLAGS)
 
 OBJECTS = $(patsubst %.cpp,$(OBJBASE_DIR)/%.obj,$(CPP_SOURCES)) $(patsubst %.c,$(OBJBASE_DIR)/%.obj,$(C_SOURCES))
@@ -111,6 +113,12 @@ ifeq ($(ARCH), x32)
 else
     CFLAGS += -D_WIN64
     LDFLAGS += -MACHINE:x64
+endif
+
+# Enables reproducible builds when defined
+ifdef SOURCE_DATE_EPOCH
+    CFLAGS += -experimental:deterministic
+    LDFLAGS += -experimental:deterministic
 endif
 
 LIBS = $(addprefix $(BUILD_DIR)/,$(MODULES))

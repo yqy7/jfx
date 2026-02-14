@@ -49,16 +49,12 @@ public:
         object->finishCreation(vm, symbol);
         return object;
     }
-    static SymbolObject* create(VM&, JSGlobalObject*, Symbol*);
 
     DECLARE_EXPORT_INFO;
 
     Symbol* internalValue() const { return asSymbol(JSWrapperObject::internalValue()); }
 
-    static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
-    {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
-    }
+    inline static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
 private:
     JS_EXPORT_PRIVATE void finishCreation(VM&, Symbol*);

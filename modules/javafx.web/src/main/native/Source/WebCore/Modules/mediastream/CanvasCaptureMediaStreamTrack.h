@@ -27,6 +27,7 @@
 #if ENABLE(MEDIA_STREAM)
 
 #include "CanvasBase.h"
+#include "CanvasObserver.h"
 #include "MediaStreamTrack.h"
 #include "Timer.h"
 #include <wtf/TypeCasts.h>
@@ -39,30 +40,33 @@ class HTMLCanvasElement;
 class Image;
 
 class CanvasCaptureMediaStreamTrack final : public MediaStreamTrack {
-    WTF_MAKE_ISO_ALLOCATED(CanvasCaptureMediaStreamTrack);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(CanvasCaptureMediaStreamTrack);
 public:
     static Ref<CanvasCaptureMediaStreamTrack> create(Document&, Ref<HTMLCanvasElement>&&, std::optional<double>&& frameRequestRate);
 
     HTMLCanvasElement& canvas() { return m_canvas.get(); }
     void requestFrame() { static_cast<Source&>(source()).requestFrame(); }
 
+    RefPtr<VideoFrame> grabFrame();
+
     RefPtr<MediaStreamTrack> clone() final;
 
 private:
-    const char* activeDOMObjectName() const override;
-
-    class Source final : public RealtimeMediaSource, private CanvasObserver, private CanvasDisplayBufferObserver {
+    class Source final : public RealtimeMediaSource, private CanvasObserver, private CanvasDisplayBufferObserver, public ThreadSafeRefCountedAndCanMakeThreadSafeWeakPtr<Source, WTF::DestructionThread::MainRunLoop> {
     public:
         static Ref<Source> create(HTMLCanvasElement&, std::optional<double>&& frameRequestRate);
 
         void requestFrame() { m_shouldEmitFrame = true; }
         std::optional<double> frameRequestRate() const { return m_frameRequestRate; }
+        RefPtr<VideoFrame> grabFrame();
+
+        WTF_ABSTRACT_THREAD_SAFE_REF_COUNTED_AND_CAN_MAKE_WEAK_PTR_IMPL;
 
     private:
         Source(HTMLCanvasElement&, std::optional<double>&&);
 
         // CanvasObserver overrides.
-        void canvasChanged(CanvasBase&, const std::optional<FloatRect>&) final;
+        void canvasChanged(CanvasBase&, const FloatRect&) final;
         void canvasResized(CanvasBase&) final;
         void canvasDestroyed(CanvasBase&) final;
 
@@ -84,8 +88,11 @@ private:
         Timer m_requestFrameTimer;
         Timer m_captureCanvasTimer;
         std::optional<RealtimeMediaSourceSettings> m_currentSettings;
-        HTMLCanvasElement* m_canvas;
+        WeakPtr<HTMLCanvasElement, WeakPtrImplWithEventTargetData> m_canvas;
         RefPtr<Image> m_currentImage;
+#if USE(GSTREAMER)
+        MediaTime m_presentationTimeStamp { MediaTime::zeroTime() };
+#endif
     };
 
     CanvasCaptureMediaStreamTrack(Document&, Ref<HTMLCanvasElement>&&, Ref<Source>&&);
@@ -93,7 +100,7 @@ private:
 
     bool isCanvas() const final { return true; }
 
-    Ref<HTMLCanvasElement> m_canvas;
+    const Ref<HTMLCanvasElement> m_canvas;
 };
 
 }

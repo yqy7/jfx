@@ -24,19 +24,22 @@
 
 #pragma once
 
-#if USE(LIBWEBRTC)
+#if ENABLE(WEB_RTC) && USE(LIBWEBRTC)
 
 #include "ExceptionCode.h"
 #include "LibWebRTCMacros.h"
 #include "LibWebRTCUtils.h"
 
-ALLOW_UNUSED_PARAMETERS_BEGIN
-ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_BEGIN
 
+// See Bug 274508: Disable thread-safety-reference-return warnings in libwebrtc
+IGNORE_CLANG_WARNINGS_BEGIN("thread-safety-reference-return")
+IGNORE_CLANG_WARNINGS_BEGIN("nullability-completeness")
 #include <webrtc/api/peer_connection_interface.h>
+IGNORE_CLANG_WARNINGS_END
+IGNORE_CLANG_WARNINGS_END
 
-ALLOW_DEPRECATED_DECLARATIONS_END
-ALLOW_UNUSED_PARAMETERS_END
+WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_END
 
 namespace WebCore {
 
@@ -52,7 +55,7 @@ public:
     void OnFailure(webrtc::RTCError error) final { m_endpoint.createSessionDescriptionFailed(toExceptionCode(error.type()), error.message()); }
 
     void AddRef() const { m_endpoint.AddRef(); }
-    rtc::RefCountReleaseStatus Release() const { return m_endpoint.Release(); }
+    webrtc::RefCountReleaseStatus Release() const { return m_endpoint.Release(); }
 
 private:
     Endpoint& m_endpoint;
@@ -67,7 +70,7 @@ public:
     }
 
     void AddRef() const { m_endpoint.AddRef(); }
-    rtc::RefCountReleaseStatus Release() const { return m_endpoint.Release(); }
+    webrtc::RefCountReleaseStatus Release() const { return m_endpoint.Release(); }
 
 private:
     void OnSetLocalDescriptionComplete(webrtc::RTCError error) final
@@ -91,7 +94,7 @@ public:
     }
 
     void AddRef() const { m_endpoint.AddRef(); }
-    rtc::RefCountReleaseStatus Release() const { return m_endpoint.Release(); }
+    webrtc::RefCountReleaseStatus Release() const { return m_endpoint.Release(); }
 
 private:
     void OnSetRemoteDescriptionComplete(webrtc::RTCError error) final
@@ -108,4 +111,4 @@ private:
 
 } // namespace WebCore
 
-#endif // USE(LIBWEBRTC)
+#endif // ENABLE(WEB_RTC) && USE(LIBWEBRTC)

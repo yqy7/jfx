@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,15 +27,15 @@
 
 #if ENABLE(ENCRYPTED_MEDIA)
 
+#include "CDMPrivate.h"
 #include "ContextDestructionObserver.h"
 #include "MediaKeySessionType.h"
 #include "MediaKeySystemConfiguration.h"
 #include "MediaKeySystemMediaCapability.h"
 #include "MediaKeysRestrictions.h"
-#include "SharedBuffer.h"
 #include <wtf/Function.h>
 #include <wtf/Ref.h>
-#include <wtf/RefCounted.h>
+#include <wtf/RefCountedAndCanMakeWeakPtr.h>
 #include <wtf/WeakPtr.h>
 #include <wtf/text/WTFString.h>
 
@@ -52,14 +52,14 @@ class CDMInstance;
 class CDMPrivate;
 class Document;
 class ScriptExecutionContext;
-class FragmentedSharedBuffer;
+class SharedBuffer;
 
-class CDM : public RefCounted<CDM>, public CanMakeWeakPtr<CDM>, private ContextDestructionObserver {
+class CDM : public RefCountedAndCanMakeWeakPtr<CDM>, public CDMPrivateClient, private ContextDestructionObserver {
 public:
     static bool supportsKeySystem(const String&);
     static bool isPersistentType(MediaKeySessionType);
 
-    static Ref<CDM> create(Document&, const String& keySystem);
+    static Ref<CDM> create(Document&, const String& keySystem, const String& mediaKeysHashSalt);
     ~CDM();
 
     using SupportedConfigurationCallback = Function<void(std::optional<MediaKeySystemConfiguration>)>;
@@ -73,23 +73,31 @@ public:
     bool supportsSessions() const;
     bool supportsInitDataType(const AtomString&) const;
 
-    RefPtr<FragmentedSharedBuffer> sanitizeInitData(const AtomString& initDataType, const FragmentedSharedBuffer&);
-    bool supportsInitData(const AtomString& initDataType, const FragmentedSharedBuffer&);
+    RefPtr<SharedBuffer> sanitizeInitData(const AtomString& initDataType, const SharedBuffer&);
+    bool supportsInitData(const AtomString& initDataType, const SharedBuffer&);
 
-    RefPtr<FragmentedSharedBuffer> sanitizeResponse(const FragmentedSharedBuffer&);
+    RefPtr<SharedBuffer> sanitizeResponse(const SharedBuffer&);
 
     std::optional<String> sanitizeSessionId(const String& sessionId);
 
     String storageDirectory() const;
 
-private:
-    CDM(Document&, const String& keySystem);
+    const String& mediaKeysHashSalt() const { return m_mediaKeysHashSalt; }
 
 #if !RELEASE_LOG_DISABLED
-    Ref<Logger> m_logger;
-    const void* m_logIdentifier;
+    const Logger& logger() const final { return m_logger; }
+    uint64_t logIdentifier() const { return m_logIdentifier; }
+#endif
+
+private:
+    CDM(Document&, const String& keySystem, const String& mediaKeysHashSalt);
+
+#if !RELEASE_LOG_DISABLED
+    const Ref<const Logger> m_logger;
+    const uint64_t m_logIdentifier;
 #endif
     String m_keySystem;
+    String m_mediaKeysHashSalt;
     std::unique_ptr<CDMPrivate> m_private;
 };
 

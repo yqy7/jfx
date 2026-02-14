@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,7 @@
  */
 package test.robot.javafx.scene;
 
+import java.util.concurrent.CountDownLatch;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.scene.Scene;
@@ -34,18 +35,12 @@ import javafx.scene.robot.Robot;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.stage.WindowEvent;
-
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import static org.junit.Assert.fail;
-
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import test.util.Util;
 
 public class ColorPickerTest {
@@ -77,7 +72,7 @@ public class ColorPickerTest {
         mouseClick(colorPicker.getLayoutX() + colorPicker.getWidth() - 15,
                     colorPicker.getLayoutY() + colorPicker.getHeight() / 2);
         Thread.sleep(400); // ColorPicker takes some time to display the color palette.
-        waitForLatch(onShownLatch, 10, "Failed to show color palette.");
+        Util.waitForLatch(onShownLatch, 10, "Failed to show color palette.");
     }
 
     private void clickColorPickerPalette(int yFactor) throws Exception {
@@ -85,7 +80,7 @@ public class ColorPickerTest {
         mouseClick(colorPicker.getLayoutX() + colorPicker.getWidth() / 2,
                     colorPicker.getLayoutY() + colorPicker.getHeight() * yFactor);
         Thread.sleep(400);
-        waitForLatch(onActionLatch, 10, "Failed to receive onAction callback.");
+        Util.waitForLatch(onActionLatch, 10, "Failed to receive onAction callback.");
     }
 
     // This test is for verifying a specific behavior.
@@ -110,27 +105,27 @@ public class ColorPickerTest {
             colorPicker.show();
             root.getChildren().add(colorPicker);
         });
-        waitForLatch(onShownLatch, 10, "Failed to show color palette.");
+        Util.waitForLatch(onShownLatch, 10, "Failed to show color palette.");
         Thread.sleep(400); // ColorPicker takes some time to display the color palette.
         // 2.
-        Assert.assertEquals("ColorPicker palette should be shown once.", 1, onShownCount);
+        Assertions.assertEquals(1, onShownCount, "ColorPicker palette should be shown once.");
 
         // 2.1
         clickColorPickerPalette(5);
-        Assert.assertEquals("ColorPicker palette should be clicked once.", 1, onActionCount);
+        Assertions.assertEquals(1, onActionCount, "ColorPicker palette should be clicked once.");
 
         // 3.
         showColorPickerPalette();
         // 4.
-        Assert.assertEquals("ColorPicker palette should have been shown two times.", 2, onShownCount);
+        Assertions.assertEquals(2, onShownCount, "ColorPicker palette should have been shown two times.");
 
         // 4.1
         clickColorPickerPalette(6);
-        Assert.assertEquals("ColorPicker palette have been clicked two times.", 2, onActionCount);
+        Assertions.assertEquals(2, onActionCount, "ColorPicker palette have been clicked two times.");
 
         // 5.
         showColorPickerPalette();
-        Assert.assertEquals("ColorPicker palette should have been shown three times.", 3, onShownCount);
+        Assertions.assertEquals(3, onShownCount, "ColorPicker palette should have been shown three times.");
 
         // 6.
         Util.runAndWait(() -> {
@@ -141,10 +136,10 @@ public class ColorPickerTest {
 
         // 7.
         clickColorPickerPalette(5);
-        Assert.assertEquals("ColorPicker palette should have been clicked three times.", 3, onActionCount);
+        Assertions.assertEquals(3, onActionCount, "ColorPicker palette should have been clicked three times.");
     }
 
-    @After
+    @AfterEach
     public void resetUI() {
         Platform.runLater(() -> {
             colorPicker.setOnShown(null);
@@ -153,7 +148,7 @@ public class ColorPickerTest {
         });
     }
 
-    @Before
+    @BeforeEach
     public void setupUI() {
         Platform.runLater(() -> {
             colorPicker = new ColorPicker();
@@ -169,18 +164,14 @@ public class ColorPickerTest {
         });
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() throws Exception {
-        new Thread(() -> Application.launch(TestApp.class, (String[])null)).start();
-        waitForLatch(startupLatch, 10, "FX runtime failed to start.");
+        Util.launch(startupLatch, TestApp.class);
     }
 
-    @AfterClass
+    @AfterAll
     public static void exit() {
-        Platform.runLater(() -> {
-            stage.hide();
-        });
-        Platform.exit();
+        Util.shutdown();
     }
 
     public static class TestApp extends Application {
@@ -197,9 +188,5 @@ public class ColorPickerTest {
             stage.setAlwaysOnTop(true);
             stage.show();
         }
-    }
-
-    public static void waitForLatch(CountDownLatch latch, int seconds, String msg) throws Exception {
-        Assert.assertTrue("Timeout: " + msg, latch.await(seconds, TimeUnit.SECONDS));
     }
 }

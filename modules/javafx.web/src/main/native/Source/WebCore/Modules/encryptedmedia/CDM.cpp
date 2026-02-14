@@ -30,7 +30,9 @@
 
 #include "CDMFactory.h"
 #include "CDMPrivate.h"
-#include "Document.h"
+#include "ContextDestructionObserverInlines.h"
+#include "DocumentInlines.h"
+#include "FrameInlines.h"
 #include "InitDataRegistry.h"
 #include "MediaKeysRequirement.h"
 #include "MediaPlayer.h"
@@ -41,6 +43,7 @@
 #include "SecurityOrigin.h"
 #include "SecurityOriginData.h"
 #include "Settings.h"
+#include "SharedBuffer.h"
 #include <wtf/FileSystem.h>
 #include <wtf/Logger.h>
 #include <wtf/LoggerHelper.h>
@@ -57,25 +60,26 @@ bool CDM::supportsKeySystem(const String& keySystem)
     return false;
 }
 
-Ref<CDM> CDM::create(Document& document, const String& keySystem)
+Ref<CDM> CDM::create(Document& document, const String& keySystem, const String& mediaKeysHashSalt)
 {
-    return adoptRef(*new CDM(document, keySystem));
+    return adoptRef(*new CDM(document, keySystem, mediaKeysHashSalt));
 }
 
-CDM::CDM(Document& document, const String& keySystem)
+CDM::CDM(Document& document, const String& keySystem, const String& mediaKeysHashSalt)
     : ContextDestructionObserver(&document)
 #if !RELEASE_LOG_DISABLED
     , m_logger(document.logger())
     , m_logIdentifier(LoggerHelper::uniqueLogIdentifier())
 #endif
     , m_keySystem(keySystem)
+    , m_mediaKeysHashSalt { mediaKeysHashSalt }
 {
     ASSERT(supportsKeySystem(keySystem));
     for (auto* factory : CDMFactory::registeredFactories()) {
         if (factory->supportsKeySystem(keySystem)) {
-            m_private = factory->createCDM(keySystem);
+            m_private = factory->createCDM(keySystem, m_mediaKeysHashSalt, *this);
 #if !RELEASE_LOG_DISABLED
-            m_private->setLogger(m_logger, m_logIdentifier);
+            m_private->setLogIdentifier(m_logIdentifier);
 #endif
             break;
         }
@@ -90,17 +94,17 @@ void CDM::getSupportedConfiguration(MediaKeySystemConfiguration&& candidateConfi
     // W3C Editor's Draft 09 November 2016
     // Implemented in CDMPrivate::getSupportedConfiguration()
 
-    Document* document = downcast<Document>(scriptExecutionContext());
+    RefPtr document = downcast<Document>(scriptExecutionContext());
     if (!document || !m_private) {
         callback(std::nullopt);
         return;
     }
 
-    bool isEphemeral = !document->page() || document->page()->sessionID().isEphemeral();
-
-    SecurityOrigin& origin = document->securityOrigin();
-    SecurityOrigin& topOrigin = document->topOrigin();
-    CDMPrivate::LocalStorageAccess access = !isEphemeral && origin.canAccessLocalStorage(&topOrigin) ? CDMPrivate::LocalStorageAccess::Allowed : CDMPrivate::LocalStorageAccess::NotAllowed;
+    RefPtr page = document->page();
+    auto access = CDMPrivate::LocalStorageAccess::Allowed;
+    bool isEphemeral = !page || page->sessionID().isEphemeral();
+    if (isEphemeral || document->canAccessResource(ScriptExecutionContext::ResourceType::LocalStorage) == ScriptExecutionContext::HasResourceAccess::No)
+        access = CDMPrivate::LocalStorageAccess::NotAllowed;
     m_private->getSupportedConfiguration(WTFMove(candidateConfiguration), access, WTFMove(callback));
 }
 
@@ -135,17 +139,17 @@ bool CDM::supportsInitDataType(const AtomString& initDataType) const
     return m_private && m_private->supportedInitDataTypes().contains(initDataType);
 }
 
-RefPtr<FragmentedSharedBuffer> CDM::sanitizeInitData(const AtomString& initDataType, const FragmentedSharedBuffer& initData)
+RefPtr<SharedBuffer> CDM::sanitizeInitData(const AtomString& initDataType, const SharedBuffer& initData)
 {
     return InitDataRegistry::shared().sanitizeInitData(initDataType, initData);
 }
 
-bool CDM::supportsInitData(const AtomString& initDataType, const FragmentedSharedBuffer& initData)
+bool CDM::supportsInitData(const AtomString& initDataType, const SharedBuffer& initData)
 {
     return m_private && m_private->supportsInitData(initDataType, initData);
 }
 
-RefPtr<FragmentedSharedBuffer> CDM::sanitizeResponse(const FragmentedSharedBuffer& response)
+RefPtr<SharedBuffer> CDM::sanitizeResponse(const SharedBuffer& response)
 {
     if (!m_private)
         return nullptr;
@@ -161,19 +165,8 @@ std::optional<String> CDM::sanitizeSessionId(const String& sessionId)
 
 String CDM::storageDirectory() const
 {
-    auto* document = downcast<Document>(scriptExecutionContext());
-    if (!document)
-        return emptyString();
-
-    auto* page = document->page();
-    if (!page || page->usesEphemeralSession())
-        return emptyString();
-
-    auto storageDirectory = document->settings().mediaKeysStorageDirectory();
-    if (storageDirectory.isEmpty())
-        return emptyString();
-
-    return FileSystem::pathByAppendingComponent(storageDirectory, document->securityOrigin().data().databaseIdentifier());
+    RefPtr document = downcast<Document>(scriptExecutionContext());
+    return document ? document->mediaKeysStorageDirectory() : emptyString();
 }
 
 }

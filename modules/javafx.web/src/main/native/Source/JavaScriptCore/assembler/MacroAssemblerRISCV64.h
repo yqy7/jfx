@@ -25,6 +25,8 @@
 
 #pragma once
 
+#include <wtf/Platform.h>
+
 #if ENABLE(ASSEMBLER) && CPU(RISCV64)
 
 #include "AbstractMacroAssembler.h"
@@ -43,6 +45,8 @@ class MacroAssemblerRISCV64 : public AbstractMacroAssembler<Assembler> {
 public:
     static constexpr unsigned numGPRs = 32;
     static constexpr unsigned numFPRs = 32;
+
+    static constexpr size_t nearJumpRange = 2 * GB;
 
     static constexpr RegisterID dataTempRegister = RISCV64Registers::x30;
     static constexpr RegisterID memoryTempRegister = RISCV64Registers::x31;
@@ -116,6 +120,7 @@ public:
     static bool supportsFloatingPointSqrt() { return true; }
     static bool supportsFloatingPointAbs() { return true; }
     static bool supportsFloatingPointRounding() { return true; }
+    static bool supportsFloat16() { return false; }
 
     enum RelationalCondition {
         Equal = Assembler::ConditionEQ,
@@ -136,6 +141,7 @@ public:
     }
 
     enum ResultCondition {
+        Carry, // <- not implemented
         Overflow,
         Signed,
         PositiveOrZero,
@@ -651,6 +657,21 @@ public:
         m_assembler.maskRegister<32>(dest);
     }
 
+    void lshift32(TrustedImm32 imm, RegisterID shiftAmount, RegisterID dest)
+    {
+        auto temp = temps<Data>();
+        move(imm, temp.data());
+        m_assembler.sllwInsn(dest, temp.data(), shiftAmount);
+        m_assembler.maskRegister<32>(dest);
+    }
+
+    void lshift32(Address src, RegisterID shiftAmount, RegisterID dest)
+    {
+        auto temp = temps<Data>();
+        load32(src, temp.data());
+        lshift32(temp.data(), shiftAmount, dest);
+    }
+
     void lshift64(RegisterID shiftAmount, RegisterID dest)
     {
         lshift64(dest, shiftAmount, dest);
@@ -661,6 +682,13 @@ public:
         m_assembler.sllInsn(dest, src, shiftAmount);
     }
 
+    void lshift64(TrustedImm32 imm, RegisterID shiftAmount, RegisterID dest)
+    {
+        auto temp = temps<Data>();
+        move(imm, temp.data());
+        lshift64(temp.data(), shiftAmount, dest);
+    }
+
     void lshift64(TrustedImm32 shiftAmount, RegisterID dest)
     {
         lshift64(dest, shiftAmount, dest);
@@ -668,7 +696,16 @@ public:
 
     void lshift64(RegisterID src, TrustedImm32 imm, RegisterID dest)
     {
+        if (!imm.m_value) [[unlikely]]
+            return move(src, dest);
         m_assembler.slliInsn(dest, src, uint32_t(imm.m_value & ((1 << 6) - 1)));
+    }
+
+    void lshift64(Address src, RegisterID shiftAmount, RegisterID dest)
+    {
+        auto temp = temps<Data>();
+        load64(src, temp.data());
+        lshift64(temp.data(), shiftAmount, dest);
     }
 
     void rshift32(RegisterID shiftAmount, RegisterID dest)
@@ -693,6 +730,14 @@ public:
         m_assembler.maskRegister<32>(dest);
     }
 
+    void rshift32(TrustedImm32 imm, RegisterID shiftAmount, RegisterID dest)
+    {
+        auto temp = temps<Data>();
+        move(imm, temp.data());
+        m_assembler.srawInsn(dest, temp.data(), shiftAmount);
+        m_assembler.maskRegister<32>(dest);
+    }
+
     void rshift64(RegisterID shiftAmount, RegisterID dest)
     {
         rshift64(dest, shiftAmount, dest);
@@ -710,6 +755,8 @@ public:
 
     void rshift64(RegisterID src, TrustedImm32 imm, RegisterID dest)
     {
+        if (!imm.m_value) [[unlikely]]
+            return move(src, dest);
         m_assembler.sraiInsn(dest, src, uint32_t(imm.m_value & ((1 << 6) - 1)));
     }
 
@@ -735,6 +782,21 @@ public:
         m_assembler.maskRegister<32>(dest);
     }
 
+    void urshift32(TrustedImm32 imm, RegisterID shiftAmount, RegisterID dest)
+    {
+        auto temp = temps<Data>();
+        move(imm, temp.data());
+        m_assembler.srlwInsn(dest, temp.data(), shiftAmount);
+        m_assembler.maskRegister<32>(dest);
+    }
+
+    void addUnsignedRightShift32(RegisterID src1, RegisterID src2, TrustedImm32 amount, RegisterID dest)
+    {
+        // dest = src1 + (src2 >> amount)
+        urshift32(src2, amount, dataTempRegister);
+        add32(src1, dataTempRegister, dest);
+    }
+
     void urshift64(RegisterID shiftAmount, RegisterID dest)
     {
         urshift64(dest, shiftAmount, dest);
@@ -752,6 +814,8 @@ public:
 
     void urshift64(RegisterID src, TrustedImm32 imm, RegisterID dest)
     {
+        if (!imm.m_value) [[unlikely]]
+            return move(src, dest);
         m_assembler.srliInsn(dest, src, uint32_t(imm.m_value & ((1 << 6) - 1)));
     }
 
@@ -917,6 +981,33 @@ public:
             load32(Address(src, offset.m_value), dest1);
             load32(Address(src, offset.m_value + 4), dest2);
         }
+    }
+
+    void loadPair32(Address src, RegisterID dest1, RegisterID dest2)
+    {
+        loadPair32(src.base, TrustedImm32(src.offset), dest1, dest2);
+    }
+
+    void loadPair64(RegisterID src, RegisterID dest1, RegisterID dest2)
+    {
+        loadPair64(src, TrustedImm32(0), dest1, dest2);
+    }
+
+    void loadPair64(RegisterID src, TrustedImm32 offset, RegisterID dest1, RegisterID dest2)
+    {
+        ASSERT(dest1 != dest2);
+        if (src == dest1) {
+            load64(Address(src, offset.m_value + 8), dest2);
+            load64(Address(src, offset.m_value), dest1);
+        } else {
+            load64(Address(src, offset.m_value), dest1);
+            load64(Address(src, offset.m_value + 8), dest2);
+        }
+    }
+
+    void loadPair64(Address src, RegisterID dest1, RegisterID dest2)
+    {
+        loadPair64(src.base, TrustedImm32(src.offset), dest1, dest2);
     }
 
     void store8(RegisterID src, Address address)
@@ -1145,6 +1236,15 @@ public:
         m_assembler.sdInsn(resolution.base, immRegister, Imm::S(resolution.offset));
     }
 
+    void store64(TrustedImmPtr imm, Address address)
+    {
+        intptr_t value = imm.asIntptr();
+        if constexpr (sizeof(intptr_t) == sizeof(int64_t))
+            store64(TrustedImm64(int64_t(value)), address);
+        else
+            store64(TrustedImm32(int32_t(value)), address);
+    }
+
     void store64(TrustedImm64 imm, BaseIndex address)
     {
         auto temp = temps<Data, Memory>();
@@ -1171,6 +1271,88 @@ public:
         m_assembler.sdInsn(temp.memory(), immRegister, Imm::S<0>());
     }
 
+    void transfer32(Address src, Address dest)
+    {
+        if (src == dest)
+            return;
+        auto temp = temps<Data>();
+        load32(src, temp.data());
+        store32(temp.data(), dest);
+    }
+
+    void transfer64(Address src, Address dest)
+    {
+        if (src == dest)
+            return;
+        auto temp = temps<Data>();
+        load64(src, temp.data());
+        store64(temp.data(), dest);
+    }
+
+    void transferFloat(Address src, Address dest)
+    {
+        transfer32(src, dest);
+    }
+
+    void transferDouble(Address src, Address dest)
+    {
+        transfer64(src, dest);
+    }
+
+    void transferVector(Address src, Address dest)
+    {
+        if (src == dest)
+            return;
+        loadVector(src, fpTempRegister);
+        storeVector(fpTempRegister, dest);
+    }
+
+    void transferPtr(Address src, Address dest)
+    {
+        transfer64(src, dest);
+    }
+
+    void transfer32(BaseIndex src, BaseIndex dest)
+    {
+        if (src == dest)
+            return;
+        auto temp = temps<Data>();
+        load32(src, temp.data());
+        store32(temp.data(), dest);
+    }
+
+    void transfer64(BaseIndex src, BaseIndex dest)
+    {
+        if (src == dest)
+            return;
+        auto temp = temps<Data>();
+        load64(src, temp.data());
+        store64(temp.data(), dest);
+    }
+
+    void transferFloat(BaseIndex src, BaseIndex dest)
+    {
+        transfer32(src, dest);
+    }
+
+    void transferDouble(BaseIndex src, BaseIndex dest)
+    {
+        transfer64(src, dest);
+    }
+
+    void transferVector(BaseIndex src, BaseIndex dest)
+    {
+        if (src == dest)
+            return;
+        loadVector(src, fpTempRegister);
+        storeVector(fpTempRegister, dest);
+    }
+
+    void transferPtr(BaseIndex src, BaseIndex dest)
+    {
+        transfer64(src, dest);
+    }
+
     void storePair32(RegisterID src1, RegisterID src2, RegisterID dest)
     {
         storePair32(src1, src2, dest, TrustedImm32(0));
@@ -1180,6 +1362,27 @@ public:
     {
         store32(src1, Address(dest, offset.m_value));
         store32(src2, Address(dest, offset.m_value + 4));
+    }
+
+    void storePair32(RegisterID src1, RegisterID src2, Address dest)
+    {
+        storePair32(src1, src2, dest.base, TrustedImm32(dest.offset));
+    }
+
+    void storePair64(RegisterID src1, RegisterID src2, RegisterID dest)
+    {
+        storePair64(src1, src2, dest, TrustedImm32(0));
+    }
+
+    void storePair64(RegisterID src1, RegisterID src2, RegisterID dest, TrustedImm32 offset)
+    {
+        store64(src1, Address(dest, offset.m_value));
+        store64(src2, Address(dest, offset.m_value + 8));
+    }
+
+    void storePair64(RegisterID src1, RegisterID src2, Address dest)
+    {
+        storePair64(src1, src2, dest.base, TrustedImm32(dest.offset));
     }
 
     void zeroExtend8To32(RegisterID src, RegisterID dest)
@@ -1214,12 +1417,44 @@ public:
         m_assembler.srliInsn<32>(dest, dest);
     }
 
+    void zeroExtend8To64(RegisterID src, RegisterID dest)
+    {
+        zeroExtend8To32(src, dest);
+    }
+
+    void zeroExtend16To64(RegisterID src, RegisterID dest)
+    {
+        zeroExtend16To32(src, dest);
+    }
+
+    void signExtend8To64(RegisterID src, RegisterID dest)
+    {
+        signExtend8To32(src, dest);
+        signExtend32To64(dest, dest);
+    }
+
+    void signExtend16To64(RegisterID src, RegisterID dest)
+    {
+        signExtend16To32(src, dest);
+        signExtend32To64(dest, dest);
+    }
+
     void signExtend32ToPtr(RegisterID src, RegisterID dest)
+    {
+        signExtend32To64(src, dest);
+    }
+
+    void signExtend32ToPtr(TrustedImm32 imm, RegisterID dest)
+    {
+        signExtend32To64(imm, dest);
+    }
+
+    void signExtend32To64(RegisterID src, RegisterID dest)
     {
         m_assembler.addiwInsn(dest, src, Imm::I<0>());
     }
 
-    void signExtend32ToPtr(TrustedImm32 imm, RegisterID dest)
+    void signExtend32To64(TrustedImm32 imm, RegisterID dest)
     {
         loadImmediate(imm, dest);
     }
@@ -1242,6 +1477,9 @@ public:
 
     void and32(TrustedImm32 imm, RegisterID op2, RegisterID dest)
     {
+        if (imm.m_value == -1)
+            return zeroExtend32ToWord(op2, dest);
+
         if (!Imm::isValid<Imm::IType>(imm.m_value)) {
             auto temp = temps<Data>();
             loadImmediate(imm, temp.data());
@@ -1277,6 +1515,9 @@ public:
 
     void and64(TrustedImm32 imm, RegisterID op2, RegisterID dest)
     {
+        if (imm.m_value == -1)
+            return move(op2, dest);
+
         if (Imm::isValid<Imm::IType>(imm.m_value)) {
             m_assembler.andiInsn(dest, op2, Imm::I(imm.m_value));
             return;
@@ -1294,6 +1535,9 @@ public:
 
     void and64(TrustedImm64 imm, RegisterID op2, RegisterID dest)
     {
+        if (imm.m_value == -1)
+            return move(op2, dest);
+
         if (Imm::isValid<Imm::IType>(imm.m_value)) {
             m_assembler.andiInsn(dest, op2, Imm::I(imm.m_value));
             return;
@@ -1646,6 +1890,26 @@ public:
         loadImmediate(imm, dest);
     }
 
+    void move32ToFloat(TrustedImm32 imm, FPRegisterID dest)
+    {
+        if (!imm.m_value) {
+            moveZeroToFloat(dest);
+            return;
+        }
+        move(imm, scratchRegister());
+        move32ToFloat(scratchRegister(), dest);
+    }
+
+    void move64ToDouble(TrustedImm64 imm, FPRegisterID dest)
+    {
+        if (!imm.m_value) {
+            moveZeroToDouble(dest);
+            return;
+        }
+        move(imm, scratchRegister());
+        move64ToDouble(scratchRegister(), dest);
+    }
+
     void swap(RegisterID reg1, RegisterID reg2)
     {
         auto temp = temps<Data>();
@@ -1654,8 +1918,10 @@ public:
         move(temp.data(), reg2);
     }
 
-    void swap(FPRegisterID reg1, FPRegisterID reg2)
+    void swapDouble(FPRegisterID reg1, FPRegisterID reg2)
     {
+        if (reg1 == reg2)
+            return;
         moveDouble(reg1, fpTempRegister);
         moveDouble(reg2, reg1);
         moveDouble(fpTempRegister, reg2);
@@ -1701,10 +1967,88 @@ public:
         m_assembler.fmvInsn<RISCV64Assembler::FMVType::D, RISCV64Assembler::FMVType::X>(dest, src);
     }
 
+    static bool supportsCountPopulation() { return false; }
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(countPopulation32);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(countPopulation64);
+
+    // The RISC-V V vector extension is not yet standardized
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(moveVector);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(loadVector);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(storeVector);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorReplaceLaneInt64);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorReplaceLaneInt32);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorReplaceLaneInt16);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorReplaceLaneInt8);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorReplaceLaneFloat64);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorReplaceLaneFloat32);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorExtractLaneInt64);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorExtractLaneInt32);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorExtractLaneSignedInt16);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorExtractLaneUnsignedInt16);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorExtractLaneSignedInt8);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorExtractLaneUnsignedInt8);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorExtractLaneFloat64);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorExtractLaneFloat32);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorDupElementInt8);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorDupElementInt16);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorDupElementInt32);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorDupElementInt64);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorDupElementFloat32);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorDupElementFloat64);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorSplatInt8);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorSplatInt16);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorSplatInt32);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorSplatInt64);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorSplatFloat32);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorSplatFloat64);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(compareFloatingPointVector);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(compareIntegerVector);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(compareIntegerVectorWithZero);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorAdd);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorSub);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorAddSat);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorSubSat);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorMul);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorDiv);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorMin);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorMax);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorPmin);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorPmax);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorNarrow);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorBitwiseSelect);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorNot);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorAnd);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorAndnot);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorOr);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorXor);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorAbs);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorNeg);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorPopcnt);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorCeil);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorFloor);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorTrunc);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorTruncSat);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorConvert);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorConvertLow);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorNearest);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorSqrt);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorExtendLow);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorExtendHigh);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorPromote);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorDemote);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorAnyTrue);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorAllTrue);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorBitmask);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorExtaddPairwise);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorAvgRound);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorMulSat);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorDotProduct);
+    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(vectorSwizzle);
+
     template<PtrTag resultTag, PtrTag locationTag>
-    static FunctionPtr<resultTag> readCallTarget(CodeLocationCall<locationTag> call)
+    static CodePtr<resultTag> readCallTarget(CodeLocationCall<locationTag> call)
     {
-        return FunctionPtr<resultTag>(MacroAssemblerCodePtr<resultTag>(Assembler::readCallTarget(call.dataLocation())));
+        return CodePtr<resultTag>(Assembler::readCallTarget(call.dataLocation()));
     }
 
     template<PtrTag tag>
@@ -1717,6 +2061,12 @@ public:
     static void replaceWithJump(CodeLocationLabel<startTag> instructionStart, CodeLocationLabel<destTag> destination)
     {
         Assembler::replaceWithJump(instructionStart.dataLocation(), destination.dataLocation());
+    }
+
+    template<PtrTag startTag>
+    static void replaceWithNops(CodeLocationLabel<startTag> instructionStart, size_t memoryToFillWithNopsInBytes)
+    {
+        Assembler::replaceWithNops(instructionStart.dataLocation(), memoryToFillWithNopsInBytes);
     }
 
     static ptrdiff_t maxJumpReplacementSize()
@@ -1742,24 +2092,24 @@ public:
     }
 
     template<PtrTag tag>
-    static void linkCall(void* code, Call call, FunctionPtr<tag> function)
+    static void linkCall(void* code, Call call, CodePtr<tag> function)
     {
         if (!call.isFlagSet(Call::Near))
-            Assembler::linkPointer(code, call.m_label, function.executableAddress());
+            Assembler::linkPointer(code, call.m_label, function.taggedPtr());
         else
-            Assembler::linkCall(code, call.m_label, function.template retaggedExecutableAddress<NoPtrTag>());
+            Assembler::linkCall(code, call.m_label, function.untaggedPtr());
     }
 
     template<PtrTag callTag, PtrTag destTag>
     static void repatchCall(CodeLocationCall<callTag> call, CodeLocationLabel<destTag> destination)
     {
-        Assembler::repatchPointer(call.dataLocation(), destination.executableAddress());
+        Assembler::repatchPointer(call.dataLocation(), destination.taggedPtr());
     }
 
     template<PtrTag callTag, PtrTag destTag>
-    static void repatchCall(CodeLocationCall<callTag> call, FunctionPtr<destTag> destination)
+    static void repatchCall(CodeLocationCall<callTag> call, CodePtr<destTag> destination)
     {
-        Assembler::repatchPointer(call.dataLocation(), destination.executableAddress());
+        Assembler::repatchPointer(call.dataLocation(), destination.taggedPtr());
     }
 
     Jump jump()
@@ -1862,6 +2212,16 @@ public:
         return Call(label, Call::LinkableNear);
     }
 
+    Call threadSafePatchableNearTailCall()
+    {
+        auto label = m_assembler.label();
+        m_assembler.nearCallPlaceholder(
+            [&] {
+                m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<0>());
+            });
+        return Call(label, Call::LinkableNearTail);
+    }
+
     void ret()
     {
         m_assembler.jalrInsn(RISCV64Registers::zero, RISCV64Registers::x1, Imm::I<0>());
@@ -1907,6 +2267,13 @@ public:
     }
 
     void compare64(RelationalCondition cond, RegisterID lhs, TrustedImm32 imm, RegisterID dest)
+    {
+        auto temp = temps<Data>();
+        loadImmediate(imm, temp.data());
+        compareFinalize(cond, lhs, temp.data(), dest);
+    }
+
+    void compare64(RelationalCondition cond, RegisterID lhs, TrustedImm64 imm, RegisterID dest)
     {
         auto temp = temps<Data>();
         loadImmediate(imm, temp.data());
@@ -1989,6 +2356,24 @@ public:
         auto temp = temps<Data, Memory>();
         loadImmediate(TrustedImmPtr(address.m_ptr), temp.memory());
         m_assembler.lbInsn(temp.memory(), temp.memory(), Imm::I<0>());
+        loadImmediate(imm, temp.data());
+        return makeBranch(cond, temp.memory(), temp.data());
+    }
+
+    Jump branch16(RelationalCondition cond, Address address, TrustedImm32 imm)
+    {
+        auto temp = temps<Data, Memory>();
+        auto resolution = resolveAddress(address, temp.memory());
+        m_assembler.lhInsn(temp.memory(), resolution.base, Imm::I(resolution.offset));
+        loadImmediate(imm, temp.data());
+        return makeBranch(cond, temp.memory(), temp.data());
+    }
+
+    Jump branch16(RelationalCondition cond, AbsoluteAddress address, TrustedImm32 imm)
+    {
+        auto temp = temps<Data, Memory>();
+        loadImmediate(TrustedImmPtr(address.m_ptr), temp.memory());
+        m_assembler.lhInsn(temp.memory(), temp.memory(), Imm::I<0>());
         loadImmediate(imm, temp.data());
         return makeBranch(cond, temp.memory(), temp.data());
     }
@@ -2154,9 +2539,28 @@ public:
         return makeBranch(cond, temp.data(), rhs);
     }
 
+    Jump branch64(RelationalCondition cond, Address left, Address right)
+    {
+        auto temp = temps<Data, Memory>();
+        auto leftResolution = resolveAddress(left, temp.memory());
+        m_assembler.ldInsn(temp.data(), leftResolution.base, Imm::I(leftResolution.offset));
+        auto rightResolution = resolveAddress(right, temp.memory());
+        m_assembler.ldInsn(temp.memory(), rightResolution.base, Imm::I(rightResolution.offset));
+        return makeBranch(cond, temp.data(), temp.memory());
+    }
+
     Jump branch32WithUnalignedHalfWords(RelationalCondition cond, BaseIndex address, TrustedImm32 imm)
     {
         return branch32(cond, address, imm);
+    }
+
+    Jump branch32WithMemory16(RelationalCondition cond, Address left, RegisterID right)
+    {
+        auto temp = temps<Data, Memory>();
+        MacroAssemblerHelpers::load16OnCondition(*this, cond, left, temp.data());
+        m_assembler.signExtend<32>(temp.data(), temp.data());
+        m_assembler.signExtend<32>(temp.memory(), right);
+        return makeBranch(cond, temp.data(), temp.memory());
     }
 
     Jump branchAdd32(ResultCondition cond, RegisterID src, RegisterID dest)
@@ -2645,6 +3049,11 @@ public:
         return branch64(cond, address, rhs);
     }
 
+    Jump branchPtr(RelationalCondition cond, Address left, Address right)
+    {
+        return branch64(cond, left, right);
+    }
+
     DataLabel32 moveWithPatch(TrustedImm32 imm, RegisterID dest)
     {
         RISCV64Assembler::ImmediateLoader imml(RISCV64Assembler::ImmediateLoader::Placeholder, imm.m_value);
@@ -2717,9 +3126,25 @@ public:
         return branchFP<32>(cond, lhs, rhs);
     }
 
+    Jump branchFloatWithZero(DoubleCondition cond, FPRegisterID left)
+    {
+        UNUSED_PARAM(cond);
+        UNUSED_PARAM(left);
+        UNREACHABLE_FOR_PLATFORM();
+        return { };
+    }
+
     Jump branchDouble(DoubleCondition cond, FPRegisterID lhs, FPRegisterID rhs)
     {
         return branchFP<64>(cond, lhs, rhs);
+    }
+
+    Jump branchDoubleWithZero(DoubleCondition cond, FPRegisterID left)
+    {
+        UNUSED_PARAM(cond);
+        UNUSED_PARAM(left);
+        UNREACHABLE_FOR_PLATFORM();
+        return { };
     }
 
     Jump branchDoubleNonZero(FPRegisterID reg, FPRegisterID)
@@ -2797,10 +3222,11 @@ public:
     Call call(RegisterID target, RegisterID callTag) { UNUSED_PARAM(callTag); return call(target, NoPtrTag); }
     Call call(Address address, RegisterID callTag) { UNUSED_PARAM(callTag); return call(address, NoPtrTag); }
 
-    void callOperation(const FunctionPtr<OperationPtrTag> operation)
+    template<PtrTag tag>
+    void callOperation(const CodePtr<tag> operation)
     {
         auto temp = temps<Data>();
-        loadImmediate(TrustedImmPtr(operation.executableAddress()), temp.data());
+        loadImmediate(TrustedImmPtr(operation.taggedPtr()), temp.data());
         m_assembler.jalrInsn(RISCV64Registers::x1, temp.data(), Imm::I<0>());
     }
 
@@ -3008,6 +3434,16 @@ public:
         roundFP<64, RISCV64Assembler::FPRoundingMode::RDN>(src, dest);
     }
 
+    void truncDouble(FPRegisterID src, FPRegisterID dst)
+    {
+        roundTowardZeroDouble(src, dst);
+    }
+
+    void truncFloat(FPRegisterID src, FPRegisterID dst)
+    {
+        roundTowardZeroFloat(src, dst);
+    }
+
     void roundTowardNearestIntFloat(FPRegisterID src, FPRegisterID dest)
     {
         roundFP<32, RISCV64Assembler::FPRoundingMode::RNE>(src, dest);
@@ -3082,6 +3518,22 @@ public:
     void compareDouble(DoubleCondition cond, FPRegisterID lhs, FPRegisterID rhs, RegisterID dest)
     {
         compareFP<64>(cond, lhs, rhs, dest);
+    }
+
+    void compareDoubleWithZero(DoubleCondition cond, FPRegisterID left, RegisterID dest)
+    {
+        UNUSED_PARAM(cond);
+        UNUSED_PARAM(left);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void compareFloatWithZero(DoubleCondition cond, FPRegisterID left, RegisterID dest)
+    {
+        UNUSED_PARAM(cond);
+        UNUSED_PARAM(left);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
     }
 
     void convertInt32ToFloat(RegisterID src, FPRegisterID dest)
@@ -3237,7 +3689,7 @@ public:
         m_assembler.ebreakInsn();
     }
 
-    void breakpoint(uint16_t = 0xc471)
+    void breakpoint(uint16_t = 0)
     {
         m_assembler.ebreakInsn();
     }
@@ -3247,27 +3699,600 @@ public:
         m_assembler.addiInsn(RISCV64Registers::zero, RISCV64Registers::zero, Imm::I<0>());
     }
 
-    void memoryFence() { }
-    void storeFence() { }
-    void loadFence() { }
+    void memoryFence()
+    {
+        m_assembler.fenceInsn({ RISCV64Assembler::MemoryOperation::RW }, { RISCV64Assembler::MemoryOperation::RW });
+    }
 
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD_WITH_RETURN(branchAtomicWeakCAS8, JumpList);
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD_WITH_RETURN(branchAtomicWeakCAS16, JumpList);
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD_WITH_RETURN(branchAtomicWeakCAS32, JumpList);
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD_WITH_RETURN(branchAtomicWeakCAS64, JumpList);
+    void storeFence()
+    {
+        m_assembler.fenceInsn({ RISCV64Assembler::MemoryOperation::W }, { RISCV64Assembler::MemoryOperation::RW });
+    }
 
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(moveConditionally32);
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(moveConditionally64);
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(moveConditionallyFloat);
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(moveConditionallyDouble);
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(moveConditionallyTest32);
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(moveConditionallyTest64);
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(moveDoubleConditionally32);
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(moveDoubleConditionally64);
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(moveDoubleConditionallyFloat);
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(moveDoubleConditionallyDouble);
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(moveDoubleConditionallyTest32);
-    MACRO_ASSEMBLER_RISCV64_TEMPLATED_NOOP_METHOD(moveDoubleConditionallyTest64);
+    void loadFence()
+    {
+        m_assembler.fenceInsn({ RISCV64Assembler::MemoryOperation::R }, { RISCV64Assembler::MemoryOperation::RW });
+    }
+
+    template<unsigned bitSize>
+    JumpList branchAtomicWeakCASImpl(StatusCondition cond, RegisterID expectedAndClobbered, RegisterID newValue, BaseIndex address)
+    {
+        static_assert(bitSize == 8 || bitSize == 16);
+        // There's no 8-bit or 16-bit load-reserved and store-conditional instructions in RISC-V,
+        // so we have to implement the operations through the 32-bit versions, with a limited amount
+        // of usable registers.
+
+        auto temp = temps<Data, Memory>();
+        JumpList failure;
+
+        // We clobber the expected-value register with the XOR difference between the expected
+        // and the new value, also clipping the result to the desired number of bits.
+        m_assembler.xorInsn(expectedAndClobbered, expectedAndClobbered, newValue);
+        m_assembler.zeroExtend<bitSize>(expectedAndClobbered);
+
+        // The BaseIndex address is resolved into the memory temp. The address is aligned to the 4-byte
+        // boundary, and the remainder is used to calculate the shift amount for the exact position
+        // in the 32-bit word where the target bit pattern is located.
+        auto resolution = resolveAddress(address, temp.memory());
+        m_assembler.addiInsn(temp.memory(), resolution.base, Imm::I(resolution.offset));
+        m_assembler.andiInsn(temp.data(), temp.memory(), Imm::I<0b11>());
+        m_assembler.andiInsn(temp.memory(), temp.memory(), Imm::I<~0b11>());
+        m_assembler.slliInsn<3>(temp.data(), temp.data());
+        m_assembler.addiInsn(temp.data(), temp.data(), Imm::I<32>());
+
+        // The XOR value in the expected-value register is shifted into the appropriate position in
+        // the upper half of the register. The shift value is OR-ed into the lower half.
+        m_assembler.sllInsn(expectedAndClobbered, expectedAndClobbered, temp.data());
+        m_assembler.orInsn(expectedAndClobbered, expectedAndClobbered, temp.data());
+
+        // The 32-bit value is loaded through the load-reserve instruction, and then shifted into the
+        // upper 32 bits of the register. XOR against the expected-value register will, in the upper
+        // 32 bits of the register, produce the 32-bit word with the expected value replaced by the new one.
+        m_assembler.lrwInsn(temp.data(), temp.memory(), { RISCV64Assembler::MemoryAccess::Acquire });
+        m_assembler.slliInsn<32>(temp.data(), temp.data());
+        m_assembler.xorInsn(expectedAndClobbered, temp.data(), expectedAndClobbered);
+
+        // We still have to validate that the expected value, after XOR, matches the new one. The upper
+        // 32 bits of the expected-value register are shifted by the pre-prepared shift amount stored
+        // in the lower half of that same register. This works becasue the shift amount is read only from
+        // the bottom 6 bits of the shift-amount register. XOR-ing against the new-value register and shifting
+        // back left should leave is with a zero value, in which case the expected-value bit pattern matched
+        // the one that was loaded from memory. If non-zero, the failure branch is taken.
+        m_assembler.srlInsn(temp.data(), expectedAndClobbered, expectedAndClobbered);
+        m_assembler.xorInsn(temp.data(), temp.data(), newValue);
+        m_assembler.slliInsn<64 - bitSize>(temp.data(), temp.data());
+        failure.append(makeBranch(NotEqual, temp.data(), RISCV64Registers::zero));
+
+        // The corresponding store-conditional remains. The 32-bit word, containing the new value after
+        // the XOR, is located in the upper 32 bits of the expected-value register. That can be shifted
+        // down and then used in the store-conditional instruction.
+        m_assembler.srliInsn<32>(expectedAndClobbered, expectedAndClobbered);
+        m_assembler.scwInsn(temp.data(), temp.memory(), expectedAndClobbered, { RISCV64Assembler::MemoryAccess::AcquireRelease });
+
+        // On successful store, the temp register will have a zero value, and a non-zero value otherwise.
+        // Branches are produced accordingly.
+        switch (cond) {
+        case Success: {
+            Jump success = makeBranch(Equal, temp.data(), RISCV64Registers::zero);
+            failure.link(this);
+            return JumpList(success);
+        }
+        case Failure:
+            failure.append(makeBranch(NotEqual, temp.data(), RISCV64Registers::zero));
+            break;
+        }
+
+        return failure;
+    }
+
+    JumpList branchAtomicWeakCAS8(StatusCondition cond, RegisterID expectedAndClobbered, RegisterID newValue, BaseIndex address)
+    {
+        return branchAtomicWeakCASImpl<8>(cond, expectedAndClobbered, newValue, address);
+    }
+
+    JumpList branchAtomicWeakCAS16(StatusCondition cond, RegisterID expectedAndClobbered, RegisterID newValue, BaseIndex address)
+    {
+        return branchAtomicWeakCASImpl<16>(cond, expectedAndClobbered, newValue, address);
+    }
+
+    JumpList branchAtomicWeakCAS32(StatusCondition cond, RegisterID expectedAndClobbered, RegisterID newValue, BaseIndex address)
+    {
+        auto temp = temps<Data, Memory>();
+        JumpList failure;
+
+        auto resolution = resolveAddress(address, temp.memory());
+        m_assembler.addiInsn(temp.memory(), resolution.base, Imm::I(resolution.offset));
+        m_assembler.zeroExtend<32>(expectedAndClobbered, expectedAndClobbered);
+
+        m_assembler.lrwInsn(temp.data(), temp.memory(), { RISCV64Assembler::MemoryAccess::Acquire });
+        m_assembler.xorInsn(temp.data(), temp.data(), expectedAndClobbered);
+        failure.append(makeBranch(NotEqual, temp.data(), RISCV64Registers::zero));
+        m_assembler.scwInsn(temp.data(), temp.memory(), newValue, { RISCV64Assembler::MemoryAccess::AcquireRelease });
+
+        switch (cond) {
+        case Success: {
+            Jump success = makeBranch(Equal, temp.data(), RISCV64Registers::zero);
+            failure.link(this);
+            return JumpList(success);
+        }
+        case Failure:
+            failure.append(makeBranch(NotEqual, temp.data(), RISCV64Registers::zero));
+            break;
+        }
+
+        return failure;
+    }
+
+    JumpList branchAtomicWeakCAS64(StatusCondition cond, RegisterID expectedAndClobbered, RegisterID newValue, BaseIndex address)
+    {
+        auto temp = temps<Data, Memory>();
+        JumpList failure;
+
+        auto resolution = resolveAddress(address, temp.memory());
+        m_assembler.addiInsn(temp.memory(), resolution.base, Imm::I(resolution.offset));
+
+        m_assembler.lrdInsn(temp.data(), temp.memory(), { RISCV64Assembler::MemoryAccess::Acquire });
+        failure.append(makeBranch(NotEqual, temp.data(), expectedAndClobbered));
+        m_assembler.scdInsn(temp.data(), temp.memory(), newValue, { RISCV64Assembler::MemoryAccess::AcquireRelease });
+
+        switch (cond) {
+        case Success: {
+            Jump success = makeBranch(Equal, temp.data(), RISCV64Registers::zero);
+            failure.link(this);
+            return JumpList(success);
+        }
+        case Failure:
+            failure.append(makeBranch(NotEqual, temp.data(), RISCV64Registers::zero));
+            break;
+        }
+
+        return failure;
+    }
+
+    void atomicLoad32(Address address, RegisterID dest)
+    {
+        auto resolution = resolveAddress(address, lazyTemp<Memory>());
+        memoryFence();
+        m_assembler.lwInsn(dest, resolution.base, Imm::I(resolution.offset));
+        loadFence();
+    }
+
+    void atomicLoad32(BaseIndex address, RegisterID dest)
+    {
+        auto resolution = resolveAddress(address, lazyTemp<Memory>());
+        memoryFence();
+        m_assembler.lwInsn(dest, resolution.base, Imm::I(resolution.offset));
+        loadFence();
+    }
+
+    void atomicLoad64(Address address, RegisterID dest)
+    {
+        auto resolution = resolveAddress(address, lazyTemp<Memory>());
+        memoryFence();
+        m_assembler.ldInsn(dest, resolution.base, Imm::I(resolution.offset));
+        loadFence();
+    }
+
+    void atomicLoad64(BaseIndex address, RegisterID dest)
+    {
+        auto resolution = resolveAddress(address, lazyTemp<Memory>());
+        memoryFence();
+        m_assembler.ldInsn(dest, resolution.base, Imm::I(resolution.offset));
+        loadFence();
+    }
+
+    void moveConditionally32(RelationalCondition cond, RegisterID lhs, RegisterID rhs, RegisterID src, RegisterID dest)
+    {
+        auto temp = temps<Data, Memory>();
+        m_assembler.signExtend<32>(temp.data(), lhs);
+        m_assembler.signExtend<32>(temp.memory(), rhs);
+
+        branchForMoveConditionally(invert(cond), temp.data(), temp.memory(), Imm::B<8>());
+        m_assembler.addiInsn(dest, src, Imm::I<0>());
+    }
+
+    void moveConditionally32(RelationalCondition cond, RegisterID lhs, RegisterID rhs, RegisterID trueSrc, RegisterID falseSrc, RegisterID dest)
+    {
+        auto temp = temps<Data, Memory>();
+        m_assembler.signExtend<32>(temp.data(), lhs);
+        m_assembler.signExtend<32>(temp.memory(), rhs);
+
+        branchForMoveConditionally(invert(cond), temp.data(), temp.memory(), Imm::B<12>());
+        m_assembler.addiInsn(dest, trueSrc, Imm::I<0>());
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.addiInsn(dest, falseSrc, Imm::I<0>());
+    }
+
+    void moveConditionally32(RelationalCondition cond, RegisterID lhs, TrustedImm32 imm, RegisterID trueSrc, RegisterID falseSrc, RegisterID dest)
+    {
+        auto temp = temps<Data, Memory>();
+        m_assembler.signExtend<32>(temp.data(), lhs);
+        loadImmediate(imm, temp.memory());
+
+        branchForMoveConditionally(invert(cond), temp.data(), temp.memory(), Imm::B<12>());
+        m_assembler.addiInsn(dest, trueSrc, Imm::I<0>());
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.addiInsn(dest, falseSrc, Imm::I<0>());
+    }
+
+    void moveConditionally64(RelationalCondition cond, RegisterID lhs, RegisterID rhs, RegisterID src, RegisterID dest)
+    {
+        branchForMoveConditionally(invert(cond), lhs, rhs, Imm::B<8>());
+        m_assembler.addiInsn(dest, src, Imm::I<0>());
+    }
+
+    void moveConditionally64(RelationalCondition cond, RegisterID lhs, RegisterID rhs, RegisterID trueSrc, RegisterID falseSrc, RegisterID dest)
+    {
+        branchForMoveConditionally(invert(cond), lhs, rhs, Imm::B<12>());
+        m_assembler.addiInsn(dest, trueSrc, Imm::I<0>());
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.addiInsn(dest, falseSrc, Imm::I<0>());
+    }
+
+    void moveConditionally64(RelationalCondition cond, RegisterID lhs, TrustedImm32 imm, RegisterID trueSrc, RegisterID falseSrc, RegisterID dest)
+    {
+        auto temp = temps<Data>();
+        loadImmediate(imm, temp.data());
+        branchForMoveConditionally(invert(cond), lhs, temp.data(), Imm::B<12>());
+        m_assembler.addiInsn(dest, trueSrc, Imm::I<0>());
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.addiInsn(dest, falseSrc, Imm::I<0>());
+    }
+
+    void moveConditionallyFloat(DoubleCondition cond, FPRegisterID lhs, FPRegisterID rhs, RegisterID src, RegisterID dest)
+    {
+        Jump invcondBranch = branchFP<32, true>(cond, lhs, rhs);
+        m_assembler.addiInsn(dest, src, Imm::I<0>());
+        invcondBranch.link(this);
+    }
+
+    void moveConditionallyFloat(DoubleCondition cond, FPRegisterID lhs, FPRegisterID rhs, RegisterID trueSrc, RegisterID falseSrc, RegisterID dest)
+    {
+        Jump invcondBranch = branchFP<32, true>(cond, lhs, rhs);
+        m_assembler.addiInsn(dest, trueSrc, Imm::I<0>());
+        Jump end = jump();
+        invcondBranch.link(this);
+        m_assembler.addiInsn(dest, falseSrc, Imm::I<0>());
+        end.link(this);
+    }
+
+    void moveConditionallyFloatWithZero(DoubleCondition cond, FPRegisterID left, RegisterID src, RegisterID dest)
+    {
+        UNUSED_PARAM(cond);
+        UNUSED_PARAM(left);
+        UNUSED_PARAM(src);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void moveConditionallyFloatWithZero(DoubleCondition cond, FPRegisterID left, RegisterID thenCase, RegisterID elseCase, RegisterID dest)
+    {
+        UNUSED_PARAM(cond);
+        UNUSED_PARAM(left);
+        UNUSED_PARAM(thenCase);
+        UNUSED_PARAM(elseCase);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void moveConditionallyDouble(DoubleCondition cond, FPRegisterID lhs, FPRegisterID rhs, RegisterID src, RegisterID dest)
+    {
+        Jump invcondBranch = branchFP<64, true>(cond, lhs, rhs);
+        m_assembler.addiInsn(dest, src, Imm::I<0>());
+        invcondBranch.link(this);
+    }
+
+    void moveConditionallyDouble(DoubleCondition cond, FPRegisterID lhs, FPRegisterID rhs, RegisterID trueSrc, RegisterID falseSrc, RegisterID dest)
+    {
+        Jump invcondBranch = branchFP<64, true>(cond, lhs, rhs);
+        m_assembler.addiInsn(dest, trueSrc, Imm::I<0>());
+        Jump end = jump();
+        invcondBranch.link(this);
+        m_assembler.addiInsn(dest, falseSrc, Imm::I<0>());
+        end.link(this);
+    }
+
+    void moveConditionallyDoubleWithZero(DoubleCondition cond, FPRegisterID left, RegisterID src, RegisterID dest)
+    {
+        UNUSED_PARAM(cond);
+        UNUSED_PARAM(left);
+        UNUSED_PARAM(src);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void moveConditionallyDoubleWithZero(DoubleCondition cond, FPRegisterID left, RegisterID thenCase, RegisterID elseCase, RegisterID dest)
+    {
+        UNUSED_PARAM(cond);
+        UNUSED_PARAM(left);
+        UNUSED_PARAM(thenCase);
+        UNUSED_PARAM(elseCase);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void moveConditionallyTest32(ResultCondition cond, RegisterID value, RegisterID mask, RegisterID src, RegisterID dest)
+    {
+        auto temp = temps<Data>();
+        m_assembler.andInsn(temp.data(), value, mask);
+        m_assembler.signExtend<32>(temp.data());
+        testFinalize(cond, temp.data(), temp.data());
+
+        m_assembler.beqInsn(temp.data(), RISCV64Registers::zero, Imm::B<8>());
+        m_assembler.addiInsn(dest, src, Imm::I<0>());
+    }
+
+    void moveConditionallyTest32(ResultCondition cond, RegisterID value, RegisterID mask, RegisterID trueSrc, RegisterID falseSrc, RegisterID dest)
+    {
+        auto temp = temps<Data>();
+        m_assembler.andInsn(temp.data(), value, mask);
+        m_assembler.signExtend<32>(temp.data());
+        testFinalize(cond, temp.data(), temp.data());
+
+        m_assembler.beqInsn(temp.data(), RISCV64Registers::zero, Imm::B<12>());
+        m_assembler.addiInsn(dest, trueSrc, Imm::I<0>());
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.addiInsn(dest, falseSrc, Imm::I<0>());
+    }
+
+    void moveConditionallyTest32(ResultCondition cond, RegisterID value, TrustedImm32 mask, RegisterID trueSrc, RegisterID falseSrc, RegisterID dest)
+    {
+        auto temp = temps<Data>();
+        loadImmediate(mask, temp.data());
+        m_assembler.andInsn(temp.data(), value, temp.data());
+        m_assembler.signExtend<32>(temp.data());
+        testFinalize(cond, temp.data(), temp.data());
+
+        m_assembler.beqInsn(temp.data(), RISCV64Registers::zero, Imm::B<12>());
+        m_assembler.addiInsn(dest, trueSrc, Imm::I<0>());
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.addiInsn(dest, falseSrc, Imm::I<0>());
+    }
+
+    void moveConditionallyTest64(ResultCondition cond, RegisterID value, RegisterID mask, RegisterID src, RegisterID dest)
+    {
+        auto temp = temps<Data>();
+        m_assembler.andInsn(temp.data(), value, mask);
+        testFinalize(cond, temp.data(), temp.data());
+
+        m_assembler.beqInsn(temp.data(), RISCV64Registers::zero, Imm::B<8>());
+        m_assembler.addiInsn(dest, src, Imm::I<0>());
+    }
+
+    void moveConditionallyTest64(ResultCondition cond, RegisterID value, RegisterID mask, RegisterID trueSrc, RegisterID falseSrc, RegisterID dest)
+    {
+        auto temp = temps<Data>();
+        m_assembler.andInsn(temp.data(), value, mask);
+        testFinalize(cond, temp.data(), temp.data());
+
+        m_assembler.beqInsn(temp.data(), RISCV64Registers::zero, Imm::B<12>());
+        m_assembler.addiInsn(dest, trueSrc, Imm::I<0>());
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.addiInsn(dest, falseSrc, Imm::I<0>());
+    }
+
+    void moveConditionallyTest64(ResultCondition cond, RegisterID value, TrustedImm32 mask, RegisterID trueSrc, RegisterID falseSrc, RegisterID dest)
+    {
+        auto temp = temps<Data>();
+        loadImmediate(mask, temp.data());
+        m_assembler.andInsn(temp.data(), value, temp.data());
+        testFinalize(cond, temp.data(), temp.data());
+
+        m_assembler.beqInsn(temp.data(), RISCV64Registers::zero, Imm::B<12>());
+        m_assembler.addiInsn(dest, trueSrc, Imm::I<0>());
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.addiInsn(dest, falseSrc, Imm::I<0>());
+    }
+
+    void moveDoubleConditionally32(RelationalCondition cond, RegisterID lhs, RegisterID rhs, FPRegisterID trueSrc, FPRegisterID falseSrc, FPRegisterID dest)
+    {
+        auto temp = temps<Data, Memory>();
+        m_assembler.signExtend<32>(temp.data(), lhs);
+        m_assembler.signExtend<32>(temp.memory(), rhs);
+
+        branchForMoveConditionally(invert(cond), temp.data(), temp.memory(), Imm::B<12>());
+        m_assembler.fsgnjInsn<64>(dest, trueSrc, trueSrc);
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.fsgnjInsn<64>(dest, falseSrc, falseSrc);
+    }
+
+    void moveDoubleConditionally32(RelationalCondition cond, RegisterID lhs, TrustedImm32 imm, FPRegisterID trueSrc, FPRegisterID falseSrc, FPRegisterID dest)
+    {
+        auto temp = temps<Data, Memory>();
+        m_assembler.signExtend<32>(temp.data(), lhs);
+        loadImmediate(imm, temp.memory());
+
+        branchForMoveConditionally(invert(cond), temp.data(), temp.memory(), Imm::B<12>());
+        m_assembler.fsgnjInsn<64>(dest, trueSrc, trueSrc);
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.fsgnjInsn<64>(dest, falseSrc, falseSrc);
+    }
+
+    void moveDoubleConditionally64(RelationalCondition cond, RegisterID lhs, RegisterID rhs, FPRegisterID trueSrc, FPRegisterID falseSrc, FPRegisterID dest)
+    {
+        branchForMoveConditionally(invert(cond), lhs, rhs, Imm::B<12>());
+        m_assembler.fsgnjInsn<64>(dest, trueSrc, trueSrc);
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.fsgnjInsn<64>(dest, falseSrc, falseSrc);
+    }
+
+    void moveDoubleConditionally64(RelationalCondition cond, RegisterID lhs, TrustedImm32 imm, FPRegisterID trueSrc, FPRegisterID falseSrc, FPRegisterID dest)
+    {
+        auto temp = temps<Data>();
+        loadImmediate(imm, temp.data());
+        branchForMoveConditionally(invert(cond), lhs, temp.data(), Imm::B<12>());
+        m_assembler.fsgnjInsn<64>(dest, trueSrc, trueSrc);
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.fsgnjInsn<64>(dest, falseSrc, falseSrc);
+    }
+
+    void moveDoubleConditionallyFloat(DoubleCondition cond, FPRegisterID lhs, FPRegisterID rhs, FPRegisterID trueSrc, FPRegisterID falseSrc, FPRegisterID dest)
+    {
+        Jump invcondBranch = branchFP<32, true>(cond, lhs, rhs);
+        m_assembler.fsgnjInsn<64>(dest, trueSrc, trueSrc);
+        Jump end = jump();
+        invcondBranch.link(this);
+        m_assembler.fsgnjInsn<64>(dest, falseSrc, falseSrc);
+        end.link(this);
+    }
+
+    void moveDoubleConditionallyDouble(DoubleCondition cond, FPRegisterID lhs, FPRegisterID rhs, FPRegisterID trueSrc, FPRegisterID falseSrc, FPRegisterID dest)
+    {
+        Jump invcondBranch = branchFP<64, true>(cond, lhs, rhs);
+        m_assembler.fsgnjInsn<64>(dest, trueSrc, trueSrc);
+        Jump end = jump();
+        invcondBranch.link(this);
+        m_assembler.fsgnjInsn<64>(dest, falseSrc, falseSrc);
+        end.link(this);
+    }
+
+    void moveDoubleConditionallyFloatWithZero(DoubleCondition cond, FPRegisterID left, FPRegisterID thenCase, FPRegisterID elseCase, FPRegisterID dest)
+    {
+        UNUSED_PARAM(cond);
+        UNUSED_PARAM(left);
+        UNUSED_PARAM(thenCase);
+        UNUSED_PARAM(elseCase);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void moveDoubleConditionallyDoubleWithZero(DoubleCondition cond, FPRegisterID left, FPRegisterID thenCase, FPRegisterID elseCase, FPRegisterID dest)
+    {
+        UNUSED_PARAM(cond);
+        UNUSED_PARAM(left);
+        UNUSED_PARAM(thenCase);
+        UNUSED_PARAM(elseCase);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void moveDoubleConditionallyTest32(ResultCondition cond, RegisterID value, RegisterID mask, FPRegisterID trueSrc, FPRegisterID falseSrc, FPRegisterID dest)
+    {
+        auto temp = temps<Data>();
+        m_assembler.andInsn(temp.data(), value, mask);
+        m_assembler.signExtend<32>(temp.data());
+        testFinalize(cond, temp.data(), temp.data());
+
+        m_assembler.beqInsn(temp.data(), RISCV64Registers::zero, Imm::B<12>());
+        m_assembler.fsgnjInsn<64>(dest, trueSrc, trueSrc);
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.fsgnjInsn<64>(dest, falseSrc, falseSrc);
+    }
+
+    void moveDoubleConditionallyTest32(ResultCondition cond, RegisterID value, TrustedImm32 mask, FPRegisterID trueSrc, FPRegisterID falseSrc, FPRegisterID dest)
+    {
+        auto temp = temps<Data>();
+        loadImmediate(mask, temp.data());
+        m_assembler.andInsn(temp.data(), value, temp.data());
+        m_assembler.signExtend<32>(temp.data());
+        testFinalize(cond, temp.data(), temp.data());
+
+        m_assembler.beqInsn(temp.data(), RISCV64Registers::zero, Imm::B<12>());
+        m_assembler.fsgnjInsn<64>(dest, trueSrc, trueSrc);
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.fsgnjInsn<64>(dest, falseSrc, falseSrc);
+    }
+
+    void moveDoubleConditionallyTest64(ResultCondition cond, RegisterID value, RegisterID mask, FPRegisterID trueSrc, FPRegisterID falseSrc, FPRegisterID dest)
+    {
+        auto temp = temps<Data>();
+        m_assembler.andInsn(temp.data(), value, mask);
+        testFinalize(cond, temp.data(), temp.data());
+
+        m_assembler.beqInsn(temp.data(), RISCV64Registers::zero, Imm::B<12>());
+        m_assembler.fsgnjInsn<64>(dest, trueSrc, trueSrc);
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.fsgnjInsn<64>(dest, falseSrc, falseSrc);
+    }
+
+    void moveDoubleConditionallyTest64(ResultCondition cond, RegisterID value, TrustedImm32 mask, FPRegisterID trueSrc, FPRegisterID falseSrc, FPRegisterID dest)
+    {
+        auto temp = temps<Data>();
+        loadImmediate(mask, temp.data());
+        m_assembler.andInsn(temp.data(), value, temp.data());
+        testFinalize(cond, temp.data(), temp.data());
+
+        m_assembler.beqInsn(temp.data(), RISCV64Registers::zero, Imm::B<12>());
+        m_assembler.fsgnjInsn<64>(dest, trueSrc, trueSrc);
+        m_assembler.jalInsn(RISCV64Registers::zero, Imm::J<8>());
+        m_assembler.fsgnjInsn<64>(dest, falseSrc, falseSrc);
+    }
+
+    void loadFloat16(Address address, FPRegisterID dest)
+    {
+        UNUSED_PARAM(address);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void loadFloat16(BaseIndex address, FPRegisterID dest)
+    {
+        UNUSED_PARAM(address);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void loadFloat16(TrustedImmPtr address, FPRegisterID dest)
+    {
+        UNUSED_PARAM(address);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void storeFloat16(FPRegisterID src, Address address)
+    {
+        UNUSED_PARAM(src);
+        UNUSED_PARAM(address);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void storeFloat16(FPRegisterID src, BaseIndex address)
+    {
+        UNUSED_PARAM(src);
+        UNUSED_PARAM(address);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void convertFloat16ToDouble(FPRegisterID src, FPRegisterID dest)
+    {
+        UNUSED_PARAM(src);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void convertDoubleToFloat16(FPRegisterID src, FPRegisterID dest)
+    {
+        UNUSED_PARAM(src);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void moveZeroToFloat16(FPRegisterID reg)
+    {
+        UNUSED_PARAM(reg);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void move16ToFloat16(RegisterID src, FPRegisterID dest)
+    {
+        UNUSED_PARAM(src);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void move16ToFloat16(TrustedImm32 imm, FPRegisterID dest)
+    {
+        UNUSED_PARAM(imm);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void moveFloat16To16(FPRegisterID src, RegisterID dest)
+    {
+        UNUSED_PARAM(src);
+        UNUSED_PARAM(dest);
+        UNREACHABLE_FOR_PLATFORM();
+    }
 
 private:
     enum class ArithmeticOperation {
@@ -3440,6 +4465,7 @@ private:
     Jump branchTestFinalize(ResultCondition cond, RegisterID src)
     {
         switch (cond) {
+        case Carry:
         case Overflow:
             break;
         case Signed:
@@ -3553,6 +4579,34 @@ private:
             m_assembler.sraiInsn<0x3f>(temp.memory(), dest);
             return makeBranch(NotEqual, temp.data(), temp.memory());
         }
+    }
+
+    void branchForMoveConditionally(RelationalCondition condition, RegisterID lhs, RegisterID rhs, RISCV64Assembler::BImmediate offset)
+    {
+        switch (condition) {
+        case Equal:
+            return m_assembler.beqInsn(lhs, rhs, offset);
+        case NotEqual:
+            return m_assembler.bneInsn(lhs, rhs, offset);
+        case Above:
+            return m_assembler.bltuInsn(rhs, lhs, offset);
+        case AboveOrEqual:
+            return m_assembler.bgeuInsn(lhs, rhs, offset);
+        case Below:
+            return m_assembler.bltuInsn(lhs, rhs, offset);
+        case BelowOrEqual:
+            return m_assembler.bgeuInsn(rhs, lhs, offset);
+        case GreaterThan:
+            return m_assembler.bltInsn(rhs, lhs, offset);
+        case GreaterThanOrEqual:
+            return m_assembler.bgeInsn(lhs, rhs, offset);
+        case LessThan:
+            return m_assembler.bltInsn(lhs, rhs, offset);
+        case LessThanOrEqual:
+            return m_assembler.bgeInsn(rhs, lhs, offset);
+        }
+
+        RELEASE_ASSERT_NOT_REACHED();
     }
 
     void compareFinalize(RelationalCondition cond, RegisterID lhs, RegisterID rhs, RegisterID dest)
@@ -3813,6 +4867,7 @@ private:
 
         end.link(this);
     }
+
 };
 
 } // namespace JSC

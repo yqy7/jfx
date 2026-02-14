@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,39 +26,48 @@
 #include "config.h"
 #include "ServiceWorkerRegistration.h"
 
-#if ENABLE(SERVICE_WORKER)
-#include "DOMWindow.h"
+#include "CookieChangeSubscription.h"
+#include "CookieStoreGetOptions.h"
+#include "CookieStoreManager.h"
 #include "Document.h"
 #include "Event.h"
 #include "EventLoop.h"
 #include "EventNames.h"
+#include "EventTargetInlines.h"
+#include "EventTargetInterfaces.h"
+#include "JSDOMPromise.h"
 #include "JSDOMPromiseDeferred.h"
 #include "JSNotification.h"
+#include "LocalDOMWindow.h"
 #include "Logging.h"
 #include "NavigationPreloadManager.h"
 #include "NotificationClient.h"
 #include "NotificationPermission.h"
+#include "PushEvent.h"
 #include "ServiceWorker.h"
 #include "ServiceWorkerContainer.h"
+#include "ServiceWorkerGlobalScope.h"
 #include "ServiceWorkerTypes.h"
+#include "WebCoreOpaqueRoot.h"
 #include "WorkerGlobalScope.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
+#include <wtf/Vector.h>
 
 #define REGISTRATION_RELEASE_LOG(fmt, ...) RELEASE_LOG(ServiceWorker, "%p - ServiceWorkerRegistration::" fmt, this, ##__VA_ARGS__)
 #define REGISTRATION_RELEASE_LOG_ERROR(fmt, ...) RELEASE_LOG_ERROR(ServiceWorker, "%p - ServiceWorkerRegistration::" fmt, this, ##__VA_ARGS__)
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(ServiceWorkerRegistration);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(ServiceWorkerRegistration);
 
 Ref<ServiceWorkerRegistration> ServiceWorkerRegistration::getOrCreate(ScriptExecutionContext& context, Ref<ServiceWorkerContainer>&& container, ServiceWorkerRegistrationData&& data)
 {
-    if (auto* registration = container->registration(data.identifier)) {
+    if (RefPtr registration = container->registration(data.identifier)) {
         ASSERT(!registration->isContextStopped());
-        return *registration;
+        return registration.releaseNonNull();
     }
 
-    auto registration = adoptRef(*new ServiceWorkerRegistration(context, WTFMove(container), WTFMove(data)));
+    Ref registration = adoptRef(*new ServiceWorkerRegistration(context, WTFMove(container), WTFMove(data)));
     registration->suspendIfNeeded();
     return registration;
 }
@@ -77,7 +86,7 @@ ServiceWorkerRegistration::ServiceWorkerRegistration(ScriptExecutionContext& con
     if (m_registrationData.activeWorker)
         m_activeWorker = ServiceWorker::getOrCreate(context, WTFMove(*m_registrationData.activeWorker));
 
-    REGISTRATION_RELEASE_LOG("ServiceWorkerRegistration: ID %llu, installing=%llu, waiting=%llu, active=%llu", identifier().toUInt64(), m_installingWorker ? m_installingWorker->identifier().toUInt64() : 0, m_waitingWorker ? m_waitingWorker->identifier().toUInt64() : 0, m_activeWorker ? m_activeWorker->identifier().toUInt64() : 0);
+    REGISTRATION_RELEASE_LOG("ServiceWorkerRegistration: ID %" PRIu64 ", installing=%" PRIu64 ", waiting=%" PRIu64 ", active=%" PRIu64, identifier().toUInt64(), m_installingWorker ? m_installingWorker->identifier().toUInt64() : 0, m_waitingWorker ? m_waitingWorker->identifier().toUInt64() : 0, m_activeWorker ? m_activeWorker->identifier().toUInt64() : 0);
 
     m_container->addRegistration(*this);
 
@@ -144,13 +153,18 @@ void ServiceWorkerRegistration::setUpdateViaCache(ServiceWorkerUpdateViaCache up
 void ServiceWorkerRegistration::update(Ref<DeferredPromise>&& promise)
 {
     if (isContextStopped()) {
-        promise->reject(Exception(InvalidStateError));
+        promise->reject(Exception(ExceptionCode::InvalidStateError));
         return;
     }
 
-    auto* newestWorker = getNewestWorker();
+    RefPtr newestWorker = getNewestWorker();
     if (!newestWorker) {
-        promise->reject(Exception(InvalidStateError, "newestWorker is null"_s));
+        promise->reject(Exception(ExceptionCode::InvalidStateError, "newestWorker is null"_s));
+        return;
+    }
+
+    if (RefPtr serviceWorkerGlobalScope = dynamicDowncast<ServiceWorkerGlobalScope>(scriptExecutionContext()); serviceWorkerGlobalScope && serviceWorkerGlobalScope->serviceWorker().state() == ServiceWorkerState::Installing) {
+        promise->reject(Exception(ExceptionCode::InvalidStateError, "service worker is installing"_s));
         return;
     }
 
@@ -160,7 +174,7 @@ void ServiceWorkerRegistration::update(Ref<DeferredPromise>&& promise)
 void ServiceWorkerRegistration::unregister(Ref<DeferredPromise>&& promise)
 {
     if (isContextStopped()) {
-        promise->reject(Exception(InvalidStateError));
+        promise->reject(Exception(ExceptionCode::InvalidStateError));
         return;
     }
 
@@ -170,27 +184,27 @@ void ServiceWorkerRegistration::unregister(Ref<DeferredPromise>&& promise)
 void ServiceWorkerRegistration::subscribeToPushService(const Vector<uint8_t>& applicationServerKey, DOMPromiseDeferred<IDLInterface<PushSubscription>>&& promise)
 {
     if (isContextStopped()) {
-        promise.reject(Exception(InvalidStateError));
+        promise.reject(Exception(ExceptionCode::InvalidStateError));
         return;
     }
 
     m_container->subscribeToPushService(*this, applicationServerKey, WTFMove(promise));
 }
 
-void ServiceWorkerRegistration::unsubscribeFromPushService(PushSubscriptionIdentifier subscriptionIdentifier, DOMPromiseDeferred<IDLBoolean>&& promise)
+void ServiceWorkerRegistration::unsubscribeFromPushService(std::optional<PushSubscriptionIdentifier> subscriptionIdentifier, DOMPromiseDeferred<IDLBoolean>&& promise)
 {
     if (isContextStopped()) {
-        promise.reject(Exception(InvalidStateError));
+        promise.reject(Exception(ExceptionCode::InvalidStateError));
         return;
     }
 
-    m_container->unsubscribeFromPushService(identifier(), subscriptionIdentifier, WTFMove(promise));
+    m_container->unsubscribeFromPushService(identifier(), *subscriptionIdentifier, WTFMove(promise));
 }
 
 void ServiceWorkerRegistration::getPushSubscription(DOMPromiseDeferred<IDLNullable<IDLInterface<PushSubscription>>>&& promise)
 {
     if (isContextStopped()) {
-        promise.reject(Exception(InvalidStateError));
+        promise.reject(Exception(ExceptionCode::InvalidStateError));
         return;
     }
 
@@ -200,7 +214,7 @@ void ServiceWorkerRegistration::getPushSubscription(DOMPromiseDeferred<IDLNullab
 void ServiceWorkerRegistration::getPushPermissionState(DOMPromiseDeferred<IDLEnumeration<PushPermissionState>>&& promise)
 {
     if (isContextStopped()) {
-        promise.reject(Exception(InvalidStateError));
+        promise.reject(Exception(ExceptionCode::InvalidStateError));
         return;
     }
 
@@ -211,15 +225,15 @@ void ServiceWorkerRegistration::updateStateFromServer(ServiceWorkerRegistrationS
 {
     switch (state) {
     case ServiceWorkerRegistrationState::Installing:
-        REGISTRATION_RELEASE_LOG("updateStateFromServer: Setting registration %llu installing worker to %llu", identifier().toUInt64(), serviceWorker ? serviceWorker->identifier().toUInt64() : 0);
+        REGISTRATION_RELEASE_LOG("updateStateFromServer: Setting registration %" PRIu64 " installing worker to %" PRIu64, identifier().toUInt64(), serviceWorker ? serviceWorker->identifier().toUInt64() : 0);
         m_installingWorker = WTFMove(serviceWorker);
         break;
     case ServiceWorkerRegistrationState::Waiting:
-        REGISTRATION_RELEASE_LOG("updateStateFromServer: Setting registration %llu waiting worker to %llu", identifier().toUInt64(), serviceWorker ? serviceWorker->identifier().toUInt64() : 0);
+        REGISTRATION_RELEASE_LOG("updateStateFromServer: Setting registration %" PRIu64 " waiting worker to %" PRIu64, identifier().toUInt64(), serviceWorker ? serviceWorker->identifier().toUInt64() : 0);
         m_waitingWorker = WTFMove(serviceWorker);
         break;
     case ServiceWorkerRegistrationState::Active:
-        REGISTRATION_RELEASE_LOG("updateStateFromServer: Setting registration %llu active worker to %llu", identifier().toUInt64(), serviceWorker ? serviceWorker->identifier().toUInt64() : 0);
+        REGISTRATION_RELEASE_LOG("updateStateFromServer: Setting registration %" PRIu64 " active worker to %" PRIu64, identifier().toUInt64(), serviceWorker ? serviceWorker->identifier().toUInt64() : 0);
         m_activeWorker = WTFMove(serviceWorker);
         break;
     }
@@ -230,24 +244,19 @@ void ServiceWorkerRegistration::queueTaskToFireUpdateFoundEvent()
     if (isContextStopped())
         return;
 
-    REGISTRATION_RELEASE_LOG("fireUpdateFoundEvent: Firing updatefound event for registration %llu", identifier().toUInt64());
+    REGISTRATION_RELEASE_LOG("fireUpdateFoundEvent: Firing updatefound event for registration %" PRIu64, identifier().toUInt64());
 
     queueTaskToDispatchEvent(*this, TaskSource::DOMManipulation, Event::create(eventNames().updatefoundEvent, Event::CanBubble::No, Event::IsCancelable::No));
 }
 
-EventTargetInterface ServiceWorkerRegistration::eventTargetInterface() const
+enum EventTargetInterfaceType ServiceWorkerRegistration::eventTargetInterface() const
 {
-    return ServiceWorkerRegistrationEventTargetInterfaceType;
+    return EventTargetInterfaceType::ServiceWorkerRegistration;
 }
 
 ScriptExecutionContext* ServiceWorkerRegistration::scriptExecutionContext() const
 {
     return ActiveDOMObject::scriptExecutionContext();
-}
-
-const char* ServiceWorkerRegistration::activeDOMObjectName() const
-{
-    return "ServiceWorkerRegistration";
 }
 
 void ServiceWorkerRegistration::stop()
@@ -267,79 +276,155 @@ NavigationPreloadManager& ServiceWorkerRegistration::navigationPreload()
     return *m_navigationPreload;
 }
 
+WebCoreOpaqueRoot root(ServiceWorkerRegistration* registration)
+{
+    return WebCoreOpaqueRoot { registration };
+}
+
 #if ENABLE(NOTIFICATION_EVENT)
-void ServiceWorkerRegistration::showNotification(ScriptExecutionContext& context, const String& title, const NotificationOptions& options, DOMPromiseDeferred<void>&& promise)
+void ServiceWorkerRegistration::showNotification(ScriptExecutionContext& context, String&& title, NotificationOptions&& options, Ref<DeferredPromise>&& promise)
 {
     if (!m_activeWorker) {
-        promise.reject(Exception { TypeError, "Registration does not have an active worker"_s });
+        RELEASE_LOG_ERROR(Push, "Cannot show notification from ServiceWorker: No active worker");
+        promise->reject(Exception { ExceptionCode::TypeError, "Registration does not have an active worker"_s });
         return;
     }
 
     auto* client = context.notificationClient();
     if (!client) {
-        promise.reject(Exception { TypeError, "Registration not active"_s });
+        RELEASE_LOG_ERROR(Push, "Cannot show notification from ServiceWorker: Registration not active");
+        promise->reject(Exception { ExceptionCode::TypeError, "Registration not active"_s });
         return;
     }
 
     if (client->checkPermission(&context) != NotificationPermission::Granted) {
-        promise.reject(Exception { TypeError, "Registration does not have permission to show notifications"_s });
+        RELEASE_LOG_ERROR(Push, "Cannot show notification from ServiceWorker: Client permission is not granted");
+        promise->reject(Exception { ExceptionCode::TypeError, "Registration does not have permission to show notifications"_s });
         return;
     }
 
-    // The Notification is kept alive by virtue of being show()'n soon.
-    // FIXME: When implementing getNotifications(), store this Notification in the registration's notification list.
-    auto notification = Notification::create(context, title, options);
+    auto notificationResult = Notification::createForServiceWorker(context, WTFMove(title), WTFMove(options), m_registrationData.scopeURL);
+    if (notificationResult.hasException()) {
+        RELEASE_LOG_ERROR(Push, "Cannot show notification from ServiceWorker: Creating Notification had an exception");
+        promise->reject(notificationResult.releaseException());
+        return;
+    }
 
-    context.eventLoop().queueTask(TaskSource::DOMManipulation, [promise = WTFMove(promise)]() mutable {
-        promise.resolve();
+    RefPtr serviceWorkerGlobalScope = dynamicDowncast<ServiceWorkerGlobalScope>(context);
+
+    // If we're handling a DeclarativePushEvent, this Notification will override the proposed notification
+    // instead of being shown directly.
+    if (serviceWorkerGlobalScope) {
+#if ENABLE(DECLARATIVE_WEB_PUSH)
+        if (RefPtr declarativePushEvent = serviceWorkerGlobalScope->declarativePushEvent()) {
+            auto notification = notificationResult.releaseReturnValue();
+            if (!notification->navigate().isValid()) {
+                promise->reject(Exception { ExceptionCode::TypeError, "Call to showNotification() while handling a `push` event did not include NotificationOptions that specify a valid defaultAction url"_s });
+                return;
+            }
+
+            declarativePushEvent->setUpdatedNotification(notification.ptr());
+            promise->resolve();
+            return;
+        }
+#endif
+
+        if (RefPtr pushEvent = serviceWorkerGlobalScope->pushEvent()) {
+            auto& globalObject = *JSC::jsCast<JSDOMGlobalObject*>(promise->globalObject());
+            auto& jsPromise = *JSC::jsCast<JSC::JSPromise*>(promise->promise());
+            pushEvent->waitUntil(DOMPromise::create(globalObject, jsPromise));
+        }
+
+        if (!serviceWorkerGlobalScope->hasPendingSilentPushEvent() && serviceWorkerGlobalScope->didFirePushEventRecently())
+            serviceWorkerGlobalScope->addConsoleMessage(MessageSource::Storage, MessageLevel::Warning, "showNotification was called outside of any push event lifetime. PushEvent.waitUntil can be used to extend the push event lifetime as necessary."_s, 0);
+        else
+            serviceWorkerGlobalScope->setHasPendingSilentPushEvent(false);
+    }
+
+    auto notification = notificationResult.releaseReturnValue();
+    notification->show([promise = WTFMove(promise)]() mutable {
+        promise->resolve();
     });
 }
 
-void ServiceWorkerRegistration::getNotifications(ScriptExecutionContext& context, const GetNotificationOptions& filter, DOMPromiseDeferred<IDLSequence<IDLInterface<Notification>>> promise)
+void ServiceWorkerRegistration::getNotifications(const GetNotificationOptions& filter, DOMPromiseDeferred<IDLSequence<IDLInterface<Notification>>> promise)
 {
-    auto notifications = filteredNotificationList(filter.tag);
-    context.eventLoop().queueTask(TaskSource::DOMManipulation, [promise = WTFMove(promise), notifications = WTFMove(notifications)]() mutable {
-        promise.resolve(WTFMove(notifications));
-    });
-}
-
-void ServiceWorkerRegistration::addNotificationToList(Notification& notification)
-{
-    // A Notification at this exact address might previously have been in the list but not successfully removed.
-    // The WeakHashSet captures that possibility here to help us maintain consistency.
-    auto iter = m_notificationList.find(&notification);
-    if (iter != m_notificationList.end()) {
-        RELEASE_ASSERT(!m_notificationSet.contains(notification));
-        m_notificationList.remove(iter);
-    }
-
-    m_notificationList.add(&notification);
-    auto result = m_notificationSet.add(notification);
-    ASSERT_UNUSED(result, result.isNewEntry);
-}
-
-void ServiceWorkerRegistration::removeNotificationFromList(Notification& notification)
-{
-    // The same notification might try to remove itself from this list more than once, and that's fine.
-    m_notificationList.remove(&notification);
-    m_notificationSet.remove(notification);
-}
-
-Vector<Ref<Notification>> ServiceWorkerRegistration::filteredNotificationList(const String& filteredTag)
-{
-    Vector<Ref<Notification>> results;
-    for (auto* notification : m_notificationList) {
-        if (!m_notificationSet.contains(*notification))
-            continue;
-        if (filteredTag.isEmpty() || notification->tag() == filteredTag)
-            results.append(notification->copyForGetNotifications());
-    }
-
-    return results;
+    m_container->getNotifications(m_registrationData.scopeURL, filter.tag, WTFMove(promise));
 }
 
 #endif // ENABLE(NOTIFICATION_EVENT)
 
-} // namespace WebCore
+CookieStoreManager& ServiceWorkerRegistration::cookies()
+{
+    if (!m_cookieStoreManager)
+        m_cookieStoreManager = CookieStoreManager::create(*this);
+    return *m_cookieStoreManager;
+}
 
-#endif // ENABLE(SERVICE_WORKER)
+void ServiceWorkerRegistration::addCookieChangeSubscriptions(Vector<CookieStoreGetOptions>&& subscriptions, Ref<DeferredPromise>&& promise)
+{
+    if (isContextStopped()) {
+        promise->reject(Exception { ExceptionCode::InvalidStateError, "The script execution context is not currently running"_s });
+        return;
+    }
+
+    Vector<CookieChangeSubscription> cookieChangeSubscriptions;
+    cookieChangeSubscriptions.reserveInitialCapacity(subscriptions.size());
+    for (auto& subscription : subscriptions) {
+        // FIXME: Fall back to scope url since spec does not specify an alternative and WPT layout tests expect this behavior (https://github.com/WICG/cookie-store/issues/236).
+        String url;
+        if (subscription.url.isNull())
+            url = scope();
+        else {
+            url = scriptExecutionContext()->completeURL(subscription.url).string();
+            if (!url.startsWith(scope())) {
+                promise->reject(Exception { ExceptionCode::TypeError, "The service worker cannot subcribe to cookie changes for URLs outside of its scope"_s });
+                return;
+            }
+        }
+
+        cookieChangeSubscriptions.append({ WTFMove(subscription.name), WTFMove(url) });
+    }
+
+    m_container->addCookieChangeSubscriptions(identifier(), WTFMove(cookieChangeSubscriptions), WTFMove(promise));
+}
+
+void ServiceWorkerRegistration::removeCookieChangeSubscriptions(Vector<CookieStoreGetOptions>&& subscriptions, Ref<DeferredPromise>&& promise)
+{
+    if (isContextStopped()) {
+        promise->reject(Exception { ExceptionCode::InvalidStateError, "The script execution context is not currently running"_s });
+        return;
+    }
+
+    Vector<CookieChangeSubscription> cookieChangeSubscriptions;
+    cookieChangeSubscriptions.reserveInitialCapacity(subscriptions.size());
+    for (auto& subscription : subscriptions) {
+        // FIXME: Fall back to scope url since spec does not specify an alternative and WPT layout tests expect this behavior (https://github.com/WICG/cookie-store/issues/236).
+        String url;
+        if (subscription.url.isNull())
+            url = scope();
+        else {
+            url = scriptExecutionContext()->completeURL(subscription.url).string();
+            if (!url.startsWith(scope())) {
+                promise->reject(Exception { ExceptionCode::TypeError, "The service worker cannot unsubcribe from cookie changes for URLs outside of its scope"_s });
+                return;
+            }
+        }
+
+        cookieChangeSubscriptions.append({ WTFMove(subscription.name), WTFMove(url) });
+    }
+
+    m_container->removeCookieChangeSubscriptions(identifier(), WTFMove(cookieChangeSubscriptions), WTFMove(promise));
+}
+
+void ServiceWorkerRegistration::cookieChangeSubscriptions(Ref<DeferredPromise>&& promise)
+{
+    if (isContextStopped()) {
+        promise->reject(Exception { ExceptionCode::InvalidStateError, "The script execution context is not currently running"_s });
+        return;
+    }
+
+    m_container->cookieChangeSubscriptions(identifier(), WTFMove(promise));
+}
+
+} // namespace WebCore

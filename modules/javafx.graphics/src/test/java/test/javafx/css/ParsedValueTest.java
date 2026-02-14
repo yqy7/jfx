@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,18 +25,12 @@
 
 package test.javafx.css;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-
 import com.sun.javafx.css.ParsedValueImpl;
 import javafx.css.StylesheetShim;
 import javafx.css.StyleConverter.StringStore;
 import javafx.css.converter.SizeConverter;
 
 import javafx.scene.text.Font;
-
-import org.junit.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -46,7 +40,12 @@ import java.io.IOException;
 import javafx.css.ParsedValue;
 import javafx.css.Size;
 import javafx.css.SizeUnits;
-import javafx.css.StylesheetShim;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class ParsedValueTest {
 
@@ -60,8 +59,8 @@ public class ParsedValueTest {
     public void testGetValue() {
         //System.out.println("getValue");
         ParsedValue<Size,Size> instance =
-                new ParsedValueImpl<Size,Size>(new Size(100.0, SizeUnits.PERCENT), null);
-        Size expResult = new Size(100.0, SizeUnits.PERCENT);;
+                new ParsedValueImpl<>(new Size(100.0, SizeUnits.PERCENT), null);
+        Size expResult = new Size(100.0, SizeUnits.PERCENT);
         Size result = instance.getValue();
         assertEquals(expResult, result);
     }
@@ -71,11 +70,11 @@ public class ParsedValueTest {
      */
     @Test
     public void testConvert() {
-        ///System.out.println("convert");
+        //System.out.println("convert");
         Font font = Font.getDefault();
         Size size = new Size(1.0, SizeUnits.EM);
         ParsedValue<ParsedValue<?,Size>,Number> value =
-            new ParsedValueImpl<ParsedValue<?,Size>,Number>(
+            new ParsedValueImpl<>(
                 new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
                 SizeConverter.getInstance());
 
@@ -90,12 +89,12 @@ public class ParsedValueTest {
         Font font = Font.getDefault();
         Size size = new Size(1.0, SizeUnits.EM);
         ParsedValue<ParsedValue<?,Size>,Number> value1 =
-            new ParsedValueImpl<ParsedValue<?,Size>,Number>(
+            new ParsedValueImpl<>(
                 new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
                 SizeConverter.getInstance());
 
         ParsedValue<ParsedValue<?,Size>,Number> value2 =
-            new ParsedValueImpl<ParsedValue<?,Size>,Number>(
+            new ParsedValueImpl<>(
                 new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
                 null);
 
@@ -103,31 +102,31 @@ public class ParsedValueTest {
         assertTrue(value1.equals(value2));
 
         value1 =
-            new ParsedValueImpl<ParsedValue<?,Size>,Number>(
+            new ParsedValueImpl<>(
                 new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
                 SizeConverter.getInstance());
 
         value2 =
-            new ParsedValueImpl<ParsedValue<?,Size>,Number>(
+            new ParsedValueImpl<>(
                 new ParsedValueImpl<Size,Size>(new Size(2.0, SizeUnits.EM), null),
                 SizeConverter.getInstance());
 
         assertFalse(value1.equals(value2));
 
         value2 =
-            new ParsedValueImpl<ParsedValue<?,Size>,Number>(
+            new ParsedValueImpl<>(
                 new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.PX), null),
                 SizeConverter.getInstance());
 
         assertFalse(value1.equals(value2));
 
         value2 =
-            new ParsedValueImpl<ParsedValue<?,Size>,Number>(null, null);
+            new ParsedValueImpl<>(null, null);
 
         assertFalse(value1.equals(value2));
 
         ParsedValue<ParsedValue[],Number[]> value3 =
-                new ParsedValueImpl<ParsedValue[],Number[]>(
+                new ParsedValueImpl<>(
                     new ParsedValueImpl[] {
                         new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
                         new ParsedValueImpl<Size,Size>(new Size(2.0, SizeUnits.EM), null)
@@ -138,7 +137,7 @@ public class ParsedValueTest {
         assertFalse(value3.equals(value1));
 
         ParsedValue<ParsedValue[],Number[]> value4 =
-                new ParsedValueImpl<ParsedValue[],Number[]>(
+                new ParsedValueImpl<>(
                     new ParsedValueImpl[] {
                         new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
                         new ParsedValueImpl<Size,Size>(new Size(2.0, SizeUnits.EM), null)
@@ -148,7 +147,7 @@ public class ParsedValueTest {
         assertTrue(value3.equals(value4));
 
         value4 =
-                new ParsedValueImpl<ParsedValue[],Number[]>(
+                new ParsedValueImpl<>(
                     new ParsedValueImpl[] {
                         new ParsedValueImpl<Size,Size>(new Size(2.0, SizeUnits.EM), null),
                         null
@@ -158,7 +157,7 @@ public class ParsedValueTest {
         assertFalse(value3.equals(value4));
 
         value4 =
-                new ParsedValueImpl<ParsedValue[],Number[]>(
+                new ParsedValueImpl<>(
                     new ParsedValueImpl[] {
                         new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
                         new ParsedValueImpl<Size,Size>(new Size(2.0, SizeUnits.EM), null),
@@ -169,7 +168,7 @@ public class ParsedValueTest {
         assertFalse(value3.equals(value4));
 
         value4 =
-                new ParsedValueImpl<ParsedValue[],Number[]>(
+                new ParsedValueImpl<>(
                     new ParsedValueImpl[] {
                         null
                     }, SizeConverter.SequenceConverter.getInstance()
@@ -178,7 +177,7 @@ public class ParsedValueTest {
         assertFalse(value3.equals(value4));
 
         value4 =
-                new ParsedValueImpl<ParsedValue[],Number[]>(
+                new ParsedValueImpl<>(
                     null,
                     SizeConverter.SequenceConverter.getInstance()
                 );
@@ -186,7 +185,7 @@ public class ParsedValueTest {
         assertFalse(value3.equals(value4));
 
         ParsedValue<ParsedValue[][],Number[][]> value5 =
-                new ParsedValueImpl<ParsedValue[][],Number[][]>(
+                new ParsedValueImpl<>(
                     new ParsedValueImpl[][] {
                         new ParsedValueImpl[] {
                             new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
@@ -205,7 +204,7 @@ public class ParsedValueTest {
         assertFalse(value5.equals(value3));
 
         ParsedValue<ParsedValue[][],Number[][]> value6 =
-                new ParsedValueImpl<ParsedValue[][],Number[][]>(
+                new ParsedValueImpl<>(
                     new ParsedValueImpl[][] {
                         new ParsedValueImpl[] {
                             new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
@@ -221,7 +220,7 @@ public class ParsedValueTest {
         assertTrue(value5.equals(value6));
 
         value6 =
-                new ParsedValueImpl<ParsedValue[][],Number[][]>(
+                new ParsedValueImpl<>(
                     new ParsedValueImpl[][] {
                         new ParsedValueImpl[] {
                             new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
@@ -238,7 +237,7 @@ public class ParsedValueTest {
         assertFalse(value5.equals(value6));
 
         value6 =
-                new ParsedValueImpl<ParsedValue[][],Number[][]>(
+                new ParsedValueImpl<>(
                     new ParsedValueImpl[][] {
                         new ParsedValueImpl[] {
                             new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
@@ -254,7 +253,7 @@ public class ParsedValueTest {
         assertFalse(value5.equals(value6));
 
         value6 =
-                new ParsedValueImpl<ParsedValue[][],Number[][]>(
+                new ParsedValueImpl<>(
                     new ParsedValueImpl[][] {
                         new ParsedValueImpl[] {
                             new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
@@ -407,7 +406,7 @@ public class ParsedValueTest {
             parsedValue.writeBinary(dos, stringStore);
             dos.close();
         } catch (IOException ioe) {
-            org.junit.Assert.fail(parsedValue.toString());
+            fail(parsedValue.toString());
         }
 
     }
@@ -421,14 +420,14 @@ public class ParsedValueTest {
         Size size = new Size(1.0, SizeUnits.EM);
 
         ParsedValueImpl parsedValue =
-            new ParsedValueImpl<ParsedValue<?,Size>,Number>(
+            new ParsedValueImpl<>(
                 new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
                 SizeConverter.getInstance());
 
         writeBinary(parsedValue);
 
         parsedValue =
-                new ParsedValueImpl<ParsedValue[],Number[]>(
+                new ParsedValueImpl<>(
                     new ParsedValueImpl[] {
                         new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
                         new ParsedValueImpl<Size,Size>(new Size(2.0, SizeUnits.EM), null)
@@ -496,10 +495,10 @@ public class ParsedValueTest {
             ByteArrayInputStream bais = new ByteArrayInputStream(baos.toByteArray());
             DataInputStream dis = new DataInputStream(bais);
             ParsedValue<?,?> pv = ParsedValueImpl.readBinary(StylesheetShim.BINARY_CSS_VERSION, dis, strings);
-            org.junit.Assert.assertEquals(parsedValue, pv);
+            assertEquals(parsedValue, pv);
         } catch (IOException ioe) {
             System.err.println(ioe);
-            org.junit.Assert.fail(parsedValue.toString());
+            fail(parsedValue.toString());
         }
 
     }
@@ -512,14 +511,14 @@ public class ParsedValueTest {
         Size size = new Size(1.0, SizeUnits.EM);
 
         ParsedValueImpl parsedValue =
-            new ParsedValueImpl<ParsedValue<?,Size>,Number>(
+            new ParsedValueImpl<>(
                 new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
                 SizeConverter.getInstance());
 
         writeAndReadBinary(parsedValue);
 
         parsedValue =
-                new ParsedValueImpl<ParsedValue[],Number[]>(
+                new ParsedValueImpl<>(
                     new ParsedValueImpl[] {
                         new ParsedValueImpl<Size,Size>(new Size(1.0, SizeUnits.EM), null),
                         new ParsedValueImpl<Size,Size>(new Size(2.0, SizeUnits.EM), null)

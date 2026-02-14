@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -39,6 +39,7 @@ import javafx.beans.property.DoublePropertyBase;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.ObjectPropertyBase;
+import javafx.beans.property.Property;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanPropertyBase;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
@@ -59,6 +60,7 @@ import javafx.css.CssMetaData;
 import javafx.css.ParsedValue;
 import javafx.css.PseudoClass;
 import javafx.css.StyleConverter;
+import javafx.css.StyleOrigin;
 import javafx.css.Styleable;
 import javafx.css.StyleableBooleanProperty;
 import javafx.css.StyleableDoubleProperty;
@@ -77,8 +79,10 @@ import javafx.geometry.Orientation;
 import javafx.geometry.Point2D;
 import javafx.geometry.Point3D;
 import javafx.geometry.Rectangle2D;
+import javafx.scene.canvas.Canvas;
 import javafx.scene.effect.BlendMode;
 import javafx.scene.effect.Effect;
+import javafx.scene.image.ImageView;
 import javafx.scene.image.WritableImage;
 import javafx.scene.input.ContextMenuEvent;
 import javafx.scene.input.DragEvent;
@@ -96,14 +100,15 @@ import javafx.scene.input.SwipeEvent;
 import javafx.scene.input.TouchEvent;
 import javafx.scene.input.TransferMode;
 import javafx.scene.input.ZoomEvent;
+import javafx.scene.shape.Shape;
 import javafx.scene.text.Font;
 import javafx.scene.transform.Rotate;
 import javafx.scene.transform.Transform;
 import javafx.stage.Window;
 import javafx.util.Callback;
-import java.security.AccessControlContext;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -119,10 +124,14 @@ import com.sun.javafx.util.TempState;
 import com.sun.javafx.util.Utils;
 import com.sun.javafx.beans.IDProperty;
 import com.sun.javafx.beans.event.AbstractNotifyListener;
-import com.sun.javafx.binding.ExpressionHelper;
 import com.sun.javafx.collections.TrackableObservableList;
 import com.sun.javafx.collections.UnmodifiableListSet;
 import com.sun.javafx.css.PseudoClassState;
+import com.sun.javafx.css.TransitionDefinition;
+import com.sun.javafx.css.TransitionDefinitionConverter;
+import com.sun.javafx.css.TransitionDefinitionCssMetaData;
+import com.sun.javafx.css.TransitionTimer;
+import com.sun.javafx.css.media.MediaQueryContext;
 import javafx.css.Selector;
 import javafx.css.Style;
 import javafx.css.converter.BooleanConverter;
@@ -141,6 +150,7 @@ import com.sun.javafx.geom.transform.BaseTransform;
 import com.sun.javafx.geom.transform.GeneralTransform3D;
 import com.sun.javafx.geom.transform.NoninvertibleTransformException;
 import com.sun.javafx.perf.PerformanceTracker;
+import com.sun.javafx.scene.AbstractNode;
 import com.sun.javafx.scene.BoundsAccessor;
 import com.sun.javafx.scene.CameraHelper;
 import com.sun.javafx.scene.CssFlags;
@@ -219,11 +229,6 @@ import com.sun.javafx.logging.PlatformLogger.Level;
  * The JavaFX Application Thread is created as part of the startup process for
  * the JavaFX runtime. See the {@link javafx.application.Application} class and
  * the {@link Platform#startup(Runnable)} method for more information.
- * </p>
- *
- * <p>
- * An application should not extend the Node class directly. Doing so may lead to
- * an UnsupportedOperationException being thrown.
  * </p>
  *
  * <h2><a id="StringID">String ID</a></h2>
@@ -406,7 +411,9 @@ import com.sun.javafx.logging.PlatformLogger.Level;
  * @since JavaFX 2.0
  */
 @IDProperty("id")
-public abstract class Node implements EventTarget, Styleable {
+public abstract sealed class Node
+        implements EventTarget, Styleable
+        permits AbstractNode, Camera, LightBase, Parent, SubScene, Canvas, ImageView, Shape, Shape3D {
 
     /*
      * Store the singleton instance of the NodeHelper subclass corresponding
@@ -493,6 +500,21 @@ public abstract class Node implements EventTarget, Styleable {
             }
 
             @Override
+            public void setScenes(Node node, Scene newScene, SubScene newSubScene) {
+                node.setScenes(newScene, newSubScene);
+            }
+
+            @Override
+            public void setParent(Node node, Parent parent) {
+                node.setParent(parent);
+            }
+
+            @Override
+            public void updateBounds(Node node) {
+                node.updateBounds();
+            }
+
+            @Override
             public void syncPeer(Node node) {
                 node.syncPeer();
             }
@@ -500,6 +522,16 @@ public abstract class Node implements EventTarget, Styleable {
             @Override
             public void layoutBoundsChanged(Node node) {
                 node.layoutBoundsChanged();
+            }
+
+            @Override
+            public void nodeResolvedOrientationInvalidated(Node node) {
+                node.nodeResolvedOrientationInvalidated();
+            }
+
+            @Override
+            public void setInheritOrientationFromScene(Node node, boolean value) {
+                node.setInheritOrientationFromScene(value);
             }
 
             @Override
@@ -590,6 +622,17 @@ public abstract class Node implements EventTarget, Styleable {
             }
 
             @Override
+            public void scheduleReapplyCSS(Node node) {
+                node.cssFlag = CssFlags.REAPPLY;
+                Toolkit.getToolkit().requestNextPulse();
+            }
+
+            @Override
+            public boolean isInitialCssState(Node node) {
+                return node.initialCssState;
+            }
+
+            @Override
             public void recalculateRelativeSizeProperties(Node node, Font fontForRelativeSizes) {
                 node.recalculateRelativeSizeProperties(fontForRelativeSizes);
             }
@@ -624,6 +667,51 @@ public abstract class Node implements EventTarget, Styleable {
             @Override
             public void requestFocusVisible(Node node) {
                 node.requestFocusVisible();
+            }
+
+            @Override
+            public StyleableProperty<TransitionDefinition[]> getTransitionProperty(Node node) {
+                var definitions = node.miscProperties != null ? node.miscProperties.transitionDefinitions : null;
+                if (definitions == null) {
+                    definitions = new TransitionDefinitionCollection();
+                    node.getMiscProperties().transitionDefinitions = definitions;
+                }
+
+                return definitions;
+            }
+
+            @Override
+            public TransitionDefinition findTransitionDefinition(
+                    Node node, CssMetaData<? extends Styleable, ?> metadata) {
+                var definitions = node.miscProperties != null ? node.miscProperties.transitionDefinitions : null;
+                return definitions == null ? null : definitions.find(metadata);
+            }
+
+            @Override
+            public Map<CssMetaData<? extends Styleable, ?>, TransitionDefinition> findTransitionDefinitions(
+                    Node node, CssMetaData<? extends Styleable, ?> metadata) {
+                var definitions = node.miscProperties != null ? node.miscProperties.transitionDefinitions : null;
+                return definitions == null ? null : definitions.findAll(metadata);
+            }
+
+            @Override
+            public void addTransitionTimer(Node node, String propertyName, TransitionTimer timer) {
+                node.addTransitionTimer(propertyName, timer);
+            }
+
+            @Override
+            public void removeTransitionTimer(Node node, String propertyName) {
+                node.removeTransitionTimer(propertyName);
+            }
+
+            @Override
+            public TransitionTimer findTransitionTimer(Node node, String propertyName) {
+                return node.findTransitionTimer(propertyName);
+            }
+
+            @Override
+            public MediaQueryContext getMediaQueryContext(Node node) {
+                return node.getMediaQueryContext();
             }
         });
     }
@@ -886,7 +974,7 @@ public abstract class Node implements EventTarget, Styleable {
      */
      public final ObservableMap<Object, Object> getProperties() {
         if (properties == null) {
-            properties = FXCollections.observableMap(new HashMap<Object, Object>());
+            properties = FXCollections.observableMap(new HashMap<>());
         }
         return properties;
     }
@@ -951,15 +1039,12 @@ public abstract class Node implements EventTarget, Styleable {
 
     private ReadOnlyObjectWrapper<Parent> parentPropertyImpl() {
         if (parent == null) {
-            parent = new ReadOnlyObjectWrapper<Parent>() {
+            parent = new ReadOnlyObjectWrapper<>() {
                 private Parent oldParent;
 
                 @Override
                 protected void invalidated() {
                     if (oldParent != null) {
-                        updateRemovedParentFocus(oldParent);
-                        oldParent.disabledProperty().removeListener(parentDisabledChangedListener);
-                        oldParent.treeVisibleProperty().removeListener(parentTreeVisibleChangedListener);
                         if (nodeTransformation != null && nodeTransformation.listenerReasons > 0) {
                             ((Node) oldParent).localToSceneTransformProperty().removeListener(
                                     nodeTransformation.getLocalToSceneInvalidationListener());
@@ -967,10 +1052,14 @@ public abstract class Node implements EventTarget, Styleable {
                     }
                     updateDisabled();
                     computeDerivedDepthTest();
+                    resetInitialCssStateFlag();
+
                     final Parent newParent = get();
+
+                    // Update the focus bits before calling reapplyCss(), as the focus bits can affect CSS styling.
+                    updateParentsFocusWithin(oldParent, newParent);
+
                     if (newParent != null) {
-                        newParent.disabledProperty().addListener(parentDisabledChangedListener);
-                        newParent.treeVisibleProperty().addListener(parentTreeVisibleChangedListener);
                         if (nodeTransformation != null && nodeTransformation.listenerReasons > 0) {
                             ((Node) newParent).localToSceneTransformProperty().addListener(
                                     nodeTransformation.getLocalToSceneInvalidationListener());
@@ -983,7 +1072,7 @@ public abstract class Node implements EventTarget, Styleable {
                         //
                         reapplyCSS();
                     } else {
-                        // RT-31168: reset CssFlag to clean so css will be reapplied if the node is added back later.
+                        // JDK-8123224: reset CssFlag to clean so css will be reapplied if the node is added back later.
                         // If flag is REAPPLY, then reapplyCSS() will just return and the call to
                         // notifyParentsOfInvalidatedCSS() will be skipped thus leaving the node un-styled.
                         cssFlag = CssFlags.CLEAN;
@@ -1009,10 +1098,6 @@ public abstract class Node implements EventTarget, Styleable {
         return parent;
     }
 
-    private final InvalidationListener parentDisabledChangedListener = valueModel -> updateDisabled();
-
-    private final InvalidationListener parentTreeVisibleChangedListener = valueModel -> updateTreeVisible(true);
-
     private SubScene subScene = null;
 
     /**
@@ -1021,7 +1106,7 @@ public abstract class Node implements EventTarget, Styleable {
      *
      * @defaultValue null
      */
-    private ReadOnlyObjectWrapperManualFire<Scene> scene = new ReadOnlyObjectWrapperManualFire<Scene>();
+    private ReadOnlyObjectWrapperManualFire<Scene> scene = new ReadOnlyObjectWrapperManualFire<>();
 
     private class ReadOnlyObjectWrapperManualFire<T> extends ReadOnlyObjectWrapper<T> {
         @Override
@@ -1063,6 +1148,15 @@ public abstract class Node implements EventTarget, Styleable {
             getClip().setScenes(newScene, newSubScene);
         }
         if (sceneChanged) {
+            if (oldScene != null) {
+                oldScene.unregisterClearInitialCssStageFlag(this);
+            }
+
+            if (newScene == null) {
+                completeTransitionTimers();
+            } else {
+                resetInitialCssStateFlag();
+            }
             updateCanReceiveFocus();
             if (isFocusTraversable()) {
                 if (newScene != null) {
@@ -1096,8 +1190,8 @@ public abstract class Node implements EventTarget, Styleable {
         if (oldScene != null) {
             oldScene.clearNodeMnemonics(this);
         }
-        if (getParent() == null) {
-            // if we are the root we need to handle scene change
+
+        if (getParent() == null || isInheritOrientationFromScene(resolvedNodeOrientation)) {
             parentResolvedOrientationInvalidated();
         }
 
@@ -1200,6 +1294,7 @@ public abstract class Node implements EventTarget, Styleable {
      * @defaultValue null
      * @see <a href="doc-files/cssref.html">CSS Reference Guide</a>
      */
+    @Override
     public final String getId() {
         return id == null ? null : id.get();
     }
@@ -1240,7 +1335,7 @@ public abstract class Node implements EventTarget, Styleable {
      * @see <a href="doc-files/cssref.html">CSS Reference Guide</a>.
      * @defaultValue null
      */
-    private ObservableList<String> styleClass = new TrackableObservableList<String>() {
+    private ObservableList<String> styleClass = new TrackableObservableList<>() {
         @Override
         protected void onChanged(Change<String> c) {
             reapplyCSS();
@@ -1309,6 +1404,7 @@ public abstract class Node implements EventTarget, Styleable {
      *         an empty String is returned.
      * @see <a href="doc-files/cssref.html">CSS Reference Guide</a>
      */
+    @Override
     public final String getStyle() {
         return style == null ? "" : style.get();
     }
@@ -1916,6 +2012,10 @@ public abstract class Node implements EventTarget, Styleable {
                     pseudoClassStateChanged(DISABLED_PSEUDOCLASS_STATE, get());
                     updateCanReceiveFocus();
                     focusSetDirty(getScene());
+
+                    if (Node.this instanceof Parent parent) {
+                        parent.getChildren().forEach(Node::updateDisabled);
+                    }
                 }
 
                 @Override
@@ -1950,9 +2050,15 @@ public abstract class Node implements EventTarget, Styleable {
      * into the branch until it finds a match. If more than one sub-node matches the
      * specified selector, this function returns the first of them.
      * <p>
-     *     For example, if a Node is given the id of "myId", then the lookup method can
-     *     be used to find this node as follows: <code>scene.lookup("#myId");</code>.
-     * </p>
+     * If the lookup selector does not specify a pseudo class, the lookup will ignore pseudo class states;
+     * it will return the first matching node whether or not it contains pseudo classes.
+     * <p>
+     * For example, if a Node is given the id of "myId", then the lookup method can
+     * be used to find this node as follows: {@code scene.lookup("#myId");}.
+     * <p>
+     * For example, if two nodes, NodeA and NodeB, have the same style class "myStyle" and NodeA has
+     * a pseudo state "myPseudo", then to find NodeA, the lookup method can be used as follows:
+     * {@code scene.lookup(".myStyle:myPseudo");} or {@code scene.lookup(":myPseudo");}.
      *
      * @param selector The css selector of the node to find
      * @return The first node, starting from this {@code Node}, which matches
@@ -1961,13 +2067,23 @@ public abstract class Node implements EventTarget, Styleable {
     public Node lookup(String selector) {
         if (selector == null) return null;
         Selector s = Selector.createSelector(selector);
-        return s != null && s.applies(this) ? this : null;
+        return selectorMatches(s) ? this : null;
     }
 
     /**
      * Finds all {@code Node}s, including this one and any children, which match
      * the given CSS selector. If no matches are found, an empty unmodifiable set is
      * returned. The set is explicitly unordered.
+     * <p>
+     * If the lookupAll selector does not specify a pseudo class, the lookupAll will ignore pseudo class states;
+     * it will return all matching nodes whether or not the nodes contain pseudo classes.
+     * <p>
+     * For example, if there are multiple nodes with same style class "myStyle", then the lookupAll method can
+     * be used to find all these nodes as follows: {@code scene.lookupAll(".myStyle");}.
+     * <p>
+     * For example, if multiple nodes have same style class "myStyle" and few nodes have
+     * a pseudo state "myPseudo", then to find all nodes with "myPseudo" state, the lookupAll method can be used as follows:
+     * {@code scene.lookupAll(".myStyle:myPseudo");} or {@code scene.lookupAll(":myPseudo");}.
      *
      * @param selector The css selector of the nodes to find
      * @return All nodes, starting from and including this {@code Node}, which match
@@ -1979,21 +2095,22 @@ public abstract class Node implements EventTarget, Styleable {
         final Set<Node> empty = Collections.emptySet();
         if (s == null) return empty;
         List<Node> results = lookupAll(s, null);
-        return results == null ? empty : new UnmodifiableListSet<Node>(results);
+        return results == null ? empty : new UnmodifiableListSet<>(results);
     }
 
     /**
      * Used by Node and Parent for traversing the tree and adding all nodes which
      * match the given selector.
      *
-     * @param selector The Selector. This will never be null.
-     * @param results The results. This will never be null.
+     * @param selector the css selector of the nodes to find
+     * @param results the results
+     * @return list of matching nodes
      */
     List<Node> lookupAll(Selector selector, List<Node> results) {
-        if (selector.applies(this)) {
+        if (selectorMatches(selector)) {
             // Lazily create the set to reduce some trash.
             if (results == null) {
-                results = new LinkedList<Node>();
+                results = new LinkedList<>();
             }
             results.add(this);
         }
@@ -2022,6 +2139,19 @@ public abstract class Node implements EventTarget, Styleable {
         if (getParent() != null) {
             getParent().toFront(this);
         }
+    }
+
+    /**
+     * Checks whether the provided selector matches the node with both styles and pseudo states.
+     * @param s selector to match
+     * @return {@code true} if the selector matches
+     */
+    private boolean selectorMatches(Selector s) {
+        boolean matches = s != null && s.applies(this);
+        if (matches && !s.createMatch().getPseudoClasses().isEmpty()) {
+            matches = s.stateMatches(this, this.getPseudoClassStates());
+        }
+        return matches;
     }
 
     // TODO: need to verify whether this is OK to do starting from a node in
@@ -2116,7 +2246,7 @@ public abstract class Node implements EventTarget, Styleable {
             w = tempBounds.getWidth();
             h = tempBounds.getHeight();
         }
-        WritableImage result = Scene.doSnapshot(getScene(), x, y, w, h,
+        WritableImage result = Scene.doSnapshot(getScene(), getSubScene(), x, y, w, h,
                 this, transform, params.isDepthBufferInternal(),
                 params.getFill(), params.getEffectiveCamera(), img);
 
@@ -2506,9 +2636,9 @@ public abstract class Node implements EventTarget, Styleable {
                 + "that is not in scene");
     }
 
-    ////////////////////////////
+    //--------------------------
     //  Private Implementation
-    ////////////////////////////
+    //--------------------------
 
     /**
      * If this Node is being used as the clip of another Node, that other node
@@ -2561,7 +2691,6 @@ public abstract class Node implements EventTarget, Styleable {
      */
     private NGNode peer;
 
-    @SuppressWarnings("CallToPrintStackTrace")
     <P extends NGNode> P getPeer() {
         if (Utils.assertionEnabled()) {
             // Assertion checking code
@@ -2596,16 +2725,7 @@ public abstract class Node implements EventTarget, Styleable {
     /**
      * Creates a new instance of Node.
      */
-    protected Node() {
-        //if (PerformanceTracker.isLoggingEnabled()) {
-        //    PerformanceTracker.logEvent("Node.init for [{this}, id=\"{id}\"]");
-        //}
-        updateTreeVisible(false);
-        //if (PerformanceTracker.isLoggingEnabled()) {
-        //    PerformanceTracker.logEvent("Node.postinit " +
-        //                                "for [{this}, id=\"{id}\"] finished");
-        //}
-    }
+    protected Node() {}
 
     /* *************************************************************************
      *                                                                         *
@@ -2613,8 +2733,8 @@ public abstract class Node implements EventTarget, Styleable {
      *                                                                         *
      **************************************************************************/
     /**
-     * Defines whether or not this node's layout will be managed by it's parent.
-     * If the node is managed, it's parent will factor the node's geometry
+     * Defines whether or not this node's layout will be managed by its parent.
+     * If the node is managed, its parent will factor the node's geometry
      * into its own preferred size and {@link #layoutBoundsProperty layoutBounds}
      * calculations and will lay it
      * out during the scene's layout pass.  If a managed node's layoutBounds
@@ -3844,7 +3964,7 @@ public abstract class Node implements EventTarget, Styleable {
         // actually be TEMP_BOUNDS, so we save off state
         if (getClip() != null
                 // FIXME: All 3D picking is currently ignored by rendering.
-                // Until this is fixed or defined differently (RT-28510),
+                // Until this is fixed or defined differently (JDK-8090485),
                 // we follow this behavior.
                 && !(this instanceof Shape3D) && !(getClip() instanceof Shape3D)) {
             double x1 = bounds.getMinX();
@@ -5389,7 +5509,7 @@ public abstract class Node implements EventTarget, Styleable {
         Node clip = getClip();
         if (clip != null
                 // FIXME: All 3D picking is currently ignored by rendering.
-                // Until this is fixed or defined differently (RT-28510),
+                // Until this is fixed or defined differently (JDK-8090485),
                 // we follow this behavior.
                 && !(this instanceof Shape3D) && !(clip instanceof Shape3D)) {
             final double dirX = dir.x;
@@ -6017,7 +6137,7 @@ public abstract class Node implements EventTarget, Styleable {
             public void addListener(InvalidationListener listener) {
                 incListenerReasons();
                 if (localToSceneListeners == null) {
-                    localToSceneListeners = new LinkedList<Object>();
+                    localToSceneListeners = new LinkedList<>();
                 }
                 localToSceneListeners.add(listener);
                 super.addListener(listener);
@@ -6027,7 +6147,7 @@ public abstract class Node implements EventTarget, Styleable {
             public void addListener(ChangeListener<? super Transform> listener) {
                 incListenerReasons();
                 if (localToSceneListeners == null) {
-                    localToSceneListeners = new LinkedList<Object>();
+                    localToSceneListeners = new LinkedList<>();
                 }
                 localToSceneListeners.add(listener);
                 super.addListener(listener);
@@ -6314,7 +6434,7 @@ public abstract class Node implements EventTarget, Styleable {
 
         public ObservableList<Transform> getTransforms() {
             if (transforms == null) {
-                transforms = new TrackableObservableList<Transform>() {
+                transforms = new TrackableObservableList<>() {
                     @Override
                     protected void onChanged(Change<Transform> c) {
                         while (c.next()) {
@@ -6384,9 +6504,9 @@ public abstract class Node implements EventTarget, Styleable {
 
     }
 
-    ////////////////////////////
+    //--------------------------
     //  Private Implementation
-    ////////////////////////////
+    //--------------------------
 
     /* *************************************************************************
      *                                                                         *
@@ -6413,6 +6533,16 @@ public abstract class Node implements EventTarget, Styleable {
      *                                                                         *
      **************************************************************************/
 
+    /**
+     * Node orientation describes the flow of visual data within a node.
+     * In the English speaking world, visual data normally flows from
+     * left-to-right. In an Arabic or Hebrew world, visual data flows
+     * from right-to-left. This is consistent with the reading order
+     * of text in both worlds.
+     *
+     * @defaultValue {@code NodeOrientation.INHERIT}
+     * @since JavaFX 8.0
+     */
     private ObjectProperty<NodeOrientation> nodeOrientation;
     private EffectiveOrientationProperty effectiveNodeOrientationProperty;
 
@@ -6422,6 +6552,13 @@ public abstract class Node implements EventTarget, Styleable {
     private static final byte AUTOMATIC_ORIENTATION_LTR = 0;
     private static final byte AUTOMATIC_ORIENTATION_RTL = 2;
     private static final byte AUTOMATIC_ORIENTATION_MASK = 2;
+
+    /**
+     * Indicates that the effective node orientation only depends on the explicit value set on this node
+     * and on the scene (if the node orientation is inherited), but not on the parent. This flag must only
+     * be set with {@link NodeHelper#setInheritOrientationFromScene(Node, boolean)} for scene overlays.
+     */
+    private static final byte INHERIT_ORIENTATION_FROM_SCENE = 4;
 
     private byte resolvedNodeOrientation =
             EFFECTIVE_ORIENTATION_LTR | AUTOMATIC_ORIENTATION_LTR;
@@ -6433,19 +6570,7 @@ public abstract class Node implements EventTarget, Styleable {
     public final NodeOrientation getNodeOrientation() {
         return nodeOrientation == null ? NodeOrientation.INHERIT : nodeOrientation.get();
     }
-    /**
-     * Property holding NodeOrientation.
-     * <p>
-     * Node orientation describes the flow of visual data within a node.
-     * In the English speaking world, visual data normally flows from
-     * left-to-right. In an Arabic or Hebrew world, visual data flows
-     * from right-to-left.  This is consistent with the reading order
-     * of text in both worlds.  The default value is left-to-right.
-     * </p>
-     *
-     * @return NodeOrientation
-     * @since JavaFX 8.0
-     */
+
     public final ObjectProperty<NodeOrientation> nodeOrientationProperty() {
         if (nodeOrientation == null) {
             nodeOrientation = new StyleableObjectProperty<NodeOrientation>(NodeOrientation.INHERIT) {
@@ -6506,7 +6631,7 @@ public abstract class Node implements EventTarget, Styleable {
      * top right corner causing the node to layout children and draw from
      * right to left using a mirroring transformation.  Some nodes may wish
      * to draw from right to left without using a transformation.  These
-     * nodes will will answer {@code false} and implement right-to-left
+     * nodes will answer {@code false} and implement right-to-left
      * orientation without using the automatic transformation.
      * </p>
      * @return true if this {@code Node} should be mirrored
@@ -6533,6 +6658,10 @@ public abstract class Node implements EventTarget, Styleable {
                 (byte) (calcEffectiveNodeOrientation()
                             | calcAutomaticNodeOrientation());
 
+        if (isInheritOrientationFromScene(oldResolvedNodeOrientation)) {
+            resolvedNodeOrientation |= INHERIT_ORIENTATION_FROM_SCENE;
+        }
+
         if ((effectiveNodeOrientationProperty != null)
                 && (getEffectiveOrientation(resolvedNodeOrientation)
                         != getEffectiveOrientation(
@@ -6553,6 +6682,10 @@ public abstract class Node implements EventTarget, Styleable {
     }
 
     private Node getMirroringOrientationParent() {
+        if (isInheritOrientationFromScene(resolvedNodeOrientation)) {
+            return null;
+        }
+
         Node parentValue = getParent();
         while (parentValue != null) {
             if (parentValue.usesMirroring()) {
@@ -6570,6 +6703,10 @@ public abstract class Node implements EventTarget, Styleable {
     }
 
     private Node getOrientationParent() {
+        if (isInheritOrientationFromScene(resolvedNodeOrientation)) {
+            return null;
+        }
+
         final Node parentValue = getParent();
         if (parentValue != null) {
             return parentValue;
@@ -6663,6 +6800,18 @@ public abstract class Node implements EventTarget, Styleable {
         return (byte) (resolvedNodeOrientation & AUTOMATIC_ORIENTATION_MASK);
     }
 
+    private static boolean isInheritOrientationFromScene(byte resolvedNodeOrientation) {
+        return (resolvedNodeOrientation & INHERIT_ORIENTATION_FROM_SCENE) != 0;
+    }
+
+    private void setInheritOrientationFromScene(boolean value) {
+        if (value) {
+            resolvedNodeOrientation |= INHERIT_ORIENTATION_FROM_SCENE;
+        } else {
+            resolvedNodeOrientation &= ~INHERIT_ORIENTATION_FROM_SCENE;
+        }
+    }
+
     private final class EffectiveOrientationProperty
             extends ReadOnlyObjectPropertyBase<NodeOrientation> {
         @Override
@@ -6726,6 +6875,8 @@ public abstract class Node implements EventTarget, Styleable {
         private ObjectProperty<InputMethodRequests> inputMethodRequests;
         private BooleanProperty mouseTransparent;
         private DoubleProperty viewOrder;
+        private TransitionTimerCollection transitionTimers;
+        private TransitionDefinitionCollection transitionDefinitions;
 
         public double getViewOrder() {
             return (viewOrder == null) ? DEFAULT_VIEW_ORDER : viewOrder.get();
@@ -7165,7 +7316,7 @@ public abstract class Node implements EventTarget, Styleable {
                 inputMethodRequestsProperty() {
             if (inputMethodRequests == null) {
                 inputMethodRequests =
-                        new SimpleObjectProperty<InputMethodRequests>(
+                        new SimpleObjectProperty<>(
                                 Node.this,
                                 "inputMethodRequests",
                                 DEFAULT_INPUT_METHOD_REQUESTS);
@@ -7601,6 +7752,25 @@ public abstract class Node implements EventTarget, Styleable {
     public final ObjectProperty<EventHandler<? super MouseDragEvent>>
             onMouseDragExitedProperty() {
         return getEventHandlerProperties().onMouseDragExitedProperty();
+    }
+
+    public final void setOnMouseDragDone(EventHandler<? super MouseDragEvent> value) {
+        onMouseDragDoneProperty().set(value);
+    }
+
+    public final EventHandler<? super MouseDragEvent> getOnMouseDragDone() {
+        return (eventHandlerProperties == null) ? null : eventHandlerProperties.getOnMouseDragDone();
+    }
+
+    /**
+     * Defines a function to be called when a full press-drag-release gesture ends with this node as its source.
+     *
+     * @return the event handler that is called when a full press-drag-release finishes
+     * @see MouseDragEvent#MOUSE_DRAG_DONE
+     * @since 26
+     */
+    public final ObjectProperty<EventHandler<? super MouseDragEvent>> onMouseDragDoneProperty() {
+        return getEventHandlerProperties().onMouseDragDoneProperty();
     }
 
 
@@ -8184,20 +8354,37 @@ public abstract class Node implements EventTarget, Styleable {
     }
 
     /**
-     * Called when the current node was removed from the scene graph in order to clear
-     * the focus bits of the former parents.
+     * Called when the current node was removed from or added to the scene graph.
+     * If the current node has the focusWithin bit, we also need to clear and set the focusWithin bits of this
+     * node's old and new parents. Note that a scene graph can have more than a single focused node, for example
+     * when a PopupWindow is used to present a branch of the scene graph. Since we need to preserve multi-level
+     * focus, we need to adjust the focus-within count on all parents of the node.
      */
-    private void updateRemovedParentFocus(Node oldParent) {
-        if (oldParent != null && focusWithin.get()) {
-            Node node = oldParent;
-            while (node != null) {
-                node.focused.set(false);
-                node.focusVisible.set(false);
-                node.focusWithin.set(false);
-                node = node.getParent();
-            }
+    private void updateParentsFocusWithin(Node oldParent, Node newParent) {
+        if (!focusWithin.get()) {
+            return;
+        }
 
+        Node node = oldParent;
+        while (node != null) {
+            node.focusWithin.adjust(-focusWithin.count);
+            node = node.getParent();
+        }
+
+        node = newParent;
+        while (node != null) {
+            node.focusWithin.adjust(focusWithin.count);
+            node = node.getParent();
+        };
+
+        // Since focus changes are atomic, we only fire change notifications after
+        // all changes are committed on all old and new parents.
+        if (oldParent != null) {
             oldParent.notifyFocusListeners();
+        }
+
+        if (newParent != null) {
+            newParent.notifyFocusListeners();
         }
     }
 
@@ -8235,9 +8422,11 @@ public abstract class Node implements EventTarget, Styleable {
             if (get() != value) {
                 super.set(value);
 
+                int change = value ? 1 : -1;
                 Node node = Node.this;
+
                 do {
-                    node.focusWithin.set(value);
+                    node.focusWithin.adjust(change);
                     node = node.getParent();
                 } while (node != null);
             }
@@ -8293,7 +8482,11 @@ public abstract class Node implements EventTarget, Styleable {
      * @defaultValue false
      * @since 19
      */
-    private final FocusPropertyBase focusWithin = new FocusPropertyBase() {
+    private final FocusWithinProperty focusWithin = new FocusWithinProperty();
+
+    private class FocusWithinProperty extends FocusPropertyBase {
+        int count;
+
         @Override
         protected PseudoClass getPseudoClass() {
             return FOCUS_WITHIN_PSEUDOCLASS_STATE;
@@ -8302,6 +8495,14 @@ public abstract class Node implements EventTarget, Styleable {
         @Override
         public String getName() {
             return "focusWithin";
+        }
+
+        /**
+         * Adjusts the number of focused nodes within this node.
+         */
+        void adjust(int change) {
+            count += change;
+            set(count > 0);
         }
     };
 
@@ -8430,9 +8631,26 @@ public abstract class Node implements EventTarget, Styleable {
         return getScene().traverse(this, dir, method);
     }
 
-    ////////////////////////////
+    /**
+     * Requests to move the focus from this {@code Node} in the specified direction.
+     * The {@code Node} serves as a reference point and does not have to be focused or focusable.
+     * A successful traversal results in a new {@code Node} being focused.
+     * <p>
+     * This method is expected to be called in response to a {@code KeyEvent}; therefore the {@code Node}
+     * receiving focus will have the {@link #focusVisibleProperty() focusVisible} property set.
+     *
+     * @param direction the direction of focus traversal, non-null
+     * @return {@code true} if traversal was successful
+     * @since 24
+     */
+    public final boolean requestFocusTraversal(TraversalDirection direction) {
+        Direction d = Direction.of(direction);
+        return traverse(d, TraversalMethod.KEY);
+    }
+
+    //--------------------------
     //  Private Implementation
-    ////////////////////////////
+    //--------------------------
 
      /**
       * Returns a string representation for the object.
@@ -8542,12 +8760,18 @@ public abstract class Node implements EventTarget, Styleable {
         setTreeVisible(isTreeVisible);
     }
 
-    private boolean treeVisible;
-    private TreeVisiblePropertyReadOnly treeVisibleRO;
+    private boolean treeVisible = true;
+    private TreeVisibleProperty treeVisibleProperty;
 
     final void setTreeVisible(boolean value) {
         if (treeVisible != value) {
             treeVisible = value;
+            if (!value) {
+                // When this node is removed from the scene graph or becomes invisible, we complete
+                // all running transitions for this node. This ensures that a node is not affected
+                // by a transition when it is no longer useful.
+                completeTransitionTimers();
+            }
             updateCanReceiveFocus();
             focusSetDirty(getScene());
             if (getClip() != null) {
@@ -8556,9 +8780,15 @@ public abstract class Node implements EventTarget, Styleable {
             if (treeVisible && !isDirtyEmpty()) {
                 addToSceneDirtyList();
             }
-            ((TreeVisiblePropertyReadOnly) treeVisibleProperty()).invalidate();
-            if (Node.this instanceof SubScene) {
-                Node subSceneRoot = ((SubScene)Node.this).getRoot();
+            if (treeVisibleProperty != null) {
+                treeVisibleProperty.invalidate();
+            }
+            if (Node.this instanceof Parent parent) {
+                for (Node child : parent.getChildren()) {
+                    child.updateTreeVisible(true);
+                }
+            } else if (Node.this instanceof SubScene subScene) {
+                Node subSceneRoot = subScene.getRoot();
                 if (subSceneRoot != null) {
                     // SubScene.getRoot() is only null if it's constructor
                     // has not finished.
@@ -8572,42 +8802,31 @@ public abstract class Node implements EventTarget, Styleable {
         return treeVisibleProperty().get();
     }
 
-    final BooleanExpression treeVisibleProperty() {
-        if (treeVisibleRO == null) {
-            treeVisibleRO = new TreeVisiblePropertyReadOnly();
+    final ReadOnlyBooleanProperty treeVisibleProperty() {
+        if (treeVisibleProperty == null) {
+            treeVisibleProperty = new TreeVisibleProperty();
         }
-        return treeVisibleRO;
+        return treeVisibleProperty;
     }
 
-    class TreeVisiblePropertyReadOnly extends BooleanExpression {
+    class TreeVisibleProperty extends ReadOnlyBooleanPropertyBase {
 
-        private ExpressionHelper<Boolean> helper;
         private boolean valid;
 
         @Override
-        public void addListener(InvalidationListener listener) {
-            helper = ExpressionHelper.addListener(helper, this, listener);
+        public Object getBean() {
+            return Node.this;
         }
 
         @Override
-        public void removeListener(InvalidationListener listener) {
-            helper = ExpressionHelper.removeListener(helper, listener);
-        }
-
-        @Override
-        public void addListener(ChangeListener<? super Boolean> listener) {
-            helper = ExpressionHelper.addListener(helper, this, listener);
-        }
-
-        @Override
-        public void removeListener(ChangeListener<? super Boolean> listener) {
-            helper = ExpressionHelper.removeListener(helper, listener);
+        public String getName() {
+            return "treeVisible";
         }
 
         protected void invalidate() {
             if (valid) {
                 valid = false;
-                ExpressionHelper.fireValueChangedEvent(helper);
+                fireValueChangedEvent();
             }
         }
 
@@ -8721,17 +8940,7 @@ public abstract class Node implements EventTarget, Styleable {
 
     private NodeEventDispatcher internalEventDispatcher;
 
-    // PENDING_DOC_REVIEW
-    /**
-     * Registers an event handler to this node. The handler is called when the
-     * node receives an {@code Event} of the specified type during the bubbling
-     * phase of event delivery.
-     *
-     * @param <T> the specific event class of the handler
-     * @param eventType the type of the events to receive by the handler
-     * @param eventHandler the handler to register
-     * @throws NullPointerException if the event type or handler is null
-     */
+    @Override
     public final <T extends Event> void addEventHandler(
             final EventType<T> eventType,
             final EventHandler<? super T> eventHandler) {
@@ -8739,18 +8948,7 @@ public abstract class Node implements EventTarget, Styleable {
                                     .addEventHandler(eventType, eventHandler);
     }
 
-    // PENDING_DOC_REVIEW
-    /**
-     * Unregisters a previously registered event handler from this node. One
-     * handler might have been registered for different event types, so the
-     * caller needs to specify the particular event type from which to
-     * unregister the handler.
-     *
-     * @param <T> the specific event class of the handler
-     * @param eventType the event type from which to unregister
-     * @param eventHandler the handler to unregister
-     * @throws NullPointerException if the event type or handler is null
-     */
+    @Override
     public final <T extends Event> void removeEventHandler(
             final EventType<T> eventType,
             final EventHandler<? super T> eventHandler) {
@@ -8759,17 +8957,7 @@ public abstract class Node implements EventTarget, Styleable {
                 .removeEventHandler(eventType, eventHandler);
     }
 
-    // PENDING_DOC_REVIEW
-    /**
-     * Registers an event filter to this node. The filter is called when the
-     * node receives an {@code Event} of the specified type during the capturing
-     * phase of event delivery.
-     *
-     * @param <T> the specific event class of the filter
-     * @param eventType the type of the events to receive by the filter
-     * @param eventFilter the filter to register
-     * @throws NullPointerException if the event type or filter is null
-     */
+    @Override
     public final <T extends Event> void addEventFilter(
             final EventType<T> eventType,
             final EventHandler<? super T> eventFilter) {
@@ -8777,18 +8965,7 @@ public abstract class Node implements EventTarget, Styleable {
                                     .addEventFilter(eventType, eventFilter);
     }
 
-    // PENDING_DOC_REVIEW
-    /**
-     * Unregisters a previously registered event filter from this node. One
-     * filter might have been registered for different event types, so the
-     * caller needs to specify the particular event type from which to
-     * unregister the filter.
-     *
-     * @param <T> the specific event class of the filter
-     * @param eventType the event type from which to unregister
-     * @param eventFilter the filter to unregister
-     * @throws NullPointerException if the event type or filter is null
-     */
+    @Override
     public final <T extends Event> void removeEventFilter(
             final EventType<T> eventType,
             final EventHandler<? super T> eventFilter) {
@@ -8822,7 +8999,7 @@ public abstract class Node implements EventTarget, Styleable {
     private void initializeInternalEventDispatcher() {
         if (internalEventDispatcher == null) {
             internalEventDispatcher = createInternalEventDispatcher();
-            eventDispatcher = new SimpleObjectProperty<EventDispatcher>(
+            eventDispatcher = new SimpleObjectProperty<>(
                                           Node.this,
                                           "eventDispatcher",
                                           internalEventDispatcher);
@@ -8838,14 +9015,6 @@ public abstract class Node implements EventTarget, Styleable {
      */
     private EventDispatcher preprocessMouseEventDispatcher;
 
-    // PENDING_DOC_REVIEW
-    /**
-     * Construct an event dispatch chain for this node. The event dispatch chain
-     * contains all event dispatchers from the stage to this node.
-     *
-     * @param tail the initial chain to build from
-     * @return the resulting event dispatch chain for this node
-     */
     @Override
     public EventDispatchChain buildEventDispatchChain(
             EventDispatchChain tail) {
@@ -8923,6 +9092,299 @@ public abstract class Node implements EventTarget, Styleable {
         Event.fireEvent(this, event);
     }
 
+
+    /* *************************************************************************
+     *                                                                         *
+     *                           CSS Transitions                               *
+     *                                                                         *
+     **************************************************************************/
+
+    /**
+     * The list of running transition timers for this node, implemented as a mapping of
+     * CSS property names to {@link TransitionTimer} instances.
+     */
+    private static class TransitionTimerCollection extends HashMap<String, TransitionTimer> {
+        TransitionTimerCollection() {
+            super(4);
+        }
+
+        /**
+         * Returns all transition timers for the specified {@code StyleableProperty},
+         * including all of its sub-properties.
+         *
+         * @param property the {@code StyleableProperty}
+         * @return a mapping of CSS property names to {@code TransitionTimer} instances
+         */
+        public Map<String, TransitionTimer> getAll(StyleableProperty<?> property) {
+            if (isEmpty()) {
+                return Map.of();
+            }
+
+            var result = collectTransitionTimers(property, null);
+            return result != null ? result : Map.of();
+        }
+
+        /**
+         * Finds all transition timers for the specified {@code StyleableProperty}, including all
+         * of its sub-properties. This method does not allocate a new {@code Map} for the common
+         * case where no transitions are found.
+         *
+         * @param property the {@code StyleableProperty}
+         * @param result this argument is an implementation detail, callers must specify {@code null}
+         * @return a mapping of CSS property names to {@code TransitionTimer} instances
+         */
+        private Map<String, TransitionTimer> collectTransitionTimers(
+                StyleableProperty<?> property, Map<String, TransitionTimer> result) {
+            CssMetaData<? extends Styleable, ?> metadata = property.getCssMetaData();
+            String propertyName = metadata.getProperty();
+            TransitionTimer timer = get(propertyName);
+            if (timer != null) {
+                if (result == null) {
+                    // We expect the number of concurrent transitions for any given node to be
+                    // quite small in most cases, six mappings should be enough.
+                    result = HashMap.newHashMap(6);
+                }
+
+                result.put(propertyName, timer);
+            }
+
+            List<CssMetaData<? extends Styleable, ?>> subMetadata = metadata.getSubProperties();
+            if (subMetadata == null) {
+                return result;
+            }
+
+            for (int i = 0, max = subMetadata.size(); i < max; ++i) {
+                result = collectTransitionTimers(property, result);
+            }
+
+            return result;
+        }
+    }
+
+    /**
+     * Called by animatable {@link StyleableProperty} implementations in order to register
+     * a running {@link TransitionTimer} with this {@code Node}. This allows the node
+     * to keep track of running timers that are targeting its properties.
+     *
+     * @param propertyName the CSS name of the targeted property
+     * @param timer the transition timer
+     */
+    private void addTransitionTimer(String propertyName, TransitionTimer timer) {
+        var transitionTimers = miscProperties != null ? miscProperties.transitionTimers : null;
+        if (transitionTimers == null) {
+            transitionTimers = new TransitionTimerCollection();
+            getMiscProperties().transitionTimers = transitionTimers;
+        }
+
+        transitionTimers.put(propertyName, timer);
+    }
+
+    /**
+     * Removes a timer that was previously registered with {@link #addTransitionTimer}.
+     * This method is called by animatable {@link StyleableProperty} implementations
+     * when their {@link TransitionTimer} has completed.
+     *
+     * @param propertyName the CSS name of the targeted property
+     */
+    private void removeTransitionTimer(String propertyName) {
+        var transitionTimers = miscProperties != null ? miscProperties.transitionTimers : null;
+        if (transitionTimers != null) {
+            transitionTimers.remove(propertyName);
+
+            if (transitionTimers.isEmpty()) {
+                miscProperties.transitionTimers = null;
+            }
+        }
+    }
+
+    /**
+     * Finds the transition timer that targets the specified {@code propertyName}.
+     *
+     * @param propertyName the CSS name of the targeted property
+     * @return the transition timer, or {@code null} if the property is not
+     *         targeted by a transition timer
+     */
+    private TransitionTimer findTransitionTimer(String propertyName) {
+        var transitionTimers = miscProperties != null ? miscProperties.transitionTimers : null;
+        return transitionTimers != null ? transitionTimers.get(propertyName) : null;
+    }
+
+    /**
+     * Finds all transition timers that target the specified {@code property}.
+     *
+     * @param property the targeted property
+     * @return a mapping of property names to transition timers, or an empty map if the
+     *         property is not targeted by any transition timers
+     */
+    private Map<String, TransitionTimer> findTransitionTimers(StyleableProperty<?> property) {
+        var transitionTimers = miscProperties != null ? miscProperties.transitionTimers : null;
+        return transitionTimers != null ? transitionTimers.getAll(property) : Map.of();
+    }
+
+    /**
+     * Completes all running timers, which skips the rest of their animation and sets
+     * the property to the target value.
+     */
+    // package-private for testing
+    void completeTransitionTimers() {
+        var transitionTimers = miscProperties != null ? miscProperties.transitionTimers : null;
+        if (transitionTimers == null || transitionTimers.isEmpty()) {
+            return;
+        }
+
+        // Make a copy of the timers, because completing the timers causes them to be removed
+        // from the map, which would result in a ConcurrentModificationException.
+        for (TransitionTimer timer : List.copyOf(transitionTimers.values())) {
+            timer.complete();
+        }
+    }
+
+    // package-private for testing
+    Map<String, TransitionTimer> getTransitionTimers() {
+        return miscProperties != null ? miscProperties.transitionTimers : null;
+    }
+
+    /**
+     * Contains descriptions of the animated transitions that are currently defined for
+     * properties of this {@code Node}.
+     * <p>
+     * All property transitions are implicit, which means they are started automatically by
+     * the CSS subsystem when a property value is changed. Explicit property changes, such as
+     * by calling {@link Property#setValue(Object)}, do not trigger an animated transition.
+     */
+    private static class TransitionDefinitionCollection
+            extends ArrayList<TransitionDefinition>
+            implements StyleableProperty<TransitionDefinition[]> {
+        private StyleOrigin origin;
+
+        /**
+         * Returns the transition for the property referenced by the specified CSS metadata,
+         * or {@code null} if no transition was found. This method does not account for
+         * sub-properties of the specified property.
+         *
+         * @param metadata the CSS metadata of the property
+         * @return the {@code TransitionDefinition} specified for the property referenced by the
+         *         CSS metadata, {@code null} otherwise
+         */
+        public TransitionDefinition find(CssMetaData<? extends Styleable, ?> metadata) {
+            int size = size();
+            if (size == 0) {
+                return null;
+            }
+
+            // We look for a matching transition in reverse, since multiple transitions might be specified
+            // for the same property. In this case, the last transition takes precedence.
+            for (int i = size - 1; i >= 0; --i) {
+                TransitionDefinition transition = get(i);
+
+                boolean selected = TransitionDefinitionConverter.PROPERTY_ALL.equals(transition.propertyName())
+                    || metadata.getProperty().equals(transition.propertyName());
+
+                if (selected) {
+                    return transition;
+                }
+            }
+
+            return null;
+        }
+
+        /**
+         * Returns all transitions for the property referenced by the specified CSS metadata,
+         * including all of its sub-properties.
+         *
+         * @param metadata the CSS metadata of the property
+         * @return a mapping of CSS metadata instances to {@code TransitionDefinition} instances
+         */
+        public Map<CssMetaData<? extends Styleable, ?>, TransitionDefinition> findAll(
+                CssMetaData<? extends Styleable, ?> metadata) {
+            if (isEmpty()) {
+                return Map.of();
+            }
+
+            var result = collectTransitions(metadata, null);
+            return result != null ? result : Map.of();
+        }
+
+        /**
+         * Finds all transition definitions for the property referenced by the specified CSS metadata,
+         * including all of its sub-properties. This method does not allocate a new {@code Map} for the
+         * common case where no transitions are found.
+         *
+         * @param metadata the CSS metadata of the property
+         * @param result this argument is an implementation detail, callers must specify {@code null}
+         * @return a mapping of CSS metadata instances to {@code TransitionDefinition} instances
+         */
+        private Map<CssMetaData<? extends Styleable, ?>, TransitionDefinition> collectTransitions(
+                CssMetaData<? extends Styleable, ?> metadata,
+                Map<CssMetaData<? extends Styleable, ?>, TransitionDefinition> result) {
+            // We look for a matching transition in reverse, since multiple transitions might be specified
+            // for the same property. In this case, the last transition takes precedence.
+            for (int max = size(), i = max - 1; i >= 0; --i) {
+                TransitionDefinition transition = get(i);
+
+                boolean selected = TransitionDefinitionConverter.PROPERTY_ALL.equals(transition.propertyName())
+                        || metadata.getProperty().equals(transition.propertyName());
+
+                if (selected) {
+                    if (result == null) {
+                        // We expect the number of concurrent transitions for any given node to be
+                        // quite small in most cases, six mappings should be enough.
+                        result = HashMap.newHashMap(6);
+                    }
+
+                    result.put(metadata, transition);
+                    break;
+                }
+            }
+
+            List<CssMetaData<? extends Styleable, ?>> subMetadata = metadata.getSubProperties();
+            if (subMetadata == null) {
+                return result;
+            }
+
+            // We also need to search for transitions defined on all sub-properties of the current property.
+            for (int i = 0, max = subMetadata.size(); i < max; ++i) {
+                result = collectTransitions(subMetadata.get(i), result);
+            }
+
+            return result;
+        }
+
+        @Override
+        public TransitionDefinition[] getValue() {
+            return toArray(TransitionDefinition[]::new);
+        }
+
+        @Override
+        public void setValue(TransitionDefinition[] value) {
+            clear();
+            addAll(Arrays.asList(value));
+            this.origin = StyleOrigin.USER;
+        }
+
+        @Override
+        public void applyStyle(StyleOrigin origin, TransitionDefinition[] value) {
+            setValue(value);
+            this.origin = origin;
+        }
+
+        @Override
+        public StyleOrigin getStyleOrigin() {
+            return origin;
+        }
+
+        @Override
+        public CssMetaData<? extends Styleable, TransitionDefinition[]> getCssMetaData() {
+            return TransitionDefinitionCssMetaData.getInstance();
+        }
+    }
+
+    // package-private for testing
+    List<TransitionDefinition> getTransitionDefinitions() {
+        return miscProperties != null ? miscProperties.transitionDefinitions : null;
+    }
+
+
     /* *************************************************************************
      *                                                                         *
      *                         Stylesheet Handling                             *
@@ -8998,7 +9460,7 @@ public abstract class Node implements EventTarget, Styleable {
      private static class StyleableProperties {
 
         private static final CssMetaData<Node,Cursor> CURSOR =
-            new CssMetaData<Node,Cursor>("-fx-cursor", CursorConverter.getInstance()) {
+            new CssMetaData<>("-fx-cursor", CursorConverter.getInstance()) {
 
                 @Override
                 public boolean isSettable(Node node) {
@@ -9019,7 +9481,7 @@ public abstract class Node implements EventTarget, Styleable {
 
             };
         private static final CssMetaData<Node,Effect> EFFECT =
-            new CssMetaData<Node,Effect>("-fx-effect", EffectConverter.getInstance()) {
+            new CssMetaData<>("-fx-effect", EffectConverter.getInstance()) {
 
                 @Override
                 public boolean isSettable(Node node) {
@@ -9032,7 +9494,7 @@ public abstract class Node implements EventTarget, Styleable {
                 }
             };
         private static final CssMetaData<Node,Boolean> FOCUS_TRAVERSABLE =
-            new CssMetaData<Node,Boolean>("-fx-focus-traversable",
+            new CssMetaData<>("-fx-focus-traversable",
                 BooleanConverter.getInstance(), Boolean.FALSE) {
 
                 @Override
@@ -9054,7 +9516,7 @@ public abstract class Node implements EventTarget, Styleable {
 
             };
         private static final CssMetaData<Node,Number> OPACITY =
-            new CssMetaData<Node,Number>("-fx-opacity",
+            new CssMetaData<>("-fx-opacity",
                 SizeConverter.getInstance(), 1.0) {
 
                 @Override
@@ -9068,7 +9530,7 @@ public abstract class Node implements EventTarget, Styleable {
                 }
             };
         private static final CssMetaData<Node,BlendMode> BLEND_MODE =
-            new CssMetaData<Node,BlendMode>("-fx-blend-mode", new EnumConverter<BlendMode>(BlendMode.class)) {
+            new CssMetaData<>("-fx-blend-mode", new EnumConverter<>(BlendMode.class)) {
 
                 @Override
                 public boolean isSettable(Node node) {
@@ -9081,7 +9543,7 @@ public abstract class Node implements EventTarget, Styleable {
                 }
             };
         private static final CssMetaData<Node,Number> ROTATE =
-            new CssMetaData<Node,Number>("-fx-rotate",
+            new CssMetaData<>("-fx-rotate",
                 SizeConverter.getInstance(), 0.0) {
 
                 @Override
@@ -9097,7 +9559,7 @@ public abstract class Node implements EventTarget, Styleable {
                 }
             };
         private static final CssMetaData<Node,Number> SCALE_X =
-            new CssMetaData<Node,Number>("-fx-scale-x",
+            new CssMetaData<>("-fx-scale-x",
                 SizeConverter.getInstance(), 1.0) {
 
                 @Override
@@ -9113,7 +9575,7 @@ public abstract class Node implements EventTarget, Styleable {
                 }
             };
         private static final CssMetaData<Node,Number> SCALE_Y =
-            new CssMetaData<Node,Number>("-fx-scale-y",
+            new CssMetaData<>("-fx-scale-y",
                 SizeConverter.getInstance(), 1.0) {
 
                 @Override
@@ -9129,7 +9591,7 @@ public abstract class Node implements EventTarget, Styleable {
                 }
             };
         private static final CssMetaData<Node,Number> SCALE_Z =
-            new CssMetaData<Node,Number>("-fx-scale-z",
+            new CssMetaData<>("-fx-scale-z",
                 SizeConverter.getInstance(), 1.0) {
 
                 @Override
@@ -9145,7 +9607,7 @@ public abstract class Node implements EventTarget, Styleable {
                 }
             };
         private static final CssMetaData<Node,Number> TRANSLATE_X =
-            new CssMetaData<Node,Number>("-fx-translate-x",
+            new CssMetaData<>("-fx-translate-x",
                 SizeConverter.getInstance(), 0.0) {
 
                 @Override
@@ -9161,7 +9623,7 @@ public abstract class Node implements EventTarget, Styleable {
                 }
             };
         private static final CssMetaData<Node,Number> TRANSLATE_Y =
-            new CssMetaData<Node,Number>("-fx-translate-y",
+            new CssMetaData<>("-fx-translate-y",
                 SizeConverter.getInstance(), 0.0) {
 
                 @Override
@@ -9177,7 +9639,7 @@ public abstract class Node implements EventTarget, Styleable {
                 }
             };
         private static final CssMetaData<Node,Number> TRANSLATE_Z =
-            new CssMetaData<Node,Number>("-fx-translate-z",
+            new CssMetaData<>("-fx-translate-z",
                 SizeConverter.getInstance(), 0.0) {
 
                 @Override
@@ -9193,7 +9655,7 @@ public abstract class Node implements EventTarget, Styleable {
                 }
             };
          private static final CssMetaData<Node, Number> VIEW_ORDER
-                 = new CssMetaData<Node, Number>("-fx-view-order",
+                 = new CssMetaData<>("-fx-view-order",
                          SizeConverter.getInstance(), 0.0) {
 
                      @Override
@@ -9209,7 +9671,7 @@ public abstract class Node implements EventTarget, Styleable {
                      }
                  };
         private static final CssMetaData<Node,Boolean> VISIBILITY =
-            new CssMetaData<Node,Boolean>("visibility",
+            new CssMetaData<>("visibility",
                 new StyleConverter<String,Boolean>() {
 
                     @Override
@@ -9233,7 +9695,7 @@ public abstract class Node implements EventTarget, Styleable {
                 }
             };
         private static final CssMetaData<Node,Boolean> MANAGED =
-            new CssMetaData<Node,Boolean>("-fx-managed",
+            new CssMetaData<>("-fx-managed",
                     BooleanConverter.getInstance(), Boolean.TRUE) {
 
                 @Override
@@ -9252,7 +9714,7 @@ public abstract class Node implements EventTarget, Styleable {
          static {
 
              final List<CssMetaData<? extends Styleable, ?>> styleables =
-                     new ArrayList<CssMetaData<? extends Styleable, ?>>();
+                     new ArrayList<>();
              styleables.add(CURSOR);
              styleables.add(EFFECT);
              styleables.add(FOCUS_TRAVERSABLE);
@@ -9308,7 +9770,7 @@ public abstract class Node implements EventTarget, Styleable {
      * @return  The Styles that match this CSS property for the given Node. The
      * list is sorted by descending specificity.
      */
-    // SB-dependency: RT-21096 has been filed to track this
+    // SB-dependency: JDK-8092096 has been filed to track this
     static List<Style> getMatchingStyles(CssMetaData cssMetaData, Styleable styleable) {
          return CssStyleHelper.getMatchingStyles(styleable, cssMetaData);
     }
@@ -9325,9 +9787,9 @@ public abstract class Node implements EventTarget, Styleable {
      }
 
      /*
-      * RT-17293
+      * JDK-8091202
       */
-     // SB-dependency: RT-21096 has been filed to track this
+     // SB-dependency: JDK-8092096 has been filed to track this
      final void setStyleMap(ObservableMap<StyleableProperty<?>, List<Style>> styleMap) {
          if (styleMap != null) getProperties().put("STYLEMAP", styleMap);
          else getProperties().remove("STYLEMAP");
@@ -9342,7 +9804,7 @@ public abstract class Node implements EventTarget, Styleable {
      * @param styleMap A Map to be populated with the styles. If null, a new Map will be allocated.
      * @return The Map populated with matching styles.
      */
-    // SB-dependency: RT-21096 has been filed to track this
+    // SB-dependency: JDK-8092096 has been filed to track this
     Map<StyleableProperty<?>,List<Style>> findStyles(Map<StyleableProperty<?>,List<Style>> styleMap) {
 
         Map<StyleableProperty<?>, List<Style>> ret = CssStyleHelper.getMatchingStyles(styleMap, this);
@@ -9471,8 +9933,8 @@ public abstract class Node implements EventTarget, Styleable {
     }
 
     final void reapplyCSS() {
-
-        if (getScene() == null) return;
+        var scene = getScene();
+        if (scene == null) return;
 
         if (cssFlag == CssFlags.REAPPLY) return;
 
@@ -9483,11 +9945,15 @@ public abstract class Node implements EventTarget, Styleable {
             return;
         }
 
-        // RT-36838 - don't reapply CSS in the middle of an update
+        // JDK-8095580 - don't reapply CSS in the middle of an update
         if (cssFlag == CssFlags.UPDATE) {
             cssFlag = CssFlags.REAPPLY;
             notifyParentsOfInvalidatedCSS();
             return;
+        }
+
+        if (scene.getRoot() == this) {
+            SceneHelper.getSceneContext(scene).notifyReapplyCSS();
         }
 
         reapplyCss();
@@ -9656,7 +10122,7 @@ public abstract class Node implements EventTarget, Styleable {
         if (cssFlag != CssFlags.REAPPLY) cssFlag = CssFlags.UPDATE;
 
         //
-        // RT-28394 - need to see if any ancestor has a flag UPDATE
+        // JDK-8115093 - need to see if any ancestor has a flag UPDATE
         // If so, process css from the top-most CssFlags.UPDATE node
         // since my ancestor's styles may affect mine.
         //
@@ -9709,6 +10175,10 @@ public abstract class Node implements EventTarget, Styleable {
 
         // if REAPPLY was deferred, process it now...
         if (cssFlag == CssFlags.REAPPLY) {
+            if (getScene() instanceof Scene scene && scene.getRoot() == this) {
+                SceneHelper.getSceneContext(scene).notifyReapplyCSS();
+            }
+
             reapplyCss();
         }
 
@@ -9722,6 +10192,30 @@ public abstract class Node implements EventTarget, Styleable {
         }
     }
 
+    /**
+     * A node is considered to be in its initial CSS state if it wasn't shown in a scene graph before.
+     * This flag is cleared after CSS processing was completed in a Scene pulse event. Note that manual
+     * calls to {@link #applyCss()} or similar methods will not clear this flag, since we consider all
+     * CSS processing before the Scene pulse to be part of the node's initial state.
+     */
+    private boolean initialCssState = true;
+
+    private void resetInitialCssStateFlag() {
+        initialCssState = true;
+        Scene scene = getScene();
+        if (scene != null) {
+            scene.registerClearInitialCssStateFlag(this);
+        }
+    }
+
+    void clearInitialCssStateFlag() {
+        initialCssState = false;
+    }
+
+    private MediaQueryContext getMediaQueryContext() {
+        Scene scene = getScene();
+        return scene != null ? SceneHelper.getSceneContext(scene) : null;
+    }
 
     /**
      * A StyleHelper for this node.
@@ -9739,37 +10233,15 @@ public abstract class Node implements EventTarget, Styleable {
     private static final PseudoClass SHOW_MNEMONICS_PSEUDOCLASS_STATE = PseudoClass.getPseudoClass("show-mnemonics");
 
     private static abstract class LazyTransformProperty
-            extends ReadOnlyObjectProperty<Transform> {
+            extends ReadOnlyObjectPropertyBase<Transform> {
 
         protected static final int VALID = 0;
         protected static final int INVALID = 1;
         protected static final int VALIDITY_UNKNOWN = 2;
         protected int valid = INVALID;
 
-        private ExpressionHelper<Transform> helper;
-
         private Transform transform;
         private boolean canReuse = false;
-
-        @Override
-        public void addListener(InvalidationListener listener) {
-            helper = ExpressionHelper.addListener(helper, this, listener);
-        }
-
-        @Override
-        public void removeListener(InvalidationListener listener) {
-            helper = ExpressionHelper.removeListener(helper, listener);
-        }
-
-        @Override
-        public void addListener(ChangeListener<? super Transform> listener) {
-            helper = ExpressionHelper.addListener(helper, this, listener);
-        }
-
-        @Override
-        public void removeListener(ChangeListener<? super Transform> listener) {
-            helper = ExpressionHelper.removeListener(helper, listener);
-        }
 
         protected Transform getInternalValue() {
             if (valid == INVALID ||
@@ -9798,7 +10270,7 @@ public abstract class Node implements EventTarget, Styleable {
         public void invalidate() {
             if (valid != INVALID) {
                 valid = INVALID;
-                ExpressionHelper.fireValueChangedEvent(helper);
+                fireValueChangedEvent();
             }
         }
 
@@ -9808,31 +10280,10 @@ public abstract class Node implements EventTarget, Styleable {
     }
 
     private static abstract class LazyBoundsProperty
-            extends ReadOnlyObjectProperty<Bounds> {
-        private ExpressionHelper<Bounds> helper;
+            extends ReadOnlyObjectPropertyBase<Bounds> {
         private boolean valid;
 
         private Bounds bounds;
-
-        @Override
-        public void addListener(InvalidationListener listener) {
-            helper = ExpressionHelper.addListener(helper, this, listener);
-        }
-
-        @Override
-        public void removeListener(InvalidationListener listener) {
-            helper = ExpressionHelper.removeListener(helper, listener);
-        }
-
-        @Override
-        public void addListener(ChangeListener<? super Bounds> listener) {
-            helper = ExpressionHelper.addListener(helper, this, listener);
-        }
-
-        @Override
-        public void removeListener(ChangeListener<? super Bounds> listener) {
-            helper = ExpressionHelper.removeListener(helper, listener);
-        }
 
         @Override
         public Bounds get() {
@@ -9847,7 +10298,7 @@ public abstract class Node implements EventTarget, Styleable {
         public void invalidate() {
             if (valid) {
                 valid = false;
-                ExpressionHelper.fireValueChangedEvent(helper);
+                fireValueChangedEvent();
             }
         }
 
@@ -9881,7 +10332,7 @@ public abstract class Node implements EventTarget, Styleable {
 
     public final ObjectProperty<AccessibleRole> accessibleRoleProperty() {
         if (accessibleRole == null) {
-            accessibleRole = new SimpleObjectProperty<AccessibleRole>(this, "accessibleRole", AccessibleRole.NODE);
+            accessibleRole = new SimpleObjectProperty<>(this, "accessibleRole", AccessibleRole.NODE);
         }
         return accessibleRole;
     }
@@ -9981,21 +10432,21 @@ public abstract class Node implements EventTarget, Styleable {
         ObjectProperty<String> accessibleRoleDescription;
         ObjectProperty<String> getAccessibleRoleDescription() {
             if (accessibleRoleDescription == null) {
-                accessibleRoleDescription = new SimpleObjectProperty<String>(Node.this, "accessibleRoleDescription", null);
+                accessibleRoleDescription = new SimpleObjectProperty<>(Node.this, "accessibleRoleDescription", null);
             }
             return accessibleRoleDescription;
         }
         ObjectProperty<String> accessibleText;
         ObjectProperty<String> getAccessibleText() {
             if (accessibleText == null) {
-                accessibleText = new SimpleObjectProperty<String>(Node.this, "accessibleText", null);
+                accessibleText = new SimpleObjectProperty<>(Node.this, "accessibleText", null);
             }
             return accessibleText;
         }
         ObjectProperty<String> accessibleHelp;
         ObjectProperty<String> getAccessibleHelp() {
             if (accessibleHelp == null) {
-                accessibleHelp = new SimpleObjectProperty<String>(Node.this, "accessibleHelp", null);
+                accessibleHelp = new SimpleObjectProperty<>(Node.this, "accessibleHelp", null);
             }
             return accessibleHelp;
         }
@@ -10115,26 +10566,6 @@ public abstract class Node implements EventTarget, Styleable {
         if (accessible == null) {
             accessible = Application.GetApplication().createAccessible();
             accessible.setEventHandler(new Accessible.EventHandler() {
-                @SuppressWarnings("removal")
-                @Override public AccessControlContext getAccessControlContext() {
-                    Scene scene = getScene();
-                    if (scene == null) {
-                        /* This can happen during the release process of an accessible object. */
-                        throw new RuntimeException("Accessbility requested for node not on a scene");
-                    }
-                    if (scene.getPeer() != null) {
-                        return scene.getPeer().getAccessControlContext();
-                    } else {
-                        /* In some rare cases the accessible for a Node is needed
-                         * before its scene is made visible. For example, the screen reader
-                         * might ask a Menu for its ContextMenu before the ContextMenu
-                         * is made visible. That is a problem because the Window for the
-                         * ContextMenu is only created immediately before the first time
-                         * it is shown.
-                         */
-                        return scene.acc;
-                    }
-                }
                 @Override public Object getAttribute(AccessibleAttribute attribute, Object... parameters) {
                     return queryAccessibleAttribute(attribute, parameters);
                 }

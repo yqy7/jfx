@@ -30,11 +30,12 @@
 namespace WebCore {
 
 class Attribute;
-class CSSStyleDeclaration;
+class CSSStyleProperties;
 class MutableStyleProperties;
 
 class Attr final : public Node {
-    WTF_MAKE_ISO_ALLOCATED(Attr);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(Attr);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(Attr);
 public:
     static Ref<Attr> create(Element&, const QualifiedName&);
     static Ref<Attr> create(Document&, const QualifiedName&, const AtomString& value);
@@ -42,14 +43,18 @@ public:
 
     String name() const { return qualifiedName().toString(); }
     bool specified() const { return true; }
-    Element* ownerElement() const { return m_element; }
+#if !PLATFORM(JAVA)
+    Element* ownerElement() const { return m_element.get(); }
+#else
+    Element* ownerElement() const;
+#endif
 
-    WEBCORE_EXPORT const AtomString& value() const;
-    WEBCORE_EXPORT void setValue(const AtomString&);
+    WEBCORE_EXPORT AtomString value() const;
+    WEBCORE_EXPORT ExceptionOr<void> setValue(const AtomString&);
 
     const QualifiedName& qualifiedName() const { return m_name; }
 
-    WEBCORE_EXPORT CSSStyleDeclaration* style();
+    WEBCORE_EXPORT CSSStyleProperties* style();
 
     void attachToElement(Element&);
     void detachFromElementWithValue(const AtomString&);
@@ -63,22 +68,22 @@ private:
     Attr(Document&, const QualifiedName&, const AtomString& value);
 
     String nodeName() const final { return name(); }
-    NodeType nodeType() const final { return ATTRIBUTE_NODE; }
 
     String nodeValue() const final { return value(); }
     ExceptionOr<void> setNodeValue(const String&) final;
 
     ExceptionOr<void> setPrefix(const AtomString&) final;
 
-    Ref<Node> cloneNodeInternal(Document&, CloningOperation) final;
+    Ref<Node> cloneNodeInternal(Document&, CloningOperation, CustomElementRegistry*) const final;
+    SerializedNode serializeNode(CloningOperation) const final;
 
     bool isAttributeNode() const final { return true; }
 
-    Attribute& elementAttribute();
+    void parentOrShadowHostNode() const = delete; // Call parentNode() instead.
 
     // Attr wraps either an element/name, or a name/value pair (when it's a standalone Node.)
     // Note that m_name is always set, but m_element/m_standaloneValue may be null.
-    Element* m_element { nullptr };
+    WeakPtr<Element, WeakPtrImplWithEventTargetData> m_element;
     QualifiedName m_name;
     AtomString m_standaloneValue;
 

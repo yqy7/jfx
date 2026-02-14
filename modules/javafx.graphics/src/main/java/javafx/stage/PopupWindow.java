@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
 
 package javafx.stage;
 
-import com.sun.javafx.scene.TreeShowingExpression;
+import com.sun.javafx.scene.TreeShowingProperty;
 import com.sun.javafx.util.Utils;
 import com.sun.javafx.event.DirectEvent;
 import java.util.ArrayList;
@@ -62,7 +62,6 @@ import com.sun.javafx.stage.PopupWindowPeerListener;
 import com.sun.javafx.stage.WindowCloseRequestHandler;
 import com.sun.javafx.stage.WindowEventDispatcher;
 import com.sun.javafx.tk.Toolkit;
-import static com.sun.javafx.FXPermissions.CREATE_TRANSPARENT_WINDOW_PERMISSION;
 
 import com.sun.javafx.stage.PopupWindowHelper;
 import com.sun.javafx.stage.WindowHelper;
@@ -74,6 +73,7 @@ import javafx.event.EventTarget;
 import javafx.event.EventType;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.InputMethodEvent;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.Background;
@@ -116,13 +116,18 @@ public abstract class PopupWindow extends Window {
             public ObservableList<Node> getContent(PopupWindow popupWindow) {
                 return popupWindow.getContent();
             }
+
+            @Override
+            public void applyStylesheetFromOwner(PopupWindow popupWindow, Window owner) {
+                popupWindow.applyStylesheetFromOwner(owner);
+            }
         });
     }
 
     /**
      * A private list of all child popups.
      */
-    private final List<PopupWindow> children = new ArrayList<PopupWindow>();
+    private final List<PopupWindow> children = new ArrayList<>();
 
     /**
      * Keeps track of the bounds of the content, and adjust the position and
@@ -140,7 +145,7 @@ public abstract class PopupWindow extends Window {
             };
 
     /**
-     * RT-28454: When a parent node or parent window we are associated with is not
+     * JDK-8088846: When a parent node or parent window we are associated with is not
      * visible anymore, possibly because the scene was not valid anymore, we should hide.
      */
     private ChangeListener<Boolean> changeListener = (observable, oldValue, newValue) -> {
@@ -150,7 +155,7 @@ public abstract class PopupWindow extends Window {
     };
 
     private WeakChangeListener<Boolean> weakOwnerNodeListener = new WeakChangeListener(changeListener);
-    private TreeShowingExpression treeShowingExpression;
+    private TreeShowingProperty treeShowingProperty;
 
     /**
      * Constructor for subclasses to call.
@@ -226,7 +231,7 @@ public abstract class PopupWindow extends Window {
      * owner window.
      */
     private ReadOnlyObjectWrapper<Window> ownerWindow =
-            new ReadOnlyObjectWrapper<Window>(this, "ownerWindow");
+            new ReadOnlyObjectWrapper<>(this, "ownerWindow");
     public final Window getOwnerWindow() {
         return ownerWindow.get();
     }
@@ -241,7 +246,7 @@ public abstract class PopupWindow extends Window {
      * doesn't cause the Popup to hide.
      */
     private ReadOnlyObjectWrapper<Node> ownerNode =
-            new ReadOnlyObjectWrapper<Node>(this, "ownerNode");
+            new ReadOnlyObjectWrapper<>(this, "ownerNode");
     public final Node getOwnerNode() {
         return ownerNode.get();
     }
@@ -321,7 +326,7 @@ public abstract class PopupWindow extends Window {
      * Called after autoHide is run.
      */
     private ObjectProperty<EventHandler<Event>> onAutoHide =
-            new SimpleObjectProperty<EventHandler<Event>>(this, "onAutoHide");
+            new SimpleObjectProperty<>(this, "onAutoHide");
     public final void setOnAutoHide(EventHandler<Event> value) { onAutoHide.set(value); }
     public final EventHandler<Event> getOnAutoHide() { return onAutoHide.get(); }
     public final ObjectProperty<EventHandler<Event>> onAutoHideProperty() { return onAutoHide; }
@@ -366,8 +371,11 @@ public abstract class PopupWindow extends Window {
      * @throws NullPointerException if owner is null
      * @throws IllegalArgumentException if the specified owner window would
      *      create cycle in the window hierarchy
+     * @throws IllegalStateException if this method is called on a thread
+     *      other than the JavaFX Application Thread.
      */
     public void show(Window owner) {
+        Toolkit.getToolkit().checkFxUserThread();
         validateOwnerWindow(owner);
         showImpl(owner);
     }
@@ -395,8 +403,11 @@ public abstract class PopupWindow extends Window {
      * @throws IllegalArgumentException if the specified owner node is not
      *      associated with a Window or when the window would create cycle
      *      in the window hierarchy
+     * @throws IllegalStateException if this method is called on a thread
+     *      other than the JavaFX Application Thread.
      */
     public void show(Node ownerNode, double anchorX, double anchorY) {
+        Toolkit.getToolkit().checkFxUserThread();
         if (ownerNode == null) {
             throw new NullPointerException("The owner node must not be null");
         }
@@ -415,8 +426,8 @@ public abstract class PopupWindow extends Window {
 
         // PopupWindow should disappear when owner node is not visible
         if (ownerNode != null) {
-            treeShowingExpression = new TreeShowingExpression(ownerNode);
-            treeShowingExpression.addListener(weakOwnerNodeListener);
+            treeShowingProperty = new TreeShowingProperty(ownerNode);
+            treeShowingProperty.addListener(weakOwnerNodeListener);
         }
 
         updateWindow(anchorX, anchorY);
@@ -435,8 +446,11 @@ public abstract class PopupWindow extends Window {
      * @throws NullPointerException if ownerWindow is null
      * @throws IllegalArgumentException if the specified owner window would
      *      create cycle in the window hierarchy
+     * @throws IllegalStateException if this method is called on a thread
+     *      other than the JavaFX Application Thread.
      */
     public void show(Window ownerWindow, double anchorX, double anchorY) {
+        Toolkit.getToolkit().checkFxUserThread();
         validateOwnerWindow(ownerWindow);
 
         updateWindow(anchorX, anchorY);
@@ -457,13 +471,11 @@ public abstract class PopupWindow extends Window {
         final Scene sceneValue = getScene();
         SceneHelper.parentEffectiveOrientationInvalidated(sceneValue);
 
-        // RT-28447
+        // JDK-8116444
+        applyStylesheetFromOwner(owner);
+
         final Scene ownerScene = getRootWindow(owner).getScene();
         if (ownerScene != null) {
-            if (ownerScene.getUserAgentStylesheet() != null) {
-                sceneValue.setUserAgentStylesheet(ownerScene.getUserAgentStylesheet());
-            }
-            sceneValue.getStylesheets().setAll(ownerScene.getStylesheets());
             if (sceneValue.getCursor() == null) {
                 sceneValue.setCursor(ownerScene.getCursor());
             }
@@ -474,15 +486,37 @@ public abstract class PopupWindow extends Window {
             // We do show() first so that the width and height of the
             // popup window are initialized. This way the x,y location of the
             // popup calculated below uses the right width and height values for
-            // its calculation. (fix for part of RT-10675).
+            // its calculation. (fix for part of JDK-8111578).
             show();
         }
     }
 
     /**
-     * Hide this Popup and all its children
+     * Applies the stylesheet from the scene of the root owner {@link Window} to the {@link Scene}
+     * associated with that window.
+     *
+     * @param owner the owner {@link Window}
      */
-    @Override public void hide() {
+    void applyStylesheetFromOwner(Window owner) {
+        Scene scene = getScene();
+        final Scene ownerScene = getRootWindow(owner).getScene();
+        if (ownerScene != null) {
+            if (ownerScene.getUserAgentStylesheet() != null) {
+                scene.setUserAgentStylesheet(ownerScene.getUserAgentStylesheet());
+            }
+            scene.getStylesheets().setAll(ownerScene.getStylesheets());
+        }
+    }
+
+    /**
+     * Hide this Popup and all its children
+     *
+     * @throws IllegalStateException if this method is called on a thread
+     *     other than the JavaFX Application Thread.
+     */
+    @Override
+    public void hide() {
+        Toolkit.getToolkit().checkFxUserThread();
         for (PopupWindow c : children) {
             if (c.isShowing()) {
                 c.hide();
@@ -493,10 +527,10 @@ public abstract class PopupWindow extends Window {
 
         // When popup hides, remove listeners; these are added when the popup shows.
         if (getOwnerWindow() != null) getOwnerWindow().showingProperty().removeListener(weakOwnerNodeListener);
-        if (treeShowingExpression != null) {
-            treeShowingExpression.removeListener(weakOwnerNodeListener);
-            treeShowingExpression.dispose();
-            treeShowingExpression = null;
+        if (treeShowingProperty != null) {
+            treeShowingProperty.removeListener(weakOwnerNodeListener);
+            treeShowingProperty.dispose();
+            treeShowingProperty = null;
         }
     }
 
@@ -511,18 +545,8 @@ public abstract class PopupWindow extends Window {
         if (visible && (getPeer() == null)) {
             // Setup the peer
             StageStyle popupStyle;
-            try {
-                @SuppressWarnings("removal")
-                final SecurityManager securityManager =
-                        System.getSecurityManager();
-                if (securityManager != null) {
-                    securityManager.checkPermission(CREATE_TRANSPARENT_WINDOW_PERMISSION);
-                }
-                popupStyle = StageStyle.TRANSPARENT;
-            } catch (final SecurityException e) {
-                popupStyle = StageStyle.UNDECORATED;
-            }
-            setPeer(toolkit.createTKPopupStage(this, popupStyle, getOwnerWindow().getPeer(), acc));
+            popupStyle = StageStyle.TRANSPARENT;
+            setPeer(toolkit.createTKPopupStage(this, popupStyle, getOwnerWindow().getPeer()));
             setPeerListener(new PopupWindowPeerListener(PopupWindow.this));
         }
     }
@@ -535,10 +559,12 @@ public abstract class PopupWindow extends Window {
      */
     private void doVisibleChanged(boolean visible) {
         final Window ownerWindowValue = getOwnerWindow();
+        Scene scene = getScene();
         if (visible) {
             rootWindow = getRootWindow(ownerWindowValue);
 
             startMonitorOwnerEvents(ownerWindowValue);
+            SceneHelper.getInputMethodStateManager(scene).addScene(scene);
             // currently we consider popup window to be focused when it is
             // visible and its owner window is focused (we need to track
             // that through listener on owner window focused property)
@@ -549,6 +575,9 @@ public abstract class PopupWindow extends Window {
             handleAutofixActivation(true, isAutoFix());
             handleAutohideActivation(true, isAutoHide());
         } else {
+            // This may generate events so it must be done while we're
+            // still monitoring owner events.
+            SceneHelper.getInputMethodStateManager(scene).removeScene(scene);
             stopMonitorOwnerEvents(ownerWindowValue);
             unbindOwnerFocusedProperty(ownerWindowValue);
             WindowHelper.setFocused(this, false);
@@ -689,7 +718,7 @@ public abstract class PopupWindow extends Window {
         boolean isContentLocation() {
             return contentLocation;
         }
-    };
+    }
 
     @Override
     void setXInternal(final double value) {
@@ -984,6 +1013,9 @@ public abstract class PopupWindow extends Window {
                 handleKeyEvent((KeyEvent) event);
                 return;
             }
+            else if (event instanceof InputMethodEvent) {
+                handleInputMethodEvent((InputMethodEvent) event);
+            }
 
             final EventType<?> eventType = event.getEventType();
 
@@ -1019,6 +1051,24 @@ public abstract class PopupWindow extends Window {
             if ((event.getEventType() == KeyEvent.KEY_PRESSED)
                     && ESCAPE_KEY_COMBINATION.match(event)) {
                 handleEscapeKeyPressedEvent(event);
+            }
+        }
+
+        private void handleInputMethodEvent(final InputMethodEvent event) {
+            if (event.isConsumed()) {
+                return;
+            }
+
+            final Scene scene = popupWindow.getScene();
+            if (scene != null) {
+                final Node sceneFocusOwner = scene.getFocusOwner();
+                final EventTarget eventTarget =
+                        (sceneFocusOwner != null) ? sceneFocusOwner : scene;
+                if (EventUtil.fireEvent(eventTarget, new DirectEvent(event.copyFor(popupWindow, eventTarget)))
+                        == null) {
+                    event.consume();
+                    return;
+                }
             }
         }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -65,43 +65,58 @@ public class TestGraphics extends BaseGraphics {
     public static final Graphics TEST_GRAPHICS = new TestGraphics();
 
     public TestGraphics() {
-        super(new TestContext(), new TestRenderTarget());
+        this(0, 0);
+    }
+
+    public TestGraphics(int width, int height) {
+        super(new TestContext(), new TestRenderTarget(width, height));
     }
 
     @Override
     protected void renderShape(Shape shape, BasicStroke stroke, float bx, float by, float bw, float bh) {
     }
 
+    @Override
     public void clear(Color color) {
     }
 
+    @Override
     public void clearQuad(float x1, float y1, float x2, float y2) {
     }
 
+    @Override
     public void fillQuad(float x1, float y1, float x2, float y2) {
     }
 
+    @Override
     public void fillRect(float x, float y, float width, float height) {
     }
 
+    @Override
     public void fillRoundRect(float x, float y, float width, float height, float arcw, float arch) {
     }
 
+    @Override
     public void fillEllipse(float x, float y, float width, float height) {
     }
 
+    @Override
     public void drawLine(float x1, float y1, float x2, float y2) {
     }
 
+    @Override
     public void drawRect(float x, float y, float width, float height) {
     }
 
+    @Override
     public void drawRoundRect(float x, float y, float width, float height, float arcw, float arch) {
     }
 
+    @Override
     public void drawEllipse(float x, float y, float width, float height) {
     }
 
+    @Override
     public void setNodeBounds(RectBounds bounds) {
     }
 
@@ -127,6 +142,7 @@ public class TestGraphics extends BaseGraphics {
     public void drawTexture9Slice(Texture tex, float dx1, float dy1, float dx2, float dy2, float sx1, float sy1, float sx2, float sy2, float dh1, float dv1, float dh2, float dv2, float sh1, float sv1, float sh2, float sv2) {
     }
 
+    @Override
     public void sync() {
     }
 
@@ -139,9 +155,11 @@ public class TestGraphics extends BaseGraphics {
         return false;
     }
 
+    @Override
     public void setup3DRendering() {
     }
 
+    @Override
     public void blit(RTTexture srcTex, RTTexture dstTex, int srcX0, int srcY0, int srcX1, int srcY1, int dstX0, int dstY0, int dstX1, int dstY1) {
     }
 
@@ -272,45 +290,64 @@ public class TestGraphics extends BaseGraphics {
 
     private static class TestRenderTarget implements RenderTarget {
 
+        private final int width;
+        private final int height;
+
+        public TestRenderTarget(int width, int height) {
+            this.width = width;
+            this.height = height;
+        }
+
+        @Override
         public Screen getAssociatedScreen() {
             return null;
         }
 
+        @Override
         public Graphics createGraphics() {
             return null;
         }
 
+        @Override
         public boolean isOpaque() {
             return true;
         }
 
+        @Override
         public void setOpaque(boolean opaque) {
         }
 
+        @Override
         public int getPhysicalWidth() {
             return 0;
         }
 
+        @Override
         public int getPhysicalHeight() {
             return 0;
         }
 
+        @Override
         public int getContentX() {
             return 0;
         }
 
+        @Override
         public int getContentY() {
             return 0;
         }
 
+        @Override
         public int getContentWidth() {
-            return 0;
+            return width;
         }
 
+        @Override
         public int getContentHeight() {
-            return 0;
+            return height;
         }
 
+        @Override
         public boolean isMSAA() {
             return false;
         }

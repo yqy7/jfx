@@ -25,17 +25,18 @@
 
 #pragma once
 
-#if ENABLE(SERVICE_WORKER)
-
-#include "ExceptionOr.h"
+#include "BackgroundFetchInformation.h"
 #include "PageIdentifier.h"
 #include "PushSubscriptionData.h"
 #include "ServiceWorkerClientData.h"
 #include "ServiceWorkerClientQueryOptions.h"
 #include "ServiceWorkerIdentifier.h"
 #include "ServiceWorkerThreadProxy.h"
+#include <wtf/AbstractRefCounted.h>
 #include <wtf/CompletionHandler.h>
 #include <wtf/HashMap.h>
+#include <wtf/Lock.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/URLHash.h>
 
 namespace WebCore {
@@ -43,12 +44,15 @@ namespace WebCore {
 class SerializedScriptValue;
 class ServiceWorkerGlobalScope;
 
+struct NotificationPayload;
+
+template<typename> class ExceptionOr;
+
 class SWContextManager {
 public:
     WEBCORE_EXPORT static SWContextManager& singleton();
 
-    class Connection {
-        WTF_MAKE_FAST_ALLOCATED;
+    class Connection : public AbstractRefCounted {
     public:
         virtual ~Connection() { }
 
@@ -67,13 +71,29 @@ public:
         virtual void findClientByVisibleIdentifier(ServiceWorkerIdentifier, const String&, FindClientByIdentifierCallback&&) = 0;
         virtual void matchAll(ServiceWorkerIdentifier, const ServiceWorkerClientQueryOptions&, ServiceWorkerClientsMatchAllCallback&&) = 0;
         virtual void claim(ServiceWorkerIdentifier, CompletionHandler<void(ExceptionOr<void>&&)>&&) = 0;
+        virtual void focus(ScriptExecutionContextIdentifier, CompletionHandler<void(std::optional<ServiceWorkerClientData>&&)>&&) = 0;
+
+        using OpenWindowCallback = CompletionHandler<void(ExceptionOr<std::optional<ServiceWorkerClientData>>&&)>;
+        virtual void openWindow(ServiceWorkerIdentifier, const URL&, OpenWindowCallback&&) = 0;
+
+        using NavigateCallback = CompletionHandler<void(ExceptionOr<std::optional<WebCore::ServiceWorkerClientData>>&&)>;
+        virtual void navigate(ScriptExecutionContextIdentifier, ServiceWorkerIdentifier, const URL&, NavigateCallback&&) = 0;
 
         virtual void didFailHeartBeatCheck(ServiceWorkerIdentifier) = 0;
+        virtual void setAsInspected(ServiceWorkerIdentifier, bool) = 0;
 
         virtual bool isThrottleable() const = 0;
         virtual PageIdentifier pageIdentifier() const = 0;
 
+        virtual void stop() = 0;
+
+        virtual void reportConsoleMessage(ServiceWorkerIdentifier, MessageSource, MessageLevel, const String& message, unsigned long requestIdentifier) = 0;
+
         bool isClosed() const { return m_isClosed; }
+
+        virtual void removeNavigationFetch(SWServerConnectionIdentifier, FetchIdentifier) = 0;
+
+        virtual bool isWebSWContextManagerConnection() const { return false; }
 
     protected:
         void setAsClosed() { m_isClosed = true; }
@@ -82,33 +102,45 @@ public:
         bool m_isClosed { false };
     };
 
-    WEBCORE_EXPORT void setConnection(std::unique_ptr<Connection>&&);
+    WEBCORE_EXPORT void setConnection(Ref<Connection>&&);
     WEBCORE_EXPORT Connection* connection() const;
+    RefPtr<Connection> protectedConnection() const { return m_connection; }
 
-    WEBCORE_EXPORT void registerServiceWorkerThreadForInstall(Ref<ServiceWorkerThreadProxy>&&);
+    WEBCORE_EXPORT void registerServiceWorkerThreadForInstall(Ref<ServiceWorkerThreadProxy>&&, Function<void()>&& debuggerTasksStartedCallback = { });
     WEBCORE_EXPORT ServiceWorkerThreadProxy* serviceWorkerThreadProxy(ServiceWorkerIdentifier) const;
-    WEBCORE_EXPORT void postMessageToServiceWorker(ServiceWorkerIdentifier destination, MessageWithMessagePorts&&, ServiceWorkerOrClientData&& sourceData);
+    WEBCORE_EXPORT RefPtr<ServiceWorkerThreadProxy> serviceWorkerThreadProxyFromBackgroundThread(ServiceWorkerIdentifier) const;
     WEBCORE_EXPORT void fireInstallEvent(ServiceWorkerIdentifier);
     WEBCORE_EXPORT void fireActivateEvent(ServiceWorkerIdentifier);
-    WEBCORE_EXPORT void firePushEvent(ServiceWorkerIdentifier, std::optional<Vector<uint8_t>>&&, CompletionHandler<void(bool)>&&);
+    WEBCORE_EXPORT void firePushEvent(ServiceWorkerIdentifier, std::optional<Vector<uint8_t>>&&, std::optional<NotificationPayload>&&, CompletionHandler<void(bool, std::optional<NotificationPayload>&&)>&&);
     WEBCORE_EXPORT void firePushSubscriptionChangeEvent(ServiceWorkerIdentifier, std::optional<PushSubscriptionData>&& newSubscriptionData, std::optional<PushSubscriptionData>&& oldSubscriptionData);
+    WEBCORE_EXPORT void fireNotificationEvent(ServiceWorkerIdentifier, NotificationData&&, NotificationEventType, CompletionHandler<void(bool)>&&);
+    WEBCORE_EXPORT void fireBackgroundFetchEvent(ServiceWorkerIdentifier, BackgroundFetchInformation&&, CompletionHandler<void(bool)>&&);
+    WEBCORE_EXPORT void fireBackgroundFetchClickEvent(ServiceWorkerIdentifier, BackgroundFetchInformation&&, CompletionHandler<void(bool)>&&);
 
     WEBCORE_EXPORT void terminateWorker(ServiceWorkerIdentifier, Seconds timeout, Function<void()>&&);
-    WEBCORE_EXPORT void didSaveScriptsToDisk(ServiceWorkerIdentifier, ScriptBuffer&&, HashMap<URL, ScriptBuffer>&& importedScripts);
 
-    void forEachServiceWorkerThread(const Function<void(ServiceWorkerThreadProxy&)>&);
+    void forEachServiceWorker(NOESCAPE const Function<Function<void(ScriptExecutionContext&)>()>&);
 
     WEBCORE_EXPORT bool postTaskToServiceWorker(ServiceWorkerIdentifier, Function<void(ServiceWorkerGlobalScope&)>&&);
+    WEBCORE_EXPORT bool stopRunningDebuggerTasksOnServiceWorker(ServiceWorkerIdentifier);
 
     using ServiceWorkerCreationCallback = void(uint64_t);
     void setServiceWorkerCreationCallback(ServiceWorkerCreationCallback* callback) { m_serviceWorkerCreationCallback = callback; }
-
-    ServiceWorkerThreadProxy* workerByID(ServiceWorkerIdentifier identifier) { return m_workerMap.get(identifier); }
 
     WEBCORE_EXPORT void stopAllServiceWorkers();
 
     static constexpr Seconds workerTerminationTimeout { 10_s };
     static constexpr Seconds syncWorkerTerminationTimeout { 100_ms }; // Only used by layout tests.
+
+    WEBCORE_EXPORT void setAsInspected(ServiceWorkerIdentifier, bool);
+    WEBCORE_EXPORT void setInspectable(bool);
+
+    WEBCORE_EXPORT void updateRegistrationState(ServiceWorkerRegistrationIdentifier, ServiceWorkerRegistrationState, const std::optional<ServiceWorkerData>&);
+    WEBCORE_EXPORT void updateWorkerState(ServiceWorkerIdentifier, ServiceWorkerState);
+    WEBCORE_EXPORT void fireUpdateFoundEvent(ServiceWorkerRegistrationIdentifier);
+    WEBCORE_EXPORT void setRegistrationLastUpdateTime(ServiceWorkerRegistrationIdentifier, WallTime);
+    WEBCORE_EXPORT void setRegistrationUpdateViaCache(ServiceWorkerRegistrationIdentifier, ServiceWorkerUpdateViaCache);
+    WEBCORE_EXPORT void removeFetch(ServiceWorkerIdentifier, SWServerConnectionIdentifier, FetchIdentifier, bool isNavigationFetch);
 
 private:
     SWContextManager() = default;
@@ -118,12 +150,13 @@ private:
 
     void stopWorker(ServiceWorkerThreadProxy&, Seconds, Function<void()>&&);
 
-    HashMap<ServiceWorkerIdentifier, Ref<ServiceWorkerThreadProxy>> m_workerMap;
-    std::unique_ptr<Connection> m_connection;
+    HashMap<ServiceWorkerIdentifier, Ref<ServiceWorkerThreadProxy>> m_workerMap WTF_GUARDED_BY_LOCK(m_workerMapLock);
+    mutable Lock m_workerMapLock;
+    RefPtr<Connection> m_connection;
     ServiceWorkerCreationCallback* m_serviceWorkerCreationCallback { nullptr };
 
     class ServiceWorkerTerminationRequest {
-        WTF_MAKE_FAST_ALLOCATED;
+        WTF_MAKE_TZONE_ALLOCATED(ServiceWorkerTerminationRequest);
     public:
         ServiceWorkerTerminationRequest(SWContextManager&, ServiceWorkerIdentifier, Seconds timeout);
 
@@ -134,5 +167,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif // ENABLE(SERVICE_WORKER)

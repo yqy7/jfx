@@ -26,33 +26,32 @@
 #pragma once
 
 #include "ElementInlines.h"
+#include "SVGAnimatedString.h"
 #include "SVGElement.h"
+#include "SVGPropertyRegistry.h"
 
 namespace WebCore {
 
-inline void SVGElement::invalidateSVGAttributes()
+inline void SVGElement::detachAllProperties()
+{
+    propertyRegistry().detachAllProperties();
+}
+
+inline void SVGElement::setAnimatedSVGAttributesAreDirty()
 {
     ensureUniqueElementData().setAnimatedSVGAttributesAreDirty(true);
 }
 
-inline void SVGElement::invalidateSVGPresentationalHintStyle()
+inline void SVGElement::setPresentationalHintStyleIsDirty()
 {
     ensureUniqueElementData().setPresentationalHintStyleIsDirty(true);
-    // Trigger style recalculation for "elements as resource" (e.g. referenced by feImage).
     invalidateStyle();
 }
 
-struct SVGAttributeHashTranslator {
-    static unsigned hash(const QualifiedName& key)
-    {
-        if (key.hasPrefix()) {
-            QualifiedNameComponents components = { nullAtom().impl(), key.localName().impl(), key.namespaceURI().impl() };
-            return hashComponents(components);
-        }
-        return DefaultHash<QualifiedName>::hash(key);
-    }
-    static bool equal(const QualifiedName& a, const QualifiedName& b) { return a.matches(b); }
-};
+inline AtomString SVGElement::className() const
+{
+    return AtomString { m_className->currentValue() };
+}
 
 inline bool Element::hasTagName(const SVGQualifiedName& tagName) const
 {
@@ -61,7 +60,8 @@ inline bool Element::hasTagName(const SVGQualifiedName& tagName) const
 
 inline bool Node::hasTagName(const SVGQualifiedName& name) const
 {
-    return isSVGElement() && downcast<SVGElement>(*this).hasTagName(name);
+    auto* svgElement = dynamicDowncast<SVGElement>(*this);
+    return svgElement && svgElement->hasTagName(name);
 }
 
 }

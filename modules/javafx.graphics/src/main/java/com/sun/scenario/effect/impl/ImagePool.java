@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,8 +26,6 @@
 package com.sun.scenario.effect.impl;
 
 import java.lang.ref.SoftReference;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -48,17 +46,13 @@ public class ImagePool {
     static long pixelsAccessed;
 
     static {
-        @SuppressWarnings("removal")
-        var dummy = AccessController.doPrivileged((PrivilegedAction) () -> {
-            if (System.getProperty("decora.showstats") != null) {
-                Runtime.getRuntime().addShutdownHook(new Thread() {
-                    @Override public void run() {
-                        printStats();
-                    }
-                });
-            }
-            return null;
-        });
+        if (System.getProperty("decora.showstats") != null) {
+            Runtime.getRuntime().addShutdownHook(new Thread() {
+                @Override public void run() {
+                    printStats();
+                }
+            });
+        }
     }
 
     static void printStats() {
@@ -78,9 +72,9 @@ public class ImagePool {
     static final int QUANT = 32;
 
     private final List<SoftReference<PoolFilterable>> unlocked =
-        new ArrayList<SoftReference<PoolFilterable>>();
+        new ArrayList<>();
     private final List<SoftReference<PoolFilterable>> locked =
-        new ArrayList<SoftReference<PoolFilterable>>();
+        new ArrayList<>();
 
     // On Canmore with the PowerVR SGX chip, there is a driver issue
     // that causes incorrect rendering if one tries to reuse an FBO
@@ -97,9 +91,9 @@ public class ImagePool {
     // slowdowns for certain frames due to increased allocation
     // (where there would normally be reuse).
     private final boolean usePurgatory = Boolean.getBoolean("decora.purgatory");
-    private final List<Filterable> hardPurgatory = new ArrayList<Filterable>();
+    private final List<Filterable> hardPurgatory = new ArrayList<>();
     private final List<SoftReference<PoolFilterable>> softPurgatory =
-        new ArrayList<SoftReference<PoolFilterable>>();
+        new ArrayList<>();
 
     /**
      * Package-private constructor.
@@ -193,7 +187,7 @@ public class ImagePool {
         }
         if (img != null) {
             img.setImagePool(this);
-            locked.add(new SoftReference<PoolFilterable>(img));
+            locked.add(new SoftReference<>(img));
             numCreated++;
             pixelsCreated += ((long) w) * h;
         }
@@ -256,9 +250,6 @@ public class ImagePool {
         // this is to help to free up space held by those images that we no
         // longer have references to
         System.gc();
-        System.runFinalization();
-        System.gc();
-        System.runFinalization();
     }
 
     public synchronized void dispose() {

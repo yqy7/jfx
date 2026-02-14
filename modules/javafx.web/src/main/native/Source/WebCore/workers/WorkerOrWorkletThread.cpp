@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2020 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,6 +28,7 @@
 
 #include "ThreadGlobalData.h"
 #include "WorkerEventLoop.h"
+#include "WorkerLoaderProxy.h"
 #include "WorkerOrWorkletGlobalScope.h"
 #include "WorkerOrWorkletScriptController.h"
 
@@ -41,17 +42,13 @@
 
 namespace WebCore {
 
-Lock WorkerOrWorkletThread::s_workerOrWorkletThreadsLock;
-
-Lock& WorkerOrWorkletThread::workerOrWorkletThreadsLock()
+ThreadSafeWeakHashSet<WorkerOrWorkletThread>& WorkerOrWorkletThread::workerOrWorkletThreads()
 {
-    return s_workerOrWorkletThreadsLock;
-}
-
-HashSet<WorkerOrWorkletThread*>& WorkerOrWorkletThread::workerOrWorkletThreads()
-{
-    ASSERT(workerOrWorkletThreadsLock().isHeld());
-    static NeverDestroyed<HashSet<WorkerOrWorkletThread*>> workerOrWorkletThreads;
+    static LazyNeverDestroyed<ThreadSafeWeakHashSet<WorkerOrWorkletThread>> workerOrWorkletThreads;
+    static std::once_flag onceFlag;
+    std::call_once(onceFlag, [] {
+        workerOrWorkletThreads.construct();
+    });
     return workerOrWorkletThreads;
 }
 
@@ -70,15 +67,24 @@ WorkerOrWorkletThread::WorkerOrWorkletThread(const String& inspectorIdentifier, 
     : m_inspectorIdentifier(inspectorIdentifier)
     , m_runLoop(constructRunLoop(workerThreadMode))
 {
-    Locker locker { workerOrWorkletThreadsLock() };
-    workerOrWorkletThreads().add(this);
+    workerOrWorkletThreads().add(*this);
 }
 
 WorkerOrWorkletThread::~WorkerOrWorkletThread()
 {
-    Locker locker { workerOrWorkletThreadsLock() };
-    ASSERT(workerOrWorkletThreads().contains(this));
-    workerOrWorkletThreads().remove(this);
+    workerOrWorkletThreads().remove(*this);
+}
+
+void WorkerOrWorkletThread::dispatch(Function<void()>&& func)
+{
+    runLoop().postTask([func = WTFMove(func)](auto&) mutable {
+        func();
+    });
+}
+
+bool WorkerOrWorkletThread::isCurrent() const
+{
+    return thread() ? thread()->uid() == Thread::currentSingleton().uid() : false;
 }
 
 void WorkerOrWorkletThread::startRunningDebuggerTasks()
@@ -92,7 +98,7 @@ void WorkerOrWorkletThread::startRunningDebuggerTasks()
 
     MessageQueueWaitResult result;
     do {
-        result = downcast<WorkerDedicatedRunLoop>(m_runLoop.get()).runInDebuggerMode(*m_globalScope);
+        result = downcast<WorkerDedicatedRunLoop>(m_runLoop.get()).runInDebuggerMode(*protectedGlobalScope());
     } while (result != MessageQueueTerminated && m_pausedForDebugger);
 }
 
@@ -104,8 +110,8 @@ void WorkerOrWorkletThread::stopRunningDebuggerTasks()
 void WorkerOrWorkletThread::runEventLoop()
 {
     // Does not return until terminated.
-    if (is<WorkerDedicatedRunLoop>(m_runLoop.get()))
-        downcast<WorkerDedicatedRunLoop>(m_runLoop.get()).run(m_globalScope.get());
+    if (auto* runLoop = dynamicDowncast<WorkerDedicatedRunLoop>(m_runLoop.get()))
+        runLoop->run(protectedGlobalScope().get());
 }
 
 void WorkerOrWorkletThread::workerOrWorkletThread()
@@ -117,7 +123,7 @@ void WorkerOrWorkletThread::workerOrWorkletThread()
         if (!m_globalScope)
             return;
 
-        downcast<WorkerMainRunLoop>(m_runLoop.get()).setGlobalScope(*m_globalScope);
+        downcast<WorkerMainRunLoop>(m_runLoop.get()).setGlobalScope(*protectedGlobalScope());
 
         String exceptionMessage;
         evaluateScriptIfNecessary(exceptionMessage);
@@ -185,11 +191,25 @@ void WorkerOrWorkletThread::workerOrWorkletThread()
     g_main_context_pop_thread_default(mainContext.get());
 #endif
 
+    if (!m_childThreads.isEmptyIgnoringNullReferences()) {
+        m_runWhenLastChildThreadIsGone = [this, protectedThis = WTFMove(protectedThis)]() mutable {
+            destroyWorkerGlobalScope(WTFMove(protectedThis));
+        };
+        return;
+    }
+    destroyWorkerGlobalScope(WTFMove(protectedThis));
+}
+
+void WorkerOrWorkletThread::destroyWorkerGlobalScope(Ref<WorkerOrWorkletThread>&& protectedThis)
+{
+    ASSERT(m_childThreads.isEmptyIgnoringNullReferences());
+
     RefPtr<Thread> protector = m_thread;
 
     ASSERT(m_globalScope->hasOneRef());
 
     RefPtr<WorkerOrWorkletGlobalScope> workerGlobalScopeToDelete;
+    Function<void()> stoppedCallback;
     {
         // Mutex protection is necessary to ensure that we don't change m_globalScope
         // while WorkerThread::stop is accessing it.
@@ -200,14 +220,16 @@ void WorkerOrWorkletThread::workerOrWorkletThread()
         // context will trigger the main thread to race against us to delete the WorkerThread
         // object, and the WorkerThread object owns the mutex we need to unlock after this.
         workerGlobalScopeToDelete = std::exchange(m_globalScope, nullptr);
-
-        if (m_stoppedCallback)
-            callOnMainThread(WTFMove(m_stoppedCallback));
+        stoppedCallback = std::exchange(m_stoppedCallback, nullptr);
     }
 
     // The below assignment will destroy the context, which will in turn notify messaging proxy.
     // We cannot let any objects survive past thread exit, because no other thread will run GC or otherwise destroy them.
     workerGlobalScopeToDelete = nullptr;
+
+    // Make sure we don't call the stoppedCallback before the WorkerGlobalScope has been destroyed.
+    if (stoppedCallback)
+        callOnMainThread(WTFMove(stoppedCallback));
 
     // Clean up WebCore::ThreadGlobalData before WTF::Thread goes away!
     threadGlobalData().destroy();
@@ -261,7 +283,8 @@ void WorkerOrWorkletThread::stop(Function<void()>&& stoppedCallback)
 
     // Ensure that tasks are being handled by thread event loop. If script execution weren't forbidden, a while(1) loop in JS could keep the thread alive forever.
     if (globalScope()) {
-        globalScope()->script()->scheduleExecutionTermination();
+        if (auto* script = globalScope()->script())
+            script->scheduleExecutionTermination();
 
         if (is<WorkerMainRunLoop>(m_runLoop.get())) {
             auto globalScope = std::exchange(m_globalScope, nullptr);
@@ -299,14 +322,14 @@ void WorkerOrWorkletThread::suspend()
     if (is<WorkerMainRunLoop>(m_runLoop.get()))
         return;
 
-    m_runLoop->postTask([&](ScriptExecutionContext&) {
-        if (globalScope())
-            globalScope()->suspend();
+    m_runLoop->postTask([protectedThis = Ref { *this }](ScriptExecutionContext&) {
+        if (RefPtr globalScope = protectedThis->m_globalScope)
+            globalScope->suspend();
 
-        m_suspensionSemaphore.wait();
+        protectedThis->m_suspensionSemaphore.wait();
 
-        if (globalScope())
-            globalScope()->resume();
+        if (RefPtr globalScope = protectedThis->m_globalScope)
+            globalScope->resume();
     });
 }
 
@@ -322,12 +345,33 @@ void WorkerOrWorkletThread::resume()
 
 void WorkerOrWorkletThread::releaseFastMallocFreeMemoryInAllThreads()
 {
-    Locker locker { workerOrWorkletThreadsLock() };
-    for (auto* workerOrWorkletThread : workerOrWorkletThreads()) {
-        workerOrWorkletThread->runLoop().postTask([] (ScriptExecutionContext&) {
+    for (Ref workerOrWorkletThread : workerOrWorkletThreads()) {
+        workerOrWorkletThread->runLoop().postTask([](ScriptExecutionContext&) {
             WTF::releaseFastMallocFreeMemory();
         });
     }
+}
+
+void WorkerOrWorkletThread::addChildThread(WorkerOrWorkletThread& childThread)
+{
+    m_childThreads.add(childThread);
+}
+
+void WorkerOrWorkletThread::removeChildThread(WorkerOrWorkletThread& childThread)
+{
+    m_childThreads.remove(childThread);
+    if (m_childThreads.isEmptyIgnoringNullReferences() && m_runWhenLastChildThreadIsGone)
+        std::exchange(m_runWhenLastChildThreadIsGone, nullptr)();
+}
+
+CheckedPtr<WorkerLoaderProxy> WorkerOrWorkletThread::checkedWorkerLoaderProxy() const
+{
+    return workerLoaderProxy();
+}
+
+RefPtr<WorkerOrWorkletGlobalScope> WorkerOrWorkletThread::protectedGlobalScope() const
+{
+    return m_globalScope.get();
 }
 
 } // namespace WebCore

@@ -45,12 +45,12 @@ using namespace WebCore;
 
 namespace {
 
-static Vector<uint8_t> constructU2fRegisterCommand(const Vector<uint8_t>& applicationParameter, const Vector<uint8_t>& challengeParameter)
+static Vector<uint8_t> constructU2fRegisterCommand(std::span<const uint8_t> applicationParameter, std::span<const uint8_t> challengeParameter)
 {
     Vector<uint8_t> data;
     data.reserveInitialCapacity(kU2fChallengeParamLength + kU2fApplicationParamLength);
-    data.appendVector(challengeParameter);
-    data.appendVector(applicationParameter);
+    data.append(challengeParameter);
+    data.append(applicationParameter);
 
     apdu::ApduCommand command;
     command.setIns(static_cast<uint8_t>(U2fApduInstruction::kRegister));
@@ -71,7 +71,7 @@ static std::optional<Vector<uint8_t>> constructU2fSignCommand(const Vector<uint8
     data.appendVector(challengeParameter);
     data.appendVector(applicationParameter);
     data.append(static_cast<uint8_t>(keyHandle.length()));
-    data.append(keyHandle.data(), keyHandle.length());
+    data.append(keyHandle.span());
 
     apdu::ApduCommand command;
     command.setIns(static_cast<uint8_t>(U2fApduInstruction::kSign));
@@ -102,8 +102,8 @@ std::optional<Vector<uint8_t>> convertToU2fRegisterCommand(const Vector<uint8_t>
     if (!isConvertibleToU2fRegisterCommand(request))
         return std::nullopt;
 
-    auto appId = processGoogleLegacyAppIdSupportExtension(request.extensions);
-    return constructU2fRegisterCommand(produceRpIdHash(!appId ? request.rp.id : appId), clientDataHash);
+    ASSERT(request.rp.id);
+    return constructU2fRegisterCommand(produceRpIdHash(request.rp.id), clientDataHash);
 }
 
 std::optional<Vector<uint8_t>> convertToU2fCheckOnlySignCommand(const Vector<uint8_t>& clientDataHash, const PublicKeyCredentialCreationOptions& request, const PublicKeyCredentialDescriptor& keyHandle)
@@ -111,6 +111,7 @@ std::optional<Vector<uint8_t>> convertToU2fCheckOnlySignCommand(const Vector<uin
     if (keyHandle.type != PublicKeyCredentialType::PublicKey)
         return std::nullopt;
 
+    ASSERT(request.rp.id);
     return constructU2fSignCommand(produceRpIdHash(request.rp.id), clientDataHash, keyHandle.id, true /* checkOnly */);
 }
 
@@ -127,20 +128,7 @@ std::optional<Vector<uint8_t>> convertToU2fSignCommand(const Vector<uint8_t>& cl
 
 Vector<uint8_t> constructBogusU2fRegistrationCommand()
 {
-    return constructU2fRegisterCommand(convertBytesToVector(kBogusAppParam, sizeof(kBogusAppParam)), convertBytesToVector(kBogusChallenge, sizeof(kBogusChallenge)));
-}
-
-String processGoogleLegacyAppIdSupportExtension(const std::optional<AuthenticationExtensionsClientInputs>& extensions)
-{
-    if (!extensions) {
-        // AuthenticatorCoordinator::create should always set it.
-        ASSERT_NOT_REACHED();
-        return String();
-    }
-
-    if (!extensions->googleLegacyAppidSupport)
-        return String();
-    return "https://www.gstatic.com/securitykey/origins.json"_s;
+    return constructU2fRegisterCommand(std::span { kBogusAppParam }, std::span { kBogusChallenge });
 }
 
 } // namespace fido

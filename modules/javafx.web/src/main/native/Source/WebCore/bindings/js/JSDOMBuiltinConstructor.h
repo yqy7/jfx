@@ -64,14 +64,16 @@ template<typename JSClass> inline JSDOMBuiltinConstructor<JSClass>* JSDOMBuiltin
 
 template<typename JSClass> inline JSC::Structure* JSDOMBuiltinConstructor<JSClass>::createStructure(JSC::VM& vm, JSC::JSGlobalObject& globalObject, JSC::JSValue prototype)
 {
-    return JSC::Structure::create(vm, &globalObject, prototype, JSC::TypeInfo(JSC::InternalFunctionType, StructureFlags), info());
+    auto* structure = JSC::Structure::create(vm, &globalObject, prototype, JSC::TypeInfo(JSC::InternalFunctionType, StructureFlags), info());
+    structure->setMayBePrototype(true);
+    return structure;
 }
 
 template<typename JSClass> inline void JSDOMBuiltinConstructor<JSClass>::finishCreation(JSC::VM& vm, JSDOMGlobalObject& globalObject)
 {
     Base::finishCreation(vm);
-    ASSERT(inherits(vm, info()));
-    setInitializeFunction(vm, *JSC::JSFunction::create(vm, initializeExecutable(vm), &globalObject));
+    ASSERT(inherits(info()));
+    setInitializeFunction(vm, *JSC::JSFunction::create(vm, &globalObject, initializeExecutable(vm), &globalObject));
     initializeProperties(vm, globalObject);
 }
 
@@ -79,7 +81,7 @@ template<typename JSClass> inline JSC::Structure* JSDOMBuiltinConstructor<JSClas
 {
     auto& vm = JSC::getVM(lexicalGlobalObject);
 
-    if (LIKELY(newTarget == this))
+    if (newTarget == this) [[likely]]
         return getDOMStructure<JSClass>(vm, *globalObject());
 
     auto scope = DECLARE_THROW_SCOPE(vm);
@@ -94,11 +96,11 @@ template<typename JSClass> inline JSC::EncodedJSValue JSC_HOST_CALL_ATTRIBUTES J
     ASSERT(callFrame);
     auto* castedThis = JSC::jsCast<JSDOMBuiltinConstructor*>(callFrame->jsCallee());
     auto* structure = castedThis->getDOMStructureForJSObject(lexicalGlobalObject, asObject(callFrame->newTarget()));
-    if (UNLIKELY(!structure))
+    if (!structure) [[unlikely]]
         return { };
 
     auto* jsObject = JSClass::create(structure, castedThis->globalObject());
-    JSC::call(lexicalGlobalObject, castedThis->initializeFunction(), jsObject, JSC::ArgList(callFrame), "This error should never occur: initialize function is guaranteed to be callable.");
+    JSC::call(lexicalGlobalObject, castedThis->initializeFunction(), jsObject, JSC::ArgList(callFrame), "This error should never occur: initialize function is guaranteed to be callable."_s);
     return JSC::JSValue::encode(jsObject);
 }
 

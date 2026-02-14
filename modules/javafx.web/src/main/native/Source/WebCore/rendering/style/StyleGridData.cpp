@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Google Inc. All Rights Reserved.
+ * Copyright (C) 2011 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,74 +26,60 @@
 #include "config.h"
 #include "StyleGridData.h"
 
-#include "RenderStyle.h"
+#include "RenderStyleInlines.h"
+#include "RenderStyleDifference.h"
+#include "StylePrimitiveNumericTypes+Logging.h"
 
 namespace WebCore {
 
+DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(StyleGridData);
+
 StyleGridData::StyleGridData()
-    : gridColumns(RenderStyle::initialGridColumns())
-    , gridRows(RenderStyle::initialGridRows())
-    , namedGridColumnLines(RenderStyle::initialNamedGridColumnLines())
-    , namedGridRowLines(RenderStyle::initialNamedGridRowLines())
-    , orderedNamedGridColumnLines(RenderStyle::initialOrderedNamedGridColumnLines())
-    , orderedNamedGridRowLines(RenderStyle::initialOrderedNamedGridRowLines())
-    , autoRepeatNamedGridColumnLines(RenderStyle::initialNamedGridColumnLines())
-    , autoRepeatNamedGridRowLines(RenderStyle::initialNamedGridRowLines())
-    , autoRepeatOrderedNamedGridColumnLines(RenderStyle::initialOrderedNamedGridColumnLines())
-    , autoRepeatOrderedNamedGridRowLines(RenderStyle::initialOrderedNamedGridRowLines())
-    , implicitNamedGridColumnLines(RenderStyle::initialNamedGridColumnLines())
-    , implicitNamedGridRowLines(RenderStyle::initialNamedGridRowLines())
-    , gridAutoFlow(RenderStyle::initialGridAutoFlow())
-    , gridAutoRows(RenderStyle::initialGridAutoRows())
-    , gridAutoColumns(RenderStyle::initialGridAutoColumns())
-    , namedGridArea(RenderStyle::initialNamedGridArea())
-    , namedGridAreaRowCount(RenderStyle::initialNamedGridAreaCount())
-    , namedGridAreaColumnCount(RenderStyle::initialNamedGridAreaCount())
-    , gridAutoRepeatColumns(RenderStyle::initialGridAutoRepeatTracks())
-    , gridAutoRepeatRows(RenderStyle::initialGridAutoRepeatTracks())
-    , autoRepeatColumnsInsertionPoint(RenderStyle::initialGridAutoRepeatInsertionPoint())
-    , autoRepeatRowsInsertionPoint(RenderStyle::initialGridAutoRepeatInsertionPoint())
-    , autoRepeatColumnsType(RenderStyle::initialGridAutoRepeatType())
-    , autoRepeatRowsType(RenderStyle::initialGridAutoRepeatType())
-    , subgridRows(false)
-    , subgridColumns(false)
+    : m_gridAutoFlow(RenderStyle::initialGridAutoFlow())
+    , m_gridAutoColumns(RenderStyle::initialGridAutoColumns())
+    , m_gridAutoRows(RenderStyle::initialGridAutoRows())
+    , m_gridTemplateAreas(RenderStyle::initialGridTemplateAreas())
+    , m_gridTemplateColumns(RenderStyle::initialGridTemplateColumns())
+    , m_gridTemplateRows(RenderStyle::initialGridTemplateRows())
 {
 }
 
 inline StyleGridData::StyleGridData(const StyleGridData& o)
     : RefCounted<StyleGridData>()
-    , gridColumns(o.gridColumns)
-    , gridRows(o.gridRows)
-    , namedGridColumnLines(o.namedGridColumnLines)
-    , namedGridRowLines(o.namedGridRowLines)
-    , orderedNamedGridColumnLines(o.orderedNamedGridColumnLines)
-    , orderedNamedGridRowLines(o.orderedNamedGridRowLines)
-    , autoRepeatNamedGridColumnLines(o.autoRepeatNamedGridColumnLines)
-    , autoRepeatNamedGridRowLines(o.autoRepeatNamedGridRowLines)
-    , autoRepeatOrderedNamedGridColumnLines(o.autoRepeatOrderedNamedGridColumnLines)
-    , autoRepeatOrderedNamedGridRowLines(o.autoRepeatOrderedNamedGridRowLines)
-    , implicitNamedGridColumnLines(o.implicitNamedGridColumnLines)
-    , implicitNamedGridRowLines(o.implicitNamedGridRowLines)
-    , gridAutoFlow(o.gridAutoFlow)
-    , gridAutoRows(o.gridAutoRows)
-    , gridAutoColumns(o.gridAutoColumns)
-    , namedGridArea(o.namedGridArea)
-    , namedGridAreaRowCount(o.namedGridAreaRowCount)
-    , namedGridAreaColumnCount(o.namedGridAreaColumnCount)
-    , gridAutoRepeatColumns(o.gridAutoRepeatColumns)
-    , gridAutoRepeatRows(o.gridAutoRepeatRows)
-    , autoRepeatColumnsInsertionPoint(o.autoRepeatColumnsInsertionPoint)
-    , autoRepeatRowsInsertionPoint(o.autoRepeatRowsInsertionPoint)
-    , autoRepeatColumnsType(o.autoRepeatColumnsType)
-    , autoRepeatRowsType(o.autoRepeatRowsType)
-    , subgridRows(o.subgridRows)
-    , subgridColumns(o.subgridColumns)
+    , m_gridAutoFlow(o.m_gridAutoFlow)
+    , m_gridAutoColumns(o.m_gridAutoColumns)
+    , m_gridAutoRows(o.m_gridAutoRows)
+    , m_gridTemplateAreas(o.m_gridTemplateAreas)
+    , m_gridTemplateColumns(o.m_gridTemplateColumns)
+    , m_gridTemplateRows(o.m_gridTemplateRows)
 {
+}
+
+bool StyleGridData::operator==(const StyleGridData& o) const
+{
+    return m_gridAutoFlow == o.m_gridAutoFlow
+        && m_gridAutoColumns == o.m_gridAutoColumns
+        && m_gridAutoRows == o.m_gridAutoRows
+        && m_gridTemplateAreas == o.m_gridTemplateAreas
+        && m_gridTemplateColumns == o.m_gridTemplateColumns
+        && m_gridTemplateRows == o.m_gridTemplateRows;
 }
 
 Ref<StyleGridData> StyleGridData::copy() const
 {
     return adoptRef(*new StyleGridData(*this));
 }
+
+#if !LOG_DISABLED
+void StyleGridData::dumpDifferences(TextStream& ts, const StyleGridData& other) const
+{
+    LOG_IF_DIFFERENT(m_gridAutoFlow);
+    LOG_IF_DIFFERENT(m_gridAutoColumns);
+    LOG_IF_DIFFERENT(m_gridAutoRows);
+    LOG_IF_DIFFERENT(m_gridTemplateAreas);
+    LOG_IF_DIFFERENT(m_gridTemplateColumns);
+    LOG_IF_DIFFERENT(m_gridTemplateRows);
+}
+#endif // !LOG_DISABLED
 
 } // namespace WebCore

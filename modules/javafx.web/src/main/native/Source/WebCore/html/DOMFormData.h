@@ -32,26 +32,26 @@
 
 #include "File.h"
 #include <pal/text/TextEncoding.h>
-#include <variant>
 #include <wtf/RefCounted.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 template<typename> class ExceptionOr;
+class HTMLElement;
 class HTMLFormElement;
 
-class DOMFormData : public RefCounted<DOMFormData> {
+class DOMFormData : public RefCounted<DOMFormData>, public ContextDestructionObserver {
 public:
-    using FormDataEntryValue = std::variant<RefPtr<File>, String>;
+    using FormDataEntryValue = Variant<RefPtr<File>, String>;
 
     struct Item {
         String name;
         FormDataEntryValue data;
     };
 
-    static ExceptionOr<Ref<DOMFormData>> create(HTMLFormElement*);
-    static Ref<DOMFormData> create(const PAL::TextEncoding&);
+    static ExceptionOr<Ref<DOMFormData>> create(ScriptExecutionContext&, HTMLFormElement*, HTMLElement*);
+    static Ref<DOMFormData> create(ScriptExecutionContext*, const PAL::TextEncoding&);
 
     const Vector<Item>& items() const { return m_items; }
     const PAL::TextEncoding& encoding() const { return m_encoding; }
@@ -72,13 +72,13 @@ public:
         std::optional<KeyValuePair<String, FormDataEntryValue>> next();
 
     private:
-        Ref<DOMFormData> m_target;
+        const Ref<DOMFormData> m_target;
         size_t m_index { 0 };
     };
-    Iterator createIterator() { return Iterator { *this }; }
+    Iterator createIterator(ScriptExecutionContext*) { return Iterator { *this }; }
 
 private:
-    explicit DOMFormData(const PAL::TextEncoding& = PAL::UTF8Encoding());
+    explicit DOMFormData(ScriptExecutionContext*, const PAL::TextEncoding& = PAL::UTF8Encoding());
 
     void set(const String& name, Item&&);
 

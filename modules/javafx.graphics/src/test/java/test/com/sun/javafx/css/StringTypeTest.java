@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,10 +30,11 @@ import javafx.css.converter.StringConverter;
 import javafx.css.ParsedValue;
 import javafx.css.StyleConverter;
 import javafx.scene.text.Font;
-import org.junit.AfterClass;
-import static org.junit.Assert.assertEquals;
-import org.junit.BeforeClass;
-import org.junit.Test;
+
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 
 public class StringTypeTest {
@@ -41,11 +42,11 @@ public class StringTypeTest {
     public StringTypeTest() {
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void setUpClass() throws Exception {
     }
 
-    @AfterClass
+    @AfterAll
     public static void tearDownClass() throws Exception {
     }
 
@@ -55,19 +56,19 @@ public class StringTypeTest {
     @Test
     public void testConvert() {
         //System.out.println("convert");
-        ParsedValue<String,String> value = new ParsedValueImpl<String,String>("test", StyleConverter.getStringConverter());
+        ParsedValue<String,String> value = new ParsedValueImpl<>("test", StyleConverter.getStringConverter());
         Font font = null;
         String expResult = "test";
         String result = value.convert(font);
         assertEquals(expResult, result);
 
         ParsedValue<String,String>[] values = new ParsedValue[] {
-            new ParsedValueImpl<String,String>("hello", StyleConverter.getStringConverter()),
-            new ParsedValueImpl<String,String>("world", StyleConverter.getStringConverter())
+            new ParsedValueImpl<>("hello", StyleConverter.getStringConverter()),
+            new ParsedValueImpl<>("world", StyleConverter.getStringConverter())
         };
 
         ParsedValue<ParsedValue<String,String>[], String[]> seq =
-            new ParsedValueImpl<ParsedValue<String,String>[], String[]>(values, StringConverter.SequenceConverter.getInstance());
+            new ParsedValueImpl<>(values, StringConverter.SequenceConverter.getInstance());
 
         String[] strings = seq.convert(font);
         assertEquals("hello", strings[0]);

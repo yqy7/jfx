@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Apple, Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,21 +32,22 @@
 #include "WebXRJointSpace.h"
 #include "WebXRSession.h"
 #include "XRHandJoint.h"
-#include <wtf/IsoMalloc.h>
 #include <wtf/Ref.h>
-#include <wtf/RefCounted.h>
+#include <wtf/RefCountedAndCanMakeWeakPtr.h>
 #include <wtf/RefPtr.h>
+#include <wtf/TZoneMalloc.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
-class WebXRHand : public RefCounted<WebXRHand> {
-    WTF_MAKE_ISO_ALLOCATED(WebXRHand);
+class WebXRHand : public RefCountedAndCanMakeWeakPtr<WebXRHand> {
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(WebXRHand);
 public:
 
     static Ref<WebXRHand> create(const WebXRInputSource&);
     ~WebXRHand();
 
-    unsigned size() { return m_size; }
+    unsigned size() const { return m_joints.size(); }
 
     RefPtr<WebXRJointSpace> get(const XRHandJoint& key);
 
@@ -56,21 +57,22 @@ public:
         std::optional<KeyValuePair<XRHandJoint, RefPtr<WebXRJointSpace>>> next();
 
     private:
-        Ref<WebXRHand> m_hand;
+        const Ref<WebXRHand> m_hand;
         size_t m_index { 0 };
     };
-    Iterator createIterator() { return Iterator(*this); }
+    Iterator createIterator(ScriptExecutionContext*) { return Iterator(*this); }
 
-    // For GC reachablitiy.
+    // For GC reachability.
     WebXRSession* session();
+
+    bool hasMissingPoses() const { return m_hasMissingPoses; }
+    void updateFromInputSource(const PlatformXR::FrameData::InputSource&);
 
 private:
     WebXRHand(const WebXRInputSource&);
 
-    unsigned m_size { 0 };
-    using HandJointToSpaceMap = HashMap<XRHandJoint, Ref<WebXRJointSpace>, DefaultHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>>;
-    HandJointToSpaceMap m_joints;
-
+    FixedVector<Ref<WebXRJointSpace>> m_joints;
+    bool m_hasMissingPoses { true };
     WeakPtr<WebXRInputSource> m_inputSource;
 };
 

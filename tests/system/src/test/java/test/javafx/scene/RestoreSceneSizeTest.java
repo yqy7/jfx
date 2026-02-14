@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,9 @@
  */
 package test.javafx.scene;
 
-import com.sun.javafx.PlatformUtil;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
@@ -32,19 +34,15 @@ import javafx.scene.Scene;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import javafx.stage.WindowEvent;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
-
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-import static org.junit.Assert.fail;
-import static org.junit.Assume.assumeTrue;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.PlatformUtil;
+import test.util.Util;
 
 public class RestoreSceneSizeTest {
-    static CountDownLatch startupLatch;
+    static CountDownLatch startupLatch = new CountDownLatch(1);
     static Stage stage;
 
     private static final int WIDTH = 234;
@@ -80,29 +78,26 @@ public class RestoreSceneSizeTest {
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() {
-        startupLatch = new CountDownLatch(1);
-        new Thread(() -> Application.launch(TestApp.class, (String[])null)).start();
-        try {
-            if (!startupLatch.await(15, TimeUnit.SECONDS)) {
-                fail("Timeout waiting for FX runtime to start");
-            }
-        } catch (InterruptedException ex) {
-            fail("Unexpected exception: " + ex);
-        }
+        Util.launch(startupLatch, TestApp.class);
+    }
+
+    @AfterAll
+    public static void teardown() {
+        Util.shutdown();
     }
 
     @Test
     public void testUnfullscreenSize() throws Exception {
-        // Disable on Mac until JDK-8176813 is fixed
-        assumeTrue(!PlatformUtil.isMac());
+        // Disable on Linux until JDK-8353556 is fixed
+        assumeTrue(!PlatformUtil.isLinux());
 
         Thread.sleep(200);
         final double w = (Math.ceil(WIDTH * scaleX)) / scaleX;
         final double h = (Math.ceil(HEIGHT * scaleY)) / scaleY;
-        Assert.assertTrue(stage.isShowing());
-        Assert.assertTrue(stage.isFullScreen());
+        Assertions.assertTrue(stage.isShowing());
+        Assertions.assertTrue(stage.isFullScreen());
 
         CountDownLatch latch = new CountDownLatch(2);
         ChangeListener<Number> listenerW = (observable, oldValue, newValue) -> {
@@ -120,17 +115,11 @@ public class RestoreSceneSizeTest {
         Platform.runLater(() -> stage.setFullScreen(false));
         latch.await(5, TimeUnit.SECONDS);
         Thread.sleep(200);
-        Assert.assertFalse(stage.isFullScreen());
+        Assertions.assertFalse(stage.isFullScreen());
         stage.getScene().widthProperty().removeListener(listenerW);
         stage.getScene().heightProperty().removeListener(listenerH);
 
-        Assert.assertEquals("Scene got wrong width", w, stage.getScene().getWidth(), 0.1);
-        Assert.assertEquals("Scene got wrong height", h, stage.getScene().getHeight(), 0.1);
-    }
-
-    @AfterClass
-    public static void teardown() {
-        Platform.runLater(stage::hide);
-        Platform.exit();
+        Assertions.assertEquals(w, stage.getScene().getWidth(), 0.1, "Scene got wrong width");
+        Assertions.assertEquals(h, stage.getScene().getHeight(), 0.1, "Scene got wrong height");
     }
 }

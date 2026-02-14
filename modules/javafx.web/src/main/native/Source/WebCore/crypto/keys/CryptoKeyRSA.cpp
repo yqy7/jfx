@@ -36,7 +36,7 @@ namespace WebCore {
 
 RefPtr<CryptoKeyRSA> CryptoKeyRSA::importJwk(CryptoAlgorithmIdentifier algorithm, std::optional<CryptoAlgorithmIdentifier> hash, JsonWebKey&& keyData, bool extractable, CryptoKeyUsageBitmap usages)
 {
-    if (keyData.kty != "RSA")
+    if (keyData.kty != "RSA"_s)
         return nullptr;
     if (keyData.key_ops && ((keyData.usages & usages) != usages))
         return nullptr;
@@ -50,7 +50,7 @@ RefPtr<CryptoKeyRSA> CryptoKeyRSA::importJwk(CryptoAlgorithmIdentifier algorithm
         return nullptr;
     // Per RFC 7518 Section 6.3.1.1: https://tools.ietf.org/html/rfc7518#section-6.3.1.1
     if (!modulus->isEmpty() && !modulus->at(0))
-        modulus->remove(0);
+        modulus->removeAt(0);
     auto exponent = base64URLDecode(keyData.e);
     if (!exponent)
         return nullptr;
@@ -133,8 +133,9 @@ RefPtr<CryptoKeyRSA> CryptoKeyRSA::importJwk(CryptoAlgorithmIdentifier algorithm
 JsonWebKey CryptoKeyRSA::exportJwk() const
 {
     JsonWebKey result;
-    result.kty = "RSA";
+    result.kty = "RSA"_s;
     result.key_ops = usages();
+    result.usages = usagesBitmap();
     result.ext = extractable();
 
     auto rsaComponents = exportData();
@@ -171,6 +172,23 @@ JsonWebKey CryptoKeyRSA::exportJwk() const
     }
     result.oth = WTFMove(oth);
     return result;
+}
+
+CryptoKey::Data CryptoKeyRSA::data() const
+{
+    auto jwk = exportJwk();
+    std::optional<CryptoAlgorithmIdentifier> hash;
+    if (m_restrictedToSpecificHash)
+        hash = hashAlgorithmIdentifier();
+    return CryptoKey::Data {
+        CryptoKeyClass::RSA,
+        algorithmIdentifier(),
+        extractable(),
+        usagesBitmap(),
+        std::nullopt,
+        WTFMove(jwk),
+        hash
+    };
 }
 
 } // namespace WebCore

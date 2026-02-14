@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,11 +36,11 @@ import javafx.collections.FXCollections;
 import test.javafx.collections.MockSetObserver;
 import javafx.collections.ObservableList;
 import javafx.collections.ObservableSet;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import static test.javafx.collections.MockSetObserver.Call;
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  */
@@ -63,7 +63,7 @@ public class SetBindingTest {
 
     private MockSetObserver<Object> listener;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         dependency1 = new ObservableStub();
         dependency2 = new ObservableStub();
@@ -73,7 +73,7 @@ public class SetBindingTest {
         emptySet = FXCollections.observableSet();
         set1 = FXCollections.observableSet(DATA_1);
         set2 = FXCollections.observableSet(DATA_2_0, DATA_2_1);
-        listener = new MockSetObserver<Object>();
+        listener = new MockSetObserver<>();
         binding0.setValue(set2);
         binding1.setValue(set2);
         binding2.setValue(set2);
@@ -149,7 +149,7 @@ public class SetBindingTest {
         binding1.setValue(set1);
         dependency1.fireValueChangedEvent();
         assertEquals(1, binding1.getComputeValueCounter());
-        listener.assertMultipleCalls(new Call[]{new Call<Object>(DATA_2_0, null), new Call<Object>(DATA_2_1, null), new Call<Object>(null, DATA_1)});
+        listener.assertMultipleCalls(new Call[]{new Call<>(DATA_2_0, null), new Call<>(DATA_2_1, null), new Call<>(null, DATA_1)});
         assertEquals(true, binding1.isValid());
         listener.clear();
 
@@ -180,7 +180,7 @@ public class SetBindingTest {
         binding1.setValue(set1);
         dependency1.fireValueChangedEvent();
         assertEquals(2, binding1.getComputeValueCounter());
-        listener.assertMultipleCalls(new Call[]{new Call<Object>(DATA_2_0, null), new Call<Object>(DATA_2_1, null), new Call<Object>(null, DATA_1)});
+        listener.assertMultipleCalls(new Call[]{new Call<>(DATA_2_0, null), new Call<>(DATA_2_1, null), new Call<>(null, DATA_1)});
         assertEquals(true, binding1.isValid());
         listener.clear();
 
@@ -196,7 +196,7 @@ public class SetBindingTest {
         binding1.setValue(set2);
         dependency1.fireValueChangedEvent();
         assertEquals(2, binding1.getComputeValueCounter());
-        listener.assertMultipleCalls(new Call[] {new Call<Object>(DATA_1, null), new Call<Object>(null, DATA_2_0), new Call<Object>(null, DATA_2_1)});
+        listener.assertMultipleCalls(new Call[] {new Call<>(DATA_1, null), new Call<>(null, DATA_2_0), new Call<>(null, DATA_2_1)});
         assertEquals(true, binding1.isValid());
         listener.clear();
 
@@ -290,6 +290,7 @@ public class SetBindingTest {
             return value;
         }
 
+        @Override
         public ObservableList<?> getDependencies() {
             fail("Should not reach here");
             return null;

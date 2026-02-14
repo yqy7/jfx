@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2007-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,12 +26,13 @@
 #include "config.h"
 #include "PositionIterator.h"
 
-#include "Editing.h"
+#include "EditingInlines.h"
 #include "HTMLBodyElement.h"
 #include "HTMLElement.h"
 #include "HTMLHtmlElement.h"
 #include "HTMLNames.h"
 #include "RenderBlockFlow.h"
+#include "RenderBoxInlines.h"
 #include "RenderFlexibleBox.h"
 #include "RenderGrid.h"
 #include "RenderText.h"
@@ -40,20 +41,28 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
+PositionIterator::PositionIterator(const Position& pos)
+    : m_anchorNode(pos.anchorNode())
+    , m_nodeAfterPositionInAnchor(m_anchorNode->traverseToChildAt(pos.deprecatedEditingOffset()))
+    , m_offsetInAnchor(m_nodeAfterPositionInAnchor ? 0 : pos.deprecatedEditingOffset())
+{
+}
+
 PositionIterator::operator Position() const
 {
+    RefPtr anchorNode = node();
     if (m_nodeAfterPositionInAnchor) {
-        ASSERT(m_nodeAfterPositionInAnchor->parentNode() == m_anchorNode);
+        ASSERT(m_nodeAfterPositionInAnchor->parentNode() == anchorNode.get());
         // FIXME: This check is inadaquete because any ancestor could be ignored by editing
-        if (positionBeforeOrAfterNodeIsCandidate(*m_anchorNode))
-            return positionBeforeNode(m_anchorNode);
-        return positionInParentBeforeNode(m_nodeAfterPositionInAnchor);
+        if (positionBeforeOrAfterNodeIsCandidate(*anchorNode))
+            return positionBeforeNode(anchorNode.get());
+        return positionInParentBeforeNode(m_nodeAfterPositionInAnchor.get());
     }
-    if (positionBeforeOrAfterNodeIsCandidate(*m_anchorNode))
-        return atStartOfNode() ? positionBeforeNode(m_anchorNode) : positionAfterNode(m_anchorNode);
-    if (m_anchorNode->hasChildNodes())
-        return lastPositionInOrAfterNode(m_anchorNode);
-    return makeDeprecatedLegacyPosition(m_anchorNode, m_offsetInAnchor);
+    if (positionBeforeOrAfterNodeIsCandidate(*anchorNode))
+        return atStartOfNode() ? positionBeforeNode(anchorNode.get()) : positionAfterNode(anchorNode.get());
+    if (anchorNode->hasChildNodes())
+        return lastPositionInOrAfterNode(anchorNode.get());
+    return makeDeprecatedLegacyPosition(WTFMove(anchorNode), m_offsetInAnchor);
 }
 
 void PositionIterator::increment()
@@ -68,10 +77,11 @@ void PositionIterator::increment()
         return;
     }
 
-    if (m_anchorNode->renderer() && !m_anchorNode->hasChildNodes() && m_offsetInAnchor < lastOffsetForEditing(*m_anchorNode))
-        m_offsetInAnchor = Position::uncheckedNextOffset(m_anchorNode, m_offsetInAnchor);
+    RefPtr anchorNode = node();
+    if (anchorNode->renderer() && !anchorNode->hasChildNodes() && m_offsetInAnchor < lastOffsetForEditing(*anchorNode))
+        m_offsetInAnchor = Position::uncheckedNextOffset(anchorNode.get(), m_offsetInAnchor);
     else {
-        m_nodeAfterPositionInAnchor = m_anchorNode;
+        m_nodeAfterPositionInAnchor = WTFMove(anchorNode);
         m_anchorNode = m_nodeAfterPositionInAnchor->parentNode();
         m_nodeAfterPositionInAnchor = m_nodeAfterPositionInAnchor->nextSibling();
         m_offsetInAnchor = 0;
@@ -85,9 +95,9 @@ void PositionIterator::decrement()
 
     if (m_nodeAfterPositionInAnchor) {
         m_anchorNode = m_nodeAfterPositionInAnchor->previousSibling();
-        if (m_anchorNode) {
+        if (RefPtr anchorNode = node()) {
             m_nodeAfterPositionInAnchor = nullptr;
-            m_offsetInAnchor = m_anchorNode->hasChildNodes() ? 0 : lastOffsetForEditing(*m_anchorNode);
+            m_offsetInAnchor = anchorNode->hasChildNodes() ? 0 : lastOffsetForEditing(*anchorNode);
         } else {
             m_nodeAfterPositionInAnchor = m_nodeAfterPositionInAnchor->parentNode();
             m_anchorNode = m_nodeAfterPositionInAnchor->parentNode();
@@ -101,7 +111,7 @@ void PositionIterator::decrement()
         m_offsetInAnchor = m_anchorNode->hasChildNodes()? 0: lastOffsetForEditing(*m_anchorNode);
     } else {
         if (m_offsetInAnchor && m_anchorNode->renderer())
-            m_offsetInAnchor = Position::uncheckedPreviousOffset(m_anchorNode, m_offsetInAnchor);
+            m_offsetInAnchor = Position::uncheckedPreviousOffset(m_anchorNode.get(), m_offsetInAnchor);
         else {
             m_nodeAfterPositionInAnchor = m_anchorNode;
             m_anchorNode = m_anchorNode->parentNode();
@@ -120,11 +130,12 @@ bool PositionIterator::atStart() const
 
 bool PositionIterator::atEnd() const
 {
-    if (!m_anchorNode)
+    RefPtr anchorNode = node();
+    if (!anchorNode)
         return true;
     if (m_nodeAfterPositionInAnchor)
         return false;
-    return !m_anchorNode->parentNode() && (m_anchorNode->hasChildNodes() || m_offsetInAnchor >= lastOffsetForEditing(*m_anchorNode));
+    return !anchorNode->parentNode() && (anchorNode->hasChildNodes() || m_offsetInAnchor >= lastOffsetForEditing(*anchorNode));
 }
 
 bool PositionIterator::atStartOfNode() const
@@ -138,20 +149,22 @@ bool PositionIterator::atStartOfNode() const
 
 bool PositionIterator::atEndOfNode() const
 {
-    if (!m_anchorNode)
+    RefPtr anchorNode = node();
+    if (!anchorNode)
         return true;
     if (m_nodeAfterPositionInAnchor)
         return false;
-    return m_anchorNode->hasChildNodes() || m_offsetInAnchor >= lastOffsetForEditing(*m_anchorNode);
+    return anchorNode->hasChildNodes() || m_offsetInAnchor >= lastOffsetForEditing(*anchorNode);
 }
 
 // This function should be kept in sync with Position::isCandidate().
 bool PositionIterator::isCandidate() const
 {
-    if (!m_anchorNode)
+    RefPtr anchorNode = node();
+    if (!anchorNode)
         return false;
 
-    RenderObject* renderer = m_anchorNode->renderer();
+    RenderObject* renderer = anchorNode->renderer();
     if (!renderer)
         return false;
 
@@ -161,26 +174,27 @@ bool PositionIterator::isCandidate() const
     if (renderer->isBR())
         return Position(*this).isCandidate();
 
-    if (is<RenderText>(*renderer))
-        return !Position::nodeIsUserSelectNone(m_anchorNode) && downcast<RenderText>(*renderer).containsCaretOffset(m_offsetInAnchor);
+    if (auto* renderText = dynamicDowncast<RenderText>(*renderer))
+        return !Position::nodeIsUserSelectNone(anchorNode.get()) && renderText->containsCaretOffset(m_offsetInAnchor);
 
-    if (positionBeforeOrAfterNodeIsCandidate(*m_anchorNode))
-        return (atStartOfNode() || atEndOfNode()) && !Position::nodeIsUserSelectNone(m_anchorNode->parentNode());
+    if (positionBeforeOrAfterNodeIsCandidate(*anchorNode))
+        return (atStartOfNode() || atEndOfNode()) && !Position::nodeIsUserSelectNone(anchorNode->parentNode());
 
-    if (is<HTMLHtmlElement>(*m_anchorNode))
+    if (is<HTMLHtmlElement>(*anchorNode))
         return false;
 
-    if (is<RenderBlockFlow>(*renderer) || is<RenderGrid>(*renderer) || is<RenderFlexibleBox>(*renderer)) {
-        auto& block = downcast<RenderBlock>(*renderer);
-        if (block.logicalHeight() || is<HTMLBodyElement>(*m_anchorNode) || m_anchorNode->isRootEditableElement()) {
-            if (!Position::hasRenderedNonAnonymousDescendantsWithHeight(block))
-                return atStartOfNode() && !Position::nodeIsUserSelectNone(m_anchorNode);
-            return m_anchorNode->hasEditableStyle() && !Position::nodeIsUserSelectNone(m_anchorNode) && Position(*this).atEditingBoundary();
+    if (auto* block = dynamicDowncast<RenderBlock>(*renderer)) {
+        if (is<RenderBlockFlow>(*block) || is<RenderGrid>(*block) || is<RenderFlexibleBox>(*block)) {
+            if (block->logicalHeight() || is<HTMLBodyElement>(*anchorNode) || anchorNode->isRootEditableElement()) {
+                if (!Position::hasRenderedNonAnonymousDescendantsWithHeight(*block))
+                return atStartOfNode() && !Position::nodeIsUserSelectNone(anchorNode.get());
+            return anchorNode->hasEditableStyle() && !Position::nodeIsUserSelectNone(anchorNode.get()) && Position(*this).atEditingBoundary();
         }
         return false;
     }
+    }
 
-    return m_anchorNode->hasEditableStyle() && !Position::nodeIsUserSelectNone(m_anchorNode) && Position(*this).atEditingBoundary();
+    return anchorNode->hasEditableStyle() && !Position::nodeIsUserSelectNone(anchorNode.get()) && Position(*this).atEditingBoundary();
 }
 
 } // namespace WebCore

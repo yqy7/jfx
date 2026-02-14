@@ -27,29 +27,34 @@
 
 #if ENABLE(USER_MESSAGE_HANDLERS)
 
-#include "ExceptionOr.h"
 #include "FrameDestructionObserver.h"
 #include "UserMessageHandlerDescriptor.h"
+
+namespace JSC {
+class JSGlobalObject;
+class JSValue;
+}
 
 namespace WebCore {
 
 class DeferredPromise;
+template<typename> class ExceptionOr;
 
 class UserMessageHandler : public RefCounted<UserMessageHandler>, public FrameDestructionObserver {
 public:
-    static Ref<UserMessageHandler> create(Frame& frame, UserMessageHandlerDescriptor& descriptor)
+    static Ref<UserMessageHandler> create(LocalFrame& frame, UserMessageHandlerDescriptor& descriptor)
     {
         return adoptRef(*new UserMessageHandler(frame, descriptor));
     }
     virtual ~UserMessageHandler();
 
-    ExceptionOr<void> postMessage(RefPtr<SerializedScriptValue>&&, Ref<DeferredPromise>&&);
+    ExceptionOr<void> postMessage(JSC::JSGlobalObject&, JSC::JSValue, Ref<DeferredPromise>&&);
 
     UserMessageHandlerDescriptor* descriptor() { return m_descriptor.get(); }
     void invalidateDescriptor() { m_descriptor = nullptr; }
 
 private:
-    UserMessageHandler(Frame&, UserMessageHandlerDescriptor&);
+    UserMessageHandler(LocalFrame&, UserMessageHandlerDescriptor&);
 
     RefPtr<UserMessageHandlerDescriptor> m_descriptor;
 };

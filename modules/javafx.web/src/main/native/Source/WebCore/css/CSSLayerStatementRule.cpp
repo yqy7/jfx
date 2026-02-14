@@ -49,17 +49,19 @@ Ref<CSSLayerStatementRule> CSSLayerStatementRule::create(StyleRuleLayer& rule, C
     return adoptRef(*new CSSLayerStatementRule(rule, parent));
 }
 
+CSSLayerStatementRule::~CSSLayerStatementRule() = default;
+
 String CSSLayerStatementRule::cssText() const
 {
     StringBuilder result;
 
-    result.append("@layer ");
+    result.append("@layer "_s);
 
     auto nameList = this->nameList();
     for (auto& name : nameList) {
         result.append(name);
         if (&name != &nameList.last())
-            result.append(", ");
+            result.append(", "_s);
     }
     result.append(';');
 
@@ -78,7 +80,7 @@ Vector<String> CSSLayerStatementRule::nameList() const
 
 void CSSLayerStatementRule::reattach(StyleRuleBase& rule)
 {
-    m_layerRule = static_cast<StyleRuleLayer&>(rule);
+    m_layerRule = downcast<StyleRuleLayer>(rule);
 }
 
 } // namespace WebCore

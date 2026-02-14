@@ -88,7 +88,7 @@ public:
         if (index > numberOfItems())
             index = numberOfItems();
 
-        auto item = insert(index, WTFMove(newItem));
+        auto item = insertAt(index, WTFMove(newItem));
         commitChange();
         return item;
     }
@@ -100,7 +100,7 @@ public:
             return result.releaseException();
         ASSERT(result.releaseReturnValue());
 
-        auto item = replace(index, WTFMove(newItem));
+        auto item = replaceAt(index, WTFMove(newItem));
         commitChange();
         return item;
     }
@@ -112,7 +112,7 @@ public:
             return result.releaseException();
         ASSERT(result.releaseReturnValue());
 
-        auto item = remove(index);
+        auto item = removeAt(index);
         commitChange();
         return item;
     }
@@ -137,6 +137,8 @@ public:
         return { };
     }
 
+    bool isSupportedPropertyIndex(unsigned index) const { return index < m_items.size(); }
+
     // Parsers and animators need to have a direct access to the items.
     Vector<ItemType>& items() { return m_items; }
     const Vector<ItemType>& items() const { return m_items; }
@@ -155,14 +157,14 @@ protected:
     ExceptionOr<bool> canAlterList() const
     {
         if (isReadOnly())
-            return Exception { NoModificationAllowedError };
+            return Exception { ExceptionCode::NoModificationAllowedError };
         return true;
     }
 
     ExceptionOr<bool> canGetItem(unsigned index)
     {
         if (index >= m_items.size())
-            return Exception { IndexSizeError };
+            return Exception { ExceptionCode::IndexSizeError };
         return true;
     }
 
@@ -174,7 +176,7 @@ protected:
         ASSERT(result.releaseReturnValue());
 
         if (index >= m_items.size())
-            return Exception { IndexSizeError };
+            return Exception { ExceptionCode::IndexSizeError };
         return true;
     }
 
@@ -186,15 +188,15 @@ protected:
         ASSERT(result.releaseReturnValue());
 
         if (index >= m_items.size())
-            return Exception { IndexSizeError };
+            return Exception { ExceptionCode::IndexSizeError };
         return true;
     }
 
     virtual void detachItems() { }
     virtual ItemType at(unsigned index) const = 0;
-    virtual ItemType insert(unsigned index, ItemType&&) = 0;
-    virtual ItemType replace(unsigned index, ItemType&&) = 0;
-    virtual ItemType remove(unsigned index) = 0;
+    virtual ItemType insertAt(unsigned index, ItemType&&) = 0;
+    virtual ItemType replaceAt(unsigned index, ItemType&&) = 0;
+    virtual ItemType removeAt(unsigned index) = 0;
     virtual ItemType append(ItemType&&) = 0;
 
     Vector<ItemType> m_items;

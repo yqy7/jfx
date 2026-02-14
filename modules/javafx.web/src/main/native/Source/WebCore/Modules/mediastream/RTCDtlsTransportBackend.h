@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Apple Inc.
+ * Copyright (C) 2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,6 +29,14 @@
 #include "RTCDtlsTransportState.h"
 #include <wtf/WeakPtr.h>
 
+namespace WebCore {
+class RTCDtlsTransportBackendClient;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::RTCDtlsTransportBackendClient> : std::true_type { };
+}
 namespace JSC {
 class ArrayBuffer;
 }
@@ -37,6 +45,13 @@ namespace WebCore {
 
 class RTCIceTransportBackend;
 
+class RTCDtlsTransportBackendClient : public CanMakeWeakPtr<RTCDtlsTransportBackendClient> {
+public:
+    virtual ~RTCDtlsTransportBackendClient() = default;
+    virtual void onStateChanged(RTCDtlsTransportState, Vector<Ref<JSC::ArrayBuffer>>&&) = 0;
+    virtual void onError() = 0;
+};
+
 class RTCDtlsTransportBackend {
 public:
     virtual ~RTCDtlsTransportBackend() = default;
@@ -44,13 +59,7 @@ public:
     virtual const void* backend() const = 0;
     virtual UniqueRef<RTCIceTransportBackend> iceTransportBackend() = 0;
 
-    class Client : public CanMakeWeakPtr<Client> {
-    public:
-        virtual ~Client() = default;
-        virtual void onStateChanged(RTCDtlsTransportState, Vector<Ref<JSC::ArrayBuffer>>&&) = 0;
-        virtual void onError() = 0;
-    };
-    virtual void registerClient(Client&) = 0;
+    virtual void registerClient(RTCDtlsTransportBackendClient&) = 0;
     virtual void unregisterClient() = 0;
 };
 

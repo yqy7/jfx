@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -441,17 +441,9 @@ public class VBox extends Pane {
             Node child = managed.get(i);
             Insets margin = getMargin(child);
             if (minimum) {
-                if (insideWidth != -1 && isFillWidth) {
-                    temp[0][i] = computeChildMinAreaHeight(child, -1, margin, insideWidth);
-                } else {
-                    temp[0][i] = computeChildMinAreaHeight(child, -1, margin, -1);
-                }
+                temp[0][i] = computeChildMinAreaHeight(child, -1, margin, insideWidth, isFillWidth);
             } else {
-                if (insideWidth != -1 && isFillWidth) {
-                    temp[0][i] = computeChildPrefAreaHeight(child, -1, margin, insideWidth);
-                } else {
-                    temp[0][i] = computeChildPrefAreaHeight(child, -1, margin, -1);
-                }
+                temp[0][i] = computeChildPrefAreaHeight(child, -1, margin, insideWidth, isFillWidth);
             }
         }
         return temp;
@@ -482,28 +474,39 @@ public class VBox extends Pane {
 
         double[] usedHeights = areaHeights[0];
         double[] temp = areaHeights[1];
+        final boolean isFillWidth = isFillWidth();
 
         if (shrinking) {
             adjustingNumber = managed.size();
             for (int i = 0, size = managed.size(); i < size; i++) {
                 final Node child = managed.get(i);
-                temp[i] = computeChildMinAreaHeight(child, -1, getMargin(child), width);
+                temp[i] = computeChildMinAreaHeight(child, -1, getMargin(child), width, isFillWidth);
             }
         } else {
             for (int i = 0, size = managed.size(); i < size; i++) {
-            final Node child = managed.get(i);
-            if (getVgrow(child) == priority) {
-                temp[i] = computeChildMaxAreaHeight(child, -1, getMargin(child), width);
-                adjustingNumber++;
-            } else {
-                temp[i] = -1;
+                final Node child = managed.get(i);
+                if (getVgrow(child) == priority) {
+                    temp[i] = computeChildMaxAreaHeight(child, -1, getMargin(child), width, isFillWidth);
+                    adjustingNumber++;
+                } else {
+                    temp[i] = -1;
+                }
             }
         }
-        }
 
+        double pixelSize = isSnapToPixel() ? 1 / Region.getSnapScaleY(this) : 0.0;
         double available = extraHeight; // will be negative in shrinking case
-        outer: while (Math.abs(available) > 1 && adjustingNumber > 0) {
-            final double portion = snapPortionY(available / adjustingNumber); // negative in shrinking case
+        outer: while (Math.abs(available) >= pixelSize && adjustingNumber > 0) {
+            double portion = snapPortionY(available / adjustingNumber); // negative in shrinking case
+
+            if (portion == 0) {
+                if (pixelSize == 0) {
+                    break;
+                }
+
+                portion = pixelSize * Math.signum(available);
+            }
+
             for (int i = 0, size = managed.size(); i < size; i++) {
                 if (temp[i] == -1) {
                     continue;
@@ -512,7 +515,7 @@ public class VBox extends Pane {
                 final double change = Math.abs(limit) <= Math.abs(portion)? limit : portion;
                 usedHeights[i] += change;
                 available -= change;
-                if (Math.abs(available) < 1) {
+                if (Math.abs(available) < pixelSize) {
                     break outer;
                 }
                 if (Math.abs(change) < Math.abs(portion)) {
@@ -597,8 +600,8 @@ public class VBox extends Pane {
       */
      private static class StyleableProperties {
          private static final CssMetaData<VBox,Pos> ALIGNMENT =
-             new CssMetaData<VBox,Pos>("-fx-alignment",
-                 new EnumConverter<Pos>(Pos.class), Pos.TOP_LEFT){
+             new CssMetaData<>("-fx-alignment",
+                 new EnumConverter<>(Pos.class), Pos.TOP_LEFT){
 
             @Override
             public boolean isSettable(VBox node) {
@@ -612,7 +615,7 @@ public class VBox extends Pane {
         };
 
          private static final CssMetaData<VBox,Boolean> FILL_WIDTH =
-             new CssMetaData<VBox,Boolean>("-fx-fill-width",
+             new CssMetaData<>("-fx-fill-width",
                  BooleanConverter.getInstance(), Boolean.TRUE) {
 
             @Override
@@ -627,7 +630,7 @@ public class VBox extends Pane {
         };
 
          private static final CssMetaData<VBox,Number> SPACING =
-             new CssMetaData<VBox,Number>("-fx-spacing",
+             new CssMetaData<>("-fx-spacing",
                  SizeConverter.getInstance(), 0d) {
 
             @Override
@@ -644,7 +647,7 @@ public class VBox extends Pane {
          private static final List<CssMetaData<? extends Styleable, ?>> STYLEABLES;
          static {
             final List<CssMetaData<? extends Styleable, ?>> styleables =
-                new ArrayList<CssMetaData<? extends Styleable, ?>>(Region.getClassCssMetaData());
+                new ArrayList<>(Region.getClassCssMetaData());
             styleables.add(ALIGNMENT);
             styleables.add(FILL_WIDTH);
             styleables.add(SPACING);

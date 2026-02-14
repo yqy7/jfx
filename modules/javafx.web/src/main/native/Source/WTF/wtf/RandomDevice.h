@@ -33,7 +33,7 @@ namespace WTF {
 
 class RandomDevice {
     WTF_MAKE_NONCOPYABLE(RandomDevice);
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(RandomDevice);
 public:
 #if OS(DARWIN) || OS(FUCHSIA) || OS(WINDOWS)
     RandomDevice() = default;
@@ -45,7 +45,7 @@ public:
     // This function attempts to fill buffer with randomness from the operating
     // system. Rather than calling this function directly, consider calling
     // cryptographicallyRandomNumber or cryptographicallyRandomValues.
-    void cryptographicallyRandomValues(unsigned char* buffer, size_t length);
+    void cryptographicallyRandomValues(std::span<uint8_t> buffer);
 
 private:
 #if OS(DARWIN) || OS(FUCHSIA) || OS(WINDOWS)

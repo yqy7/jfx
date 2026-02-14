@@ -25,9 +25,10 @@
 
 #pragma once
 
-#if ENABLE(LAYOUT_FORMATTING_CONTEXT)
-
+#include "InlineDamage.h"
+#include "InlineDisplayContent.h"
 #include <optional>
+#include <wtf/Forward.h>
 
 namespace WebCore {
 
@@ -36,27 +37,41 @@ class RenderStyle;
 namespace Layout {
 
 class Box;
-class InlineDamage;
+class ElementBox;
 class InlineTextBox;
+struct InvalidatedLine;
 
 class InlineInvalidation {
 public:
-    InlineInvalidation(InlineDamage&);
+    InlineInvalidation(InlineDamage&, const InlineItemList&, const InlineDisplay::Content&);
 
-    void styleChanged(const Box&, const RenderStyle& oldStyle);
+    bool rootStyleWillChange(const ElementBox& formattingContextRoot, const RenderStyle& newStyle);
+    bool styleWillChange(const Box&, const RenderStyle& newStyle, StyleDifference);
 
-    void textInserted(const InlineTextBox&, std::optional<size_t> offset, std::optional<size_t> length);
-    void textWillBeRemoved(const InlineTextBox&, std::optional<size_t> offset, std::optional<size_t> length);
+    bool textInserted(const InlineTextBox& newOrDamagedInlineTextBox, std::optional<size_t> offset = { });
+    bool textWillBeRemoved(const InlineTextBox&, std::optional<size_t> offset = { });
 
-    void inlineLevelBoxInserted(const Box&);
-    void inlineLevelBoxWillBeRemoved(const Box&);
+    bool inlineLevelBoxInserted(const Box&);
+    bool inlineLevelBoxWillBeRemoved(const Box&);
+    bool inlineLevelBoxContentWillChange(const Box&);
 
-    void horizontalConstraintChanged();
+    bool restartForPagination(size_t lineIndex, LayoutUnit pageTopAdjustment);
+
+    static bool mayOnlyNeedPartialLayout(const InlineDamage* inlineDamage) { return inlineDamage && inlineDamage->layoutStartPosition(); }
+    static void resetInlineDamage(InlineDamage&);
 
 private:
+    enum class ShouldApplyRangeLayout : bool { No, Yes };
+    bool updateInlineDamage(const InvalidatedLine&, InlineDamage::Reason, ShouldApplyRangeLayout = ShouldApplyRangeLayout::No, LayoutUnit restartPaginationAdjustment = 0_lu);
+    bool setFullLayoutIfNeeded(const Box&);
+    const InlineDisplay::Boxes& displayBoxes() const { return m_displayContent.boxes; }
+    const InlineDisplay::Lines& displayLines() const { return m_displayContent.lines; }
+
     InlineDamage& m_inlineDamage;
+
+    const InlineItemList& m_inlineItemList;
+    const InlineDisplay::Content& m_displayContent;
 };
 
 }
 }
-#endif

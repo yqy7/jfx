@@ -21,13 +21,15 @@
 
 #pragma once
 
-#include "CSSParser.h"
+#include "CSSPropertyParserConsumer+Color.h"
 #include "Color.h"
 #include "ColorSerialization.h"
+#include "CommonAtomStrings.h"
 #include "FloatPoint.h"
 #include "FloatRect.h"
 #include "QualifiedName.h"
 #include "SVGParserUtilities.h"
+#include <wtf/text/MakeString.h>
 
 namespace WebCore {
 
@@ -37,18 +39,18 @@ struct SVGPropertyTraits { };
 template<>
 struct SVGPropertyTraits<bool> {
     static bool initialValue() { return false; }
-    static bool fromString(const String& string) { return string == "true"; }
+    static bool fromString(const String& string) { return string == "true"_s; }
     static std::optional<bool> parse(const QualifiedName&, const String&) { ASSERT_NOT_REACHED(); return initialValue(); }
-    static String toString(bool type) { return type ? "true" : "false"; }
+    static String toString(bool type) { return type ? trueAtom() : falseAtom(); }
 };
 
 template<>
 struct SVGPropertyTraits<Color> {
     static Color initialValue() { return Color(); }
-    static Color fromString(const String& string) { return CSSParser::parseColorWithoutContext(string.stripWhiteSpace()); }
+    static Color fromString(const String& string) { return CSSPropertyParserHelpers::deprecatedParseColorRawWithoutContext(string.trim(deprecatedIsSpaceOrNewline)); }
     static std::optional<Color> parse(const QualifiedName&, const String& string)
     {
-        Color color = CSSParser::parseColorWithoutContext(string.stripWhiteSpace());
+        auto color = CSSPropertyParserHelpers::deprecatedParseColorRawWithoutContext(string.trim(deprecatedIsSpaceOrNewline));
         if (!color.isValid())
             return std::nullopt;
         return color;

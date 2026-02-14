@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -63,7 +63,9 @@ public abstract class TableCellBehaviorBase<S, T, TC extends TableColumnBase<S, 
 
     protected abstract TableColumnBase<S, T> getTableColumn(); // getControl().getTableColumn()
     protected abstract int getItemCount();
+    @Override
     protected abstract TableSelectionModel<S> getSelectionModel();
+    @Override
     protected abstract TableFocusModel<S,TC> getFocusModel();
     protected abstract TablePositionBase getFocusedCell();
     protected abstract boolean isTableRowSelected(); // tableCell.getTableRow().isSelected()
@@ -92,6 +94,7 @@ public abstract class TableCellBehaviorBase<S, T, TC extends TableColumnBase<S, 
      *                                                                         *
      **************************************************************************/
 
+    @Override
     protected void doSelect(final double x, final double y, final MouseButton button,
                           final int clickCount, final boolean shiftDown, final boolean shortcutDown) {
         // Note that table.select will reset selection
@@ -129,7 +132,7 @@ public abstract class TableCellBehaviorBase<S, T, TC extends TableColumnBase<S, 
 
         // if shift is down, and we don't already have the initial focus index
         // recorded, we record the focus index now so that subsequent shift+clicks
-        // result in the correct selection occuring (whilst the focus index moves
+        // result in the correct selection occurring (whilst the focus index moves
         // about).
         if (shiftDown) {
             if (! hasNonDefaultAnchor(tableView)) {
@@ -173,7 +176,7 @@ public abstract class TableCellBehaviorBase<S, T, TC extends TableColumnBase<S, 
                     TableColumnBase<S,T> maxColumn = anchor.getColumn() >= column ? anchor.getTableColumn() : tableColumn;
 
                     // and then perform the selection.
-                    // RT-21444: We need to put the range in the correct
+                    // JDK-8126876: We need to put the range in the correct
                     // order or else the last selected row will not be the
                     // last item in the selectedItems list of the selection
                     // model,
@@ -183,11 +186,11 @@ public abstract class TableCellBehaviorBase<S, T, TC extends TableColumnBase<S, 
                         sm.selectRange(maxRow, minColumn, minRow, maxColumn);
                     }
 
-                    // This line of code below was disabled as a fix for RT-30394.
+                    // This line of code below was disabled as a fix for JDK-8119603.
                     // Unit tests were written, so if by disabling this code I
                     // have introduced regressions elsewhere, it is allowable to
                     // re-enable this code as tests will fail if it is done so
-                    // without taking care of RT-30394 in an alternative manner.
+                    // without taking care of JDK-8119603 in an alternative manner.
 
                     // return selection back to the focus owner
                     // focus(anchor.getRow(), tableColumn);
@@ -198,25 +201,33 @@ public abstract class TableCellBehaviorBase<S, T, TC extends TableColumnBase<S, 
         }
     }
 
+    @Override
     protected void simpleSelect(MouseButton button, int clickCount, boolean shortcutDown) {
         final TableSelectionModel<S> sm = getSelectionModel();
-        final int row = getNode().getIndex();
-        final TableColumnBase<S,T> column = getTableColumn();
-        boolean isAlreadySelected = sm.isSelected(row, column);
+        boolean isAlreadySelected;
 
-        if (isAlreadySelected && shortcutDown) {
-            sm.clearSelection(row, column);
-            getFocusModel().focus(row, (TC) column);
+        if (sm == null) {
             isAlreadySelected = false;
         } else {
-            // we check if cell selection is enabled to fix RT-33897
-            sm.clearAndSelect(row, column);
+            final int row = getNode().getIndex();
+            final TableColumnBase<S,T> column = getTableColumn();
+            isAlreadySelected = sm.isSelected(row, column);
+
+            if (isAlreadySelected && shortcutDown) {
+                sm.clearSelection(row, column);
+                getFocusModel().focus(row, (TC) column);
+                isAlreadySelected = false;
+            } else {
+                // we check if cell selection is enabled to fix JDK-8119598
+                sm.clearAndSelect(row, column);
+            }
         }
 
         handleClicks(button, clickCount, isAlreadySelected);
     }
 
     private int getColumn() {
+        // this method will not be called if selection model is null
         if (getSelectionModel().isCellSelectionEnabled()) {
             TableColumnBase<S,T> tc = getTableColumn();
             return getVisibleLeafIndex(tc);

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2022 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2012-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -54,6 +54,7 @@ public:
 
     const Identifier& variable(unsigned index) { return m_variables[index]; }
     unsigned numVariables() { return m_variables.size(); }
+    std::span<const Identifier> variables() const { return m_variables.span(); }
     void adoptVariables(Vector<Identifier, 0, UnsafeVectorOverflow>&& variables)
     {
         ASSERT(m_variables.isEmpty());
@@ -62,6 +63,7 @@ public:
 
     const Identifier& functionHoistingCandidate(unsigned index) { return m_functionHoistingCandidates[index]; }
     unsigned numFunctionHoistingCandidates() { return m_functionHoistingCandidates.size(); }
+    std::span<const Identifier> functionHoistingCandidates() const { return m_functionHoistingCandidates.span(); }
     void adoptFunctionHoistingCandidates(Vector<Identifier, 0, UnsafeVectorOverflow>&& functionHoistingCandidates)
     {
         ASSERT(m_functionHoistingCandidates.isEmpty());
@@ -81,10 +83,7 @@ private:
     FixedVector<Identifier> m_functionHoistingCandidates;
 
 public:
-    static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue proto)
-    {
-        return Structure::create(vm, globalObject, proto, TypeInfo(UnlinkedEvalCodeBlockType, StructureFlags), info());
-    }
+    inline static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
     DECLARE_INFO;
 };

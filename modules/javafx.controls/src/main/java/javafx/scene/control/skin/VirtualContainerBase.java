@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,17 +25,20 @@
 
 package javafx.scene.control.skin;
 
-import javafx.event.EventHandler;
 import javafx.scene.control.Control;
 import javafx.scene.control.IndexedCell;
 import javafx.scene.control.ScrollToEvent;
 import javafx.scene.control.SkinBase;
+
+import com.sun.javafx.scene.control.ListenerHelper;
 
 /**
  * Parent class to control skins whose contents are virtualized and scrollable.
  * This class handles the interaction with the VirtualFlow class, which is the
  * main class handling the virtualization of the contents of this container.
  *
+ * @param <C> the type of the control
+ * @param <I> the type of the index cell
  * @since 9
  */
 public abstract class VirtualContainerBase<C extends Control, I extends IndexedCell> extends SkinBase<C> {
@@ -54,8 +57,6 @@ public abstract class VirtualContainerBase<C extends Control, I extends IndexedC
      */
     private final VirtualFlow<I> flow;
 
-    private EventHandler<? super ScrollToEvent<Integer>> scrollToEventHandler;
-
 
     /* *************************************************************************
      *                                                                         *
@@ -71,17 +72,16 @@ public abstract class VirtualContainerBase<C extends Control, I extends IndexedC
         super(control);
         flow = createVirtualFlow();
 
-        scrollToEventHandler = event -> {
-            // Fix for RT-24630: The row count in VirtualFlow was incorrect
+        ListenerHelper.get(this).addEventHandler(control, ScrollToEvent.scrollToTopIndex(), (ev) -> {
+            // Fix for JDK-8119687: The row count in VirtualFlow was incorrect
             // (normally zero), so the scrollTo call was misbehaving.
             if (itemCountDirty) {
                 // update row count before we do a scroll
                 updateItemCount();
                 itemCountDirty = false;
             }
-            flow.scrollToTop(event.getScrollTarget());
-        };
-        control.addEventHandler(ScrollToEvent.scrollToTopIndex(), scrollToEventHandler);
+            flow.scrollToTop(ev.getScrollTarget());
+        });
     }
 
 
@@ -118,7 +118,7 @@ public abstract class VirtualContainerBase<C extends Control, I extends IndexedC
      * Create the virtualized container that handles the layout and scrolling of
      * all the cells. This enables skin subclasses to provide
      * a custom {@link VirtualFlow} implementation.
-     * If not overridden, this method intantiates a default VirtualFlow instance.
+     * If not overridden, this method instantiates a default VirtualFlow instance.
      * @return newly created VirtualFlow instance
      * @since 10
      */
@@ -132,8 +132,9 @@ public abstract class VirtualContainerBase<C extends Control, I extends IndexedC
      */
     @Override
     public void dispose() {
-        if (getSkinnable() == null) return;
-        getSkinnable().removeEventHandler(ScrollToEvent.scrollToTopIndex(), scrollToEventHandler);
+        if (getSkinnable() == null) {
+            return;
+        }
         super.dispose();
     }
 
@@ -188,6 +189,10 @@ public abstract class VirtualContainerBase<C extends Control, I extends IndexedC
 
     void requestRebuildCells() {
         flow.rebuildCells();
+    }
+
+    void requestRecreateCells() {
+        flow.recreateCells();
     }
 
 }

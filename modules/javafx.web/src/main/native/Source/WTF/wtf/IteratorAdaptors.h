@@ -26,12 +26,15 @@
 #pragma once
 
 #include <type_traits>
+#include <wtf/Compiler.h>
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 namespace WTF {
 
 template<typename Predicate, typename Iterator>
 class FilterIterator {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(FilterIterator);
 public:
     FilterIterator(Predicate pred, Iterator begin, Iterator end)
         : m_pred(WTFMove(pred))
@@ -60,7 +63,6 @@ public:
     }
 
     inline bool operator==(const FilterIterator& other) const { return m_iter == other.m_iter; }
-    inline bool operator!=(const FilterIterator& other) const { return m_iter != other.m_iter; }
 
 private:
     const Predicate m_pred;
@@ -76,7 +78,7 @@ inline FilterIterator<Predicate, Iterator> makeFilterIterator(Predicate&& pred, 
 
 template<typename Transform, typename Iterator>
 class TransformIterator {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(TransformIterator);
 public:
     TransformIterator(Transform&& transform, Iterator&& iter)
         : m_transform(WTFMove(transform))
@@ -96,7 +98,6 @@ public:
     }
 
     inline bool operator==(const TransformIterator& other) const { return m_iter == other.m_iter; }
-    inline bool operator!=(const TransformIterator& other) const { return m_iter != other.m_iter; }
 
 private:
     const Transform m_transform;
@@ -110,3 +111,5 @@ inline TransformIterator<Transform, Iterator> makeTransformIterator(Transform&& 
 }
 
 } // namespace WTF
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

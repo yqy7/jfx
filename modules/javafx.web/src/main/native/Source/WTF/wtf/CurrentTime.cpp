@@ -33,8 +33,10 @@
 
 #include "config.h"
 #include <wtf/ApproximateTime.h>
+#include <wtf/ContinuousApproximateTime.h>
+#include <wtf/ContinuousTime.h>
 #include <wtf/MonotonicTime.h>
-
+#include <wtf/StdLibExtras.h>
 #include <wtf/WallTime.h>
 
 #if OS(DARWIN)
@@ -43,11 +45,6 @@
 #include <mutex>
 #include <sys/time.h>
 #elif OS(WINDOWS)
-
-// Windows is first since we want to use hires timers, despite USE(CF)
-// being defined.
-// If defined, WIN32_LEAN_AND_MEAN disables timeBeginPeriod/timeEndPeriod.
-#undef WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <math.h>
 #include <stdint.h>
@@ -59,6 +56,10 @@
 
 #if OS(FUCHSIA)
 #include <zircon/syscalls.h>
+#endif
+
+#if OS(HAIKU)
+#include <OS.h>
 #endif
 
 #if USE(GLIB)
@@ -84,7 +85,8 @@ static double lowResUTCTime()
     // prevent alignment faults on 64-bit Windows).
 
     ULARGE_INTEGER dateTime;
-    memcpy(&dateTime, &fileTime, sizeof(dateTime));
+    static_assert(sizeof(dateTime) == sizeof(fileTime));
+    memcpySpan(asMutableByteSpan(dateTime), asByteSpan(fileTime));
 
     // Windows file times are in 100s of nanoseconds.
     return (dateTime.QuadPart - epochBias) / hundredsOfNanosecondsPerMillisecond;
@@ -118,11 +120,7 @@ static double highResUpTime()
         if (tickCount >= tickCountLast)
             tickCountElapsed = (tickCount - tickCountLast);
         else {
-#if COMPILER(MINGW)
-            __int64 tickCountLarge = tickCount + 0x100000000ULL;
-#else
             __int64 tickCountLarge = tickCount + 0x100000000I64;
-#endif
             tickCountElapsed = tickCountLarge - tickCountLast;
         }
 
@@ -185,7 +183,7 @@ static inline double currentTime()
     // force a clock re-sync if we've drifted
     double lowResElapsed = lowResTime - syncLowResUTCTime;
     const double maximumAllowedDriftMsec = 15.625 * 2.0; // 2x the typical low-res accuracy
-    if (fabs(highResElapsed - lowResElapsed) > maximumAllowedDriftMsec)
+    if (std::abs(highResElapsed - lowResElapsed) > maximumAllowedDriftMsec)
         syncedTime = false;
 
     // make sure time doesn't run backwards (only correct if difference is < 2 seconds, since DST or clock changes could occur)
@@ -199,6 +197,18 @@ static inline double currentTime()
 Int128 currentTimeInNanoseconds()
 {
     return static_cast<Int128>(currentTime() * 1'000'000'000);
+}
+
+#elif OS(HAIKU)
+
+Int128 currentTimeInNanoseconds()
+{
+    return static_cast<Int128>(real_time_clock_usecs() * 1000.0);
+}
+
+double currentTime()
+{
+    return (double)real_time_clock_usecs() / 1'000'000.0;
 }
 
 #else
@@ -261,6 +271,30 @@ uint64_t ApproximateTime::toMachApproximateTime() const
     auto& info = machTimebaseInfo();
     return static_cast<uint64_t>((m_value * 1.0e9 * info.denom) / info.numer);
 }
+
+ContinuousTime ContinuousTime::fromMachContinuousTime(uint64_t machContinuousTime)
+{
+    auto& info = machTimebaseInfo();
+    return fromRawSeconds((machContinuousTime * info.numer) / (1.0e9 * info.denom));
+}
+
+uint64_t ContinuousTime::toMachContinuousTime() const
+{
+    auto& info = machTimebaseInfo();
+    return static_cast<uint64_t>((m_value * 1.0e9 * info.denom) / info.numer);
+}
+
+ContinuousApproximateTime ContinuousApproximateTime::fromMachContinuousApproximateTime(uint64_t machContinuousApproximateTime)
+{
+    auto& info = machTimebaseInfo();
+    return fromRawSeconds((machContinuousApproximateTime * info.numer) / (1.0e9 * info.denom));
+}
+
+uint64_t ContinuousApproximateTime::toMachContinuousApproximateTime() const
+{
+    auto& info = machTimebaseInfo();
+    return static_cast<uint64_t>((m_value * 1.0e9 * info.denom) / info.numer);
+}
 #endif
 
 MonotonicTime MonotonicTime::now()
@@ -275,17 +309,8 @@ MonotonicTime MonotonicTime::now()
     struct timespec ts { };
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return fromRawSeconds(static_cast<double>(ts.tv_sec) + ts.tv_nsec / 1.0e9);
-#elif OS(WINDOWS) && PLATFORM(JAVA)
-    // monotonicallyIncreasingTime() implementation is done by taking reference from glib library
-    uint64_t ticks = GetTickCount64();
-    uint32_t ticks32 = timeGetTime();
-    uint32_t ticksAs32Bit = static_cast<uint32_t>(ticks);
-    if (ticks32 - ticksAs32Bit <= INT_MAX) {
-        ticks += ticks32 - ticksAs32Bit;
-    } else {
-        ticks -= ticksAs32Bit - ticks32;
-    }
-    return fromRawSeconds(ticks / 1000.0);
+#elif OS(HAIKU)
+    return fromRawSeconds(static_cast<double>(system_time_nsecs() / 1.0e9));
 #else
     static double lastTime = 0;
     double currentTimeNow = currentTime();
@@ -308,8 +333,46 @@ ApproximateTime ApproximateTime::now()
     struct timespec ts { };
     clock_gettime(CLOCK_MONOTONIC_FAST, &ts);
     return fromRawSeconds(static_cast<double>(ts.tv_sec) + ts.tv_nsec / 1.0e9);
+#elif OS(HAIKU)
+    return fromRawSeconds(static_cast<double>(system_time() / 1.0e6));
 #else
     return ApproximateTime::fromRawSeconds(MonotonicTime::now().secondsSinceEpoch().value());
+#endif
+}
+
+ContinuousTime ContinuousTime::now()
+{
+#if OS(DARWIN)
+    return fromMachContinuousTime(mach_continuous_time());
+#elif (OS(LINUX) || OS(OPENBSD)) && !PLATFORM(JAVA)
+    struct timespec ts { };
+    clock_gettime(CLOCK_BOOTTIME, &ts);
+    return fromRawSeconds(static_cast<double>(ts.tv_sec) + ts.tv_nsec / 1.0e9);
+#else
+    static double lastTime = 0;
+    double currentTimeNow = currentTime();
+    if (currentTimeNow < lastTime)
+        return lastTime;
+    lastTime = currentTimeNow;
+    return fromRawSeconds(currentTimeNow);
+#endif
+}
+
+ContinuousApproximateTime ContinuousApproximateTime::now()
+{
+#if OS(DARWIN)
+    return fromMachContinuousApproximateTime(mach_continuous_approximate_time());
+#elif (OS(LINUX) || OS(OPENBSD)) && !PLATFORM(JAVA)
+    struct timespec ts { };
+    clock_gettime(CLOCK_BOOTTIME, &ts);
+    return fromRawSeconds(static_cast<double>(ts.tv_sec) + ts.tv_nsec / 1.0e9);
+#else
+    static double lastTime = 0;
+    double currentTimeNow = currentTime();
+    if (currentTimeNow < lastTime)
+        return lastTime;
+    lastTime = currentTimeNow;
+    return fromRawSeconds(currentTimeNow);
 #endif
 }
 

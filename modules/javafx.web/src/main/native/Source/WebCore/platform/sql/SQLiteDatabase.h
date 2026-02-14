@@ -28,17 +28,15 @@
 
 #include <functional>
 #include <sqlite3.h>
+#include <wtf/CheckedRef.h>
 #include <wtf/Expected.h>
 #include <wtf/Lock.h>
+#include <wtf/OptionSet.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/Threading.h>
 #include <wtf/UniqueRef.h>
-#include <wtf/WeakPtr.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/WTFString.h>
-
-#if COMPILER(MSVC)
-#pragma warning(disable: 4800)
-#endif
 
 struct sqlite3;
 
@@ -48,37 +46,45 @@ class DatabaseAuthorizer;
 class SQLiteStatement;
 class SQLiteTransaction;
 
-class SQLiteDatabase : public CanMakeWeakPtr<SQLiteDatabase> {
-    WTF_MAKE_FAST_ALLOCATED;
+class SQLiteDatabase final : public CanMakeThreadSafeCheckedPtr<SQLiteDatabase> {
+    WTF_MAKE_TZONE_ALLOCATED_EXPORT(SQLiteDatabase, WEBCORE_EXPORT);
     WTF_MAKE_NONCOPYABLE(SQLiteDatabase);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(SQLiteDatabase);
+
     friend class SQLiteTransaction;
 public:
     WEBCORE_EXPORT SQLiteDatabase();
     WEBCORE_EXPORT ~SQLiteDatabase();
 
-    WEBCORE_EXPORT static const char* inMemoryPath();
+    static constexpr ASCIILiteral inMemoryPath() { return ":memory:"_s; }
 
-    enum class OpenMode { ReadOnly, ReadWrite, ReadWriteCreate };
-    WEBCORE_EXPORT bool open(const String& filename, OpenMode = OpenMode::ReadWriteCreate);
+    enum class OpenMode : uint8_t { ReadOnly, ReadWrite, ReadWriteCreate };
+    enum class OpenOptions : uint8_t {
+        CanSuspendWhileLocked = 1 << 0,
+    };
+
+    WEBCORE_EXPORT bool open(const String& filename, OpenMode = OpenMode::ReadWriteCreate, OptionSet<OpenOptions> = { });
     bool isOpen() const { return m_db; }
-    enum class ShouldSetErrorState : bool { No, Yes };
-    WEBCORE_EXPORT void close(ShouldSetErrorState = ShouldSetErrorState::Yes);
+    WEBCORE_EXPORT void close();
 
-    WEBCORE_EXPORT bool executeCommandSlow(const String&);
+    WEBCORE_EXPORT int executeSlow(StringView);
+    WEBCORE_EXPORT int execute(ASCIILiteral);
+    WEBCORE_EXPORT bool executeCommandSlow(StringView);
     WEBCORE_EXPORT bool executeCommand(ASCIILiteral);
 
-    WEBCORE_EXPORT bool tableExists(const String&);
-    WEBCORE_EXPORT String tableSQL(const String&);
-    WEBCORE_EXPORT String indexSQL(const String&);
+    WEBCORE_EXPORT bool tableExists(StringView);
+    WEBCORE_EXPORT bool indexExists(StringView);
+    WEBCORE_EXPORT String tableSQL(StringView);
+    WEBCORE_EXPORT String indexSQL(StringView);
     WEBCORE_EXPORT void clearAllTables();
     WEBCORE_EXPORT int runVacuumCommand();
     WEBCORE_EXPORT int runIncrementalVacuumCommand();
 
     bool transactionInProgress() const { return m_transactionInProgress; }
 
-    WEBCORE_EXPORT Expected<SQLiteStatement, int> prepareStatementSlow(const String& query);
+    WEBCORE_EXPORT Expected<SQLiteStatement, int> prepareStatementSlow(StringView query);
     WEBCORE_EXPORT Expected<SQLiteStatement, int> prepareStatement(ASCIILiteral query);
-    WEBCORE_EXPORT Expected<UniqueRef<SQLiteStatement>, int> prepareHeapStatementSlow(const String& query);
+    WEBCORE_EXPORT Expected<UniqueRef<SQLiteStatement>, int> prepareHeapStatementSlow(StringView query);
     WEBCORE_EXPORT Expected<UniqueRef<SQLiteStatement>, int> prepareHeapStatement(ASCIILiteral query);
 
     // Aborts the current database operation. This is thread safe.
@@ -126,7 +132,7 @@ public:
     sqlite3* sqlite3Handle() const
     {
 #if !PLATFORM(IOS_FAMILY)
-        ASSERT(m_sharable || m_openingThread == &Thread::current() || !m_db);
+        ASSERT(m_sharable || m_openingThread == &Thread::currentSingleton() || !m_db);
 #endif
         return m_db;
     }
@@ -149,7 +155,6 @@ public:
     WEBCORE_EXPORT bool turnOnIncrementalAutoVacuum();
 
     WEBCORE_EXPORT void setCollationFunction(const String& collationName, Function<int(int, const void*, int, const void*)>&&);
-    void removeCollationFunction(const String& collationName);
 
     // Set this flag to allow access from multiple threads.  Not all multi-threaded accesses are safe!
     // See http://www.sqlite.org/cvstrac/wiki?p=MultiThreading for more info.
@@ -159,7 +164,7 @@ public:
     void disableThreadingChecks() { }
 #endif
 
-    WEBCORE_EXPORT static void setIsDatabaseOpeningForbidden(bool);
+    WEBCORE_EXPORT static void useFastMalloc();
 
     WEBCORE_EXPORT void releaseMemory();
 
@@ -170,7 +175,7 @@ private:
     static int authorizerFunction(void*, int, const char*, const char*, const char*, const char*);
 
     void enableAuthorizer(bool enable) WTF_REQUIRES_LOCK(m_authorizerLock);
-    void useWALJournalMode();
+    bool useWALJournalMode();
 
     int pageSize();
 

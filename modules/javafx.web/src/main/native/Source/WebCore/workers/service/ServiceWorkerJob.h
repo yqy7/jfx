@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,17 +25,18 @@
 
 #pragma once
 
-#if ENABLE(SERVICE_WORKER)
-
 #include "ResourceLoaderIdentifier.h"
 #include "ResourceResponse.h"
+#include "ScriptExecutionContextIdentifier.h"
 #include "ServiceWorkerJobClient.h"
 #include "ServiceWorkerJobData.h"
 #include "ServiceWorkerTypes.h"
 #include "WorkerScriptLoader.h"
 #include "WorkerScriptLoaderClient.h"
+#include <wtf/CompletionHandler.h>
 #include <wtf/RefPtr.h>
 #include <wtf/RunLoop.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/Threading.h>
 
@@ -44,11 +45,11 @@ namespace WebCore {
 class DeferredPromise;
 class Exception;
 class ScriptExecutionContext;
-enum class ServiceWorkerJobType;
+enum class ServiceWorkerJobType : uint8_t;
 struct ServiceWorkerRegistrationData;
 
 class ServiceWorkerJob : public WorkerScriptLoaderClient {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED_EXPORT(ServiceWorkerJob, WEBCORE_EXPORT);
 public:
     ServiceWorkerJob(ServiceWorkerJobClient&, RefPtr<DeferredPromise>&&, ServiceWorkerJobData&&);
     WEBCORE_EXPORT ~ServiceWorkerJob();
@@ -73,10 +74,12 @@ public:
 
     WEBCORE_EXPORT static ResourceError validateServiceWorkerResponse(const ServiceWorkerJobData&, const ResourceResponse&);
 
+    bool isRegistering() const;
+
 private:
     // WorkerScriptLoaderClient
-    void didReceiveResponse(ResourceLoaderIdentifier, const ResourceResponse&) final;
-    void notifyFinished() final;
+    void didReceiveResponse(ScriptExecutionContextIdentifier, std::optional<ResourceLoaderIdentifier>, const ResourceResponse&) final;
+    void notifyFinished(std::optional<ScriptExecutionContextIdentifier>) final;
 
     ServiceWorkerJobClient& m_client;
     ServiceWorkerJobData m_jobData;
@@ -88,11 +91,8 @@ private:
     RefPtr<WorkerScriptLoader> m_scriptLoader;
 
 #if ASSERT_ENABLED
-    Ref<Thread> m_creationThread { Thread::current() };
+    const Ref<Thread> m_creationThread { Thread::currentSingleton() };
 #endif
 };
 
 } // namespace WebCore
-
-#endif // ENABLE(SERVICE_WORKER)
-

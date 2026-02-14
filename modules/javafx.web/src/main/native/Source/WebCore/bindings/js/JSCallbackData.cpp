@@ -34,18 +34,22 @@
 #include "JSExecState.h"
 #include "JSExecStateInstrumentation.h"
 #include <JavaScriptCore/Exception.h>
+#include <wtf/TZoneMallocInlines.h>
+#include <wtf/text/MakeString.h>
 
 namespace WebCore {
 using namespace JSC;
 
+WTF_MAKE_TZONE_ALLOCATED_IMPL(JSCallbackData);
+
 // https://webidl.spec.whatwg.org/#call-a-user-objects-operation
-JSValue JSCallbackData::invokeCallback(VM& vm, JSObject* callback, JSValue thisValue, MarkedArgumentBuffer& args, CallbackType method, PropertyName functionName, NakedPtr<JSC::Exception>& returnedException)
+JSValue JSCallbackData::invokeCallback(JSDOMGlobalObject& globalObject, JSObject* callback, JSValue thisValue, MarkedArgumentBuffer& args, CallbackType method, PropertyName functionName, NakedPtr<JSC::Exception>& returnedException)
 {
     ASSERT(callback);
 
-    // https://webidl.spec.whatwg.org/#ref-for-prepare-to-run-script makes callback's [[Realm]] a running JavaScript execution context,
-    // which is used for creating TypeError objects: https://tc39.es/ecma262/#sec-ecmascript-function-objects-call-thisargument-argumentslist (step 4).
-    JSGlobalObject* lexicalGlobalObject = callback->globalObject(vm);
+    JSGlobalObject* lexicalGlobalObject = &globalObject;
+    VM& vm = lexicalGlobalObject->vm();
+
     auto scope = DECLARE_CATCH_SCOPE(vm);
 
     JSValue function;
@@ -53,7 +57,7 @@ JSValue JSCallbackData::invokeCallback(VM& vm, JSObject* callback, JSValue thisV
 
     if (method != CallbackType::Object) {
         function = callback;
-        callData = getCallData(vm, callback);
+        callData = JSC::getCallData(callback);
     }
     if (callData.type == CallData::Type::None) {
         if (method == CallbackType::Function) {
@@ -63,15 +67,15 @@ JSValue JSCallbackData::invokeCallback(VM& vm, JSObject* callback, JSValue thisV
 
         ASSERT(!functionName.isNull());
         function = callback->get(lexicalGlobalObject, functionName);
-        if (UNLIKELY(scope.exception())) {
+        if (scope.exception()) [[unlikely]] {
             returnedException = scope.exception();
             scope.clearException();
             return JSValue();
         }
 
-        callData = getCallData(vm, function);
+        callData = JSC::getCallData(function);
         if (callData.type == CallData::Type::None) {
-            returnedException = JSC::Exception::create(vm, createTypeError(lexicalGlobalObject, makeString("'", String(functionName.uid()), "' property of callback interface should be callable")));
+            returnedException = JSC::Exception::create(vm, createTypeError(lexicalGlobalObject, makeString('\'', String(functionName.uid()), "' property of callback interface should be callable"_s)));
             return JSValue();
         }
 
@@ -81,7 +85,7 @@ JSValue JSCallbackData::invokeCallback(VM& vm, JSObject* callback, JSValue thisV
     ASSERT(!function.isEmpty());
     ASSERT(callData.type != CallData::Type::None);
 
-    ScriptExecutionContext* context = jsCast<JSDOMGlobalObject*>(lexicalGlobalObject)->scriptExecutionContext();
+    ScriptExecutionContext* context = globalObject.scriptExecutionContext();
     // We will fail to get the context if the frame has been detached.
     if (!context)
         return JSValue();
@@ -97,19 +101,12 @@ JSValue JSCallbackData::invokeCallback(VM& vm, JSObject* callback, JSValue thisV
 }
 
 template<typename Visitor>
-void JSCallbackDataWeak::visitJSFunction(Visitor& visitor)
+void JSCallbackData::visitJSFunction(Visitor& visitor)
 {
     visitor.append(m_callback);
 }
 
-template void JSCallbackDataWeak::visitJSFunction(JSC::AbstractSlotVisitor&);
-template void JSCallbackDataWeak::visitJSFunction(JSC::SlotVisitor&);
-
-bool JSCallbackDataWeak::WeakOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown>, void* context, AbstractSlotVisitor& visitor, const char** reason)
-{
-    if (UNLIKELY(reason))
-        *reason = "Context is opaque root"; // FIXME: what is the context.
-    return visitor.containsOpaqueRoot(context);
-}
+template void JSCallbackData::visitJSFunction(JSC::AbstractSlotVisitor&);
+template void JSCallbackData::visitJSFunction(JSC::SlotVisitor&);
 
 } // namespace WebCore

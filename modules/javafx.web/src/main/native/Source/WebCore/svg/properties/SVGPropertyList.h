@@ -37,11 +37,7 @@ public:
     using BaseList::size;
     using BaseList::append;
 
-    // Visual Studio doesn't seem to see these private constructors from subclasses.
-    // FIXME: See what it takes to remove this hack.
-#if !COMPILER(MSVC)
 protected:
-#endif
     using SVGPropertyOwner::SVGPropertyOwner;
     using BaseList::m_items;
     using BaseList::m_access;
@@ -78,7 +74,7 @@ protected:
         return m_items.at(index).copyRef();
     }
 
-    Ref<PropertyType> insert(unsigned index, Ref<PropertyType>&& newItem) override
+    Ref<PropertyType> insertAt(unsigned index, Ref<PropertyType>&& newItem) override
     {
         ASSERT(index <= size());
 
@@ -93,7 +89,7 @@ protected:
         return at(index);
     }
 
-    Ref<PropertyType> replace(unsigned index, Ref<PropertyType>&& newItem) override
+    Ref<PropertyType> replaceAt(unsigned index, Ref<PropertyType>&& newItem) override
     {
         ASSERT(index < size());
         Ref<PropertyType>& item = m_items[index];
@@ -113,14 +109,14 @@ protected:
         return at(index);
     }
 
-    Ref<PropertyType> remove(unsigned index) override
+    Ref<PropertyType> removeAt(unsigned index) override
     {
         ASSERT(index < size());
         Ref<PropertyType> item = at(index);
 
         // Spec: Detach item.
         item->detach();
-        m_items.remove(index);
+        m_items.removeAt(index);
         return item;
     }
 

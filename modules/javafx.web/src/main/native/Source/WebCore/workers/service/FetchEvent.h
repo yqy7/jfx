@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,11 +25,10 @@
 
 #pragma once
 
-#if ENABLE(SERVICE_WORKER)
-
-#include "DOMPromiseProxy.h"
 #include "ExtendableEvent.h"
-#include "FetchRequest.h"
+#include "FetchIdentifier.h"
+#include "JSDOMPromiseDeferredForward.h"
+#include "ResourceError.h"
 #include <wtf/CompletionHandler.h>
 #include <wtf/Expected.h>
 
@@ -40,11 +39,12 @@ class JSGlobalObject;
 namespace WebCore {
 
 class DOMPromise;
+class FetchRequest;
 class FetchResponse;
-class ResourceError;
+class ResourceResponse;
 
 class FetchEvent final : public ExtendableEvent {
-    WTF_MAKE_ISO_ALLOCATED(FetchEvent);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(FetchEvent);
 public:
     struct Init : ExtendableEventInit {
         RefPtr<FetchRequest> request;
@@ -60,8 +60,6 @@ public:
         return adoptRef(*new FetchEvent(globalObject, type, WTFMove(initializer), isTrusted));
     }
     ~FetchEvent();
-
-    EventInterface eventInterface() const final { return FetchEventInterfaceType; }
 
     ExceptionOr<void> respondWith(Ref<DOMPromise>&&);
 
@@ -81,6 +79,8 @@ public:
     PreloadResponsePromise& preloadResponse(ScriptExecutionContext&);
 
     void setNavigationPreloadIdentifier(FetchIdentifier);
+    WEBCORE_EXPORT void navigationPreloadIsReady(ResourceResponse&&);
+    WEBCORE_EXPORT void navigationPreloadFailed(ResourceError&&);
 
 private:
     WEBCORE_EXPORT FetchEvent(JSC::JSGlobalObject&, const AtomString&, Init&&, IsTrusted);
@@ -89,7 +89,7 @@ private:
     void processResponse(Expected<Ref<FetchResponse>, std::optional<ResourceError>>&&);
     void respondWithError(ResourceError&&);
 
-    Ref<FetchRequest> m_request;
+    const Ref<FetchRequest> m_request;
     String m_clientId;
     String m_resultingClientId;
 
@@ -97,21 +97,18 @@ private:
     bool m_waitToRespond { false };
     bool m_respondWithError { false };
     RefPtr<DOMPromise> m_respondPromise;
-    Ref<DOMPromise> m_handled;
+    const Ref<DOMPromise> m_handled;
 
     ResponseCallback m_onResponse;
 
-    FetchIdentifier m_navigationPreloadIdentifier;
+    Markable<FetchIdentifier> m_navigationPreloadIdentifier;
     std::unique_ptr<PreloadResponsePromise> m_preloadResponsePromise;
 };
 
 inline void FetchEvent::setNavigationPreloadIdentifier(FetchIdentifier identifier)
 {
     ASSERT(!m_navigationPreloadIdentifier);
-    ASSERT(identifier);
     m_navigationPreloadIdentifier = identifier;
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(SERVICE_WORKER)

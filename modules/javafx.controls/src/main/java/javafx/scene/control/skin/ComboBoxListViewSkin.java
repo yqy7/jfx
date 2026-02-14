@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,14 +25,9 @@
 
 package javafx.scene.control.skin;
 
-import com.sun.javafx.scene.control.behavior.ComboBoxBaseBehavior;
-import com.sun.javafx.scene.control.behavior.ComboBoxListViewBehavior;
-
 import java.util.List;
 import java.util.function.Supplier;
 
-import javafx.beans.InvalidationListener;
-import javafx.beans.WeakInvalidationListener;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.value.ObservableValue;
@@ -55,13 +50,20 @@ import javafx.scene.control.SelectionMode;
 import javafx.scene.control.SelectionModel;
 import javafx.scene.control.SingleSelectionModel;
 import javafx.scene.control.TextField;
-import javafx.scene.input.*;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.MouseEvent;
 import javafx.util.Callback;
 import javafx.util.StringConverter;
+
+import com.sun.javafx.scene.control.IDisconnectable;
+import com.sun.javafx.scene.control.ListenerHelper;
+import com.sun.javafx.scene.control.behavior.ComboBoxBaseBehavior;
+import com.sun.javafx.scene.control.behavior.ComboBoxListViewBehavior;
 
 /**
  * Default skin implementation for the {@link ComboBox} control.
  *
+ * @param <T> the type of the ComboBox control
  * @see ComboBox
  * @since 9
  */
@@ -100,7 +102,7 @@ public class ComboBoxListViewSkin<T> extends ComboBoxPopupControl<T> {
     private boolean listViewSelectionDirty = false;
 
     private final ComboBoxListViewBehavior behavior;
-
+    private IDisconnectable selectedItemWatcher;
 
 
     /* *************************************************************************
@@ -110,17 +112,15 @@ public class ComboBoxListViewSkin<T> extends ComboBoxPopupControl<T> {
      **************************************************************************/
 
     private boolean itemCountDirty;
-    private final ListChangeListener<T> listViewItemsListener = new ListChangeListener<T>() {
+    private final ListChangeListener<T> listViewItemsListener = new ListChangeListener<>() {
         @Override public void onChanged(ListChangeListener.Change<? extends T> c) {
             itemCountDirty = true;
             getSkinnable().requestLayout();
         }
     };
 
-    private final InvalidationListener itemsObserver;
-
     private final WeakListChangeListener<T> weakListViewItemsListener =
-            new WeakListChangeListener<T>(listViewItemsListener);
+            new WeakListChangeListener<>(listViewItemsListener);
 
 
     /* *************************************************************************
@@ -141,21 +141,21 @@ public class ComboBoxListViewSkin<T> extends ComboBoxPopupControl<T> {
 
         // install default input map for the control
         this.behavior = new ComboBoxListViewBehavior<>(control);
-//        control.setInputMap(behavior.getInputMap());
 
         this.comboBox = control;
         updateComboBoxItems();
 
-        itemsObserver = observable -> {
+        ListenerHelper lh = ListenerHelper.get(this);
+
+        lh.addInvalidationListener(control.itemsProperty(), (x) -> {
             updateComboBoxItems();
             updateListViewItems();
-        };
-        control.itemsProperty().addListener(new WeakInvalidationListener(itemsObserver));
+        });
 
         // listview for popup
         this.listView = createListView();
 
-        // Fix for RT-21207. Additional code related to this bug is further below.
+        // Fix for JDK-8115587. Additional code related to this bug is further below.
         this.listView.setManaged(false);
         getChildren().add(listView);
         // -- end of fix
@@ -165,37 +165,40 @@ public class ComboBoxListViewSkin<T> extends ComboBoxPopupControl<T> {
 
         updateButtonCell();
 
-        // Fix for RT-19431 (also tested via ComboBoxListViewSkinTest)
+        // Fix for JDK-8115097 (also tested via ComboBoxListViewSkinTest)
         updateValue();
 
-        registerChangeListener(control.itemsProperty(), e -> {
+        lh.addChangeListener(control.itemsProperty(), e -> {
             updateComboBoxItems();
             updateListViewItems();
         });
-        registerChangeListener(control.promptTextProperty(), e -> updateDisplayNode());
-        registerChangeListener(control.cellFactoryProperty(), e -> updateCellFactory());
-        registerChangeListener(control.visibleRowCountProperty(), e -> {
+        lh.addChangeListener(control.promptTextProperty(), e -> updateDisplayNode());
+        lh.addChangeListener(control.cellFactoryProperty(), e -> updateCellFactory());
+        lh.addChangeListener(control.visibleRowCountProperty(), e -> {
             if (listView == null) return;
             listView.requestLayout();
         });
-        registerChangeListener(control.converterProperty(), e -> updateListViewItems());
-        registerChangeListener(control.buttonCellProperty(), e -> {
+        lh.addChangeListener(control.converterProperty(), e -> updateListViewItems());
+        lh.addChangeListener(control.buttonCellProperty(), e -> {
             updateButtonCell();
             updateDisplayArea();
         });
-        registerChangeListener(control.valueProperty(), e -> {
+        lh.addChangeListener(control.valueProperty(), e -> {
             updateValue();
             control.fireEvent(new ActionEvent());
         });
-        registerChangeListener(control.editableProperty(), e -> updateEditable());
+        lh.addChangeListener(control.editableProperty(), e -> updateEditable());
 
         // Refer to JDK-8095306
         if (comboBox.isShowing()) {
             show();
         }
-        comboBox.sceneProperty().addListener(o -> {
+
+        lh.addInvalidationListener(comboBox.sceneProperty(), (o) -> {
             if (((ObservableValue)o).getValue() == null) {
-                comboBox.hide();
+                if (comboBox.isShowing()) {
+                    comboBox.hide();
+                }
             }
         });
     }
@@ -357,13 +360,13 @@ public class ComboBoxListViewSkin<T> extends ComboBoxPopupControl<T> {
                 buttonCell.setItem(null);
                 buttonCell.updateIndex(index);
             } else {
-                // RT-21336 Show the ComboBox value even though it doesn't
+                // JDK-8127575 Show the ComboBox value even though it doesn't
                 // exist in the ComboBox items list (part two of fix)
                 buttonCell.updateIndex(-1);
                 boolean empty = updateDisplayText(buttonCell, value, false);
 
                 // Note that empty boolean collected above. This is used to resolve
-                // RT-27834, where we were getting different styling based on whether
+                // JDK-8124141, where we were getting different styling based on whether
                 // the cell was updated via the updateIndex method above, or just
                 // by directly updating the text. We fake the pseudoclass state
                 // for empty, filled, and selected here.
@@ -410,7 +413,7 @@ public class ComboBoxListViewSkin<T> extends ComboBoxPopupControl<T> {
 
         SelectionModel<T> listViewSM = listView.getSelectionModel();
 
-        // RT-22386: We need to test to see if the value is in the comboBox
+        // JDK-8117826: We need to test to see if the value is in the comboBox
         // items list. If it isn't, then we should clear the listview
         // selection
         final int indexOfNewValue = getIndexOfComboBoxValueInItemsList();
@@ -435,7 +438,7 @@ public class ComboBoxListViewSkin<T> extends ComboBoxPopupControl<T> {
                     // just select the first instance of newValue in the list
                     int listViewIndex = comboBoxItems.indexOf(newValue);
                     if (listViewIndex == -1) {
-                        // RT-21336 Show the ComboBox value even though it doesn't
+                        // JDK-8127575 Show the ComboBox value even though it doesn't
                         // exist in the ComboBox items list (part one of fix)
                         updateDisplayNode();
                     } else {
@@ -450,6 +453,17 @@ public class ComboBoxListViewSkin<T> extends ComboBoxPopupControl<T> {
     private boolean updateDisplayText(ListCell<T> cell, T item, boolean empty) {
         if (empty) {
             if (cell == null) return true;
+
+            if (cell == buttonCell) {
+                final String promptText = comboBox.getPromptText();
+                if (comboBox.getValue() == null
+                        && promptText != null && !promptText.isEmpty()) {
+                    cell.setGraphic(null);
+                    cell.setText(promptText);
+                    return false;
+                }
+            }
+
             cell.setGraphic(null);
             cell.setText(null);
             return true;
@@ -498,9 +512,9 @@ public class ComboBoxListViewSkin<T> extends ComboBoxPopupControl<T> {
     }
 
     private Callback<ListView<T>, ListCell<T>> getDefaultCellFactory() {
-        return new Callback<ListView<T>, ListCell<T>>() {
+        return new Callback<>() {
             @Override public ListCell<T> call(ListView<T> listView) {
-                return new ListCell<T>() {
+                return new ListCell<>() {
                     @Override public void updateItem(T item, boolean empty) {
                         super.updateItem(item, empty);
                         updateDisplayText(this, item, empty);
@@ -511,7 +525,7 @@ public class ComboBoxListViewSkin<T> extends ComboBoxPopupControl<T> {
     }
 
     private ListView<T> createListView() {
-        final ListView<T> _listView = new ListView<T>() {
+        final ListView<T> _listView = new ListView<>() {
 
             {
                 getProperties().put("selectFirstRowByDefault", false);
@@ -573,15 +587,21 @@ public class ComboBoxListViewSkin<T> extends ComboBoxPopupControl<T> {
             comboBox.notifyAccessibleAttributeChanged(AccessibleAttribute.TEXT);
         });
 
-        SingleSelectionModel<T> selectionModel = comboBox.getSelectionModel();
-        if (selectionModel != null) {
-            selectionModel.selectedItemProperty().addListener(o -> {
-                listViewSelectionDirty = true;
-            });
-        }
+        ListenerHelper lh = ListenerHelper.get(this);
+        lh.addChangeListener(comboBox.selectionModelProperty(), true, (src, oldsm, newsm) -> {
+            if (selectedItemWatcher != null) {
+                selectedItemWatcher.disconnect();
+            }
+
+            if (newsm != null) {
+                selectedItemWatcher = lh.addInvalidationListener(newsm.selectedItemProperty(), (x) -> {
+                    listViewSelectionDirty = true;
+                });
+            }
+        });
 
         _listView.addEventFilter(MouseEvent.MOUSE_RELEASED, t -> {
-            // RT-18672: Without checking if the user is clicking in the
+            // JDK-8115969: Without checking if the user is clicking in the
             // scrollbar area of the ListView, the comboBox will hide. Therefore,
             // we add the check below to prevent this from happening.
             EventTarget target = t.getTarget();

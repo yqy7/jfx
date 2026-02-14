@@ -30,19 +30,32 @@
 #include "config.h"
 #include "CSSKeywordValue.h"
 
-#if ENABLE(CSS_TYPED_OM)
-
+#include "CSSMarkup.h"
+#include "CSSPrimitiveValue.h"
+#include "CSSPropertyParser.h"
+#include "CSSValuePool.h"
 #include "ExceptionOr.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(CSSKeywordValue);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(CSSKeywordValue);
+
+Ref<CSSKeywordValue> CSSKeywordValue::rectifyKeywordish(CSSKeywordish&& keywordish)
+{
+    // https://drafts.css-houdini.org/css-typed-om/#rectify-a-keywordish-value
+    return WTF::switchOn(WTFMove(keywordish), [] (String string) {
+        return adoptRef(*new CSSKeywordValue(string));
+    }, [] (RefPtr<CSSKeywordValue> value) {
+        RELEASE_ASSERT(value);
+        return value.releaseNonNull();
+    });
+}
 
 ExceptionOr<Ref<CSSKeywordValue>> CSSKeywordValue::create(const String& value)
 {
     if (value.isEmpty())
-        return Exception { TypeError };
+        return Exception { ExceptionCode::TypeError };
 
     return adoptRef(*new CSSKeywordValue(value));
 }
@@ -50,13 +63,24 @@ ExceptionOr<Ref<CSSKeywordValue>> CSSKeywordValue::create(const String& value)
 ExceptionOr<void> CSSKeywordValue::setValue(const String& value)
 {
     if (value.isEmpty())
-        return Exception { TypeError };
+        return Exception { ExceptionCode::TypeError };
 
     m_value = value;
     return { };
 }
 
+void CSSKeywordValue::serialize(StringBuilder& builder, OptionSet<SerializationArguments>) const
+{
+    // https://drafts.css-houdini.org/css-typed-om/#keywordvalue-serialization
+    serializeIdentifier(m_value, builder);
+}
+
+RefPtr<CSSValue> CSSKeywordValue::toCSSValue() const
+{
+    auto keyword = cssValueKeywordID(m_value);
+    if (keyword == CSSValueInvalid)
+        return CSSPrimitiveValue::createCustomIdent(m_value);
+    return CSSPrimitiveValue::create(keyword);
+}
 
 } // namespace WebCore
-
-#endif

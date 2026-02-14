@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,6 +40,7 @@ import com.sun.javafx.util.TempState;
 import com.sun.javafx.util.Utils;
 import com.sun.javafx.collections.TrackableObservableList;
 import com.sun.javafx.collections.VetoableListDecorator;
+import javafx.css.PseudoClass;
 import javafx.css.Selector;
 import com.sun.javafx.css.StyleManager;
 import com.sun.javafx.geom.BaseBounds;
@@ -76,13 +77,13 @@ import javafx.stage.Window;
  *
  * @since JavaFX 2.0
  */
-public abstract class Parent extends Node {
+public abstract non-sealed class Parent extends Node {
     // package private for testing
     static final int DIRTY_CHILDREN_THRESHOLD = 10;
 
     // If set to true, generate a warning message whenever adding a node to a
     // parent if it is currently a child of another parent.
-    private static final boolean warnOnAutoMove = PropertyHelper.getBooleanProperty("javafx.sg.warn");
+    private static final boolean warnOnAutoMove = Boolean.getBoolean("javafx.sg.warn");
 
     /**
      * Threshold when it's worth to populate list of removed children.
@@ -211,7 +212,7 @@ public abstract class Parent extends Node {
      **********************************************************************/
 
     // Used to check for duplicate nodes
-    private final Set<Node> childSet = new HashSet<Node>();
+    private final Set<Node> childSet = new HashSet<>();
 
     // starting child index from which we need to send the children to the PGGroup
     private int startIdx = 0;
@@ -316,13 +317,19 @@ public abstract class Parent extends Node {
     private boolean geomChanged;
     private boolean childSetModified;
     private final ObservableList<Node> children = new VetoableListDecorator<Node>(new TrackableObservableList<Node>() {
+        private static final PseudoClass FIRST_CHILD_PSEUDO_CLASS = PseudoClass.getPseudoClass("first-child");
+        private static final PseudoClass LAST_CHILD_PSEUDO_CLASS = PseudoClass.getPseudoClass("last-child");
+        private static final PseudoClass ONLY_CHILD_PSEUDO_CLASS = PseudoClass.getPseudoClass("only-child");
+        private static final PseudoClass NTH_EVEN_CHILD_PSEUDO_CLASS = PseudoClass.getPseudoClass("nth-child(even)");
+        private static final PseudoClass NTH_ODD_CHILD_PSEUDO_CLASS = PseudoClass.getPseudoClass("nth-child(odd)");
 
-
+        @Override
         protected void onChanged(Change<Node> c) {
             // proceed with updating the scene graph
             unmodifiableManagedChildren = null;
             boolean relayout = false;
             boolean viewOrderChildrenDirty = false;
+            int firstDirtyChildIndex = -1;
 
             if (childSetModified) {
                 while (c.next()) {
@@ -350,6 +357,12 @@ public abstract class Parent extends Node {
                         if (n.isManaged()) {
                             relayout = true;
                         }
+                    }
+
+                    // Sub-changes are sorted by their 'from' index, so it is sufficient to record
+                    // the index of the first change to separate unchanged from changed elements.
+                    if (firstDirtyChildIndex < 0) {
+                        firstDirtyChildIndex = from;
                     }
 
                     // Mark viewOrderChildrenDirty if there is modification to children list
@@ -384,7 +397,7 @@ public abstract class Parent extends Node {
                 // populate it.
                 if (dirtyChildren == null && children.size() > DIRTY_CHILDREN_THRESHOLD) {
                     dirtyChildren
-                            = new ArrayList<Node>(2 * DIRTY_CHILDREN_THRESHOLD);
+                            = new ArrayList<>(2 * DIRTY_CHILDREN_THRESHOLD);
                     // only bother populating children if geom has
                     // changed, otherwise there is no need
                     if (dirtyChildrenCount > 0) {
@@ -401,6 +414,12 @@ public abstract class Parent extends Node {
                 // If childSet was not modified, we still need to check whether the permutation
                 // did change the layout
                 layout_loop:while (c.next()) {
+                    // Sub-changes are sorted by their 'from' index, so it is sufficient to record
+                    // the index of the first change to separate unchanged from changed elements.
+                    if (firstDirtyChildIndex < 0) {
+                        firstDirtyChildIndex = c.getFrom();
+                    }
+
                     List<Node> removed = c.getRemoved();
                     for (int i = 0, removedSize = removed.size(); i < removedSize; ++i) {
                         if (removed.get(i).isManaged()) {
@@ -417,7 +436,6 @@ public abstract class Parent extends Node {
                     }
                 }
             }
-
 
             //
             // Note that the styles of a child do not affect the parent or
@@ -448,10 +466,8 @@ public abstract class Parent extends Node {
 
             // Note the starting index at which we need to update the
             // PGGroup on the next update, and mark the children dirty
-            c.reset();
-            c.next();
-            if (startIdx > c.getFrom()) {
-                startIdx = c.getFrom();
+            if (startIdx > firstDirtyChildIndex) {
+                startIdx = firstDirtyChildIndex;
             }
 
             NodeHelper.markDirty(Parent.this, DirtyBits.PARENT_CHILDREN);
@@ -462,8 +478,57 @@ public abstract class Parent extends Node {
             if (viewOrderChildrenDirty) {
                 markViewOrderChildrenDirty();
             }
+
+            c.reset();
+            updateStructuralPseudoClasses(c, firstDirtyChildIndex);
         }
 
+        private void updateStructuralPseudoClasses(Change<Node> change, int firstDirtyChildIndex) {
+            while (change.next()) {
+                if (change.wasRemoved()) {
+                    for (Node node : change.getRemoved()) {
+                        node.pseudoClassStateChanged(FIRST_CHILD_PSEUDO_CLASS, false);
+                        node.pseudoClassStateChanged(LAST_CHILD_PSEUDO_CLASS, false);
+                        node.pseudoClassStateChanged(ONLY_CHILD_PSEUDO_CLASS, false);
+                        node.pseudoClassStateChanged(NTH_EVEN_CHILD_PSEUDO_CLASS, false);
+                        node.pseudoClassStateChanged(NTH_ODD_CHILD_PSEUDO_CLASS, false);
+                    }
+                }
+            }
+
+            int size = size();
+
+            // Toggle the "only-child" / "first-child" / "last-child" pseudo-classes.
+            if (size == 1) {
+                Node first = getFirst();
+                first.pseudoClassStateChanged(FIRST_CHILD_PSEUDO_CLASS, true);
+                first.pseudoClassStateChanged(LAST_CHILD_PSEUDO_CLASS, true);
+                first.pseudoClassStateChanged(ONLY_CHILD_PSEUDO_CLASS, true);
+            } else if (size > 1) {
+                Node first = getFirst(), last = getLast();
+                first.pseudoClassStateChanged(FIRST_CHILD_PSEUDO_CLASS, true);
+                first.pseudoClassStateChanged(LAST_CHILD_PSEUDO_CLASS, false);
+                first.pseudoClassStateChanged(ONLY_CHILD_PSEUDO_CLASS, false);
+                last.pseudoClassStateChanged(LAST_CHILD_PSEUDO_CLASS, true);
+
+                if (firstDirtyChildIndex > 0) {
+                    // Clear the "last-child" pseudo-class on the last non-modified child.
+                    Node lastNonModified = get(firstDirtyChildIndex - 1);
+                    if (last != lastNonModified) {
+                        lastNonModified.pseudoClassStateChanged(LAST_CHILD_PSEUDO_CLASS, false);
+                    }
+                }
+            }
+
+            // Toggle the "nth-child(even)" and "nth-child(odd)" pseudo-classes on all modified children.
+            if (firstDirtyChildIndex >= 0) {
+                for (int i = firstDirtyChildIndex; i < size; ++i) {
+                    Node n = get(i);
+                    n.pseudoClassStateChanged(NTH_EVEN_CHILD_PSEUDO_CLASS, i % 2 != 0);
+                    n.pseudoClassStateChanged(NTH_ODD_CHILD_PSEUDO_CLASS, i % 2 == 0);
+                }
+            }
+        }
     }) {
         @Override
         protected void onProposedChange(final List<Node> newNodes, int... toBeRemoved) {
@@ -580,7 +645,7 @@ public abstract class Parent extends Node {
             // parent and scene. Add to them also to removed list for further
             // dirty regions calculation.
             if (removed == null) {
-                removed = new ArrayList<Node>();
+                removed = new ArrayList<>();
             }
             if (removed.size() + removedLength > REMOVED_CHILDREN_THRESHOLD || !isTreeVisible()) {
                 //do not populate too many children in removed list
@@ -656,8 +721,8 @@ public abstract class Parent extends Node {
      * restored. An {@link IllegalArgumentException} is thrown in this case.
      *
      * <p>
-     * If this {@link Parent} node is attached to a {@link Scene} attached to a {@link Window}
-     * that is showning ({@link javafx.stage.Window#isShowing()}), then its
+     * If this {@link Parent} node is attached to a {@link Scene} attached to a {@link Window},
+     * that is, showing ({@link javafx.stage.Window#isShowing()}), then its
      * list of children must only be modified on the JavaFX Application Thread.
      * An {@link IllegalStateException} is thrown if this restriction is
      * violated.
@@ -693,7 +758,7 @@ public abstract class Parent extends Node {
      */
     protected <E extends Node> List<E> getManagedChildren() {
         if (unmodifiableManagedChildren == null) {
-            unmodifiableManagedChildren = new ArrayList<Node>();
+            unmodifiableManagedChildren = new ArrayList<>();
             for (int i=0, max=children.size(); i<max; i++) {
                 Node e = children.get(i);
                 if (e.isManaged()) {
@@ -759,7 +824,7 @@ public abstract class Parent extends Node {
                        final Scene oldScene, final SubScene oldSubScene) {
 
         if (oldScene != null && newScene == null) {
-            // RT-34863 - clean up CSS cache when Parent is removed from scene-graph
+            // JDK-8094828 - clean up CSS cache when Parent is removed from scene-graph
             StyleManager.getInstance().forget(this);
 
             // Clear removed list on parent who is no longer in a scene
@@ -904,7 +969,7 @@ public abstract class Parent extends Node {
         if (needsLayout == null) {
             needsLayout = new ReadOnlyBooleanWrapper(this, "needsLayout", layoutFlag == LayoutFlags.NEEDS_LAYOUT);
         }
-        return needsLayout;
+        return needsLayout.getReadOnlyProperty();
     }
 
     /**
@@ -926,10 +991,13 @@ public abstract class Parent extends Node {
     private double minHeightCache = -1;
 
     void setLayoutFlag(LayoutFlags flag) {
+        // Needs to be set before needsLayout is updated, as otherwise a listener that
+        // calls isNeedsLayout() might see the old value.
+        layoutFlag = flag;
+
         if (needsLayout != null) {
             needsLayout.set(flag == LayoutFlags.NEEDS_LAYOUT);
         }
-        layoutFlag = flag;
     }
 
     private void markDirtyLayout(boolean local, boolean forceParentLayout) {
@@ -953,7 +1021,7 @@ public abstract class Parent extends Node {
      * rendered. This is batched up asynchronously to happen once per
      * "pulse", or frame of animation.
      * <p>
-     * If this parent is either a layout root or unmanaged, then it will be
+     * If this parent is either a scene root or unmanaged, then it will be
      * added directly to the scene's dirty layout list, otherwise requestParentLayout
      * will be invoked.
      * @since JavaFX 8.0
@@ -998,7 +1066,15 @@ public abstract class Parent extends Node {
         if (!layoutRoot) {
             final Parent p = getParent();
             if (p != null && (!p.performingLayout || forceParentLayout)) {
-                p.requestLayout();
+
+                /*
+                 * The forceParentLayout flag must be propagated to mark all ancestors
+                 * as needing layout. Failure to do so while performingLayout is true
+                 * would stop the propagation mid-tree. This leaves some nodes as needing
+                 * layout, while its ancestors are clean, which is an inconsistent state.
+                 */
+
+                p.requestLayout(forceParentLayout);
             }
         }
     }
@@ -1274,7 +1350,7 @@ public abstract class Parent extends Node {
      * scene graph, see the <a href="doc-files/cssref.html">CSS Reference
      * Guide</a>.
      */
-    private final ObservableList<String> stylesheets = new TrackableObservableList<String>() {
+    private final ObservableList<String> stylesheets = new TrackableObservableList<>() {
         @Override
         protected void onChanged(Change<String> c) {
             final Scene scene = getScene();
@@ -1284,7 +1360,7 @@ public abstract class Parent extends Node {
                 // styleManager will get recreated in NodeHelper.processCSS.
                 StyleManager.getInstance().stylesheetsChanged(Parent.this, c);
 
-                // RT-9784 - if stylesheet is removed, reset styled properties to
+                // JDK-8110059 - if stylesheet is removed, reset styled properties to
                 // their initial value.
                 c.reset();
                 while(c.next()) {
@@ -1321,7 +1397,7 @@ public abstract class Parent extends Node {
      *
      * Note: This method MUST only be called via its accessor method.
      */
-     // SB-dependency: RT-21247 has been filed to track this
+     // SB-dependency: JDK-8091352 has been filed to track this
     private List<String> doGetAllParentStylesheets() {
 
         List<String> list = null;
@@ -1339,7 +1415,7 @@ public abstract class Parent extends Node {
 
         if (stylesheets != null && stylesheets.isEmpty() == false) {
             if (list == null) {
-                list = new ArrayList<String>(stylesheets.size());
+                list = new ArrayList<>(stylesheets.size());
             }
             for (int n=0,nMax=stylesheets.size(); n<nMax; n++) {
                 list.add(stylesheets.get(n));
@@ -1358,7 +1434,7 @@ public abstract class Parent extends Node {
         // Nothing to do...
         if (cssFlag == CssFlags.CLEAN) return;
 
-        // RT-29254 - If DIRTY_BRANCH, pass control to Node#processCSS. This avoids calling NodeHelper.processCSS on
+        // JDK-8124385 - If DIRTY_BRANCH, pass control to Node#processCSS. This avoids calling NodeHelper.processCSS on
         // this node and all of its children when css doesn't need updated, recalculated, or reapplied.
         if (cssFlag == CssFlags.DIRTY_BRANCH) {
             super.processCSS();
@@ -1372,7 +1448,7 @@ public abstract class Parent extends Node {
         if (children.isEmpty()) return;
 
         //
-        // RT-33103
+        // JDK-8117203
         //
         // It is possible for a child to be removed from children in the middle of
         // the following loop. Iterating over the children may result in an IndexOutOfBoundsException.
@@ -1393,7 +1469,7 @@ public abstract class Parent extends Node {
 
             // If the parent styles are being updated, recalculated or
             // reapplied, then make sure the children get the same treatment.
-            // Unless the child is already more dirty than this parent (RT-29074).
+            // Unless the child is already more dirty than this parent (JDK-8124468).
             if(CssFlags.UPDATE.compareTo(child.cssFlag) > 0) {
                 child.cssFlag = CssFlags.UPDATE;
             }
@@ -1653,12 +1729,12 @@ public abstract class Parent extends Node {
         }
     }
 
-    private final int LEFT_INVALID = 1;
-    private final int TOP_INVALID = 1 << 1;
-    private final int NEAR_INVALID = 1 << 2;
-    private final int RIGHT_INVALID = 1 << 3;
-    private final int BOTTOM_INVALID = 1 << 4;
-    private final int FAR_INVALID = 1 << 5;
+    private static final int LEFT_INVALID = 1;
+    private static final int TOP_INVALID = 1 << 1;
+    private static final int NEAR_INVALID = 1 << 2;
+    private static final int RIGHT_INVALID = 1 << 3;
+    private static final int BOTTOM_INVALID = 1 << 4;
+    private static final int FAR_INVALID = 1 << 5;
 
     private boolean updateCachedBounds(final List<Node> dirtyNodes,
                                        int remainingDirtyNodes) {
@@ -1836,7 +1912,7 @@ public abstract class Parent extends Node {
     }
 
     // Note: this marks the currently processed child in terms of transformed bounds. In rare situations like
-    // in RT-37879, it might happen that the child bounds will be marked as invalid. Due to optimizations,
+    // in JDK-8096304, it might happen that the child bounds will be marked as invalid. Due to optimizations,
     // the invalidation must *always* be propagated to the parent, because the parent with some transformation
     // calls child's getTransformedBounds non-idenitity transform and the child's transformed bounds are thus not validated.
     // This does not apply to the call itself however, because the call will yield the correct result even if something
@@ -1859,6 +1935,15 @@ public abstract class Parent extends Node {
             return;
         }
 
+        // When we have a scene overlay (like the full-screen notification message or default window buttons
+        // of an extended stage), the scene root is the parent of the overlay node. However, the overlay node
+        // is not contained in the scene root's children list, because it is not a publicly accessible part of
+        // the scene graph. When this method is called on the root node, we need to check whether the supposed
+        // child is actually contained in the children list.
+        if (!childSet.contains(node)) {
+            return;
+        }
+
         cachedBoundsInvalid = true;
 
         // mark the node such that the parent knows that the child's bounds
@@ -1877,6 +1962,11 @@ public abstract class Parent extends Node {
      * Called by node whenever the visibility of the node changes.
      */
     void childVisibilityChanged(Node node) {
+        // See comment above in childBoundsChanged(Node)
+        if (!childSet.contains(node)) {
+            return;
+        }
+
         if (node.isVisible()) {
             childIncluded(node);
         } else {
@@ -1916,6 +2006,7 @@ public abstract class Parent extends Node {
         }
     }
 
+    @Override
     void releaseAccessible() {
         for (int i=0, max=children.size(); i<max; i++) {
             final Node node = children.get(i);

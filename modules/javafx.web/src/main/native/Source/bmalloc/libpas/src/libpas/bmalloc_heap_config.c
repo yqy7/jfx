@@ -38,7 +38,7 @@
 
 PAS_BEGIN_EXTERN_C;
 
-pas_heap_config bmalloc_heap_config = BMALLOC_HEAP_CONFIG;
+const pas_heap_config bmalloc_heap_config = BMALLOC_HEAP_CONFIG;
 
 PAS_BASIC_HEAP_CONFIG_DEFINITIONS(
     bmalloc, BMALLOC,
@@ -55,7 +55,7 @@ void bmalloc_heap_config_activate(void)
                                              &bmalloc_heap_config);
 
 #if PAS_OS(DARWIN)
-    if (register_with_libmalloc && !pas_debug_heap_is_enabled(pas_heap_config_kind_bmalloc))
+    if (register_with_libmalloc && !pas_system_heap_is_enabled(pas_heap_config_kind_bmalloc))
         pas_root_ensure_for_libmalloc_enumeration();
 #endif
 }

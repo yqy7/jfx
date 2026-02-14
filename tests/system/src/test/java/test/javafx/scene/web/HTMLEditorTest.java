@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,35 +25,33 @@
 
 package test.javafx.scene.web;
 
-import com.sun.javafx.PlatformUtil;
-import java.util.concurrent.atomic.AtomicReference;
+import static javafx.concurrent.Worker.State.SUCCEEDED;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.event.Event;
+import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.ComboBox;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
-import javafx.scene.Node;
-import javafx.scene.Scene;
 import javafx.scene.text.Font;
 import javafx.scene.web.HTMLEditor;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.PlatformUtil;
 import test.com.sun.javafx.scene.control.infrastructure.KeyEventFirer;
 import test.com.sun.javafx.scene.control.infrastructure.KeyModifier;
 import test.util.Util;
-
-import static javafx.concurrent.Worker.State.SUCCEEDED;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
 
 public class HTMLEditorTest {
     private static final CountDownLatch launchLatch = new CountDownLatch(1);
@@ -74,6 +72,12 @@ public class HTMLEditorTest {
 
         @Override
         public void init() {
+            // Used by selectFontFamilysWithSpace() for JDK-8230492
+            Font.loadFont(
+                HTMLEditorTest.class.getResource("WebKit_Layout_Tests_2.ttf").toExternalForm(),
+                10
+            );
+
             HTMLEditorTest.htmlEditorTestApp = this;
         }
 
@@ -85,27 +89,17 @@ public class HTMLEditorTest {
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void setupOnce() {
-        // Start the Test Application
-        new Thread(() -> Application.launch(HTMLEditorTestApp.class,
-            (String[]) null)).start();
-
-        // Used by selectFontFamilysWithSpace() for JDK-8230492
-        Font.loadFont(
-            HTMLEditorTest.class.getResource("WebKit_Layout_Tests_2.ttf").toExternalForm(),
-            10
-        );
-
-        assertTrue("Timeout waiting for FX runtime to start", Util.await(launchLatch));
+        Util.launch(launchLatch, HTMLEditorTestApp.class);
     }
 
-    @AfterClass
+    @AfterAll
     public static void tearDownOnce() {
-        Platform.exit();
+        Util.shutdown();
     }
 
-    @Before
+    @BeforeEach
     public void setupTestObjects() {
         Platform.runLater(() -> {
             htmlEditor = new HTMLEditor();
@@ -129,7 +123,8 @@ public class HTMLEditorTest {
     // Currently ignoring this test case due to regression (JDK-8200418).
     // The newly cloned issue (JDK-8202542) needs to be fixed before
     // re-enabling this test case.
-    @Test @Ignore("JDK-8202542")
+    @Test
+    @Disabled("JDK-8202542")
     public void checkFocusChange() throws Exception {
         final CountDownLatch editorStateLatch = new CountDownLatch(1);
         final AtomicReference<String> result = new AtomicReference<>();
@@ -170,8 +165,8 @@ public class HTMLEditorTest {
 
         });
 
-        assertTrue("Timeout when waiting for focus change ", Util.await(editorStateLatch));
-        assertEquals("Focus Change with design mode enabled ", "red", result.get());
+        assertTrue(Util.await(editorStateLatch), "Timeout when waiting for focus change ");
+        assertEquals("red", result.get(), "Focus Change with design mode enabled ");
     }
 
     /**
@@ -220,7 +215,7 @@ public class HTMLEditorTest {
 
         });
 
-        assertTrue("Timeout when waiting for focus change ", Util.await(editorStateLatch));
+        assertTrue(Util.await(editorStateLatch), "Timeout when waiting for focus change ");
 
         Util.runAndWait(() -> {
             webView.getEngine().executeScript("document.body.focus();");
@@ -303,9 +298,9 @@ public class HTMLEditorTest {
 
         });
 
-        assertTrue("Timeout when waiting for focus change ", Util.await(editorStateLatch));
+        assertTrue(Util.await(editorStateLatch), "Timeout when waiting for focus change ");
         assertNotNull("result must have a valid reference ", result.get());
-        assertEquals("document.body.style.fontWeight must be bold ", "bold", result.get());
+        assertEquals("bold", result.get(), "document.body.style.fontWeight must be bold ");
     }
 
     /**
@@ -336,11 +331,13 @@ public class HTMLEditorTest {
                     for (Node comboBox : htmlEditor.lookupAll(".font-menu-button")) {
                         // 0 - Format, 1 - Font Family, 2 - Font Size
                         if (i == 1) {
-                            assertTrue("fontFamilyComboBox must be ComboBox",
-                                comboBox instanceof ComboBox);
+                            assertTrue(
+                                comboBox instanceof ComboBox,
+                                "fontFamilyComboBox must be ComboBox");
                             fontFamilyComboBox = (ComboBox<String>) comboBox;
-                            assertNotNull("fontFamilyComboBox must not be null",
-                                fontFamilyComboBox);
+                            assertNotNull(
+                                fontFamilyComboBox,
+                                "fontFamilyComboBox must not be null");
                         }
                         i++;
                     }
@@ -353,10 +350,9 @@ public class HTMLEditorTest {
             });
         });
 
-        assertTrue("Timeout when waiting for focus change ", Util.await(editorStateLatch));
-        assertNotNull("result must have a valid reference ", result.get());
-        assertTrue("font-family must be 'WebKit Layout Test 2' ", result.get().
-            contains("font-family: &quot;WebKit Layout Tests 2&quot;"));
+        assertTrue(Util.await(editorStateLatch), "Timeout when waiting for focus change ");
+        assertNotNull(result.get(), "result must have a valid reference ");
+        assertTrue(result.get().contains("font-family: &quot;WebKit Layout Tests 2&quot;"), "font-family must be 'WebKit Layout Test 2' ");
     }
 
     /**
@@ -396,7 +392,7 @@ public class HTMLEditorTest {
             });
         });
 
-        assertTrue("Timeout while waiting for test html text setup", Util.await(editorStateLatch));
+        assertTrue(Util.await(editorStateLatch), "Timeout while waiting for test html text setup");
 
         String expectedHtmlText = htmlEditor.getHtmlText();
 
@@ -410,7 +406,7 @@ public class HTMLEditorTest {
 
         String actualHtmlText = htmlEditor.getHtmlText();
 
-        assertEquals("Expected and Actual HTML text does not match. ", expectedHtmlText, actualHtmlText);
+        assertEquals(expectedHtmlText, actualHtmlText, "Expected and Actual HTML text does not match. ");
     }
 
 
@@ -446,7 +442,7 @@ public class HTMLEditorTest {
             });
         });
 
-        assertTrue("Timeout while waiting for test html text setup", Util.await(editorStateLatch));
+        assertTrue(Util.await(editorStateLatch), "Timeout while waiting for test html text setup");
 
         String expectedHtmlText = htmlEditor.getHtmlText();
 
@@ -460,6 +456,6 @@ public class HTMLEditorTest {
 
         String actualHtmlText = htmlEditor.getHtmlText();
 
-        assertEquals("Expected and Actual HTML text does not match. ", expectedHtmlText, actualHtmlText);
+        assertEquals(expectedHtmlText, actualHtmlText, "Expected and Actual HTML text does not match. ");
     }
 }

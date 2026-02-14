@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,7 +29,10 @@
 
 #include "ActiveDOMObject.h"
 #include "EventTarget.h"
+#include "EventTargetInterfaces.h"
+#include "WebCoreOpaqueRoot.h"
 #include <wtf/HashMap.h>
+#include <wtf/LoggerHelper.h>
 #include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
 
@@ -41,9 +44,16 @@ class MediaPlaybackTarget;
 class Node;
 class RemotePlaybackAvailabilityCallback;
 
-class RemotePlayback final : public RefCounted<RemotePlayback>, public ActiveDOMObject, public EventTargetWithInlineData {
-    WTF_MAKE_ISO_ALLOCATED(RemotePlayback);
+class RemotePlayback final
+    : public RefCounted<RemotePlayback>
+    , public ActiveDOMObject
+    , public EventTarget
+{
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(RemotePlayback);
 public:
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
+
     static Ref<RemotePlayback> create(HTMLMediaElement&);
     ~RemotePlayback();
 
@@ -66,28 +76,34 @@ public:
 
     void invalidate();
 
-    using RefCounted::ref;
-    using RefCounted::deref;
-
-    void* opaqueRootConcurrently() const;
+    WebCoreOpaqueRoot opaqueRootConcurrently() const;
     Node* ownerNode() const;
 
 private:
     explicit RemotePlayback(HTMLMediaElement&);
 
-    void refEventTarget() final { ref(); }
-    void derefEventTarget() final { deref(); }
-
     void setState(State);
     void establishConnection();
     void disconnect();
 
-    // ActiveDOMObject.
-    const char* activeDOMObjectName() const final;
-
-    // EventTargetWithInlineData.
-    EventTargetInterface eventTargetInterface() const final { return RemotePlaybackEventTargetInterfaceType; }
+    // EventTarget.
+    enum EventTargetInterfaceType eventTargetInterface() const final { return EventTargetInterfaceType::RemotePlayback; }
     ScriptExecutionContext* scriptExecutionContext() const final { return ActiveDOMObject::scriptExecutionContext(); }
+    void refEventTarget() final { ref(); }
+    void derefEventTarget() final { deref(); }
+
+    // ActiveDOMObject
+    void stop() final;
+
+#if !RELEASE_LOG_DISABLED
+    const Logger& logger() const { return m_logger.get(); }
+    uint64_t logIdentifier() const { return m_logIdentifier; }
+    WTFLogChannel& logChannel() const;
+    ASCIILiteral logClassName() const { return "RemotePlayback"_s; }
+
+    const Ref<const Logger> m_logger;
+    uint64_t m_logIdentifier { 0 };
+#endif
 
     WeakPtr<HTMLMediaElement> m_mediaElement;
     uint32_t m_nextId { 0 };

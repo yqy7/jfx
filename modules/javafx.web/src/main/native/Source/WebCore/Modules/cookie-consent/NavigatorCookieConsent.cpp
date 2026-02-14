@@ -34,29 +34,32 @@
 #include "Navigator.h"
 #include "Page.h"
 #include "RequestCookieConsentOptions.h"
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-void NavigatorCookieConsent::requestCookieConsent(Navigator& navigator, std::optional<RequestCookieConsentOptions>&& options, Ref<DeferredPromise>&& promise)
+WTF_MAKE_TZONE_ALLOCATED_IMPL(NavigatorCookieConsent);
+
+void NavigatorCookieConsent::requestCookieConsent(Navigator& navigator, RequestCookieConsentOptions&& options, Ref<DeferredPromise>&& promise)
 {
     from(navigator).requestCookieConsent(WTFMove(options), WTFMove(promise));
 }
 
-void NavigatorCookieConsent::requestCookieConsent(std::optional<RequestCookieConsentOptions>&& options, Ref<DeferredPromise>&& promise)
+void NavigatorCookieConsent::requestCookieConsent(RequestCookieConsentOptions&& options, Ref<DeferredPromise>&& promise)
 {
     // FIXME: Support the 'More info' option.
     UNUSED_PARAM(options);
 
-    RefPtr frame = m_navigator.frame();
+    RefPtr frame = m_navigator->frame();
     if (!frame || !frame->isMainFrame() || !frame->page()) {
-        promise->reject(NotAllowedError);
+        promise->reject(ExceptionCode::NotAllowedError);
         return;
     }
 
     frame->page()->chrome().client().requestCookieConsent([promise = WTFMove(promise)] (CookieConsentDecisionResult result) {
         switch (result) {
         case CookieConsentDecisionResult::NotSupported:
-            promise->reject(NotSupportedError);
+            promise->reject(ExceptionCode::NotSupportedError);
             break;
         case CookieConsentDecisionResult::Consent:
             promise->resolve<IDLBoolean>(true);
@@ -70,7 +73,7 @@ void NavigatorCookieConsent::requestCookieConsent(std::optional<RequestCookieCon
 
 NavigatorCookieConsent& NavigatorCookieConsent::from(Navigator& navigator)
 {
-    if (auto supplement = static_cast<NavigatorCookieConsent*>(Supplement<Navigator>::from(&navigator, supplementName())))
+    if (auto supplement = downcast<NavigatorCookieConsent>(Supplement<Navigator>::from(&navigator, supplementName())))
         return *supplement;
 
     auto newSupplement = makeUnique<NavigatorCookieConsent>(navigator);

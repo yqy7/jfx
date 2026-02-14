@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,7 @@
 #include <MediaManagement/MediaManager.h>
 #include <PipelineManagement/PipelineOptions.h>
 #include <PipelineManagement/VideoFrame.h>
+#include <Locator/Locator.h>
 #include <Locator/LocatorStream.h>
 #include <jni/JniUtils.h>
 #include <jni/JavaInputStreamCallbacks.h>
@@ -39,6 +40,8 @@
 #include <Utils/LowLevelPerf.h>
 
 using namespace std;
+
+#define HLS_PROP_HAS_AUDIO_EXT_STREAM 6
 
 //*************************************************************************************************
 //********** com.sun.media.jfxmediaimpl.Media JNI support functions
@@ -48,35 +51,12 @@ using namespace std;
 extern "C" {
 #endif
 
-    static jstring LocatorToString(JNIEnv *env, jobject locator)
-    {
-        static jmethodID mid_toString = 0;
-        jstring result = NULL;
-        CJavaEnvironment javaEnv(env);
-
-        if (mid_toString == 0)
-        {
-            jclass klass = env->GetObjectClass(locator);
-
-            mid_toString = env->GetMethodID(klass, "getStringLocation", "()Ljava/lang/String;");
-            env->DeleteLocalRef(klass);
-            if (javaEnv.clearException())
-                return NULL;
-        }
-
-        result = (jstring)env->CallObjectMethod(locator, mid_toString);
-        if (javaEnv.clearException())
-            return NULL;
-
-        return result;
-    }
-
     static jint InitMedia(JNIEnv *env, CPipelineOptions* pOptions, jobject jLocator, jstring jContentType, jlong jSizeHint,
                           jlongArray jlMediaHandle)
     {
         CMedia*         pMedia = NULL;
         char*           pjContent = (char*)env->GetStringUTFChars(jContentType , NULL);
-        jstring         jLocation = LocatorToString(env, jLocator);
+        jstring         jLocation = CLocator::LocatorGetStringLocation(env, jLocator);
         char*           pjLocation = NULL;
         CMediaManager*  pManager = NULL;
         uint32_t        uErrCode = CMediaManager::GetInstance(&pManager);
@@ -107,12 +87,12 @@ extern "C" {
         }
 
         //***** Create a new native locator object
-        CLocator *locator;
         CJavaInputStreamCallbacks *callbacks = new (nothrow) CJavaInputStreamCallbacks();
-        if (NULL == callbacks)
+        jobject jConnectionHolder = CLocator::CreateConnectionHolder(env, jLocator);
+        if (NULL == callbacks || NULL == jConnectionHolder)
             return ERROR_MEMORY_ALLOCATION;
 
-        if (!callbacks->Init(env, jLocator))
+        if (!callbacks->Init(env, jConnectionHolder))
         {
             env->ReleaseStringUTFChars(jContentType, pjContent);
             env->ReleaseStringUTFChars(jLocation, pjLocation);
@@ -120,12 +100,42 @@ extern "C" {
             return ERROR_MEDIA_CREATION;
         }
 
-        locator = new(nothrow) CLocatorStream(callbacks, pjContent, pjLocation, (int64_t)jSizeHint);
+        CLocatorStream *locator = new(nothrow) CLocatorStream(callbacks, pjContent, pjLocation, (int64_t)jSizeHint);
         env->ReleaseStringUTFChars(jContentType, pjContent);
         env->ReleaseStringUTFChars(jLocation, pjLocation);
 
         if (NULL == locator)
+        {
+            delete callbacks;
             return ERROR_MEMORY_ALLOCATION;
+        }
+
+        // Load any additional streams if needed.
+        // HLS_PROP_HAS_AUDIO_EXT_STREAM
+        int hasAudioStream = callbacks->Property(HLS_PROP_HAS_AUDIO_EXT_STREAM, 0);
+        if (hasAudioStream)
+        {
+            CJavaInputStreamCallbacks *audioStreamCallbacks =
+                    new (nothrow) CJavaInputStreamCallbacks();
+            jobject jAudioStreamConnectionHolder =
+                    CLocator::GetAudioStreamConnectionHolder(env, jLocator, jConnectionHolder);
+            if (NULL == audioStreamCallbacks || NULL == jAudioStreamConnectionHolder)
+            {
+                delete callbacks;
+                delete locator;
+                return ERROR_MEMORY_ALLOCATION;
+            }
+
+            if (!audioStreamCallbacks->Init(env, jAudioStreamConnectionHolder))
+            {
+                delete callbacks;
+                delete audioStreamCallbacks;
+                delete locator;
+                return ERROR_MEDIA_CREATION;
+            }
+
+            locator->SetAudioCallbacks(audioStreamCallbacks);
+        }
 
         //***** Create the media object
         uErrCode  = pManager->CreatePlayer(locator, pOptions, &pMedia);
@@ -137,6 +147,9 @@ extern "C" {
             {
                 jlong lMediaHandle = (jlong)ptr_to_jlong(pMedia);
                 env->SetLongArrayRegion(jlMediaHandle, 0, 1, &lMediaHandle);
+                if (env->ExceptionCheck()) {
+                    env->ExceptionClear();
+                }
             }
             else
             {

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,17 +41,12 @@ class LayoutTraits
         throw "Derived class must implement this function.";
     }
 
-    overridenSupportingObjectClasses()
+    supportingObjectClasses()
     {
-        throw "Derived class must implement this function.";
+        return [AirplaySupport, AudioSupport, CloseSupport, ControlsVisibilitySupport, FullscreenSupport, MuteSupport, OverflowSupport, PiPSupport, PlacardSupport, PlaybackSupport, ScrubbingSupport, SeekBackwardSupport, SeekForwardSupport, SkipBackSupport, SkipForwardSupport, StartSupport, StatusSupport, TimeControlSupport, TracksSupport, VolumeSupport];
     }
 
     resourceDirectory()
-    {
-        throw "Derived class must implement this function.";
-    }
-
-    controlsAlwaysAvailable()
     {
         throw "Derived class must implement this function.";
     }
@@ -66,17 +61,12 @@ class LayoutTraits
         throw "Derived class must implement this function.";
     }
 
-    knobStyleForScrubber()
-    {
-        throw "Derived class must implement this function.";
-    }
-
     supportsDurationTimeLabel()
     {
         throw "Derived class must implement this function.";
     }
 
-    playPauseButtonScaleFactor()
+    skipDuration()
     {
         throw "Derived class must implement this function.";
     }
@@ -91,14 +81,26 @@ class LayoutTraits
         throw "Derived class must implement this function.";
     }
 
-    overflowButtonHasCircle()
+    supportsTouches()
     {
-        return false;
+        // Can be overridden by subclasses.
+
+        return GestureRecognizer.SupportsTouches;
     }
 
-    additionalControlScaleFactor()
+    supportsAirPlay()
     {
-        return 1;
+        throw "Derived class must implement this function.";
+    }
+
+    supportsPiP()
+    {
+        throw "Derived class must implement this function.";
+    }
+
+    inheritsBorderRadius()
+    {
+        throw "Derived class must implement this function.";
     }
 }
 

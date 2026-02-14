@@ -27,7 +27,8 @@
 
 #include "CachedResourceHandle.h"
 #include "CachedSVGDocumentClient.h"
-#include <wtf/text/WTFString.h>
+#include "LoaderMalloc.h"
+#include "StyleURL.h"
 
 namespace WebCore {
 
@@ -36,9 +37,9 @@ class CachedResourceLoader;
 struct ResourceLoaderOptions;
 
 class CachedSVGDocumentReference final : public CachedSVGDocumentClient {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(CachedSVGDocumentReference, Loader);
 public:
-    CachedSVGDocumentReference(const String&);
+    CachedSVGDocumentReference(const Style::URL&);
 
     virtual ~CachedSVGDocumentReference();
 
@@ -48,9 +49,9 @@ public:
     CachedSVGDocument* document() { return m_document.get(); }
 
 private:
-    String m_url;
+    Style::URL m_location;
     CachedResourceHandle<CachedSVGDocument> m_document;
-    bool m_loadRequested;
+    bool m_loadRequested { false };
 };
 
 } // namespace WebCore

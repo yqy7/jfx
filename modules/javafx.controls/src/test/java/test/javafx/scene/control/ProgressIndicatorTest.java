@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,32 +25,30 @@
 
 package test.javafx.scene.control;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-
-import java.lang.ref.Reference;
-import java.lang.ref.ReferenceQueue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import javafx.geometry.Pos;
+import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ProgressIndicator;
-import javafx.scene.Scene;
-import javafx.stage.Stage;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.stage.Stage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import com.sun.javafx.tk.Toolkit;
-
-import org.junit.Before;
-import org.junit.Test;
 
 /**
  */
 public class ProgressIndicatorTest {
     Toolkit tk;
 
-    @Before public void setup() {
+    @BeforeEach
+    public void setup() {
         tk = Toolkit.getToolkit();
     }
 
@@ -133,7 +131,7 @@ public class ProgressIndicatorTest {
 
         for (int i = 0; i < TOTAL_PROGRESS_INDICATORS; i++) {
             pi[i] = new ProgressIndicator();
-            weakRefArr.add(i, new WeakReference<ProgressIndicator>(pi[i]));
+            weakRefArr.add(i, new WeakReference<>(pi[i]));
             hb.getChildren().add(pi[i]);
         }
 
@@ -157,7 +155,7 @@ public class ProgressIndicatorTest {
 
         for (int i = 0; i < TOTAL_PROGRESS_INDICATORS; i++) {
             pi[i] = new ProgressIndicator();
-            weakRefArr.add(i, new WeakReference<ProgressIndicator>(pi[i]));
+            weakRefArr.add(i, new WeakReference<>(pi[i]));
             root.getChildren().add(pi[i]);
         }
 
@@ -179,7 +177,7 @@ public class ProgressIndicatorTest {
 
         for (int i = 0; i < TOTAL_PROGRESS_INDICATORS; i++) {
             pi[i] = new ProgressIndicator();
-            weakRefArr.add(i, new WeakReference<ProgressIndicator>(pi[i]));
+            weakRefArr.add(i, new WeakReference<>(pi[i]));
             hb.getChildren().add(pi[i]);
         }
 
@@ -214,7 +212,7 @@ public class ProgressIndicatorTest {
             try {
                 Thread.sleep(500);
             } catch (InterruptedException e) {
-               System.err.println("InterruptedException occurred during Thread.sleep()");
+                fail(e);
             }
         }
     }

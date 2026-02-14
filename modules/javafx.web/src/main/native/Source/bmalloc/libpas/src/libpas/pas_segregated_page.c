@@ -91,7 +91,7 @@ pas_lock* pas_segregated_page_switch_lock_slow(
     pas_lock* held_lock,
     pas_lock* page_lock)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
 
     PAS_ASSERT(held_lock != page_lock);
 
@@ -109,7 +109,7 @@ pas_lock* pas_segregated_page_switch_lock_slow(
 
         page_lock = page->lock_ptr;
     }
-    PAS_ASSERT(!"Should not be reached");
+    PAS_ASSERT_NOT_REACHED();
 }
 
 void pas_segregated_page_switch_lock_and_rebias_while_ineligible_impl(
@@ -127,7 +127,7 @@ void pas_segregated_page_switch_lock_and_rebias_while_ineligible_impl(
         page_lock = page->lock_ptr;
         PAS_TESTING_ASSERT(page_lock);
 
-        if (*held_lock == page_lock && *held_lock == &cache_node->page_lock) {
+        if (*held_lock == page_lock && cache_node && *held_lock == &cache_node->page_lock) {
             pas_compiler_fence();
             return;
         }
@@ -191,9 +191,9 @@ void pas_segregated_page_switch_lock_and_rebias_while_ineligible_impl(
 void pas_segregated_page_construct(pas_segregated_page* page,
                                    pas_segregated_view owner,
                                    bool was_stolen,
-                                   pas_segregated_page_config* page_config_ptr)
+                                   const pas_segregated_page_config* page_config_ptr)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
 
     pas_segregated_page_config page_config;
     pas_segregated_page_role role;
@@ -207,8 +207,6 @@ void pas_segregated_page_construct(pas_segregated_page* page,
     /* This is essential for medium deallocation. */
     pas_page_base_construct(
         &page->base, pas_page_kind_for_segregated_variant_and_role(page_config.variant, role));
-
-    page->use_epoch = PAS_EPOCH_INVALID;
 
     if (verbose) {
         pas_log("Constructing page %p with boundary %p for view %p and config %s.\n",
@@ -224,7 +222,11 @@ void pas_segregated_page_construct(pas_segregated_page* page,
     page->owner = owner;
     pas_zero_memory(page->alloc_bits, pas_segregated_page_config_num_alloc_bytes(page_config));
 
-    page->num_non_empty_words = 0;
+    pas_segregated_page_emptiness emptiness = {
+        .use_epoch = PAS_EPOCH_INVALID,
+        .num_non_empty_words = 0,
+    };
+    pas_atomic_store_pair_relaxed(&page->emptiness, *(pas_pair*)&emptiness);
 
     page->view_cache_index = (pas_allocator_index)UINT_MAX;
 
@@ -294,9 +296,9 @@ void pas_segregated_page_construct(pas_segregated_page* page,
     page->eligibility_notification_has_been_deferred = false;
 }
 
-void pas_segregated_page_note_emptiness(pas_segregated_page* page)
+void pas_segregated_page_note_emptiness(pas_segregated_page* page, pas_note_emptiness_action action)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
     if (page->lock_ptr)
         pas_lock_testing_assert_held(page->lock_ptr);
     if (verbose) {
@@ -305,7 +307,19 @@ void pas_segregated_page_note_emptiness(pas_segregated_page* page)
                 pas_segregated_page_boundary(
                     page, *pas_segregated_view_get_page_config(page->owner)));
     }
-    page->use_epoch = pas_get_epoch();
+    switch (action) {
+    case pas_note_emptiness_clear_num_non_empty_words: {
+        pas_segregated_page_emptiness emptiness = {
+            .use_epoch = pas_get_epoch(),
+            .num_non_empty_words = 0,
+        };
+        pas_atomic_store_pair_relaxed(&page->emptiness, *(pas_pair*)&emptiness);
+        break;
+    }
+    case pas_note_emptiness_keep_num_non_empty_words:
+        page->emptiness.use_epoch = pas_get_epoch();
+        break;
+    }
     pas_segregated_view_note_emptiness(page->owner, page);
 }
 
@@ -321,11 +335,11 @@ bool pas_segregated_page_take_empty_granules(
     pas_range_locked_mode range_locked_mode,
     pas_lock_hold_mode heap_lock_hold_mode)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
 
     pas_page_granule_use_count* use_counts;
     pas_segregated_view owner;
-    pas_segregated_page_config* page_config_ptr;
+    const pas_segregated_page_config* page_config_ptr;
     pas_segregated_page_config page_config;
     uintptr_t num_granules;
     char* boundary;
@@ -401,7 +415,7 @@ bool pas_segregated_page_take_physically(
         return result;
     }
 
-    PAS_ASSERT(!page->num_non_empty_words);
+    PAS_ASSERT(!page->emptiness.num_non_empty_words);
 
     base = (uintptr_t)pas_segregated_page_boundary(page, page_config);
 
@@ -420,9 +434,9 @@ void pas_segregated_page_commit_fully(
     pas_lock** held_lock,
     pas_commit_fully_lock_hold_mode lock_hold_mode)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
 
-    pas_segregated_page_config* page_config_ptr;
+    const pas_segregated_page_config* page_config_ptr;
     pas_segregated_page_config page_config;
     pas_page_granule_use_count* use_counts;
     uintptr_t num_granules;
@@ -556,7 +570,7 @@ static bool verify_granules_live_object_callback(pas_segregated_view view,
                                                  pas_range range,
                                                  void* arg)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
 
     verify_granules_data* data;
 
@@ -581,7 +595,7 @@ static bool verify_granules_live_object_callback(pas_segregated_view view,
 
 void pas_segregated_page_verify_granules(pas_segregated_page* page)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
 
     pas_segregated_page_config page_config;
     pas_segregated_page_role role;
@@ -649,7 +663,7 @@ void pas_segregated_page_deallocation_did_fail(uintptr_t begin)
 
 size_t pas_segregated_page_get_num_empty_granules(pas_segregated_page* page)
 {
-    pas_segregated_page_config* page_config_ptr;
+    const pas_segregated_page_config* page_config_ptr;
     pas_segregated_page_config page_config;
     size_t result;
 
@@ -677,7 +691,7 @@ size_t pas_segregated_page_get_num_empty_granules(pas_segregated_page* page)
 
 size_t pas_segregated_page_get_num_committed_granules(pas_segregated_page* page)
 {
-    pas_segregated_page_config* page_config_ptr;
+    const pas_segregated_page_config* page_config_ptr;
     pas_segregated_page_config page_config;
     size_t result;
     pas_page_granule_use_count* use_counts;
@@ -702,7 +716,7 @@ size_t pas_segregated_page_get_num_committed_granules(pas_segregated_page* page)
     return result;
 }
 
-pas_segregated_page_config* pas_segregated_page_get_config(pas_segregated_page* page)
+const pas_segregated_page_config* pas_segregated_page_get_config(pas_segregated_page* page)
 {
     return pas_segregated_view_get_page_config(page->owner);
 }
@@ -711,7 +725,7 @@ void pas_segregated_page_add_commit_range(pas_segregated_page* page,
                                           pas_heap_summary* result,
                                           pas_range range)
 {
-    pas_segregated_page_config* page_config_ptr;
+    const pas_segregated_page_config* page_config_ptr;
     pas_segregated_page_config page_config;
     pas_page_granule_use_count* use_counts;
     uintptr_t first_granule_index;
@@ -762,7 +776,7 @@ void pas_segregated_page_add_commit_range(pas_segregated_page* page,
 
 pas_segregated_page_and_config
 pas_segregated_page_and_config_for_address_and_heap_config(uintptr_t begin,
-                                                           pas_heap_config* config)
+                                                           const pas_heap_config* config)
 {
     switch (config->fast_megapage_kind_func(begin)) {
     case pas_small_exclusive_segregated_fast_megapage_kind:
@@ -781,7 +795,7 @@ pas_segregated_page_and_config_for_address_and_heap_config(uintptr_t begin,
         case pas_small_bitfit_page_kind:
             return pas_segregated_page_and_config_create_empty();
         default:
-            PAS_ASSERT(!"Should not be reached");
+            PAS_ASSERT_NOT_REACHED();
             return pas_segregated_page_and_config_create_empty();
         }
     }
@@ -806,7 +820,7 @@ pas_segregated_page_and_config_for_address_and_heap_config(uintptr_t begin,
         }
         return pas_segregated_page_and_config_create_empty();
     } }
-    PAS_ASSERT(!"Should not be reached");
+    PAS_ASSERT_NOT_REACHED();
     return pas_segregated_page_and_config_create_empty();
 }
 

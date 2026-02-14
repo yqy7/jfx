@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,16 +38,11 @@ import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
-import javafx.beans.value.ChangeListener;
-import javafx.beans.value.ObservableValue;
 import javafx.event.Event;
 import javafx.event.EventDispatchChain;
 import javafx.event.EventHandler;
 import javafx.event.EventTarget;
 import javafx.event.EventType;
-import java.security.AccessController;
-import java.security.AccessControlContext;
-import java.security.PrivilegedAction;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -157,7 +152,7 @@ public abstract class Service<V> implements Worker<V>, EventTarget {
      * our queue has to be smart in that it will REJECT an item in the queue unless the
      * thread size in the EXECUTOR is > 32, in which case we will queue up.
      */
-    private static final BlockingQueue<Runnable> IO_QUEUE = new LinkedBlockingQueue<Runnable>() {
+    private static final BlockingQueue<Runnable> IO_QUEUE = new LinkedBlockingQueue<>() {
         @Override public boolean offer(Runnable runnable) {
             if (EXECUTOR.getPoolSize() < THREAD_POOL_SIZE) {
                 return false;
@@ -166,9 +161,7 @@ public abstract class Service<V> implements Worker<V>, EventTarget {
         }
     };
 
-    // Addition of doPrivileged added due to RT-19580
-    @SuppressWarnings("removal")
-    private static final ThreadGroup THREAD_GROUP = AccessController.doPrivileged((PrivilegedAction<ThreadGroup>) () -> new ThreadGroup("javafx concurrent thread pool"));
+    private static final ThreadGroup THREAD_GROUP = new ThreadGroup("javafx concurrent thread pool");
     private static final Thread.UncaughtExceptionHandler UNCAUGHT_HANDLER = (thread, throwable) -> {
         // Ignore IllegalMonitorStateException which could be thrown from the ThreadPoolExecutor in certain cases when there are
         // asynchronous tasks. These exceptions generally do not cause loss of functionality.
@@ -177,15 +170,13 @@ public abstract class Service<V> implements Worker<V>, EventTarget {
         }
     };
 
-    // Addition of doPrivileged added due to RT-19580
-    @SuppressWarnings("removal")
-    private static final ThreadFactory THREAD_FACTORY = run -> AccessController.doPrivileged((PrivilegedAction<Thread>) () -> {
+    private static final ThreadFactory THREAD_FACTORY = run -> {
         final Thread th = new Thread(THREAD_GROUP, run);
         th.setUncaughtExceptionHandler(UNCAUGHT_HANDLER);
         th.setPriority(Thread.MIN_PRIORITY);
         th.setDaemon(true);
         return th;
-    });
+    };
 
     private static final ThreadPoolExecutor EXECUTOR = new ThreadPoolExecutor(
             2, THREAD_POOL_SIZE,
@@ -589,7 +580,7 @@ public abstract class Service<V> implements Worker<V>, EventTarget {
             task.cancel();
             task = null;
 
-            // RT-20880: IllegalStateException thrown from Service#restart()
+            // JDK-8127414: IllegalStateException thrown from Service#restart()
             // The problem is that the reset method explodes if the state
             // is SCHEDULED or RUNNING. Although we have cancelled the
             // task above, it is possible that cancelling does not change
@@ -717,15 +708,10 @@ public abstract class Service<V> implements Worker<V>, EventTarget {
      * @param task a non-null task to execute
      * @since JavaFX 2.1
      */
-    @SuppressWarnings("removal")
     protected void executeTask(final Task<V> task) {
-        final AccessControlContext acc = AccessController.getContext();
         final Executor e = getExecutor() != null ? getExecutor() : EXECUTOR;
         e.execute(() -> {
-            AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-                task.run();
-                return null;
-            }, acc);
+            task.run();
         });
     }
 
@@ -744,18 +730,10 @@ public abstract class Service<V> implements Worker<V>, EventTarget {
     }
 
     /**
-     * Registers an event handler to this task. Any event filters are first
-     * processed, then the specified onFoo event handlers, and finally any
-     * event handlers registered by this method. As with other events
-     * in the scene graph, if an event is consumed, it will not continue
-     * dispatching.
-     *
-     * @param <T> the specific event class of the handler
-     * @param eventType the type of the events to receive by the handler
-     * @param eventHandler the handler to register
-     * @throws NullPointerException if the event type or handler is null
+     * {@inheritDoc}
      * @since JavaFX 2.1
      */
+    @Override
     public final <T extends Event> void addEventHandler(
             final EventType<T> eventType,
             final EventHandler<? super T> eventHandler) {
@@ -764,17 +742,10 @@ public abstract class Service<V> implements Worker<V>, EventTarget {
     }
 
     /**
-     * Unregisters a previously registered event handler from this task. One
-     * handler might have been registered for different event types, so the
-     * caller needs to specify the particular event type from which to
-     * unregister the handler.
-     *
-     * @param <T> the specific event class of the handler
-     * @param eventType the event type from which to unregister
-     * @param eventHandler the handler to unregister
-     * @throws NullPointerException if the event type or handler is null
+     * {@inheritDoc}
      * @since JavaFX 2.1
      */
+    @Override
     public final <T extends Event> void removeEventHandler(
             final EventType<T> eventType,
             final EventHandler<? super T> eventHandler) {
@@ -783,15 +754,10 @@ public abstract class Service<V> implements Worker<V>, EventTarget {
     }
 
     /**
-     * Registers an event filter to this task. Registered event filters get
-     * an event before any associated event handlers.
-     *
-     * @param <T> the specific event class of the filter
-     * @param eventType the type of the events to receive by the filter
-     * @param eventFilter the filter to register
-     * @throws NullPointerException if the event type or filter is null
+     * {@inheritDoc}
      * @since JavaFX 2.1
      */
+    @Override
     public final <T extends Event> void addEventFilter(
             final EventType<T> eventType,
             final EventHandler<? super T> eventFilter) {
@@ -800,17 +766,10 @@ public abstract class Service<V> implements Worker<V>, EventTarget {
     }
 
     /**
-     * Unregisters a previously registered event filter from this task. One
-     * filter might have been registered for different event types, so the
-     * caller needs to specify the particular event type from which to
-     * unregister the filter.
-     *
-     * @param <T> the specific event class of the filter
-     * @param eventType the event type from which to unregister
-     * @param eventFilter the filter to unregister
-     * @throws NullPointerException if the event type or filter is null
+     * {@inheritDoc}
      * @since JavaFX 2.1
      */
+    @Override
     public final <T extends Event> void removeEventFilter(
             final EventType<T> eventType,
             final EventHandler<? super T> eventFilter) {

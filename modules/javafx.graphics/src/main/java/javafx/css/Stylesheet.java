@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,7 @@ import javafx.collections.ObservableList;
 
 import com.sun.javafx.collections.TrackableObservableList;
 import com.sun.javafx.css.FontFaceImpl;
+import com.sun.javafx.css.RuleHelper;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
@@ -63,8 +64,10 @@ public class Stylesheet {
      * binary stream changes. This number does not correlate with JavaFX versions.
      * Version 5: persist @font-face
      * Version 6: converter classes moved to public package
+     * Version 7: user-preference media queries
+     * Version 8: viewport characteristics media queries
      */
-    final static int BINARY_CSS_VERSION = 6;
+    final static int BINARY_CSS_VERSION = 8;
 
     private final String url;
     /**
@@ -103,7 +106,7 @@ public class Stylesheet {
     }
 
     /** All the rules contained in the stylesheet in the order they are in the file */
-    private final ObservableList<Rule> rules = new TrackableObservableList<Rule>() {
+    private final ObservableList<Rule> rules = new TrackableObservableList<>() {
 
         @Override protected void onChanged(Change<Rule> c) {
             c.reset();
@@ -122,7 +125,7 @@ public class Stylesheet {
     };
 
     /** List of all font faces */
-    private final List<FontFace> fontFaces = new ArrayList<FontFace>();
+    private final List<FontFace> fontFaces = new ArrayList<>();
 
     /**
      * Constructs a stylesheet with the base URI defaulting to the root
@@ -133,7 +136,7 @@ public class Stylesheet {
 //        ClassLoader cl = Thread.currentThread().getContextClassLoader();
 //        this.url = (cl != null) ? cl.getResource("") : null;
         //
-        // RT-17344
+        // JDK-8120294
         // The above code is unreliable. The getResource call is intended
         // to return the root path of the Application instance, but it sometimes
         // returns null. Here, we'll set url to null and then when a url is
@@ -251,7 +254,7 @@ public class Stylesheet {
         final int index = is.readShort();
         this.setOrigin(StyleOrigin.valueOf(strings[index]));
         final int nRules = is.readShort();
-        List<Rule> persistedRules = new ArrayList<Rule>(nRules);
+        List<Rule> persistedRules = new ArrayList<>(nRules);
         for (int n=0; n<nRules; n++) {
             persistedRules.add(Rule.readBinary(bssVersion,is,strings));
         }
@@ -335,7 +338,7 @@ public class Stylesheet {
                 dataInputStream.reset();
 
                 if (bssVersion == 2) {
-                    // RT-31022
+                    // JDK-8116809
                     stylesheet.readBinary(3, dataInputStream, strings);
                 } else {
                     stylesheet.readBinary(Stylesheet.BINARY_CSS_VERSION, dataInputStream, strings);
@@ -413,7 +416,7 @@ public class Stylesheet {
         for (Rule rule : rulesToImport) {
             List<Selector> selectors = rule.getSelectors();
             List<Declaration> declarations = rule.getUnobservedDeclarationList();
-            importedRules.add(new Rule(selectors, declarations));
+            importedRules.add(new Rule(RuleHelper.getMediaRule(rule), selectors, declarations));
         }
 
         rules.addAll(importedRules);

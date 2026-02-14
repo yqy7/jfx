@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@ package javafx.geometry;
 
 import javafx.animation.Interpolatable;
 import javafx.beans.NamedArg;
+import java.util.Objects;
 
 
 // PENDING_DOC_REVIEW of this whole class
@@ -52,7 +53,9 @@ public class Point3D implements Interpolatable<Point3D> {
 
     /**
      * The x coordinate.
+     *
      * @return the x coordinate
+     * @interpolationType <a href="../animation/Interpolatable.html#linear">linear</a>
      */
     public final double getX() {
         return x;
@@ -67,7 +70,9 @@ public class Point3D implements Interpolatable<Point3D> {
 
     /**
      * The y coordinate.
+     *
      * @return the y coordinate
+     * @interpolationType <a href="../animation/Interpolatable.html#linear">linear</a>
      */
     public final double getY() {
         return y;
@@ -82,7 +87,9 @@ public class Point3D implements Interpolatable<Point3D> {
 
     /**
      * The z coordinate.
+     *
      * @return the z coordinate
+     * @interpolationType <a href="../animation/Interpolatable.html#linear">linear</a>
      */
     public final double getZ() {
         return z;
@@ -396,12 +403,15 @@ public class Point3D implements Interpolatable<Point3D> {
     /**
      * {@inheritDoc}
      *
+     * @throws NullPointerException {@inheritDoc}
      * @since 13
      */
     @Override
     public Point3D interpolate(Point3D endValue, double t) {
-        if (t <= 0.0) return this;
-        if (t >= 1.0) return endValue;
+        Objects.requireNonNull(endValue, "endValue cannot be null");
+
+        if (t == 0.0) return this;
+        if (t == 1.0) return endValue;
         return new Point3D(
             getX() + (endValue.getX() - getX()) * t,
             getY() + (endValue.getY() - getY()) * t,
@@ -410,10 +420,15 @@ public class Point3D implements Interpolatable<Point3D> {
     }
 
     /**
-     * Returns a hash code value for the point.
-     * @return a hash code value for the point.
+     * Indicates whether some other object is "equal to" this one.
+     * Two instances of {@code Point3D} are equal if the return values of their
+     * {@code getX}, {@code getY}, and {@code getZ} methods are equal.
+     *
+     * @param obj the reference object with which to compare
+     * @return {@code true} if this {@code Point3D} is the same as the {@code obj} argument; {@code false} otherwise
      */
-    @Override public boolean equals(Object obj) {
+    @Override
+    public boolean equals(Object obj) {
         if (obj == this) return true;
         if (obj instanceof Point3D) {
             Point3D other = (Point3D) obj;

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004-2020 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2025 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "Color.h"
 #include "DeprecatedCSSOMPrimitiveValue.h"
 #include <wtf/Ref.h>
 
@@ -27,7 +28,7 @@ namespace WebCore {
 
 class DeprecatedCSSOMRGBColor final : public RefCounted<DeprecatedCSSOMRGBColor> {
 public:
-    static Ref<DeprecatedCSSOMRGBColor> create(CSSStyleDeclaration& owner, const Color& color)
+    static Ref<DeprecatedCSSOMRGBColor> create(CSSStyleDeclaration& owner, const WebCore::Color& color)
     {
         return adoptRef(*new DeprecatedCSSOMRGBColor(owner, color));
     }
@@ -42,10 +43,10 @@ public:
 private:
     template<typename NumberType> static Ref<DeprecatedCSSOMPrimitiveValue> createWrapper(CSSStyleDeclaration& owner, NumberType number)
     {
-        return CSSPrimitiveValue::create(number, CSSUnitType::CSS_NUMBER)->createDeprecatedCSSOMPrimitiveWrapper(owner);
+        return DeprecatedCSSOMPrimitiveValue::create(CSSPrimitiveValue::create(number), owner);
     }
 
-    DeprecatedCSSOMRGBColor(CSSStyleDeclaration& owner, const Color& color)
+    DeprecatedCSSOMRGBColor(CSSStyleDeclaration& owner, const WebCore::Color& color)
         : m_color(color.toColorTypeLossy<SRGBA<uint8_t>>().resolved())
         , m_red(createWrapper(owner, m_color.red))
         , m_green(createWrapper(owner, m_color.green))
@@ -55,10 +56,10 @@ private:
     }
 
     ResolvedColorType<SRGBA<uint8_t>> m_color;
-    Ref<DeprecatedCSSOMPrimitiveValue> m_red;
-    Ref<DeprecatedCSSOMPrimitiveValue> m_green;
-    Ref<DeprecatedCSSOMPrimitiveValue> m_blue;
-    Ref<DeprecatedCSSOMPrimitiveValue> m_alpha;
+    const Ref<DeprecatedCSSOMPrimitiveValue> m_red;
+    const Ref<DeprecatedCSSOMPrimitiveValue> m_green;
+    const Ref<DeprecatedCSSOMPrimitiveValue> m_blue;
+    const Ref<DeprecatedCSSOMPrimitiveValue> m_alpha;
 };
 
 } // namespace WebCore

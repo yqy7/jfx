@@ -25,18 +25,19 @@
 
 #pragma once
 
-#include "Document.h"
+#include "CustomElementDefaultARIA.h"
+#include "DocumentInlines.h"
 #include "Element.h"
 #include "ElementData.h"
 #include "HTMLNames.h"
-#include "RenderStyle.h"
+#include "RenderStyleInlines.h"
 #include "StyleChange.h"
 
 namespace WebCore {
 
-inline AttributeIteratorAccessor Element::attributesIterator() const
+inline std::span<const Attribute> Element::attributes() const
 {
-    return elementData()->attributesIterator();
+    return elementData()->attributes();
 }
 
 inline unsigned Element::findAttributeIndexByName(const QualifiedName& name) const
@@ -47,21 +48,6 @@ inline unsigned Element::findAttributeIndexByName(const QualifiedName& name) con
 inline unsigned Element::findAttributeIndexByName(const AtomString& name, bool shouldIgnoreAttributeCase) const
 {
     return elementData()->findAttributeIndexByName(name, shouldIgnoreAttributeCase);
-}
-
-inline bool Node::hasAttributes() const
-{
-    return is<Element>(*this) && downcast<Element>(*this).hasAttributes();
-}
-
-inline NamedNodeMap* Node::attributes() const
-{
-    return is<Element>(*this) ? &downcast<Element>(*this).attributes() : nullptr;
-}
-
-inline Element* Node::parentElement() const
-{
-    return dynamicDowncast<Element>(parentNode());
 }
 
 inline const Element* Element::rootElement() const
@@ -88,6 +74,31 @@ inline const AtomString& Element::attributeWithoutSynchronization(const Qualifie
             return attribute->value();
     }
     return nullAtom();
+}
+
+inline const AtomString& Element::attributeWithDefaultARIA(const QualifiedName& name) const
+{
+    auto& value = attributeWithoutSynchronization(name);
+    if (!value.isNull())
+        return value;
+
+    auto* defaultARIA = customElementDefaultARIAIfExists();
+    return defaultARIA ? defaultARIA->valueForAttribute(*this, name) : nullAtom();
+}
+
+inline String Element::attributeTrimmedWithDefaultARIA(const QualifiedName& name) const
+{
+    const auto& originalValue = attributeWithDefaultARIA(name);
+    if (originalValue.isEmpty())
+        return { };
+
+    auto value = originalValue.string();
+    return value.trim(isASCIIWhitespace).simplifyWhiteSpace(isASCIIWhitespace);
+}
+
+inline URL Element::getURLAttributeForBindings(const QualifiedName& name) const
+{
+    return protectedDocument()->maskedURLForBindingsIfNeeded(getURLAttribute(name));
 }
 
 inline bool Element::hasAttributesWithoutUpdate() const
@@ -124,6 +135,13 @@ inline const SpaceSplitString& Element::classNames() const
     ASSERT(hasClass());
     ASSERT(elementData());
     return elementData()->classNames();
+}
+
+inline bool Element::hasClassName(const AtomString& className) const
+{
+    if (!elementData())
+        return false;
+    return elementData()->classNames().contains(className);
 }
 
 inline unsigned Element::attributeCount() const
@@ -171,6 +189,27 @@ inline bool shouldIgnoreAttributeCase(const Element& element)
     return element.isHTMLElement() && element.document().isHTMLDocument();
 }
 
+inline const Attribute* Element::getAttributeInternal(const QualifiedName& name) const
+{
+    if (!elementData())
+        return nullptr;
+    synchronizeAttribute(name);
+    return findAttributeByName(name);
+}
+
+inline const Attribute* Element::getAttributeInternal(const AtomString& qualifiedName) const
+{
+    if (!elementData() || qualifiedName.isEmpty())
+        return nullptr;
+    synchronizeAttribute(qualifiedName);
+    return elementData()->findAttributeByName(qualifiedName, shouldIgnoreAttributeCase(*this));
+}
+
+inline AtomString Element::getAttributeNSForBindings(const AtomString& namespaceURI, const AtomString& localName, ResolveURLs resolveURLs) const
+{
+    return getAttributeForBindings(QualifiedName(nullAtom(), localName, namespaceURI), resolveURLs);
+}
+
 template<typename... QualifiedNames>
 inline const AtomString& Element::getAttribute(const QualifiedName& name, const QualifiedNames&... names) const
 {
@@ -182,8 +221,20 @@ inline const AtomString& Element::getAttribute(const QualifiedName& name, const 
 
 inline bool isInTopLayerOrBackdrop(const RenderStyle& style, const Element* element)
 {
-    return (element && element->isInTopLayer()) || style.styleType() == PseudoId::Backdrop;
+    return (element && element->isInTopLayer()) || style.pseudoElementType() == PseudoId::Backdrop;
 }
 
+inline void Element::hideNonce()
+{
+    // In the common case, Elements don't have a nonce parameter to hide.
+    if (!isConnected() || !hasAttributeWithoutSynchronization(HTMLNames::nonceAttr)) [[likely]]
+        return;
+    hideNonceSlow();
+}
+
+inline Element* Document::cssTarget() const
+{
+    return m_cssTarget.get();
+}
 
 }

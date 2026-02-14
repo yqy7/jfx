@@ -27,7 +27,8 @@ namespace WebCore {
 class HTMLProgressElement;
 
 class RenderProgress final : public RenderBlockFlow {
-    WTF_MAKE_ISO_ALLOCATED(RenderProgress);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(RenderProgress);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(RenderProgress);
 public:
     RenderProgress(HTMLElement&, RenderStyle&&);
     virtual ~RenderProgress();
@@ -42,21 +43,20 @@ public:
     HTMLProgressElement* progressElement() const;
 
 private:
-    const char* renderName() const override { return "RenderProgress"; }
-    bool isProgress() const override { return true; }
+    ASCIILiteral renderName() const override { return "RenderProgress"_s; }
     LogicalExtentComputedValues computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop) const override;
+
+    void willBeDestroyed() final;
 
     void animationTimerFired();
     void updateAnimationState();
 
-    double m_position;
+    double m_position { 0 };
     MonotonicTime m_animationStartTime;
-    Seconds m_animationRepeatInterval { 0_s };
-    Seconds m_animationDuration { 0_s };
     bool m_animating { false };
     Timer m_animationTimer;
 };
 
 } // namespace WebCore
 
-SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderProgress, isProgress())
+SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderProgress, isRenderProgress())

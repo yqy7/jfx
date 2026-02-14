@@ -31,16 +31,9 @@
 #include "AuxiliaryBarrierInlines.h"
 #include "JSCInlines.h"
 
-#include "WebAssemblyLinkErrorPrototype.lut.h"
-
 namespace JSC {
 
-const ClassInfo WebAssemblyLinkErrorPrototype::s_info = { "WebAssembly.LinkError", &Base::s_info, &prototypeTableWebAssemblyLinkError, nullptr, CREATE_METHOD_TABLE(WebAssemblyLinkErrorPrototype) };
-
-/* Source for WebAssemblyLinkErrorPrototype.lut.h
- @begin prototypeTableWebAssemblyLinkError
- @end
- */
+const ClassInfo WebAssemblyLinkErrorPrototype::s_info = { "WebAssembly.LinkError"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(WebAssemblyLinkErrorPrototype) };
 
 WebAssemblyLinkErrorPrototype* WebAssemblyLinkErrorPrototype::create(VM& vm, JSGlobalObject*, Structure* structure)
 {
@@ -57,7 +50,7 @@ Structure* WebAssemblyLinkErrorPrototype::createStructure(VM& vm, JSGlobalObject
 void WebAssemblyLinkErrorPrototype::finishCreation(VM& vm)
 {
     Base::finishCreation(vm);
-    ASSERT(inherits(vm, info()));
+    ASSERT(inherits(info()));
     putDirectWithoutTransition(vm, vm.propertyNames->name, jsNontrivialString(vm, "LinkError"_s), static_cast<unsigned>(PropertyAttribute::DontEnum));
     putDirectWithoutTransition(vm, vm.propertyNames->message, jsEmptyString(vm), static_cast<unsigned>(PropertyAttribute::DontEnum));
 }

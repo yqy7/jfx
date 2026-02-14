@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,12 +26,11 @@
 #include "config.h"
 #include "ScrollingThread.h"
 
-#if ENABLE(SCROLLING_THREAD)
+#if ENABLE(SCROLLING_THREAD) || ENABLE(THREADED_ANIMATION_RESOLUTION)
 
 #include <mutex>
 #include <wtf/MainThread.h>
 #include <wtf/NeverDestroyed.h>
-#include <wtf/threads/BinarySemaphore.h>
 
 namespace WebCore {
 
@@ -47,26 +46,18 @@ ScrollingThread& ScrollingThread::singleton()
 }
 
 ScrollingThread::ScrollingThread()
+    : m_runLoop(RunLoop::create("WebCore: Scrolling"_s, ThreadType::Graphics, Thread::QOS::UserInteractive))
 {
-    BinarySemaphore semaphore;
-    m_thread = Thread::create("WebCore: Scrolling", [this, &semaphore] {
-        Thread::setCurrentThreadIsUserInteractive();
-        m_runLoop = &RunLoop::current();
-        semaphore.signal();
-        m_runLoop->run();
-    });
-
-    semaphore.wait();
 }
 
 bool ScrollingThread::isCurrentThread()
 {
-    return ScrollingThread::singleton().m_thread == &Thread::current();
+    return ScrollingThread::singleton().m_runLoop->isCurrent();
 }
 
 void ScrollingThread::dispatch(Function<void ()>&& function)
 {
-    ScrollingThread::singleton().runLoop().dispatch(WTFMove(function));
+    ScrollingThread::singleton().m_runLoop->dispatch(WTFMove(function));
 }
 
 void ScrollingThread::dispatchBarrier(Function<void ()>&& function)
@@ -78,4 +69,4 @@ void ScrollingThread::dispatchBarrier(Function<void ()>&& function)
 
 } // namespace WebCore
 
-#endif // ENABLE(SCROLLING_THREAD)
+#endif // ENABLE(SCROLLING_THREAD) || ENABLE(THREADED_ANIMATION_RESOLUTION)

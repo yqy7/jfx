@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,29 +24,24 @@
  */
 package test.robot.javafx.scene;
 
+import java.util.concurrent.CountDownLatch;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
+import javafx.scene.Scene;
 import javafx.scene.control.ComboBox;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.VBox;
 import javafx.scene.robot.Robot;
-import javafx.scene.Scene;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.stage.WindowEvent;
-
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import static org.junit.Assert.fail;
-
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import test.util.Util;
 
 public class ComboBoxTest {
@@ -102,7 +97,7 @@ public class ComboBoxTest {
 
         for (int i = 0; i < ITEM_COUNT; i++) {
             Thread.sleep(300); // ComboBox is removed and added back. Time for layout.
-            waitForLatch(showLatch, 10, "Failed to show ComboBox popup list. " + i);
+            Util.waitForLatch(showLatch, 10, "Failed to show ComboBox popup list. " + i);
             showLatch = new CountDownLatch(1);
             selectedLatch = new CountDownLatch(1);
             final int k = i;
@@ -110,12 +105,14 @@ public class ComboBoxTest {
             mouseClick(comboBox.getLayoutX() + comboBox.getWidth() / 2,
                         comboBox.getLayoutY() + comboBox.getHeight() * (k + 1.2f));
 
-            waitForLatch(selectedLatch, 10, "Failed to select " + i + "th choice.");
+            Util.waitForLatch(selectedLatch, 10, "Failed to select " + i + "th choice.");
         }
-        Assert.assertEquals("ComboBox popup list should have been displayed " +
-            (ITEM_COUNT + 1) + " times.", (ITEM_COUNT + 1), onShownCount);
-        Assert.assertEquals("ComboBox choice should have been selected " +
-            ITEM_COUNT + " times.", ITEM_COUNT, onSelectedCount);
+        Assertions.assertEquals(
+            (ITEM_COUNT + 1), onShownCount,
+            "ComboBox popup list should have been displayed " + (ITEM_COUNT + 1) + " times.");
+        Assertions.assertEquals(
+            ITEM_COUNT, onSelectedCount,
+            "ComboBox choice should have been selected " + ITEM_COUNT + " times.");
     }
 
     // This test is for verifying a specific behavior.
@@ -147,28 +144,30 @@ public class ComboBoxTest {
                     comboBox.getLayoutY() + comboBox.getHeight() / 2);
 
             Thread.sleep(200); // ComboBox takes some time to display the popup list.
-            waitForLatch(showLatch, 10, "Failed to show ComboBox popup list. " + i);
+            Util.waitForLatch(showLatch, 10, "Failed to show ComboBox popup list. " + i);
             final int k = i;
             // Select a choice.
             mouseClick(comboBox.getLayoutX() + comboBox.getWidth() / 2,
                         comboBox.getLayoutY() + comboBox.getHeight() * (k + 1.2f));
 
-            waitForLatch(selectedLatch, 10, "Failed to select " + i + "th choice.");
+            Util.waitForLatch(selectedLatch, 10, "Failed to select " + i + "th choice.");
         }
-        Assert.assertEquals("ComboBox popup list should be displayed " +
-            ITEM_COUNT + " times.", ITEM_COUNT, onShownCount);
-        Assert.assertEquals("ComboBox choice should have been selected " +
-            ITEM_COUNT + " times.", ITEM_COUNT, onSelectedCount);
+        Assertions.assertEquals(
+            ITEM_COUNT, onShownCount,
+            "ComboBox popup list should be displayed " + ITEM_COUNT + " times.");
+        Assertions.assertEquals(
+            ITEM_COUNT, onSelectedCount,
+            "ComboBox choice should have been selected " + ITEM_COUNT + " times.");
     }
 
-    @After
+    @AfterEach
     public void resetUI() {
         Util.runAndWait(() -> {
             root.getChildren().clear();
         });
     }
 
-    @Before
+    @BeforeEach
     public void setupUI() {
         Util.runAndWait(() -> {
             comboBox = new ComboBox();
@@ -181,18 +180,14 @@ public class ComboBoxTest {
         });
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() throws Exception {
-        new Thread(() -> Application.launch(TestApp.class, (String[])null)).start();
-        waitForLatch(startupLatch, 10, "FX runtime failed to start.");
+        Util.launch(startupLatch, TestApp.class);
     }
 
-    @AfterClass
+    @AfterAll
     public static void exit() {
-        Util.runAndWait(() -> {
-            stage.hide();
-        });
-        Platform.exit();
+        Util.shutdown();
     }
 
     public static class TestApp extends Application {
@@ -209,9 +204,5 @@ public class ComboBoxTest {
             stage.setAlwaysOnTop(true);
             stage.show();
         }
-    }
-
-    public static void waitForLatch(CountDownLatch latch, int seconds, String msg) throws Exception {
-        Assert.assertTrue("Timeout: " + msg, latch.await(seconds, TimeUnit.SECONDS));
     }
 }

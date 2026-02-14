@@ -28,11 +28,12 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
+
 #include <wtf/text/StringView.h>
 
 namespace WebCore {
 
-enum CSSAtRuleID {
+enum CSSAtRuleID : uint8_t {
     CSSAtRuleInvalid = 0,
 
     CSSAtRuleCharset,
@@ -42,15 +43,27 @@ enum CSSAtRuleID {
     CSSAtRuleMedia,
     CSSAtRuleNamespace,
     CSSAtRulePage,
+    CSSAtRulePositionTry,
     CSSAtRuleSupports,
-    CSSAtRuleViewport,
+    CSSAtRuleViewTransition,
 
     CSSAtRuleWebkitKeyframes,
     CSSAtRuleCounterStyle,
     CSSAtRuleLayer,
     CSSAtRuleContainer,
+    CSSAtRuleProperty,
+
+    CSSAtRuleFontFeatureValues,
+    CSSAtRuleStylistic,
+    CSSAtRuleStyleset,
+    CSSAtRuleCharacterVariant,
+    CSSAtRuleSwash,
+    CSSAtRuleOrnaments,
+    CSSAtRuleAnnotation,
 
     CSSAtRuleFontPaletteValues,
+    CSSAtRuleScope,
+    CSSAtRuleStartingStyle,
 };
 
 CSSAtRuleID cssAtRuleID(StringView name);

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2017 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,20 +29,27 @@
 #include "CrossOriginEmbedderPolicy.h"
 #include "FetchRequestCredentials.h"
 #include "NotificationPermission.h"
+#include "ScriptExecutionContextIdentifier.h"
+#include "ServiceWorkerRegistrationData.h"
+#include "Settings.h"
+#include "WorkerClient.h"
 #include "WorkerOrWorkletThread.h"
 #include "WorkerRunLoop.h"
 #include "WorkerType.h"
 #include <JavaScriptCore/RuntimeFlags.h>
 #include <memory>
 #include <pal/SessionID.h>
+#include <wtf/CheckedPtr.h>
 #include <wtf/URL.h>
 
 namespace WebCore {
 
 class NotificationClient;
+class Page;
 class ScriptBuffer;
 class SecurityOrigin;
 class SocketProvider;
+class WorkerBadgeProxy;
 class WorkerGlobalScope;
 class WorkerLoaderProxy;
 class WorkerDebuggerProxy;
@@ -57,11 +64,14 @@ namespace IDBClient {
 class IDBConnectionProxy;
 }
 
+enum class AdvancedPrivacyProtections : uint16_t;
+
 struct WorkerThreadStartupData;
 
 struct WorkerParameters {
 public:
     URL scriptURL;
+    URL ownerURL;
     String name;
     String inspectorIdentifier;
     String userAgent;
@@ -73,9 +83,13 @@ public:
     ReferrerPolicy referrerPolicy;
     WorkerType workerType;
     FetchRequestCredentials credentials;
-    Settings::Values settingsValues;
+    SettingsValues settingsValues;
     WorkerThreadMode workerThreadMode { WorkerThreadMode::CreateNewThread };
-    std::optional<PAL::SessionID> sessionID { std::nullopt };
+    PAL::SessionID sessionID;
+    std::optional<ServiceWorkerData> serviceWorkerData;
+    Markable<ScriptExecutionContextIdentifier> clientIdentifier;
+    OptionSet<AdvancedPrivacyProtections> advancedPrivacyProtections;
+    std::optional<uint64_t> noiseInjectionHashSalt;
 
     WorkerParameters isolatedCopy() const;
 };
@@ -84,9 +98,10 @@ class WorkerThread : public WorkerOrWorkletThread {
 public:
     virtual ~WorkerThread();
 
-    WorkerLoaderProxy& workerLoaderProxy() final { return m_workerLoaderProxy; }
-    WorkerDebuggerProxy* workerDebuggerProxy() const final { return &m_workerDebuggerProxy; }
-    WorkerReportingProxy& workerReportingProxy() const { return m_workerReportingProxy; }
+    WorkerBadgeProxy* workerBadgeProxy() const { return m_workerBadgeProxy.get(); }
+    WorkerDebuggerProxy* workerDebuggerProxy() const final { return m_workerDebuggerProxy.get(); }
+    WorkerLoaderProxy* workerLoaderProxy() const final { return m_workerLoaderProxy.get(); }
+    WorkerReportingProxy* workerReportingProxy() const { return m_workerReportingProxy.get(); }
 
     // Number of active worker threads.
     WEBCORE_EXPORT static unsigned workerThreadCount();
@@ -99,17 +114,21 @@ public:
     JSC::RuntimeFlags runtimeFlags() const { return m_runtimeFlags; }
     bool isInStaticScriptEvaluation() const { return m_isInStaticScriptEvaluation; }
 
+    void clearProxies() override;
+
+    void setWorkerClient(std::unique_ptr<WorkerClient> client) { m_workerClient = WTFMove(client); }
 protected:
-    WorkerThread(const WorkerParameters&, const ScriptBuffer& sourceCode, WorkerLoaderProxy&, WorkerDebuggerProxy&, WorkerReportingProxy&, WorkerThreadStartMode, const SecurityOrigin& topOrigin, IDBClient::IDBConnectionProxy*, SocketProvider*, JSC::RuntimeFlags);
+    WorkerThread(const WorkerParameters&, const ScriptBuffer& sourceCode, WorkerLoaderProxy&, WorkerDebuggerProxy&, WorkerReportingProxy&, WorkerBadgeProxy&, WorkerThreadStartMode, const SecurityOrigin& topOrigin, IDBClient::IDBConnectionProxy*, SocketProvider*, JSC::RuntimeFlags);
 
     // Factory method for creating a new worker context for the thread.
     virtual Ref<WorkerGlobalScope> createWorkerGlobalScope(const WorkerParameters&, Ref<SecurityOrigin>&&, Ref<SecurityOrigin>&& topOrigin) = 0;
 
     WorkerGlobalScope* globalScope();
 
-    IDBClient::IDBConnectionProxy* idbConnectionProxy();
-    SocketProvider* socketProvider();
+    IDBClient::IDBConnectionProxy* idbConnectionProxy() { return m_idbConnectionProxy.get(); }
+    SocketProvider* socketProvider() { return m_socketProvider.get(); }
 
+    std::unique_ptr<WorkerClient> m_workerClient;
 private:
     virtual ASCIILiteral threadName() const = 0;
 
@@ -121,9 +140,10 @@ private:
     void evaluateScriptIfNecessary(String& exceptionMessage) final;
     bool shouldWaitForWebInspectorOnStartup() const final;
 
-    WorkerLoaderProxy& m_workerLoaderProxy;
-    WorkerDebuggerProxy& m_workerDebuggerProxy;
-    WorkerReportingProxy& m_workerReportingProxy;
+    CheckedPtr<WorkerLoaderProxy> m_workerLoaderProxy;
+    CheckedPtr<WorkerDebuggerProxy> m_workerDebuggerProxy;
+    CheckedPtr<WorkerReportingProxy> m_workerReportingProxy;
+    CheckedPtr<WorkerBadgeProxy> m_workerBadgeProxy;
     JSC::RuntimeFlags m_runtimeFlags;
 
     std::unique_ptr<WorkerThreadStartupData> m_startupData;
@@ -132,8 +152,8 @@ private:
     NotificationClient* m_notificationClient { nullptr };
 #endif
 
-    RefPtr<IDBClient::IDBConnectionProxy> m_idbConnectionProxy;
-    RefPtr<SocketProvider> m_socketProvider;
+    const RefPtr<IDBClient::IDBConnectionProxy> m_idbConnectionProxy;
+    const RefPtr<SocketProvider> m_socketProvider;
     bool m_isInStaticScriptEvaluation { false };
 };
 

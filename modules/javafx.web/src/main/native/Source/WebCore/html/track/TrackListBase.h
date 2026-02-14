@@ -29,18 +29,33 @@
 
 #include "ActiveDOMObject.h"
 #include "EventTarget.h"
+#include "WebCoreOpaqueRoot.h"
 #include <wtf/Observer.h>
 #include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
 #include <wtf/WeakPtr.h>
 
 namespace WebCore {
+class TrackListBase;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+// FIXME: TrackListBase inherits from RefCounted, what gives?
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::TrackListBase> : std::true_type { };
+}
+
+namespace WebCore {
 
 class TrackBase;
+using TrackID = uint64_t;
 
-class TrackListBase : public RefCounted<TrackListBase>, public EventTargetWithInlineData, public ActiveDOMObject {
-    WTF_MAKE_ISO_ALLOCATED(TrackListBase);
+class TrackListBase : public RefCounted<TrackListBase>, public EventTarget, public ActiveDOMObject {
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(TrackListBase);
 public:
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
+
     virtual ~TrackListBase();
 
     enum Type { BaseTrackList, TextTrackList, AudioTrackList, VideoTrackList };
@@ -48,17 +63,20 @@ public:
 
     virtual unsigned length() const;
     virtual bool contains(TrackBase&) const;
+    virtual bool contains(TrackID) const;
     virtual void remove(TrackBase&, bool scheduleEvent = true);
+    virtual void remove(TrackID, bool scheduleEvent = true);
+    virtual RefPtr<TrackBase> find(TrackID) const;
 
     // EventTarget
-    EventTargetInterface eventTargetInterface() const override = 0;
-    using RefCounted<TrackListBase>::ref;
-    using RefCounted<TrackListBase>::deref;
-    ScriptExecutionContext* scriptExecutionContext() const final { return ContextDestructionObserver::scriptExecutionContext(); }
+    enum EventTargetInterfaceType eventTargetInterface() const override = 0;
+    ScriptExecutionContext* scriptExecutionContext() const final;
 
-    void* opaqueRoot();
+    void didMoveToNewDocument(Document&);
 
-    using OpaqueRootObserver = WTF::Observer<void*()>;
+    WebCoreOpaqueRoot opaqueRoot();
+
+    using OpaqueRootObserver = WTF::Observer<WebCoreOpaqueRoot()>;
     void setOpaqueRootObserver(const OpaqueRootObserver& observer) { m_opaqueRootObserver = observer; };
 
     // Needs to be public so tracks can call it
@@ -87,7 +105,7 @@ private:
     bool m_isChangeEventScheduled { false };
 };
 
-inline void* root(TrackListBase* trackList)
+inline WebCoreOpaqueRoot root(TrackListBase* trackList)
 {
     return trackList->opaqueRoot();
 }

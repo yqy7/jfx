@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,7 +55,6 @@ import com.sun.javafx.tk.TKPulseListener;
 import com.sun.javafx.tk.Toolkit;
 import com.sun.media.jfxmedia.MediaManager;
 import com.sun.media.jfxmedia.control.VideoDataBuffer;
-import com.sun.media.jfxmedia.effects.AudioSpectrum;
 import com.sun.media.jfxmedia.events.AudioSpectrumEvent;
 import com.sun.media.jfxmedia.events.BufferListener;
 import com.sun.media.jfxmedia.events.BufferProgressEvent;
@@ -264,7 +263,7 @@ public final class MediaPlayer {
          * @since JavaFX 8.0
          */
         DISPOSED
-    };
+    }
 
     /**
      * A value representing an effectively infinite number of playback cycles.
@@ -330,7 +329,7 @@ public final class MediaPlayer {
 
     // views to be notified on media change
     private final Set<WeakReference<MediaView>> viewRefs =
-            new HashSet<WeakReference<MediaView>>();
+            new HashSet<>();
 
     /**
      * The read-only {@link AudioEqualizer} associated with this player. The
@@ -572,7 +571,7 @@ public final class MediaPlayer {
 
     private ReadOnlyObjectWrapper<MediaException> errorPropertyImpl() {
         if (error == null) {
-            error = new ReadOnlyObjectWrapper<MediaException>() {
+            error = new ReadOnlyObjectWrapper<>() {
 
                 @Override
                 protected void invalidated() {
@@ -618,7 +617,7 @@ public final class MediaPlayer {
 
     public ObjectProperty<Runnable> onErrorProperty() {
         if (onError == null) {
-            onError = new ObjectPropertyBase<Runnable>() {
+            onError = new ObjectPropertyBase<>() {
 
                 @Override
                 protected void invalidated() {
@@ -1096,7 +1095,7 @@ public final class MediaPlayer {
 
     public ObjectProperty<Duration> startTimeProperty() {
         if (startTime == null) {
-            startTime = new ObjectPropertyBase<Duration>() {
+            startTime = new ObjectPropertyBase<>() {
 
                 @Override
                 protected void invalidated() {
@@ -1157,7 +1156,7 @@ public final class MediaPlayer {
 
     public ObjectProperty<Duration> stopTimeProperty() {
         if (stopTime == null) {
-            stopTime = new ObjectPropertyBase<Duration>() {
+            stopTime = new ObjectPropertyBase<>() {
 
                 @Override
                 protected void invalidated() {
@@ -1214,7 +1213,7 @@ public final class MediaPlayer {
 
     private ReadOnlyObjectWrapper<Duration> cycleDurationPropertyImpl() {
         if (cycleDuration == null) {
-            cycleDuration = new ReadOnlyObjectWrapper<Duration>(this, "cycleDuration");
+            cycleDuration = new ReadOnlyObjectWrapper<>(this, "cycleDuration");
         }
         return cycleDuration;
     }
@@ -1271,7 +1270,7 @@ public final class MediaPlayer {
 
     private ReadOnlyObjectWrapper<Duration> totalDurationPropertyImpl() {
         if (totalDuration == null) {
-            totalDuration = new ReadOnlyObjectWrapper<Duration>(this, "totalDuration");
+            totalDuration = new ReadOnlyObjectWrapper<>(this, "totalDuration");
         }
         return totalDuration;
     }
@@ -1281,7 +1280,7 @@ public final class MediaPlayer {
          } else if (getCycleDuration().isUnknown()) {
              setTotalDuration(Duration.UNKNOWN);
          } else {
-             setTotalDuration(getCycleDuration().multiply((double)getCycleCount()));
+             setTotalDuration(getCycleDuration().multiply(getCycleCount()));
          }
      }
 
@@ -1356,7 +1355,7 @@ public final class MediaPlayer {
 
     private ReadOnlyObjectWrapper<Duration> currentTimePropertyImpl() {
         if (currentTime == null) {
-            currentTime = new ReadOnlyObjectWrapper<Duration>(this, "currentTime");
+            currentTime = new ReadOnlyObjectWrapper<>(this, "currentTime");
             currentTime.setValue(Duration.ZERO);
             updateTime();
         }
@@ -1466,7 +1465,7 @@ public final class MediaPlayer {
 
     private ReadOnlyObjectWrapper<Status> statusPropertyImpl() {
         if (status == null) {
-            status = new ReadOnlyObjectWrapper<Status>() {
+            status = new ReadOnlyObjectWrapper<>() {
 
                 @Override
                 protected void invalidated() {
@@ -1544,7 +1543,7 @@ public final class MediaPlayer {
 
     private ReadOnlyObjectWrapper<Duration> bufferProgressTimePropertyImpl() {
         if (bufferProgressTime == null) {
-            bufferProgressTime = new ReadOnlyObjectWrapper<Duration>(this, "bufferProgressTime");
+            bufferProgressTime = new ReadOnlyObjectWrapper<>(this, "bufferProgressTime");
         }
         return bufferProgressTime;
     }
@@ -1709,13 +1708,13 @@ public final class MediaPlayer {
 
     public ObjectProperty<EventHandler<MediaMarkerEvent>> onMarkerProperty() {
         if (onMarker == null) {
-            onMarker = new SimpleObjectProperty<EventHandler<MediaMarkerEvent>>(this, "onMarker");
+            onMarker = new SimpleObjectProperty<>(this, "onMarker");
         }
         return onMarker;
     }
 
     void addView(MediaView view) {
-        WeakReference<MediaView> vref = new WeakReference<MediaView>(view);
+        WeakReference<MediaView> vref = new WeakReference<>(view);
         synchronized (viewRefs) {
             viewRefs.add(vref);
         }
@@ -1723,10 +1722,11 @@ public final class MediaPlayer {
 
     void removeView(MediaView view) {
         synchronized (viewRefs) {
-            for (WeakReference<MediaView> vref : viewRefs) {
-                MediaView v = vref.get();
+            Iterator<WeakReference<MediaView>> iter = viewRefs.iterator();
+            while (iter.hasNext()) {
+                MediaView v = iter.next().get();
                 if (v != null && v.equals(view)) {
-                    viewRefs.remove(vref);
+                    iter.remove();
                 }
             }
         }
@@ -1737,7 +1737,7 @@ public final class MediaPlayer {
         Platform.runLater(() -> {
             setError(error);
 
-            // Propogate errors that related to media to media object
+            // Propagate errors that related to media to media object
             if (error.getType() == MediaException.Type.MEDIA_CORRUPTED
                     || error.getType() == MediaException.Type.MEDIA_UNSUPPORTED
                     || error.getType() == MediaException.Type.MEDIA_INACCESSIBLE
@@ -1922,7 +1922,7 @@ public final class MediaPlayer {
 
     public ObjectProperty<Runnable> onEndOfMediaProperty() {
         if (onEndOfMedia == null) {
-            onEndOfMedia = new SimpleObjectProperty<Runnable>(this, "onEndOfMedia");
+            onEndOfMedia = new SimpleObjectProperty<>(this, "onEndOfMedia");
         }
         return onEndOfMedia;
     }
@@ -1951,7 +1951,7 @@ public final class MediaPlayer {
 
     public ObjectProperty<Runnable> onReadyProperty() {
         if (onReady == null) {
-            onReady = new SimpleObjectProperty<Runnable>(this, "onReady");
+            onReady = new SimpleObjectProperty<>(this, "onReady");
         }
         return onReady;
     }
@@ -1980,7 +1980,7 @@ public final class MediaPlayer {
 
     public ObjectProperty<Runnable> onPlayingProperty() {
         if (onPlaying == null) {
-            onPlaying = new SimpleObjectProperty<Runnable>(this, "onPlaying");
+            onPlaying = new SimpleObjectProperty<>(this, "onPlaying");
         }
         return onPlaying;
     }
@@ -2008,7 +2008,7 @@ public final class MediaPlayer {
 
     public ObjectProperty<Runnable> onPausedProperty() {
         if (onPaused == null) {
-            onPaused = new SimpleObjectProperty<Runnable>(this, "onPaused");
+            onPaused = new SimpleObjectProperty<>(this, "onPaused");
         }
         return onPaused;
     }
@@ -2037,7 +2037,7 @@ public final class MediaPlayer {
 
     public ObjectProperty<Runnable> onStoppedProperty() {
         if (onStopped == null) {
-            onStopped = new SimpleObjectProperty<Runnable>(this, "onStopped");
+            onStopped = new SimpleObjectProperty<>(this, "onStopped");
         }
         return onStopped;
     }
@@ -2065,7 +2065,7 @@ public final class MediaPlayer {
 
     public ObjectProperty<Runnable> onHaltedProperty() {
         if (onHalted == null) {
-            onHalted = new SimpleObjectProperty<Runnable>(this, "onHalted");
+            onHalted = new SimpleObjectProperty<>(this, "onHalted");
         }
         return onHalted;
     }
@@ -2096,7 +2096,7 @@ public final class MediaPlayer {
 
     public ObjectProperty<Runnable> onRepeatProperty() {
         if (onRepeat == null) {
-            onRepeat = new SimpleObjectProperty<Runnable>(this, "onRepeat");
+            onRepeat = new SimpleObjectProperty<>(this, "onRepeat");
         }
         return onRepeat;
     }
@@ -2125,7 +2125,7 @@ public final class MediaPlayer {
 
     public ObjectProperty<Runnable> onStalledProperty() {
         if (onStalled == null) {
-            onStalled = new SimpleObjectProperty<Runnable>(this, "onStalled");
+            onStalled = new SimpleObjectProperty<>(this, "onStalled");
         }
         return onStalled;
     }
@@ -2330,7 +2330,7 @@ public final class MediaPlayer {
 
     public ObjectProperty<AudioSpectrumListener> audioSpectrumListenerProperty() {
         if (audioSpectrumListener == null) {
-            audioSpectrumListener = new ObjectPropertyBase<AudioSpectrumListener>() {
+            audioSpectrumListener = new ObjectPropertyBase<>() {
 
                 @Override
                 protected void invalidated() {
@@ -2439,7 +2439,7 @@ public final class MediaPlayer {
             Platform.runLater(() -> {
                 Duration markerTime = Duration.millis(evt.getPresentationTime() * 1000.0);
                 if (getOnMarker() != null) {
-                    getOnMarker().handle(new MediaMarkerEvent(new Pair<String, Duration>(evt.getMarkerName(), markerTime)));
+                    getOnMarker().handle(new MediaMarkerEvent(new Pair<>(evt.getMarkerName(), markerTime)));
                 }
             });
         }
@@ -2772,7 +2772,7 @@ public final class MediaPlayer {
 
 class MediaPlayerShutdownHook implements Runnable {
 
-    private final static List<WeakReference<MediaPlayer>> playerRefs = new ArrayList<WeakReference<MediaPlayer>>();
+    private final static List<WeakReference<MediaPlayer>> playerRefs = new ArrayList<>();
     private static boolean isShutdown = false;
 
     static {
@@ -2794,7 +2794,7 @@ class MediaPlayerShutdownHook implements Runnable {
                     }
                 }
 
-                playerRefs.add(new WeakReference<MediaPlayer>(player));
+                playerRefs.add(new WeakReference<>(player));
             }
         }
     }
@@ -2827,7 +2827,7 @@ class MediaTimerTask extends TimerTask {
     private WeakReference<MediaPlayer> playerRef;
 
     MediaTimerTask(MediaPlayer player) {
-        playerRef = new WeakReference<MediaPlayer>(player);
+        playerRef = new WeakReference<>(player);
     }
 
     void start() {

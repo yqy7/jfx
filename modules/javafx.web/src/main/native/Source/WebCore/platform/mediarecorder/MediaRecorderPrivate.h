@@ -27,8 +27,10 @@
 #include "ExceptionOr.h"
 #include "MediaRecorderPrivateOptions.h"
 #include "RealtimeMediaSource.h"
+#include <wtf/CheckedRef.h>
 #include <wtf/CompletionHandler.h>
 #include <wtf/Forward.h>
+#include <wtf/TZoneMalloc.h>
 
 #if ENABLE(MEDIA_RECORDER)
 
@@ -49,9 +51,18 @@ struct MediaRecorderPrivateOptions;
 
 class MediaRecorderPrivate
     : public RealtimeMediaSource::AudioSampleObserver
-    , public RealtimeMediaSource::VideoSampleObserver {
+    , public RealtimeMediaSource::VideoFrameObserver
+    , public CanMakeCheckedPtr<MediaRecorderPrivate> {
+    WTF_MAKE_TZONE_ALLOCATED(MediaRecorderPrivate);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(MediaRecorderPrivate);
 public:
     ~MediaRecorderPrivate();
+
+    // CheckedPtr interface
+    uint32_t checkedPtrCount() const final { return CanMakeCheckedPtr::checkedPtrCount(); }
+    uint32_t checkedPtrCountWithoutThreadCheck() const final { return CanMakeCheckedPtr::checkedPtrCountWithoutThreadCheck(); }
+    void incrementCheckedPtrCount() const final { CanMakeCheckedPtr::incrementCheckedPtrCount(); }
+    void decrementCheckedPtrCount() const final { CanMakeCheckedPtr::decrementCheckedPtrCount(); }
 
     struct AudioVideoSelectedTracks {
         MediaStreamTrackPrivate* audioTrack { nullptr };
@@ -59,9 +70,9 @@ public:
     };
     WEBCORE_EXPORT static AudioVideoSelectedTracks selectTracks(MediaStreamPrivate&);
 
-    using FetchDataCallback = CompletionHandler<void(RefPtr<FragmentedSharedBuffer>&&, const String& mimeType, double)>;
+    using FetchDataCallback = CompletionHandler<void(Ref<FragmentedSharedBuffer>&&, const String& mimeType, double)>;
     virtual void fetchData(FetchDataCallback&&) = 0;
-    virtual const String& mimeType() const = 0;
+    virtual String mimeType() const = 0;
 
     void stop(CompletionHandler<void()>&&);
     void pause(CompletionHandler<void()>&&);
@@ -89,13 +100,14 @@ protected:
     bool shouldMuteVideo() const { return m_shouldMuteVideo; }
 
 private:
+
     virtual void stopRecording(CompletionHandler<void()>&&) = 0;
     virtual void pauseRecording(CompletionHandler<void()>&&) = 0;
     virtual void resumeRecording(CompletionHandler<void()>&&) = 0;
 
 private:
-    bool m_shouldMuteAudio { false };
-    bool m_shouldMuteVideo { false };
+    std::atomic<bool> m_shouldMuteAudio { false };
+    std::atomic<bool> m_shouldMuteVideo { false };
     RefPtr<RealtimeMediaSource> m_audioSource;
     RefPtr<RealtimeMediaSource> m_videoSource;
     RefPtr<RealtimeMediaSource> m_pausedAudioSource;
@@ -116,12 +128,12 @@ inline void MediaRecorderPrivate::setAudioSource(RefPtr<RealtimeMediaSource>&& a
 inline void MediaRecorderPrivate::setVideoSource(RefPtr<RealtimeMediaSource>&& videoSource)
 {
     if (m_videoSource)
-        m_videoSource->removeVideoSampleObserver(*this);
+        m_videoSource->removeVideoFrameObserver(*this);
 
     m_videoSource = WTFMove(videoSource);
 
     if (m_videoSource)
-        m_videoSource->addVideoSampleObserver(*this);
+        m_videoSource->addVideoFrameObserver(*this);
 }
 
 inline MediaRecorderPrivate::~MediaRecorderPrivate()
@@ -132,7 +144,7 @@ inline MediaRecorderPrivate::~MediaRecorderPrivate()
     if (m_audioSource)
         m_audioSource->removeAudioSampleObserver(*this);
     if (m_videoSource)
-        m_videoSource->removeVideoSampleObserver(*this);
+        m_videoSource->removeVideoFrameObserver(*this);
 }
 
 } // namespace WebCore

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,7 +32,6 @@
 #include "WasmLimits.h"
 #include "WebAssemblyFunction.h"
 #include "WebAssemblyWrapperFunction.h"
-#include <wtf/MallocPtr.h>
 #include <wtf/Ref.h>
 
 namespace JSC {
@@ -40,7 +39,7 @@ namespace JSC {
 class JSWebAssemblyGlobal final : public JSNonFinalObject {
 public:
     using Base = JSNonFinalObject;
-    static constexpr bool needsDestruction = true;
+    static constexpr DestructionMode needsDestruction = NeedsDestruction;
     static void destroy(JSCell*);
 
     template<typename CellType, SubspaceAccess mode>
@@ -49,20 +48,21 @@ public:
         return vm.webAssemblyGlobalSpace<mode>();
     }
 
-    static JSWebAssemblyGlobal* tryCreate(JSGlobalObject*, VM&, Structure*, Ref<Wasm::Global>&&);
+    static JSWebAssemblyGlobal* create(VM&, Structure*, Ref<Wasm::Global>&&);
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
     DECLARE_INFO;
+
+    DECLARE_VISIT_CHILDREN;
 
     Wasm::Global* global() { return m_global.ptr(); }
     JSObject* type(JSGlobalObject*);
 
 private:
     JSWebAssemblyGlobal(VM&, Structure*, Ref<Wasm::Global>&&);
-    void finishCreation(VM&);
-    DECLARE_VISIT_CHILDREN;
+    DECLARE_DEFAULT_FINISH_CREATION;
 
-    Ref<Wasm::Global> m_global;
+    const Ref<Wasm::Global> m_global;
 };
 
 } // namespace JSC

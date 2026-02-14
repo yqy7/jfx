@@ -29,25 +29,19 @@
 #if ENABLE(WEBASSEMBLY)
 
 #include "IteratorOperations.h"
+#include "JITOpaqueByproducts.h"
 #include "JSCInlines.h"
 #include "JSWebAssemblyException.h"
 #include "JSWebAssemblyHelpers.h"
 #include "JSWebAssemblyTag.h"
 #include "WebAssemblyExceptionPrototype.h"
 
-#include "WebAssemblyExceptionConstructor.lut.h"
-
 namespace JSC {
 
-const ClassInfo WebAssemblyExceptionConstructor::s_info = { "Function", &Base::s_info, &constructorTableWebAssemblyException, nullptr, CREATE_METHOD_TABLE(WebAssemblyExceptionConstructor) };
+const ClassInfo WebAssemblyExceptionConstructor::s_info = { "Function"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(WebAssemblyExceptionConstructor) };
 
 static JSC_DECLARE_HOST_FUNCTION(constructJSWebAssemblyException);
 static JSC_DECLARE_HOST_FUNCTION(callJSWebAssemblyException);
-
-/* Source for WebAssemblyExceptionConstructor.lut.h
- @begin constructorTableWebAssemblyException
- @end
- */
 
 JSC_DEFINE_HOST_FUNCTION(constructJSWebAssemblyException, (JSGlobalObject* globalObject, CallFrame* callFrame))
 {
@@ -56,25 +50,33 @@ JSC_DEFINE_HOST_FUNCTION(constructJSWebAssemblyException, (JSGlobalObject* globa
     JSValue tagValue = callFrame->argument(0);
     JSValue tagParameters = callFrame->argument(1);
 
-    auto tag = jsDynamicCast<JSWebAssemblyTag*>(vm, tagValue);
+    auto tag = jsDynamicCast<JSWebAssemblyTag*>(tagValue);
     if (!tag)
-        return throwVMTypeError(globalObject, scope, "WebAssembly.Exception constructor expects the first argument to be a WebAssembly.Tag");
+        return throwVMTypeError(globalObject, scope, "WebAssembly.Exception constructor expects the first argument to be a WebAssembly.Tag"_s);
 
+    if (&tag->tag() == &Wasm::Tag::jsExceptionTag()) [[unlikely]]
+        return throwVMTypeError(globalObject, scope, "WebAssembly.Exception constructor does not accept WebAssembly.JSTag"_s);
+
+    const auto& tagFunctionType = tag->type();
     MarkedArgumentBuffer values;
+    values.ensureCapacity(tagFunctionType.argumentCount());
     forEachInIterable(globalObject, tagParameters, [&] (VM&, JSGlobalObject*, JSValue nextValue) {
         values.append(nextValue);
-        if (UNLIKELY(values.hasOverflowed()))
+        if (values.hasOverflowed()) [[unlikely]]
             throwOutOfMemoryError(globalObject, scope);
     });
     RETURN_IF_EXCEPTION(scope, { });
 
-    if (values.size() != tag->signature().argumentCount())
-        return throwVMTypeError(globalObject, scope, "WebAssembly.Exception constructor expects the number of paremeters in WebAssembly.Tag to match the tags parameter count.");
+    if (values.size() != tagFunctionType.argumentCount())
+        return throwVMTypeError(globalObject, scope, "WebAssembly.Exception constructor expects the number of paremeters in WebAssembly.Tag to match the tags parameter count."_s);
 
     // Any GC'd values in here will be marked by the MarkedArugementBuffer until stored in the Exception.
     FixedVector<uint64_t> payload(values.size());
     for (unsigned i = 0; i < values.size(); ++i) {
-        payload[i] = fromJSValue(globalObject, tag->signature().argument(i), values.at(i));
+        auto type = tagFunctionType.argumentType(i);
+        if (type.kind == Wasm::TypeKind::V128 || isExnref(type)) [[unlikely]]
+            return throwVMTypeError(globalObject, scope, "WebAssembly.Exception constructor expects payload includes neither v128 nor exnref."_s);
+        payload[i] = toWebAssemblyValue(globalObject, type, values.at(i));
         RETURN_IF_EXCEPTION(scope, { });
     }
 
@@ -89,7 +91,7 @@ JSC_DEFINE_HOST_FUNCTION(callJSWebAssemblyException, (JSGlobalObject* globalObje
 {
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
-    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "WebAssembly.Exception"));
+    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "WebAssembly.Exception"_s));
 }
 
 WebAssemblyExceptionConstructor* WebAssemblyExceptionConstructor::create(VM& vm, Structure* structure, WebAssemblyExceptionPrototype* thisPrototype)

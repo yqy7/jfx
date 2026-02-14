@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -108,7 +108,7 @@ public class FXDnDInteropN {
     }
 
     public void setNode(SwingNode swnode) {
-        this.nodeRef = new WeakReference<SwingNode>(swnode);
+        this.nodeRef = new WeakReference<>(swnode);
     }
 
     private WeakReference<SwingNode> nodeRef = null;
@@ -154,12 +154,12 @@ public class FXDnDInteropN {
     }
 
     public <T> ComponentMapper<T> mapComponent(Map<Component, T> map, int x, int y) {
-        return new ComponentMapper<T>(map, x, y);
+        return new ComponentMapper<>(map, x, y);
     }
 
-    ///////////////////////////////////////////////////////////////////////////
+    //-------------------------------------------------------------------------
     //     DRAG SOURCE IMPLEMENTATION
-    ///////////////////////////////////////////////////////////////////////////
+    //-------------------------------------------------------------------------
 
 
     private boolean isDragSourceListenerInstalled = false;
@@ -192,6 +192,7 @@ public class FXDnDInteropN {
             if (c != null) recognizers.put(c, this);
         }
 
+        @Override
         protected void registerListeners() {
             runOnFxThread(() -> {
                 if (!isDragSourceListenerInstalled) {
@@ -207,6 +208,7 @@ public class FXDnDInteropN {
             });
         }
 
+        @Override
         protected void unregisterListeners() {
             runOnFxThread(() -> {
                 if (isDragSourceListenerInstalled) {
@@ -371,11 +373,11 @@ public class FXDnDInteropN {
                 }
             }
         }
-    };
+    }
 
-    ///////////////////////////////////////////////////////////////////////////
+    //-------------------------------------------------------------------------
     //     DROP TARGET IMPLEMENTATION
-    ///////////////////////////////////////////////////////////////////////////
+    //-------------------------------------------------------------------------
 
 
     private boolean isDropTargetListenerInstalled = false;
@@ -502,7 +504,7 @@ public class FXDnDInteropN {
                      FXDropTargetContextPeer.this);
                     }
 
-                    DropTargetListener dtl = (DropTargetListener)target;
+                    DropTargetListener dtl = target;
 
                     if (DragEvent.DRAG_DROPPED.equals(fxEvType)) {
                         DropTargetDropEvent awtEvent = new DropTargetDropEvent(

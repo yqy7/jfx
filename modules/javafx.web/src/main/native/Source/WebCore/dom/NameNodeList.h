@@ -28,7 +28,7 @@
 namespace WebCore {
 
 class NameNodeList final : public CachedLiveNodeList<NameNodeList> {
-    WTF_MAKE_ISO_ALLOCATED(NameNodeList);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(NameNodeList);
 public:
     static Ref<NameNodeList> create(ContainerNode& rootNode, const AtomString& name);
     virtual ~NameNodeList();
@@ -41,10 +41,5 @@ private:
 
     AtomString m_name;
 };
-
-inline bool NameNodeList::elementMatches(Element& element) const
-{
-    return element.getNameAttribute() == m_name;
-}
 
 } // namespace WebCore

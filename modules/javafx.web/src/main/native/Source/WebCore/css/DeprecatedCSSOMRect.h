@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,7 +27,6 @@
 
 #include "DeprecatedCSSOMPrimitiveValue.h"
 #include "Rect.h"
-#include <wtf/RefPtr.h>
 
 namespace WebCore {
 
@@ -38,28 +37,24 @@ public:
         return adoptRef(*new DeprecatedCSSOMRect(rect, owner));
     }
 
-    DeprecatedCSSOMPrimitiveValue* top() const { return m_top.get(); }
-    DeprecatedCSSOMPrimitiveValue* right() const { return m_right.get(); }
-    DeprecatedCSSOMPrimitiveValue* bottom() const { return m_bottom.get(); }
-    DeprecatedCSSOMPrimitiveValue* left() const { return m_left.get(); }
+    DeprecatedCSSOMPrimitiveValue* top() const { return m_top.ptr(); }
+    DeprecatedCSSOMPrimitiveValue* right() const { return m_right.ptr(); }
+    DeprecatedCSSOMPrimitiveValue* bottom() const { return m_bottom.ptr(); }
+    DeprecatedCSSOMPrimitiveValue* left() const { return m_left.ptr(); }
 
 private:
     DeprecatedCSSOMRect(const Rect& rect, CSSStyleDeclaration& owner)
+        : m_top(DeprecatedCSSOMPrimitiveValue::create(rect.top(), owner))
+        , m_right(DeprecatedCSSOMPrimitiveValue::create(rect.right(), owner))
+        , m_bottom(DeprecatedCSSOMPrimitiveValue::create(rect.bottom(), owner))
+        , m_left(DeprecatedCSSOMPrimitiveValue::create(rect.left(), owner))
     {
-        if (rect.top())
-            m_top = rect.top()->createDeprecatedCSSOMPrimitiveWrapper(owner);
-        if (rect.right())
-            m_right = rect.right()->createDeprecatedCSSOMPrimitiveWrapper(owner);
-        if (rect.bottom())
-            m_bottom = rect.bottom()->createDeprecatedCSSOMPrimitiveWrapper(owner);
-        if (rect.left())
-            m_left = rect.left()->createDeprecatedCSSOMPrimitiveWrapper(owner);
     }
 
-    RefPtr<DeprecatedCSSOMPrimitiveValue> m_top;
-    RefPtr<DeprecatedCSSOMPrimitiveValue> m_right;
-    RefPtr<DeprecatedCSSOMPrimitiveValue> m_bottom;
-    RefPtr<DeprecatedCSSOMPrimitiveValue> m_left;
+    const Ref<DeprecatedCSSOMPrimitiveValue> m_top;
+    const Ref<DeprecatedCSSOMPrimitiveValue> m_right;
+    const Ref<DeprecatedCSSOMPrimitiveValue> m_bottom;
+    const Ref<DeprecatedCSSOMPrimitiveValue> m_left;
 };
 
 } // namespace WebCore

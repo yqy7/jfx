@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,6 +31,7 @@
 #include <type_traits>
 #include <wtf/RawPtrTraits.h>
 #include <wtf/RawValueTraits.h>
+#include <wtf/TZoneMalloc.h>
 
 namespace JSC {
 
@@ -73,6 +74,8 @@ template<class T> inline void validateCell(T)
 {
 }
 #endif
+
+enum WriteBarrierEarlyInitTag { WriteBarrierEarlyInit };
 
 // We have a separate base class with no constructors for use in Unions.
 template <typename T, typename Traits> class WriteBarrierBase {
@@ -165,7 +168,11 @@ public:
 
     JSValue get() const
     {
+#if USE(JSVALUE64) || !ENABLE(CONCURRENT_JS)
         return JSValue::decode(m_value);
+#else
+        return JSValue::decodeConcurrent(&m_value);
+#endif
     }
     void clear() { m_value = JSValue::encode(JSValue()); }
     void setUndefined() { m_value = JSValue::encode(jsUndefined()); }
@@ -179,11 +186,11 @@ public:
 
     JSValue* slot() const
     {
-        return bitwise_cast<JSValue*>(&m_value);
+        return std::bit_cast<JSValue*>(&m_value);
     }
 
-    int32_t* tagPointer() { return &bitwise_cast<EncodedValueDescriptor*>(&m_value)->asBits.tag; }
-    int32_t* payloadPointer() { return &bitwise_cast<EncodedValueDescriptor*>(&m_value)->asBits.payload; }
+    int32_t* tagPointer() { return &std::bit_cast<EncodedValueDescriptor*>(&m_value)->asBits.tag; }
+    int32_t* payloadPointer() { return &std::bit_cast<EncodedValueDescriptor*>(&m_value)->asBits.payload; }
 
     explicit operator bool() const { return !!get(); }
     bool operator!() const { return !get(); }
@@ -194,7 +201,7 @@ private:
 
 template <typename T, typename Traits = WriteBarrierTraitsSelect<T>>
 class WriteBarrier : public WriteBarrierBase<T, Traits> {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED_TEMPLATE(WriteBarrier);
 public:
     WriteBarrier()
     {
@@ -217,12 +224,26 @@ public:
     {
         this->setMayBeNull(vm, owner, value);
     }
+
+    WriteBarrier(T* value, WriteBarrierEarlyInitTag)
+    {
+        this->setWithoutWriteBarrier(value);
+    }
 };
 
+#define TZONE_TEMPLATE_PARAMS template <typename T, typename Traits>
+#define TZONE_TYPE WriteBarrier<T, Traits>
+
+WTF_MAKE_TZONE_ALLOCATED_TEMPLATE_IMPL_WITH_MULTIPLE_OR_SPECIALIZED_PARAMETERS();
+
+#undef TZONE_TEMPLATE_PARAMS
+#undef TZONE_TYPE
+
 enum UndefinedWriteBarrierTagType { UndefinedWriteBarrierTag };
+enum NullWriteBarrierTagType { NullWriteBarrierTag };
 template <>
 class WriteBarrier<Unknown, RawValueTraits<Unknown>> : public WriteBarrierBase<Unknown, RawValueTraits<Unknown>> {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED_TEMPLATE(WriteBarrier);
 public:
     WriteBarrier()
     {
@@ -231,6 +252,10 @@ public:
     WriteBarrier(UndefinedWriteBarrierTagType)
     {
         this->setWithoutWriteBarrier(jsUndefined());
+    }
+    WriteBarrier(NullWriteBarrierTagType)
+    {
+        this->setWithoutWriteBarrier(jsNull());
     }
 
     WriteBarrier(VM& vm, const JSCell* owner, JSValue value)
@@ -241,6 +266,11 @@ public:
     WriteBarrier(DFG::DesiredWriteBarrier&, JSValue value)
     {
         ASSERT(isCompilationThread());
+        this->setWithoutWriteBarrier(value);
+    }
+
+    WriteBarrier(JSValue value, WriteBarrierEarlyInitTag)
+    {
         this->setWithoutWriteBarrier(value);
     }
 };
@@ -270,6 +300,11 @@ public:
     WriteBarrierStructureID(VM& vm, const JSCell* owner, Structure* value, MayBeNullTag)
     {
         setMayBeNull(vm, owner, value);
+    }
+
+    WriteBarrierStructureID(Structure* value, WriteBarrierEarlyInitTag)
+    {
+        setWithoutWriteBarrier(value);
     }
 
     void set(VM&, const JSCell* owner, Structure* value);
@@ -352,3 +387,21 @@ private:
 };
 
 } // namespace JSC
+
+namespace WTF {
+
+template<typename T> struct VectorTraits<JSC::WriteBarrier<T>> : public SimpleClassVectorTraits {
+    static_assert(std::is_trivially_destructible<JSC::WriteBarrier<T>>::value);
+    static constexpr bool canCopyWithMemcpy = true;
+};
+
+template<> struct VectorTraits<JSC::WriteBarrier<JSC::Unknown>> : public SimpleClassVectorTraits {
+    static_assert(std::is_trivially_destructible<JSC::WriteBarrier<JSC::Unknown>>::value);
+#if USE(JSVALUE32_64)
+    // We can memset only in JSVALUE64 since empty value is zero. On the other hand, JSVALUE32_64's empty value is not zero.
+    static constexpr bool canInitializeWithMemset = false;
+#endif
+    static constexpr bool canCopyWithMemcpy = true;
+};
+
+} // namespace WTF

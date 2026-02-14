@@ -56,7 +56,7 @@ namespace WTF {
 
 class CountingLock final {
     WTF_MAKE_NONCOPYABLE(CountingLock);
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(CountingLock);
 
     typedef unsigned LockType;
 
@@ -89,13 +89,13 @@ public:
 
     void lock()
     {
-        if (UNLIKELY(!ExclusiveAlgorithm::lockFast(m_word)))
+        if (!ExclusiveAlgorithm::lockFast(m_word)) [[unlikely]]
             lockSlow();
     }
 
     void unlock()
     {
-        if (UNLIKELY(!ExclusiveAlgorithm::unlockFast(m_word)))
+        if (!ExclusiveAlgorithm::unlockFast(m_word)) [[unlikely]]
             unlockSlow();
     }
 
@@ -115,8 +115,7 @@ public:
     public:
         explicit operator bool() const { return !!m_value; }
 
-        bool operator==(const Count& other) const { return m_value == other.m_value; }
-        bool operator!=(const Count& other) const { return m_value != other.m_value; }
+        friend bool operator==(const Count&, const Count&) = default;
 
     private:
         friend class CountingLock;

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2025 Samuel Weinig <sam@webkit.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,12 +26,12 @@
 
 #pragma once
 
-#if ENABLE(LAYOUT_FORMATTING_CONTEXT)
-
 #include "FontCascade.h"
 #include "InlineRect.h"
 #include "LayoutBox.h"
 #include "LayoutUnits.h"
+#include "LengthFunctions.h"
+#include "StyleTextEdge.h"
 #include <wtf/OptionSet.h>
 
 namespace WebCore {
@@ -42,51 +43,66 @@ class LineBoxVerticalAligner;
 
 class InlineLevelBox {
 public:
-    enum class LineSpanningInlineBox { Yes, No };
-    static InlineLevelBox createInlineBox(const Box&, const RenderStyle&, InlineLayoutUnit logicalLeft, InlineLayoutUnit logicalWidth, LineSpanningInlineBox = LineSpanningInlineBox::No);
-    static InlineLevelBox createAtomicInlineLevelBox(const Box&, const RenderStyle&, InlineLayoutUnit logicalLeft, InlineLayoutSize);
-    static InlineLevelBox createLineBreakBox(const Box&, const RenderStyle&, InlineLayoutUnit logicalLeft);
-    static InlineLevelBox createGenericInlineLevelBox(const Box&, const RenderStyle&, InlineLayoutUnit logicalLeft);
+    enum class LineSpanningInlineBox : bool { No, Yes };
+    static inline InlineLevelBox createInlineBox(const Box&, const RenderStyle&, InlineLayoutUnit logicalLeft, InlineLayoutUnit logicalWidth, LineSpanningInlineBox = LineSpanningInlineBox::No);
+    static inline InlineLevelBox createRootInlineBox(const Box&, const RenderStyle&, InlineLayoutUnit logicalLeft, InlineLayoutUnit logicalWidth);
+    static inline InlineLevelBox createAtomicInlineBox(const Box&, const RenderStyle&, InlineLayoutUnit logicalLeft, InlineLayoutUnit logicalWidth);
+    static inline InlineLevelBox createLineBreakBox(const Box&, const RenderStyle&, InlineLayoutUnit logicalLeft);
+    static inline InlineLevelBox createGenericInlineLevelBox(const Box&, const RenderStyle&, InlineLayoutUnit logicalLeft);
 
-    InlineLayoutUnit ascent() const { return m_ascent; }
-    std::optional<InlineLayoutUnit> descent() const { return m_descent; }
-    // See https://www.w3.org/TR/css-inline-3/#layout-bounds
-    struct LayoutBounds {
-        InlineLayoutUnit height() const { return ascent + descent; }
-        bool operator==(const LayoutBounds& other) const { return ascent == other.ascent && descent == other.descent; }
-
+    struct AscentAndDescent {
         InlineLayoutUnit ascent { 0 };
         InlineLayoutUnit descent { 0 };
+
+        InlineLayoutUnit height() const { return ascent + descent; }
+        friend bool operator==(const AscentAndDescent&, const AscentAndDescent&) = default;
+        // FIXME: Remove this.
+        // We need floor/ceil to match legacy layout integral positioning.
+        void round();
     };
-    LayoutBounds layoutBounds() const { return m_layoutBounds; }
+    InlineLayoutUnit ascent() const { return m_ascentAndDescent.ascent; }
+    InlineLayoutUnit descent() const { return m_ascentAndDescent.descent; }
+    // See https://www.w3.org/TR/css-inline-3/#layout-bounds
+    AscentAndDescent layoutBounds() const { return m_layoutBounds; }
 
     bool hasContent() const { return m_hasContent; }
     void setHasContent();
 
-    struct VerticalAlignment {
-        VerticalAlign type { VerticalAlign::Baseline };
-        std::optional<InlineLayoutUnit> baselineOffset;
-    };
-    VerticalAlignment verticalAlign() const;
+    using VerticalAlignment = Variant<CSS::Keyword::Baseline, CSS::Keyword::Sub, CSS::Keyword::Super, CSS::Keyword::Top, CSS::Keyword::TextTop, CSS::Keyword::Middle, CSS::Keyword::Bottom, CSS::Keyword::TextBottom, CSS::Keyword::WebkitBaselineMiddle, InlineLayoutUnit>;
+    const VerticalAlignment& verticalAlign() const { return m_style.verticalAlignment; }
+    bool hasLineBoxRelativeAlignment() const;
+
     InlineLayoutUnit preferredLineHeight() const;
-    bool isPreferredLineHeightFontMetricsBased() const;
-    const FontMetrics& primarymetricsOfPrimaryFont() const;
-    InlineLayoutUnit fontSize() const;
+    bool isPreferredLineHeightFontMetricsBased() const { return m_style.lineHeight.isNormal(); }
+
+    inline bool mayStretchLineBox() const;
+
+    const FontMetrics& primarymetricsOfPrimaryFont() const { return m_style.primaryFontMetrics; }
+    InlineLayoutUnit fontSize() const { return m_style.primaryFontSize; }
+
+    TextBoxTrim textBoxTrim() const { return m_style.textBoxTrim; }
+    TextEdge textBoxEdge() const { return m_style.textBoxEdge; }
+    TextEdge lineFitEdge() const { return m_style.lineFitEdge; }
+    InlineLayoutUnit inlineBoxContentOffsetForTextBoxTrim() const { return m_inlineBoxContentOffsetForTextBoxTrim; }
+
+    bool hasTextEmphasis() const { return (hasContent() || isAtomicInlineBox()) && m_textEmphasis.has_value(); };
+    std::optional<InlineLayoutUnit> textEmphasisAbove() const { return hasTextEmphasis() ? std::optional { m_textEmphasis->above } : std::nullopt; }
+    std::optional<InlineLayoutUnit> textEmphasisBelow() const { return hasTextEmphasis() ? std::optional { m_textEmphasis->below } : std::nullopt; }
 
     bool isInlineBox() const { return m_type == Type::InlineBox || isRootInlineBox() || isLineSpanningInlineBox(); }
     bool isRootInlineBox() const { return m_type == Type::RootInlineBox; }
     bool isLineSpanningInlineBox() const { return m_type == Type::LineSpanningInlineBox; }
-    bool isAtomicInlineLevelBox() const { return m_type == Type::AtomicInlineLevelBox; }
+    bool isAtomicInlineBox() const { return m_type == Type::AtomicInlineBox; }
+    bool isListMarker() const { return isAtomicInlineBox() && layoutBox().isListMarkerBox(); }
     bool isLineBreakBox() const { return m_type == Type::LineBreakBox; }
-    bool hasLineBoxRelativeAlignment() const;
 
     enum class Type : uint8_t {
         InlineBox             = 1 << 0,
         LineSpanningInlineBox = 1 << 1,
-        RootInlineBox         = 1 << 1,
-        AtomicInlineLevelBox  = 1 << 2,
-        LineBreakBox          = 1 << 3,
-        GenericInlineLevelBox = 1 << 4
+        RootInlineBox         = 1 << 2,
+        AtomicInlineBox       = 1 << 3,
+        LineBreakBox          = 1 << 4,
+        GenericInlineLevelBox = 1 << 5
     };
     Type type() const { return m_type; }
 
@@ -106,32 +122,38 @@ private:
     friend class LineBox;
     friend class LineBoxBuilder;
     friend class LineBoxVerticalAligner;
+    friend class InlineFormattingUtils;
+    friend class RubyFormattingContext;
 
     const InlineRect& logicalRect() const { return m_logicalRect; }
     InlineLayoutUnit logicalTop() const { return m_logicalRect.top(); }
     InlineLayoutUnit logicalBottom() const { return m_logicalRect.bottom(); }
     InlineLayoutUnit logicalLeft() const { return m_logicalRect.left(); }
+    InlineLayoutUnit logicalRight() const { return m_logicalRect.right(); }
     InlineLayoutUnit logicalWidth() const { return m_logicalRect.width(); }
     InlineLayoutUnit logicalHeight() const { return m_logicalRect.height(); }
 
     // FIXME: Remove legacy rounding.
     void setLogicalWidth(InlineLayoutUnit logicalWidth) { m_logicalRect.setWidth(logicalWidth); }
-    void setLogicalHeight(InlineLayoutUnit logicalHeight) { m_logicalRect.setHeight(roundToInt(logicalHeight)); }
-    void setLogicalTop(InlineLayoutUnit logicalTop) { m_logicalRect.setTop(roundToInt(logicalTop)); }
-    void setAscent(InlineLayoutUnit ascent) { m_ascent = roundToInt(ascent); }
-    void setDescent(InlineLayoutUnit descent) { m_descent = roundToInt(descent); }
-    void setLayoutBounds(const LayoutBounds& layoutBounds) { m_layoutBounds = { InlineLayoutUnit(roundToInt(layoutBounds.ascent)), InlineLayoutUnit(roundToInt(layoutBounds.descent)) }; }
+    void setLogicalHeight(InlineLayoutUnit logicalHeight) { m_logicalRect.setHeight(logicalHeight); }
+    void setLogicalTop(InlineLayoutUnit logicalTop) { m_logicalRect.setTop(logicalTop); }
+    void setLogicalLeft(InlineLayoutUnit logicalLeft) { m_logicalRect.setLeft(logicalLeft); }
+    void setAscentAndDescent(AscentAndDescent ascentAndDescent) { m_ascentAndDescent = ascentAndDescent; }
+    void setLayoutBounds(const AscentAndDescent& layoutBounds) { m_layoutBounds = layoutBounds; }
+    void setInlineBoxContentOffsetForTextBoxTrim(InlineLayoutUnit offset) { m_inlineBoxContentOffsetForTextBoxTrim = offset; }
 
     void setIsFirstBox() { m_isFirstWithinLayoutBox = true; }
     void setIsLastBox() { m_isLastWithinLayoutBox = true; }
+
+    void setTextEmphasis(std::pair<InlineLayoutUnit, InlineLayoutUnit>);
 
 private:
     CheckedRef<const Box> m_layoutBox;
     // This is the combination of margin and border boxes. Inline level boxes are vertically aligned using their margin boxes.
     InlineRect m_logicalRect;
-    LayoutBounds m_layoutBounds;
-    InlineLayoutUnit m_ascent { 0 };
-    std::optional<InlineLayoutUnit> m_descent;
+    AscentAndDescent m_layoutBounds;
+    AscentAndDescent m_ascentAndDescent;
+    InlineLayoutUnit m_inlineBoxContentOffsetForTextBoxTrim { 0.f };
     bool m_hasContent { false };
     // These bits are about whether this inline level box is the first/last generated box of the associated Layout::Box
     // (e.g. always true for atomic inline level boxes, but inline boxes spanning over multiple lines can produce separate first/last boxes).
@@ -142,25 +164,21 @@ private:
     struct Style {
         const FontMetrics& primaryFontMetrics;
         const Length& lineHeight;
+        TextBoxTrim textBoxTrim;
+        TextEdge textBoxEdge;
+        TextEdge lineFitEdge;
+        OptionSet<WebCore::Style::LineBoxContain> lineBoxContain;
         InlineLayoutUnit primaryFontSize { 0 };
         VerticalAlignment verticalAlignment { };
     };
     Style m_style;
+
+    struct TextEmphasis {
+        InlineLayoutUnit above;
+        InlineLayoutUnit below;
+    };
+    std::optional<TextEmphasis> m_textEmphasis;
 };
-
-inline InlineLevelBox::InlineLevelBox(const Box& layoutBox, const RenderStyle& style, InlineLayoutUnit logicalLeft, InlineLayoutSize logicalSize, Type type, OptionSet<PositionWithinLayoutBox> positionWithinLayoutBox)
-    : m_layoutBox(layoutBox)
-    , m_logicalRect({ }, logicalLeft, logicalSize.width(), logicalSize.height())
-    , m_isFirstWithinLayoutBox(positionWithinLayoutBox.contains(PositionWithinLayoutBox::First))
-    , m_isLastWithinLayoutBox(positionWithinLayoutBox.contains(PositionWithinLayoutBox::Last))
-    , m_type(type)
-    , m_style({ style.fontCascade().metricsOfPrimaryFont(), style.lineHeight(), InlineLayoutUnit(style.fontCascade().fontDescription().computedPixelSize()), { } })
-{
-    m_style.verticalAlignment.type = style.verticalAlign();
-    if (m_style.verticalAlignment.type == VerticalAlign::Length)
-        m_style.verticalAlignment.baselineOffset = floatValueForLength(style.verticalAlignLength(), preferredLineHeight());
-
-}
 
 inline void InlineLevelBox::setHasContent()
 {
@@ -170,62 +188,25 @@ inline void InlineLevelBox::setHasContent()
 
 inline InlineLayoutUnit InlineLevelBox::preferredLineHeight() const
 {
-    // FIXME: Remove integral flooring when legacy line layout stops using it.
     if (isPreferredLineHeightFontMetricsBased())
         return primarymetricsOfPrimaryFont().lineSpacing();
 
     if (m_style.lineHeight.isPercentOrCalculated())
-        return floorf(minimumValueForLength(m_style.lineHeight, fontSize()));
-    return floorf(m_style.lineHeight.value());
-}
-
-inline InlineLevelBox::VerticalAlignment InlineLevelBox::verticalAlign() const
-{
-    return m_style.verticalAlignment;
+        return minimumValueForLength(m_style.lineHeight, fontSize());
+    return m_style.lineHeight.value();
 }
 
 inline bool InlineLevelBox::hasLineBoxRelativeAlignment() const
 {
-    auto verticalAlignment = verticalAlign().type;
-    return verticalAlignment == VerticalAlign::Top || verticalAlignment == VerticalAlign::Bottom;
+    return WTF::holdsAlternative<CSS::Keyword::Top>(m_style.verticalAlignment)
+        || WTF::holdsAlternative<CSS::Keyword::Bottom>(m_style.verticalAlignment);
 }
 
-inline bool InlineLevelBox::isPreferredLineHeightFontMetricsBased() const
+inline void InlineLevelBox::AscentAndDescent::round()
 {
-    return m_style.lineHeight.isNegative();
-}
-
-inline const FontMetrics& InlineLevelBox::primarymetricsOfPrimaryFont() const
-{
-    return m_style.primaryFontMetrics;
-}
-
-inline InlineLayoutUnit InlineLevelBox::fontSize() const
-{
-    return m_style.primaryFontSize;
-}
-
-inline InlineLevelBox InlineLevelBox::createAtomicInlineLevelBox(const Box& layoutBox, const RenderStyle& style, InlineLayoutUnit logicalLeft, InlineLayoutSize logicalSize)
-{
-    return InlineLevelBox { layoutBox, style, logicalLeft, logicalSize, Type::AtomicInlineLevelBox };
-}
-
-inline InlineLevelBox InlineLevelBox::createInlineBox(const Box& layoutBox, const RenderStyle& style, InlineLayoutUnit logicalLeft, InlineLayoutUnit logicalWidth, LineSpanningInlineBox isLineSpanning)
-{
-    return InlineLevelBox { layoutBox, style, logicalLeft, InlineLayoutSize { logicalWidth, { } }, isLineSpanning == LineSpanningInlineBox::Yes ? Type::LineSpanningInlineBox : Type::InlineBox, { } };
-}
-
-inline InlineLevelBox InlineLevelBox::createLineBreakBox(const Box& layoutBox, const RenderStyle& style, InlineLayoutUnit logicalLeft)
-{
-    return InlineLevelBox { layoutBox, style, logicalLeft, InlineLayoutSize { }, Type::LineBreakBox };
-}
-
-inline InlineLevelBox InlineLevelBox::createGenericInlineLevelBox(const Box& layoutBox, const RenderStyle& style, InlineLayoutUnit logicalLeft)
-{
-    return InlineLevelBox { layoutBox, style, logicalLeft, InlineLayoutSize { }, Type::GenericInlineLevelBox };
+    ascent = floorf(ascent);
+    descent = ceilf(descent);
 }
 
 }
 }
-
-#endif

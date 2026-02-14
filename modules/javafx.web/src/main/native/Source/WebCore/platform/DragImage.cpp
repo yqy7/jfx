@@ -26,15 +26,16 @@
 #include "config.h"
 #include "DragImage.h"
 
-#include "Frame.h"
+#include "BitmapImage.h"
 #include "FrameSnapshotting.h"
-#include "FrameView.h"
 #include "ImageBuffer.h"
+#include "LocalFrameInlines.h"
+#include "LocalFrameView.h"
 #include "NotImplemented.h"
 #include "Position.h"
 #include "RenderElement.h"
+#include "RenderSelection.h"
 #include "RenderView.h"
-#include "SelectionRangeData.h"
 #include "SimpleRange.h"
 #include "TextIndicator.h"
 
@@ -79,12 +80,12 @@ DragImageRef fitDragImageToMaxSize(DragImageRef image, const IntSize& layoutSize
 }
 
 struct ScopedNodeDragEnabler {
-    ScopedNodeDragEnabler(Frame& frame, Node& node)
+    ScopedNodeDragEnabler(LocalFrame& frame, Node& node)
         : element(dynamicDowncast<Element>(node))
     {
         if (element)
             element->setBeingDragged(true);
-        frame.document()->updateLayout();
+        frame.protectedDocument()->updateLayout();
     }
 
     ~ScopedNodeDragEnabler()
@@ -103,39 +104,42 @@ static DragImageRef createDragImageFromSnapshot(RefPtr<ImageBuffer> snapshot, No
 
     ImageOrientation orientation;
     if (node) {
-        RenderObject* renderer = node->renderer();
-        if (!renderer || !is<RenderElement>(renderer))
+        auto* elementRenderer = dynamicDowncast<RenderElement>(node->renderer());
+        if (!elementRenderer)
             return nullptr;
 
-        orientation = downcast<RenderElement>(*renderer).imageOrientation();
+        orientation = elementRenderer->imageOrientation();
     }
 
-    RefPtr<Image> image = ImageBuffer::sinkIntoImage(WTFMove(snapshot), PreserveResolution::Yes);
+    auto image = BitmapImage::create(ImageBuffer::sinkIntoNativeImage(WTFMove(snapshot)));
     if (!image)
         return nullptr;
     return createDragImageFromImage(image.get(), orientation);
 }
 
-DragImageRef createDragImageForNode(Frame& frame, Node& node)
+DragImageRef createDragImageForNode(LocalFrame& frame, Node& node)
 {
     ScopedNodeDragEnabler enableDrag(frame, node);
-    return createDragImageFromSnapshot(snapshotNode(frame, node, { { }, PixelFormat::BGRA8, DestinationColorSpace::SRGB() }), &node);
+
+    SnapshotOptions options { { SnapshotFlags::DraggableElement }, ImageBufferPixelFormat::BGRA8, DestinationColorSpace::SRGB() };
+
+    return createDragImageFromSnapshot(snapshotNode(frame, node, WTFMove(options)), &node);
 }
 
 #if !PLATFORM(IOS_FAMILY) || !ENABLE(DRAG_SUPPORT)
 
-DragImageRef createDragImageForSelection(Frame& frame, TextIndicatorData&, bool forceBlackText)
+DragImageData createDragImageForSelection(LocalFrame& frame, bool forceBlackText)
 {
-    SnapshotOptions options { { }, PixelFormat::BGRA8, DestinationColorSpace::SRGB() };
+    SnapshotOptions options { { }, ImageBufferPixelFormat::BGRA8, DestinationColorSpace::SRGB() };
     if (forceBlackText)
         options.flags.add(SnapshotFlags::ForceBlackText);
-    return createDragImageFromSnapshot(snapshotSelection(frame, WTFMove(options)), nullptr);
+    return { createDragImageFromSnapshot(snapshotSelection(frame, WTFMove(options)), nullptr), nullptr };
 }
 
 #endif
 
 struct ScopedFrameSelectionState {
-    ScopedFrameSelectionState(Frame& frame)
+    ScopedFrameSelectionState(LocalFrame& frame)
         : frame(frame)
     {
         if (auto* renderView = frame.contentRenderer())
@@ -144,21 +148,21 @@ struct ScopedFrameSelectionState {
 
     ~ScopedFrameSelectionState()
     {
-        if (auto* renderView = frame.contentRenderer()) {
+        if (auto* renderView = frame->contentRenderer()) {
             ASSERT(selection);
-            renderView->selection().set(selection.value(), SelectionRangeData::RepaintMode::Nothing);
+            renderView->selection().set(selection.value(), RenderSelection::RepaintMode::Nothing);
         }
     }
 
-    const Frame& frame;
+    const WeakRef<LocalFrame> frame;
     std::optional<RenderRange> selection;
 };
 
 #if !PLATFORM(IOS_FAMILY)
 
-DragImageRef createDragImageForRange(Frame& frame, const SimpleRange& range, bool forceBlackText)
+DragImageRef createDragImageForRange(LocalFrame& frame, const SimpleRange& range, bool forceBlackText)
 {
-    frame.document()->updateLayout();
+    frame.protectedDocument()->updateLayout();
     RenderView* view = frame.contentRenderer();
     if (!view)
         return nullptr;
@@ -184,14 +188,14 @@ DragImageRef createDragImageForRange(Frame& frame, const SimpleRange& range, boo
     if (!startRenderer || !endRenderer)
         return nullptr;
 
-    SnapshotOptions options { { SnapshotFlags::PaintSelectionOnly }, PixelFormat::BGRA8, DestinationColorSpace::SRGB() };
+    SnapshotOptions options { { SnapshotFlags::PaintSelectionOnly }, ImageBufferPixelFormat::BGRA8, DestinationColorSpace::SRGB() };
     if (forceBlackText)
         options.flags.add(SnapshotFlags::ForceBlackText);
 
     int startOffset = start.deprecatedEditingOffset();
     int endOffset = end.deprecatedEditingOffset();
     ASSERT(startOffset >= 0 && endOffset >= 0);
-    view->selection().set({ startRenderer, endRenderer, static_cast<unsigned>(startOffset), static_cast<unsigned>(endOffset) }, SelectionRangeData::RepaintMode::Nothing);
+    view->selection().set({ startRenderer, endRenderer, static_cast<unsigned>(startOffset), static_cast<unsigned>(endOffset) }, RenderSelection::RepaintMode::Nothing);
     // We capture using snapshotFrameRect() because we fake up the selection using
     // FrameView but snapshotSelection() uses the selection from the Frame itself.
     return createDragImageFromSnapshot(snapshotFrameRect(frame, view->selection().boundsClippedToVisibleContent(), WTFMove(options)), nullptr);
@@ -199,7 +203,7 @@ DragImageRef createDragImageForRange(Frame& frame, const SimpleRange& range, boo
 
 #endif
 
-DragImageRef createDragImageForImage(Frame& frame, Node& node, IntRect& imageRect, IntRect& elementRect)
+DragImageRef createDragImageForImage(LocalFrame& frame, Node& node, IntRect& imageRect, IntRect& elementRect)
 {
     ScopedNodeDragEnabler enableDrag(frame, node);
 
@@ -217,7 +221,9 @@ DragImageRef createDragImageForImage(Frame& frame, Node& node, IntRect& imageRec
     elementRect = snappedIntRect(topLevelRect);
     imageRect = paintingRect;
 
-    return createDragImageFromSnapshot(snapshotNode(frame, node, { { }, PixelFormat::BGRA8, DestinationColorSpace::SRGB() }), &node);
+    SnapshotOptions options { { SnapshotFlags::DraggableElement }, ImageBufferPixelFormat::BGRA8, DestinationColorSpace::SRGB() };
+
+    return createDragImageFromSnapshot(snapshotNode(frame, node, WTFMove(options)), &node);
 }
 
 #if !PLATFORM(IOS_FAMILY) || !ENABLE(DRAG_SUPPORT)
@@ -256,9 +262,9 @@ DragImage::DragImage(DragImageRef dragImageRef)
 
 DragImage::DragImage(DragImage&& other)
     : m_dragImageRef { std::exchange(other.m_dragImageRef, nullptr) }
+    , m_textIndicator { WTFMove(other.m_textIndicator) }
+    , m_visiblePath { WTFMove(other.m_visiblePath) }
 {
-    m_indicatorData = other.m_indicatorData;
-    m_visiblePath = other.m_visiblePath;
 }
 
 DragImage& DragImage::operator=(DragImage&& other)
@@ -267,8 +273,8 @@ DragImage& DragImage::operator=(DragImage&& other)
         deleteDragImage(m_dragImageRef);
 
     m_dragImageRef = std::exchange(other.m_dragImageRef, nullptr);
-    m_indicatorData = other.m_indicatorData;
-    m_visiblePath = other.m_visiblePath;
+    m_textIndicator = WTFMove(other.m_textIndicator);
+    m_visiblePath = WTFMove(other.m_visiblePath);
 
     return *this;
 }
@@ -279,7 +285,7 @@ DragImage::~DragImage()
         deleteDragImage(m_dragImageRef);
 }
 
-#if !PLATFORM(COCOA) && !PLATFORM(GTK) && !PLATFORM(WIN) && !PLATFORM(JAVA)
+#if !PLATFORM(COCOA) && !PLATFORM(GTK) && !PLATFORM(WIN) && !(PLATFORM(WPE) && ENABLE(DRAG_SUPPORT) && USE(SKIA)) && !PLATFORM(JAVA)
 
 IntSize dragImageSize(DragImageRef)
 {
@@ -304,7 +310,13 @@ DragImageRef dissolveDragImageToFraction(DragImageRef, float)
     return nullptr;
 }
 
-DragImageRef createDragImageFromImage(Image*, ImageOrientation)
+DragImageRef createDragImageForColor(const Color&, const FloatRect&, float, Path&)
+{
+    notImplemented();
+    return nullptr;
+}
+
+DragImageRef createDragImageFromImage(Image*, ImageOrientation, GraphicsClient*, float)
 {
     notImplemented();
     return nullptr;
@@ -316,10 +328,10 @@ DragImageRef createDragImageIconForCachedImageFilename(const String&)
     return nullptr;
 }
 
-DragImageRef createDragImageForLink(Element&, URL&, const String&, TextIndicatorData&, FontRenderingMode, float)
+DragImageData createDragImageForLink(Element&, URL&, const String&, float)
 {
     notImplemented();
-    return nullptr;
+    return  { nullptr, nullptr };
 }
 
 #endif

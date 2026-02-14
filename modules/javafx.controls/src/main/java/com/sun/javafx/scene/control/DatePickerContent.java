@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -87,9 +87,9 @@ public class DatePickerContent extends VBox {
     protected GridPane gridPane;
 
     private int daysPerWeek;
-    private List<DateCell> dayNameCells = new ArrayList<DateCell>();
-    private List<DateCell> weekNumberCells = new ArrayList<DateCell>();
-    protected List<DateCell> dayCells = new ArrayList<DateCell>();
+    private List<DateCell> dayNameCells = new ArrayList<>();
+    private List<DateCell> weekNumberCells = new ArrayList<>();
+    protected List<DateCell> dayCells = new ArrayList<>();
     private LocalDate[] dayCellDates;
     private DateCell lastFocusedDayCell = null;
 
@@ -141,7 +141,7 @@ public class DatePickerContent extends VBox {
             @Override protected double computePrefWidth(double height) {
                 final double width = super.computePrefWidth(height);
 
-                // RT-30903: Make sure width snaps to pixel when divided by
+                // JDK-8123555: Make sure width snaps to pixel when divided by
                 // number of columns. GridPane doesn't do this with percentage
                 // width constraints. See GridPane.adjustColumnWidths().
                 final int nCols = daysPerWeek + (datePicker.isShowWeekNumbers() ? 1 : 0);
@@ -167,7 +167,7 @@ public class DatePickerContent extends VBox {
 
         // Add a focus owner listener to Scene when it becomes available.
         final WeakChangeListener<Node> weakFocusOwnerListener =
-            new WeakChangeListener<Node>((ov2, oldFocusOwner, newFocusOwner) -> {
+            new WeakChangeListener<>((ov2, oldFocusOwner, newFocusOwner) -> {
                 if (newFocusOwner == gridPane) {
                     if (oldFocusOwner instanceof DateCell) {
                         // Backwards traversal, skip gridPane.
@@ -220,7 +220,7 @@ public class DatePickerContent extends VBox {
 
         refresh();
 
-        // RT-30511: This prevents key events from reaching the popup's owner.
+        // JDK-8118350: This prevents key events from reaching the popup's owner.
         addEventHandler(KeyEvent.ANY, e -> {
             Node node = getScene().getFocusOwner();
             if (node instanceof DateCell) {
@@ -292,7 +292,7 @@ public class DatePickerContent extends VBox {
     }
 
     private ObjectProperty<YearMonth> displayedYearMonth =
-        new SimpleObjectProperty<YearMonth>(this, "displayedYearMonth");
+        new SimpleObjectProperty<>(this, "displayedYearMonth");
 
     public ObjectProperty<YearMonth> displayedYearMonthProperty() {
         return displayedYearMonth;
@@ -464,7 +464,7 @@ public class DatePickerContent extends VBox {
         int firstOfMonthIdx = determineFirstOfMonthDayOfWeek();
         YearMonth curMonth = displayedYearMonth.get();
 
-        // RT-31075: The following are now set in the try-catch block.
+        // JDK-8096176: The following are now set in the try-catch block.
         YearMonth prevMonth = null;
         YearMonth nextMonth = null;
         int daysInCurMonth = -1;
@@ -718,7 +718,7 @@ public class DatePickerContent extends VBox {
             backMonthButton.requestFocus();
         }
 
-        // RT-31857
+        // JDK-8123621
         if (backMonthButton.getWidth() == 0) {
             backMonthButton.requestLayout();
             forwardMonthButton.requestLayout();

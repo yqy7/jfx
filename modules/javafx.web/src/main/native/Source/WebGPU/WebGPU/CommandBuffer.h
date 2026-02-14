@@ -27,32 +27,82 @@
 
 #import <wtf/FastMalloc.h>
 #import <wtf/Ref.h>
-#import <wtf/RefCounted.h>
+#import <wtf/RefCountedAndCanMakeWeakPtr.h>
+#import <wtf/RetainReleaseSwift.h>
+#import <wtf/TZoneMalloc.h>
+#import <wtf/WeakPtr.h>
+#import <wtf/threads/BinarySemaphore.h>
+
+struct WGPUCommandBufferImpl {
+};
 
 namespace WebGPU {
 
-class CommandBuffer : public RefCounted<CommandBuffer> {
-    WTF_MAKE_FAST_ALLOCATED;
+class CommandEncoder;
+class Device;
+
+// https://gpuweb.github.io/gpuweb/#gpucommandbuffer
+class CommandBuffer : public ThreadSafeRefCountedAndCanMakeThreadSafeWeakPtr<CommandBuffer>, public WGPUCommandBufferImpl {
+    WTF_MAKE_TZONE_ALLOCATED(CommandBuffer);
 public:
-    static Ref<CommandBuffer> create(id <MTLCommandBuffer> commandBuffer)
+    static Ref<CommandBuffer> create(id<MTLCommandBuffer> commandBuffer, Device& device, id<MTLSharedEvent> sharedEvent, uint64_t sharedEventSignalValue, Vector<Function<bool(CommandBuffer&, CommandEncoder&)>>&& onCommitHandlers, CommandEncoder& commandEncoder)
     {
-        return adoptRef(*new CommandBuffer(commandBuffer));
+        return adoptRef(*new CommandBuffer(commandBuffer, device, sharedEvent, sharedEventSignalValue, WTFMove(onCommitHandlers), commandEncoder));
+    }
+    static Ref<CommandBuffer> createInvalid(Device& device)
+    {
+        return adoptRef(*new CommandBuffer(device));
     }
 
     ~CommandBuffer();
 
-    void setLabel(const char*);
+    void setLabel(String&&);
 
-    id <MTLCommandBuffer> commandBuffer() const { return m_commandBuffer; }
+    bool isValid() const { return m_commandBuffer; }
+
+    id<MTLCommandBuffer> commandBuffer() const { return m_commandBuffer; }
+
+    Device& device() const { return m_device; }
+    void makeInvalid(NSString*);
+    void makeInvalidDueToCommit(NSString*);
+    void setBufferMapCount(int bufferMapCount) { m_bufferMapCount = bufferMapCount; }
+    int bufferMapCount() const { return m_bufferMapCount; }
+
+    NSString* lastError() const;
+    bool waitForCompletion();
+    bool preCommitHandler();
+    void postCommitHandler();
+    void addPostCommitHandler(Function<void(id<MTLCommandBuffer>)>&&);
 
 private:
-    CommandBuffer(id <MTLCommandBuffer>);
+    CommandBuffer(id<MTLCommandBuffer>, Device&, id<MTLSharedEvent>, uint64_t sharedEventSignalValue, Vector<Function<bool(CommandBuffer&, CommandEncoder&)>>&&, CommandEncoder&);
+    CommandBuffer(Device&);
+    void retainTimestampsForOneUpdateLoop();
 
-    id <MTLCommandBuffer> m_commandBuffer { nil };
-};
+    id<MTLCommandBuffer> m_commandBuffer { nil };
+    id<MTLCommandBuffer> m_cachedCommandBuffer { nil };
+    int m_bufferMapCount { 0 };
+
+    const Ref<Device> m_device;
+    NSString* m_lastErrorString { nil };
+    id<MTLSharedEvent> m_sharedEvent { nil };
+    Vector<Function<bool(CommandBuffer&, CommandEncoder&)>> m_preCommitHandlers;
+    Vector<Function<void(id<MTLCommandBuffer>)>> m_postCommitHandlers;
+    const uint64_t m_sharedEventSignalValue { 0 };
+    // FIXME: we should not need this semaphore - https://bugs.webkit.org/show_bug.cgi?id=272353
+    BinarySemaphore m_commandBufferComplete;
+    RefPtr<CommandEncoder> m_commandEncoder;
+// FIXME: remove @safe once rdar://151039766 lands
+} __attribute__((swift_attr("@safe"))) SWIFT_SHARED_REFERENCE(refCommandBuffer, derefCommandBuffer);
 
 } // namespace WebGPU
 
-struct WGPUCommandBufferImpl {
-    Ref<WebGPU::CommandBuffer> commandBuffer;
-};
+inline void refCommandBuffer(WebGPU::CommandBuffer* obj)
+{
+    WTF::ref(obj);
+}
+
+inline void derefCommandBuffer(WebGPU::CommandBuffer* obj)
+{
+    WTF::deref(obj);
+}

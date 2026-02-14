@@ -22,7 +22,9 @@
 #pragma once
 
 #include "JSDOMGlobalObject.h"
+#include <wtf/Compiler.h>
 #include <wtf/Forward.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
@@ -30,7 +32,7 @@ class WindowProxy;
 
 typedef HashMap<void*, JSC::Weak<JSC::JSObject>> DOMObjectWrapperMap;
 
-class DOMWrapperWorld : public RefCounted<DOMWrapperWorld> {
+class DOMWrapperWorld : public RefCounted<DOMWrapperWorld>, public CanMakeSingleThreadWeakPtr<DOMWrapperWorld> {
 public:
     enum class Type {
         Normal,   // Main (e.g. Page)
@@ -50,8 +52,22 @@ public:
     void didCreateWindowProxy(WindowProxy* controller) { m_jsWindowProxies.add(controller); }
     void didDestroyWindowProxy(WindowProxy* controller) { m_jsWindowProxies.remove(controller); }
 
+    void setAllowAutofill() { m_allowAutofill = true; }
+    bool allowAutofill() const { return m_allowAutofill; }
+
+    void setNodeInfoEnabled() { m_nodeInfoEnabled = true; }
+    bool nodeInfoEnabled() const { return m_nodeInfoEnabled; }
+
+    void setAllowElementUserInfo() { m_allowElementUserInfo = true; }
+    bool allowElementUserInfo() const { return m_allowElementUserInfo; }
+
+    bool canAccessAnyShadowRoot() const { return shadowRootIsAlwaysOpen() || closedShadowRootIsExposedForExtensions(); }
+
     void setShadowRootIsAlwaysOpen() { m_shadowRootIsAlwaysOpen = true; }
     bool shadowRootIsAlwaysOpen() const { return m_shadowRootIsAlwaysOpen; }
+
+    void setClosedShadowRootIsExposedForExtensions() { m_closedShadowRootIsExposedForExtensions = true; }
+    bool closedShadowRootIsExposedForExtensions() const { return m_closedShadowRootIsExposedForExtensions; }
 
     void disableLegacyOverrideBuiltInsBehavior() { m_shouldDisableLegacyOverrideBuiltInsBehavior = true; }
     bool shouldDisableLegacyOverrideBuiltInsBehavior() const { return m_shouldDisableLegacyOverrideBuiltInsBehavior; }
@@ -60,6 +76,7 @@ public:
 
     Type type() const { return m_type; }
     bool isNormal() const { return m_type == Type::Normal; }
+    bool isUser() const { return m_type == Type::User; }
 
     const String& name() const { return m_name; }
 
@@ -76,15 +93,20 @@ private:
     String m_name;
     Type m_type { Type::Internal };
 
+    bool m_allowAutofill { false };
+    bool m_allowElementUserInfo { false };
     bool m_shadowRootIsAlwaysOpen { false };
+    bool m_closedShadowRootIsExposedForExtensions { false };
     bool m_shouldDisableLegacyOverrideBuiltInsBehavior { false };
+    bool m_nodeInfoEnabled { false };
 };
 
 DOMWrapperWorld& normalWorld(JSC::VM&);
-WEBCORE_EXPORT DOMWrapperWorld& mainThreadNormalWorld();
+WEBCORE_EXPORT DOMWrapperWorld& mainThreadNormalWorldSingleton();
+inline Ref<DOMWrapperWorld> protectedMainThreadNormalWorld() { return mainThreadNormalWorldSingleton(); }
 
-inline DOMWrapperWorld& debuggerWorld() { return mainThreadNormalWorld(); }
-inline DOMWrapperWorld& pluginWorld() { return mainThreadNormalWorld(); }
+inline DOMWrapperWorld& debuggerWorldSingleton() { return mainThreadNormalWorldSingleton(); }
+inline DOMWrapperWorld& pluginWorldSingleton() { return mainThreadNormalWorldSingleton(); }
 
 DOMWrapperWorld& currentWorld(JSC::JSGlobalObject&);
 DOMWrapperWorld& worldForDOMObject(JSC::JSObject&);

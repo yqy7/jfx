@@ -1,6 +1,6 @@
 /*
  * Copyright (C) Research In Motion Limited 2011. All rights reserved.
- * Copyright (C) 2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,7 +20,6 @@
 
 #pragma once
 
-#include "ExceptionOr.h"
 #include "FloatRect.h"
 #include "SVGLengthValue.h"
 #include "SVGUnitTypes.h"
@@ -28,17 +27,32 @@
 namespace WebCore {
 
 class SVGElement;
+class WeakPtrImplWithEventTargetData;
 
 struct Length;
+
+template<typename> class ExceptionOr;
+
+namespace Style {
+struct PreferredSize;
+struct SVGCenterCoordinateComponent;
+struct SVGCoordinateComponent;
+struct SVGRadius;
+struct SVGRadiusComponent;
+struct SVGStrokeDasharrayValue;
+struct SVGStrokeDashoffset;
+struct StrokeWidth;
+}
 
 class SVGLengthContext {
 public:
     explicit SVGLengthContext(const SVGElement*);
+    ~SVGLengthContext();
 
     template<typename T>
     static FloatRect resolveRectangle(const T* context, SVGUnitTypes::SVGUnitType type, const FloatRect& viewport)
     {
-        return SVGLengthContext::resolveRectangle(context, type, viewport, context->x(), context->y(), context->width(), context->height());
+        return resolveRectangle(context, type, viewport, context->x(), context->y(), context->width(), context->height());
     }
 
     static FloatRect resolveRectangle(const SVGElement*, SVGUnitTypes::SVGUnitType, const FloatRect& viewport, const SVGLengthValue& x, const SVGLengthValue& y, const SVGLengthValue& width, const SVGLengthValue& height);
@@ -46,25 +60,45 @@ public:
     static float resolveLength(const SVGElement*, SVGUnitTypes::SVGUnitType, const SVGLengthValue&);
 
     float valueForLength(const Length&, SVGLengthMode = SVGLengthMode::Other);
+    float valueForLength(const Style::PreferredSize&, SVGLengthMode = SVGLengthMode::Other);
+    float valueForLength(const Style::SVGCenterCoordinateComponent&, SVGLengthMode = SVGLengthMode::Other);
+    float valueForLength(const Style::SVGCoordinateComponent&, SVGLengthMode = SVGLengthMode::Other);
+    float valueForLength(const Style::SVGRadius&, SVGLengthMode = SVGLengthMode::Other);
+    float valueForLength(const Style::SVGRadiusComponent&, SVGLengthMode = SVGLengthMode::Other);
+    float valueForLength(const Style::SVGStrokeDasharrayValue&, SVGLengthMode = SVGLengthMode::Other);
+    float valueForLength(const Style::SVGStrokeDashoffset&, SVGLengthMode = SVGLengthMode::Other);
+    float valueForLength(const Style::StrokeWidth&, SVGLengthMode = SVGLengthMode::Other);
+
     ExceptionOr<float> convertValueToUserUnits(float, SVGLengthType, SVGLengthMode) const;
     ExceptionOr<float> convertValueFromUserUnits(float, SVGLengthType, SVGLengthMode) const;
 
-    bool determineViewport(FloatSize&) const;
+    std::optional<FloatSize> viewportSize() const;
 
 private:
-    SVGLengthContext(const SVGElement*, const FloatRect& viewport);
-
     ExceptionOr<float> convertValueFromUserUnitsToPercentage(float value, SVGLengthMode) const;
     ExceptionOr<float> convertValueFromPercentageToUserUnits(float value, SVGLengthMode) const;
+    static float convertValueFromPercentageToUserUnits(float value, SVGLengthMode, FloatSize);
 
-    ExceptionOr<float> convertValueFromUserUnitsToEMS(float value) const;
-    ExceptionOr<float> convertValueFromEMSToUserUnits(float value) const;
+    ExceptionOr<float> convertValueFromUserUnitsToEMS(float) const;
+    ExceptionOr<float> convertValueFromEMSToUserUnits(float) const;
 
-    ExceptionOr<float> convertValueFromUserUnitsToEXS(float value) const;
-    ExceptionOr<float> convertValueFromEXSToUserUnits(float value) const;
+    ExceptionOr<float> convertValueFromUserUnitsToEXS(float) const;
+    ExceptionOr<float> convertValueFromEXSToUserUnits(float) const;
 
-    const SVGElement* m_context;
-    FloatRect m_overriddenViewport;
+    ExceptionOr<float> convertValueFromUserUnitsToLh(float) const;
+    ExceptionOr<float> convertValueFromLhToUserUnits(float) const;
+
+    ExceptionOr<float> convertValueFromUserUnitsToCh(float) const;
+    ExceptionOr<float> convertValueFromChToUserUnits(float) const;
+
+    std::optional<FloatSize> computeViewportSize() const;
+
+    RefPtr<const SVGElement> protectedContext() const;
+
+    template<typename SizeType> float valueForSizeType(const SizeType&, SVGLengthMode = SVGLengthMode::Other);
+
+    WeakPtr<const SVGElement, WeakPtrImplWithEventTargetData> m_context;
+    mutable std::optional<FloatSize> m_viewportSize;
 };
 
 } // namespace WebCore

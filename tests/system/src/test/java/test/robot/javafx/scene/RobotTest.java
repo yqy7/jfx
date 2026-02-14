@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,13 +24,11 @@
  */
 package test.robot.javafx.scene;
 
+import static javafx.scene.paint.Color.MAGENTA;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-
-import com.sun.javafx.PlatformUtil;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.InvalidationListener;
@@ -56,20 +54,16 @@ import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.stage.WindowEvent;
-
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.Assume;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Ignore;
-import org.junit.Test;
-import junit.framework.AssertionFailedError;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.PlatformUtil;
 import test.util.Util;
-
-import static javafx.scene.paint.Color.MAGENTA;
-import static org.junit.Assert.fail;
 
 /**
  * Tests to verify that the native robot implementations all work correctly.
@@ -140,13 +134,9 @@ public class RobotTest {
         TYPED
     }
 
-    @Before
+    @BeforeEach
     public void before() {
-        double x = stage.getX() + stage.getWidth();
-        double y = stage.getY() + stage.getHeight();
-        Util.runAndWait(() -> {
-            robot.mouseMove(x,y);
-        });
+        Util.parkCursor(robot);
     }
 
     @Test
@@ -180,7 +170,7 @@ public class RobotTest {
             });
             stage.setScene(scene);
         });
-        waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
+        Util.waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
         Util.runAndWait(() -> {
             int mouseX = (int) (scene.getWindow().getX() + scene.getX() +
                     textField.getLayoutX() + textField.getLayoutBounds().getWidth() / 2);
@@ -198,53 +188,40 @@ public class RobotTest {
                     break;
             }
         });
-        waitForLatch(keyActionLatch, 5, "Timeout while waiting for textField.onKey" +
+        Util.waitForLatch(keyActionLatch, 5, "Timeout while waiting for textField.onKey" +
                 capFirst(keyAction.name()) + "().");
-        Assert.assertEquals("letter 'a' should be " + keyAction.name().toLowerCase() +
-                " by Robot", "a", textField.getText());
+        Assertions.assertEquals(
+            "a", textField.getText(),
+            "letter 'a' should be " + keyAction.name().toLowerCase() + " by Robot");
     }
 
     @Test
     public void testKeyPressThrowsISEOnWrongThread() {
-        try {
+        Assertions.assertThrows(IllegalStateException.class, () -> {
             robot.keyPress(KeyCode.A);
-        } catch (IllegalStateException e) {
-            return;
-        }
-        Assert.fail("Expected IllegalStateException");
+        });
     }
 
     @Test
     public void testKeyPressThrowsNPEForNullArgument() {
-        Util.runAndWait(() -> {
-            try {
-                robot.keyPress(null);
-            } catch (NullPointerException e) {
-                return;
-            }
-            Assert.fail("Expected NullPointerException");
+        Assertions.assertThrows(NullPointerException.class, () -> {
+            robot.keyPress(null);
         });
     }
 
     @Test
     public void testKeyReleaseThrowsISEOnWrongThread() {
-        try {
+        Assertions.assertThrows(IllegalStateException.class, () -> {
             robot.keyRelease(KeyCode.A);
-        } catch (IllegalStateException e) {
-            return;
-        }
-        Assert.fail("Expected IllegalStateException");
+        });
     }
 
     @Test
     public void testKeyReleaseThrowsNPEForNullArgument() {
         Util.runAndWait(() -> {
-            try {
+            Assertions.assertThrows(NullPointerException.class, () -> {
                 robot.keyRelease(null);
-            } catch (NullPointerException e) {
-                return;
-            }
-            Assert.fail("Expected NullPointerException");
+            });
         });
     }
 
@@ -269,7 +246,7 @@ public class RobotTest {
             });
             stage.setScene(scene);
         });
-        waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
+        Util.waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
         AtomicReference<Point2D> mousePosition = new AtomicReference<>();
         Util.runAndWait(() -> {
             if (primitiveArg) {
@@ -279,29 +256,23 @@ public class RobotTest {
             }
             mousePosition.set(robot.getMousePosition());
         });
-        Assert.assertEquals(x, (int) mousePosition.get().getX());
-        Assert.assertEquals(y, (int) mousePosition.get().getY());
+        Assertions.assertEquals(x, (int) mousePosition.get().getX());
+        Assertions.assertEquals(y, (int) mousePosition.get().getY());
     }
 
     @Test
     public void testMouseMoveThrowsISEOnWrongThread() {
-        try {
+        Assertions.assertThrows(IllegalStateException.class, () -> {
             robot.mouseMove(0, 0);
-        } catch (IllegalStateException e) {
-            return;
-        }
-        Assert.fail("Expected IllegalStateException");
+        });
     }
 
     @Test
     public void testMouseMoveThrowsNPEForNullArgument() {
         Util.runAndWait(() -> {
-            try {
+            Assertions.assertThrows(NullPointerException.class, () -> {
                 robot.mouseMove(null);
-            } catch (NullPointerException e) {
-                return;
-            }
-            Assert.fail("Expected NullPointerException");
+            });
         });
     }
 
@@ -410,7 +381,7 @@ public class RobotTest {
             });
             stage.setScene(scene);
         });
-        waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
+        Util.waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
         int mouseX = (int) (scene.getWindow().getX() + scene.getX() +
                 button.getLayoutX() + button.getLayoutBounds().getWidth() / 2);
         int mouseY = (int) (scene.getWindow().getY() + scene.getY() +
@@ -428,108 +399,91 @@ public class RobotTest {
                     break;
             }
         });
-        waitForLatch(onClickLatch, 5, "Timeout while waiting for button.onMouse" +
+        Util.waitForLatch(onClickLatch, 5, "Timeout while waiting for button.onMouse" +
                 capFirst(mouseAction.name()) + "().");
-        Assert.assertEquals(mouseButton + " mouse button should be " + mouseAction.name().toLowerCase() + " by Robot",
-                expectedText, button.getText());
+        Assertions.assertEquals(
+            expectedText, button.getText(),
+            mouseButton + " mouse button should be " + mouseAction.name().toLowerCase() + " by Robot");
     }
 
     @Test
     public void testMousePressThrowsISEOnWrongThread() {
-        try {
+        Assertions.assertThrows(IllegalStateException.class, () -> {
             robot.mousePress(MouseButton.PRIMARY);
-        } catch (IllegalStateException e) {
-            return;
-        }
-        Assert.fail("Expected IllegalStateException");
+        });
     }
 
     @Test
     public void testMousePressThrowsNPEForNullArgument() {
         Util.runAndWait(() -> {
-            try {
-                robot.mousePress(null);
-            } catch (NullPointerException e) {
-                return;
-            }
-            Assert.fail("Expected NullPointerException");
+            Assertions.assertThrows(NullPointerException.class, () -> {
+                robot.mousePress((MouseButton[])null);
+            });
         });
     }
 
     @Test
     public void testMouseReleaseThrowsISEOnWrongThread() {
-        try {
+        Assertions.assertThrows(IllegalStateException.class, () -> {
             robot.mouseRelease(MouseButton.PRIMARY);
-        } catch (IllegalStateException e) {
-            return;
-        }
-        Assert.fail("Expected IllegalStateException");
+        });
     }
 
     @Test
     public void testMouseReleaseThrowsNPEForNullArgument() {
         Util.runAndWait(() -> {
-            try {
-                robot.mouseRelease(null);
-            } catch (NullPointerException e) {
-                return;
-            }
-            Assert.fail("Expected NullPointerException");
+            Assertions.assertThrows(NullPointerException.class, () -> {
+                robot.mouseRelease((MouseButton[])null);
+            });
         });
     }
 
     @Test
     public void testMouseClickThrowsISEOnWrongThread() {
-        try {
+        Assertions.assertThrows(IllegalStateException.class, () -> {
             robot.mouseClick(MouseButton.PRIMARY);
-        } catch (IllegalStateException e) {
-            return;
-        }
-        Assert.fail("Expected IllegalStateException");
+        });
     }
 
     @Test
     public void testMouseClickThrowsNPEForNullArgument() {
         Util.runAndWait(() -> {
-            try {
-                robot.mouseClick(null);
-            } catch (NullPointerException e) {
-                return;
-            }
-            Assert.fail("Expected NullPointerException");
+            Assertions.assertThrows(NullPointerException.class, () -> {
+                robot.mouseClick((MouseButton[])null);
+            });
         });
     }
 
     @Test
-    @Ignore("Flaky - see JDK-8215376")
+    @Disabled("Flaky - see JDK-8215376")
     public void testMouseDragPrimary() {
         testMouseDrag(MouseButton.PRIMARY);
     }
 
     @Test
-    @Ignore("Flaky - see JDK-8215376")
+    @Disabled("Flaky - see JDK-8215376")
     public void testMouseDragSecondary() {
         testMouseDrag(MouseButton.SECONDARY);
     }
 
     @Test
-    @Ignore("Flaky - see JDK-8215376")
+    @Disabled("Flaky - see JDK-8215376")
     public void testMouseDragMiddle() {
-        Assume.assumeTrue(!PlatformUtil.isMac() ); // See JDK-8215376
+        Assumptions.assumeTrue(!PlatformUtil.isMac() ); // See JDK-8215376
         testMouseDrag(MouseButton.MIDDLE);
     }
 
     @Test
-    @Ignore("Flaky - see JDK-8215376")
+    @Disabled("Flaky - see JDK-8215376")
     public void testMouseDragForward() {
-        Assume.assumeTrue(!PlatformUtil.isMac()); // See JDK-8215376
+        Assumptions.assumeTrue(!PlatformUtil.isMac()); // See JDK-8215376
         testMouseDrag(MouseButton.FORWARD);
     }
 
     @Test
-    @Ignore("Flaky - see JDK-8215376")
+    @Disabled("Flaky - see JDK-8215376")
     public void testMouseDragBack() {
-        Assume.assumeTrue(!PlatformUtil.isMac()); // See JDK-8215376
+        Assumptions.assumeTrue(!PlatformUtil.isMac()); // See JDK-8215376
         testMouseDrag(MouseButton.BACK);
     }
 
@@ -551,7 +505,7 @@ public class RobotTest {
             });
             stage.setScene(scene);
         });
-        waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
+        Util.waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
         Util.runAndWait(() -> {
             int mouseX = (int) (scene.getWindow().getX() + scene.getX() +
                     label.getLayoutX() + label.getLayoutBounds().getWidth() / 2);
@@ -564,7 +518,7 @@ public class RobotTest {
             }
             robot.mouseRelease(mouseButton);
         });
-        waitForLatch(mouseDragLatch, 5, "Timeout while waiting for button.onMouseDragged().");
+        Util.waitForLatch(mouseDragLatch, 5, "Timeout while waiting for button.onMouseDragged().");
     }
 
     @Test
@@ -578,7 +532,7 @@ public class RobotTest {
     }
 
     private static void testMouseWheel(int amount) {
-        Assume.assumeTrue(!PlatformUtil.isMac()); // See JDK-8214580
+        Assumptions.assumeTrue(!PlatformUtil.isMac()); // See JDK-8214580
         CountDownLatch onScrollLatch = new CountDownLatch(1);
         CountDownLatch setSceneLatch = new CountDownLatch(1);
         Button button = new Button("Scroll me");
@@ -612,7 +566,7 @@ public class RobotTest {
             });
             stage.setScene(scene);
         });
-        waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
+        Util.waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
         Util.runAndWait(() -> {
             int mouseX = (int) (scene.getWindow().getX() + scene.getX() +
                     button.getLayoutX() + button.getLayoutBounds().getWidth() / 2);
@@ -621,19 +575,17 @@ public class RobotTest {
             robot.mouseMove(mouseX, mouseY);
             robot.mouseWheel(amount);
         });
-        waitForLatch(onScrollLatch, 5, "Timeout while waiting for button.onScroll().");
-        Assert.assertEquals("mouse wheel should be scrolled " + amount + " vertical units by Robot",
-                "Scrolled " + amount, button.getText());
+        Util.waitForLatch(onScrollLatch, 5, "Timeout while waiting for button.onScroll().");
+        Assertions.assertEquals(
+            "Scrolled " + amount, button.getText(),
+            "mouse wheel should be scrolled " + amount + " vertical units by Robot");
     }
 
     @Test
     public void testMouseWheelThrowsISEOnWrongThread() {
-        try {
+        Assertions.assertThrows(IllegalStateException.class, () -> {
             robot.mouseWheel(1);
-        } catch (IllegalStateException e) {
-            return;
-        }
-        Assert.fail("Expected IllegalStateException");
+        });
     }
 
     @Test
@@ -660,7 +612,7 @@ public class RobotTest {
             });
             stage.setScene(scene);
         });
-        waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
+        Util.waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
         AtomicReference<Color> captureColor = new AtomicReference<>();
         Thread.sleep(1000);
         Util.runAndWait(() -> {
@@ -690,12 +642,12 @@ public class RobotTest {
             });
             stage.setScene(scene);
         });
-        waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
+        Util.waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
         AtomicReference<Color> captureColor = new AtomicReference<>();
         Thread.sleep(1000);
         Util.runAndWait(() -> {
-            int x = (int) stage.getX();
-            int y = (int) stage.getY();
+            int x = (int)(Math.round(stage.getX()));
+            int y = (int)(Math.round(stage.getY()));
             // Subtracting one pixel from x makes the result RED, so we are on the border.
             // If the implementation of getPixelColor is ever chaged to interpolate the
             // colors on HiDPI screens, this test will fail and the resulting color will
@@ -707,23 +659,17 @@ public class RobotTest {
 
     @Test
     public void testPixelCaptureThrowsISEOnWrongThread() {
-        try {
+        Assertions.assertThrows(IllegalStateException.class, () -> {
             robot.getPixelColor(20, 20);
-        } catch (IllegalStateException e) {
-            return;
-        }
-        Assert.fail("Expected IllegalStateException");
+        });
     }
 
     @Test
     public void testPixelCaptureThrowsNPEForNullArgument() {
         Util.runAndWait(() -> {
-            try {
+            Assertions.assertThrows(NullPointerException.class, () -> {
                 robot.getPixelColor(null);
-            } catch (NullPointerException e) {
-                return;
-            }
-            Assert.fail("Expected NullPointerException");
+            });
         });
     }
 
@@ -741,7 +687,7 @@ public class RobotTest {
             });
             stage.setScene(scene);
         });
-        waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
+        Util.waitForLatch(setSceneLatch, 5, "Timeout while waiting for scene to be set on stage.");
         AtomicReference<WritableImage> screenCaptureNotScaledToFit = new AtomicReference<>();
         AtomicReference<WritableImage> screenCaptureScaledToFit = new AtomicReference<>();
         Thread.sleep(1000);
@@ -757,19 +703,34 @@ public class RobotTest {
         // Should be scaled to the primary screen x and y scales. Note that screenCaptureScaledToFit and
         // screenCaptureNotScaledToFit will be the same if screenScaleX = screenScaleY = 1.0 and in that case
         // this is redundant.
-        Assert.assertEquals((double) WIDTH * screenScaleX, screenCaptureNotScaledToFit.get().getWidth(), 0.0001);
-        Assert.assertEquals((double) HEIGHT * screenScaleY, screenCaptureNotScaledToFit.get().getHeight(), 0.0001);
-        for (int x = 0; x < WIDTH * screenScaleX; x++) {
-            for (int y = 0; y < HEIGHT * screenScaleY; y++) {
+        // Below calculations follow how getScreenCapture should calculate screen capture dimensions. This
+        // is to make this code consistent and stable on HiDPI systems.
+        int stageX = (int) stage.getX();
+        int stageY = (int) stage.getY();
+        int shouldBeMinX = (int) Math.floor(stageX * screenScaleX);
+        int shouldBeMinY = (int) Math.floor(stageY * screenScaleY);
+        int shouldBeMaxX = (int) Math.ceil((stageX + WIDTH) * screenScaleX);
+        int shouldBeMaxY = (int) Math.ceil((stageY + HEIGHT) * screenScaleY);
+        int shouldBeWidth = shouldBeMaxX - shouldBeMinX;
+        int shouldBeHeight = shouldBeMaxY - shouldBeMinY;
+        Assertions.assertEquals((double) shouldBeWidth, screenCaptureNotScaledToFit.get().getWidth(), 0.0001);
+        Assertions.assertEquals((double) shouldBeHeight, screenCaptureNotScaledToFit.get().getHeight(), 0.0001);
+
+        // To verify the color we're going to skip the "1-pixel outside border" of the capture. On HiDPI systems
+        // (especially on Windows) stage's position might have fractional element, which will mean the capture will
+        // average those values with whatever is behind the stage. This will make their values invalid.
+        for (int x = 1; x < shouldBeWidth - 1; x++) {
+            for (int y = 1; y < shouldBeHeight - 1; y++) {
                 assertColorEquals(MAGENTA, screenCaptureNotScaledToFit.get().getPixelReader().getColor(x, y), TOLERANCE);
             }
         }
 
         // Should have been shrunk to fit the requested size, but still contain the same thing (all magenta pixels).
-        Assert.assertEquals((double) WIDTH, screenCaptureScaledToFit.get().getWidth(), 0.0001);
-        Assert.assertEquals((double) HEIGHT, screenCaptureScaledToFit.get().getHeight(), 0.0001);
-        for (int x = 0; x < WIDTH; x++) {
-            for (int y = 0; y < HEIGHT; y++) {
+        Assertions.assertEquals((double) WIDTH, screenCaptureScaledToFit.get().getWidth(), 0.0001);
+        Assertions.assertEquals((double) HEIGHT, screenCaptureScaledToFit.get().getHeight(), 0.0001);
+        // Because of scaling, similar estimate has to be done like above.
+        for (int x = 1; x < WIDTH - 1; x++) {
+            for (int y = 1; y < HEIGHT - 1; y++) {
                 assertColorEquals(MAGENTA, screenCaptureScaledToFit.get().getPixelReader().getColor(x, y), TOLERANCE);
             }
         }
@@ -777,23 +738,17 @@ public class RobotTest {
 
     @Test
     public void testScreenCaptureThrowsISEOnWrongThread() {
-        try {
+        Assertions.assertThrows(IllegalStateException.class, () -> {
             robot.getScreenCapture(null, 0, 0, 10, 10);
-        } catch (IllegalStateException e) {
-            return;
-        }
-        Assert.fail("Expected IllegalStateException");
+        });
     }
 
     @Test
     public void testScreenCaptureThrowsNPEForNullArgument() {
         Util.runAndWait(() -> {
-            try {
+            Assertions.assertThrows(NullPointerException.class, () -> {
                 robot.getScreenCapture(null, null);
-            } catch (NullPointerException e) {
-                return;
-            }
-            Assert.fail("Expected NullPointerException");
+            });
         });
     }
 
@@ -810,19 +765,17 @@ public class RobotTest {
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() {
-        new Thread(() -> Application.launch(TestApp.class, (String[])null)).start();
-        waitForLatch(startupLatch, 10, "Timeout waiting for FX runtime to start");
+        Util.launch(startupLatch, TestApp.class);
     }
 
-    @AfterClass
+    @AfterAll
     public static void exit() {
-        Platform.runLater(() -> stage.hide());
-        Platform.exit();
+        Util.shutdown();
     }
 
-    @After
+    @AfterEach
     public void cleanup() {
         Util.runAndWait(() -> {
             if (!pressedButtons.isEmpty()) {
@@ -833,19 +786,9 @@ public class RobotTest {
         });
     }
 
-    private static void waitForLatch(CountDownLatch latch, int seconds, String msg) {
-        try {
-            if (!latch.await(seconds, TimeUnit.SECONDS)) {
-                fail(msg);
-            }
-        } catch (Exception ex) {
-            fail("Unexpected exception: " + ex);
-        }
-    }
-
     private static void assertColorEquals(Color expected, Color actual, double delta) {
         if (!testColorEquals(expected, actual, delta)) {
-            throw new AssertionFailedError("expected: " + colorToString(expected)
+            Assertions.fail("expected: " + colorToString(expected)
                     + " but was: " + colorToString(actual));
         }
     }

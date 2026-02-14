@@ -31,11 +31,14 @@
 
 namespace JSC {
 
+#define JSCALLBACK_CONSTRUCTOR_METHOD(method) \
+    WTF_VTBL_FUNCPTR_PTRAUTH_STR("JSCallbackConstructor." #method) method
+
 class JSCallbackConstructor final : public JSNonFinalObject {
 public:
     using Base = JSNonFinalObject;
     static constexpr unsigned StructureFlags = Base::StructureFlags | ImplementsHasInstance | ImplementsDefaultHasInstance;
-    static constexpr bool needsDestruction = true;
+    static constexpr DestructionMode needsDestruction = NeedsDestruction;
 
     template<typename CellType, SubspaceAccess mode>
     static GCClient::IsoSubspace* subspaceFor(VM& vm)
@@ -73,8 +76,10 @@ private:
     JSObjectCallAsConstructorCallback constructCallback() { return m_callback; }
 
     JSClassRef m_class;
-    JSObjectCallAsConstructorCallback m_callback;
+    JSObjectCallAsConstructorCallback JSCALLBACK_CONSTRUCTOR_METHOD(m_callback);
 };
+
+#undef JSCALLBACK_CONSTRUCTOR_METHOD
 
 } // namespace JSC
 

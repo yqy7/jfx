@@ -26,13 +26,14 @@
 #include "config.h"
 #include "WindowOrWorkerGlobalScopeFetch.h"
 
-#include "CachedResourceRequestInitiators.h"
-#include "DOMWindow.h"
-#include "Document.h"
+#include "CachedResourceRequestInitiatorTypes.h"
+#include "DocumentInlines.h"
 #include "EventLoop.h"
 #include "FetchResponse.h"
 #include "JSDOMPromiseDeferred.h"
 #include "JSFetchResponse.h"
+#include "LocalDOMWindow.h"
+#include "Quirks.h"
 #include "UserGestureIndicator.h"
 #include "WorkerGlobalScope.h"
 
@@ -51,22 +52,42 @@ static void doFetch(ScriptExecutionContext& scope, FetchRequest::Info&& input, F
 
     auto request = requestOrException.releaseReturnValue();
     if (request->signal().aborted()) {
-        promise.reject(Exception { AbortError, "Request signal is aborted"_s });
+        auto reason = request->signal().reason().getValue();
+        if (reason.isUndefined())
+            promise.reject(Exception { ExceptionCode::AbortError, "Request signal is aborted"_s });
+        else
+            promise.rejectType<IDLAny>(reason);
+
         return;
     }
 
-    FetchResponse::fetch(scope, request.get(), [promise = WTFMove(promise), scope = Ref { scope }](auto&& result) mutable {
-        scope->eventLoop().queueTask(TaskSource::Networking, [promise = WTFMove(promise), result = WTFMove(result)]() mutable {
+    FetchResponse::fetch(scope, request.get(), [promise = WTFMove(promise), scope = Ref { scope }, userGestureToken = UserGestureIndicator::currentUserGesture()]<typename Result> (Result&& result) mutable {
+        scope->eventLoop().queueTask(TaskSource::Networking, [promise = WTFMove(promise), userGestureToken = WTFMove(userGestureToken), result = std::forward<Result>(result)] () mutable {
+            if (!userGestureToken || userGestureToken->hasExpired(UserGestureToken::maximumIntervalForUserGestureForwardingForFetch()) || !userGestureToken->processingUserGesture()) {
+                promise.settle(WTFMove(result));
+                return;
+            }
+            UserGestureIndicator gestureIndicator(userGestureToken, UserGestureToken::GestureScope::MediaOnly, UserGestureToken::ShouldPropagateToMicroTask::Yes);
             promise.settle(WTFMove(result));
         });
-    }, cachedResourceRequestInitiators().fetch);
+    }, cachedResourceRequestInitiatorTypes().fetch);
 }
 
 void WindowOrWorkerGlobalScopeFetch::fetch(DOMWindow& window, FetchRequest::Info&& input, FetchRequest::Init&& init, Ref<DeferredPromise>&& promise)
 {
-    auto* document = window.document();
+    if (RefPtr document = window.documentIfLocal(); document && document->quirks().shouldBlockFetchWithNewlineAndLessThan()) {
+        if (auto* string = std::get_if<String>(&input); string && string->contains('\n') && string->contains('<'))
+            return promise->reject(ExceptionCode::InvalidStateError);
+    }
+
+    RefPtr localWindow = dynamicDowncast<LocalDOMWindow>(window);
+    if (!localWindow) {
+        promise->reject(ExceptionCode::InvalidStateError);
+        return;
+    }
+    RefPtr document = localWindow->document();
     if (!document) {
-        promise->reject(InvalidStateError);
+        promise->reject(ExceptionCode::InvalidStateError);
         return;
     }
     doFetch(*document, WTFMove(input), WTFMove(init), WTFMove(promise));

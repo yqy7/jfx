@@ -31,7 +31,7 @@
 namespace WTF {
 
 class OSAllocator {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(OSAllocator);
 public:
     enum Usage {
         UnknownUsage = -1,
@@ -79,6 +79,9 @@ public:
 
     // Hint to the OS that an address range is not expected to be accessed anytime soon.
     WTF_EXPORT_PRIVATE static void hintMemoryNotNeededSoon(void*, size_t);
+
+    WTF_EXPORT_PRIVATE static void protect(void*, size_t, bool readable, bool writable);
+    WTF_EXPORT_PRIVATE static bool tryProtect(void*, size_t, bool readable, bool writable);
 };
 
 inline void* OSAllocator::reserveAndCommit(size_t reserveSize, size_t commitSize, Usage usage, bool writable, bool executable, bool jitCageEnabled)

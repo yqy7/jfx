@@ -28,32 +28,66 @@
 
 #if ENABLE(ATTACHMENT_ELEMENT)
 
+#include "ContainerNodeInlines.h"
 #include "FloatRect.h"
 #include "FloatRoundedRect.h"
 #include "FrameSelection.h"
 #include "HTMLAttachmentElement.h"
+#include "NodeInlines.h"
+#include "RenderBoxInlines.h"
+#include "RenderChildIterator.h"
+#include "RenderObjectInlines.h"
+#include "RenderStyleSetters.h"
 #include "RenderTheme.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/URL.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(RenderAttachment);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(RenderAttachment);
 
 RenderAttachment::RenderAttachment(HTMLAttachmentElement& element, RenderStyle&& style)
-    : RenderReplaced(element, WTFMove(style), LayoutSize())
+    : RenderReplaced(Type::Attachment, element, WTFMove(style), LayoutSize())
+    , m_isWideLayout(element.isWideLayout())
 {
+    ASSERT(isRenderAttachment());
+#if ENABLE(SERVICE_CONTROLS)
+    m_hasShadowControls = element.isImageMenuEnabled();
+#endif
 }
+
+RenderAttachment::~RenderAttachment() = default;
 
 HTMLAttachmentElement& RenderAttachment::attachmentElement() const
 {
     return downcast<HTMLAttachmentElement>(nodeForNonAnonymous());
 }
 
+LayoutSize RenderAttachment::layoutWideLayoutAttachmentOnly()
+{
+    if (auto* wideLayoutShadowElement = attachmentElement().wideLayoutShadowContainer()) {
+        if (auto* wideLayoutShadowRenderer = downcast<RenderBox>(wideLayoutShadowElement->renderer())) {
+            if (wideLayoutShadowRenderer->needsLayout())
+                wideLayoutShadowRenderer->layout();
+            ASSERT(!wideLayoutShadowRenderer->needsLayout());
+            return wideLayoutShadowRenderer->size();
+        }
+    }
+    return { };
+}
+
 void RenderAttachment::layout()
 {
+    if (auto size = layoutWideLayoutAttachmentOnly(); !size.isEmpty()) {
+        setIntrinsicSize(size);
+        RenderReplaced::layout();
+        if (hasShadowContent())
+            layoutShadowContent(intrinsicSize());
+        return;
+    }
+
     LayoutSize newIntrinsicSize = theme().attachmentIntrinsicSize(*this);
 
     if (!theme().attachmentShouldAllowWidthToShrink(*this)) {
@@ -64,36 +98,59 @@ void RenderAttachment::layout()
     setIntrinsicSize(newIntrinsicSize);
 
     RenderReplaced::layout();
-}
 
-void RenderAttachment::invalidate()
-{
-    setNeedsLayout();
-    repaint();
-}
-
-LayoutUnit RenderAttachment::baselinePosition(FontBaseline, bool, LineDirectionMode, LinePositionMode) const
-{
-    return theme().attachmentBaseline(*this);
+    if (hasShadowContent())
+        layoutShadowContent(newIntrinsicSize);
 }
 
 bool RenderAttachment::shouldDrawBorder() const
 {
-    if (style().effectiveAppearance() == BorderlessAttachmentPart)
+    if (style().usedAppearance() == StyleAppearance::BorderlessAttachment)
         return false;
     return m_shouldDrawBorder;
 }
 
 void RenderAttachment::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& offset)
 {
-    if (paintInfo.phase != PaintPhase::Selection || !hasVisibleBoxDecorations() || !style().hasEffectiveAppearance())
+    ASSERT(!isSkippedContentRoot(*this));
+
+    if (paintInfo.phase != PaintPhase::Selection || !hasVisibleBoxDecorations() || !style().hasUsedAppearance())
         return;
 
     auto paintRect = borderBoxRect();
     paintRect.moveBy(offset);
 
-    ControlStates controlStates;
-    theme().paint(*this, controlStates, paintInfo, paintRect);
+    theme().paint(*this, paintInfo, paintRect);
+}
+
+void RenderAttachment::layoutShadowContent(const LayoutSize& size)
+{
+    for (auto& renderBox : childrenOfType<RenderBox>(*this)) {
+        renderBox.mutableStyle().setHeight(Style::PreferredSize::Fixed { size.height() });
+        renderBox.mutableStyle().setWidth(Style::PreferredSize::Fixed { size.width() });
+        renderBox.setNeedsLayout(MarkOnlyThis);
+        renderBox.layout();
+    }
+}
+
+bool RenderAttachment::paintWideLayoutAttachmentOnly(const PaintInfo& paintInfo, const LayoutPoint& offset) const
+{
+    if (paintInfo.phase != PaintPhase::Foreground && paintInfo.phase != PaintPhase::Selection)
+        return false;
+
+    if (auto* wideLayoutShadowElement = attachmentElement().wideLayoutShadowContainer()) {
+        if (auto* wideLayoutShadowRenderer = wideLayoutShadowElement->renderer()) {
+            auto shadowPaintInfo = paintInfo;
+            for (PaintPhase phase : { PaintPhase::BlockBackground, PaintPhase::ChildBlockBackgrounds, PaintPhase::Float, PaintPhase::Foreground, PaintPhase::Outline }) {
+                shadowPaintInfo.phase = phase;
+                wideLayoutShadowRenderer->paint(shadowPaintInfo, offset);
+            }
+        }
+
+        attachmentElement().requestWideLayoutIconIfNeeded();
+        return true;
+    }
+    return false;
 }
 
 } // namespace WebCore

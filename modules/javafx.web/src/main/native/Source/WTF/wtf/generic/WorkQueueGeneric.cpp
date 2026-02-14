@@ -40,17 +40,18 @@ namespace WTF {
 
 WorkQueueBase::WorkQueueBase(RunLoop& runLoop)
     : m_runLoop(&runLoop)
+    , m_threadID(mainThreadID)
 {
 }
 
-void WorkQueueBase::platformInitialize(const char* name, Type, QOS qos)
+void WorkQueueBase::platformInitialize(ASCIILiteral name, Type, QOS qos)
 {
+    m_runLoop = RunLoop::create(name, ThreadType::Unknown, qos).ptr();
     BinarySemaphore semaphore;
-    Thread::create(name, [&] {
-        m_runLoop = &RunLoop::current();
+    m_runLoop->dispatch([&] {
+        m_threadID = Thread::currentSingleton().uid();
         semaphore.signal();
-        m_runLoop->run();
-    }, ThreadType::Unknown, qos)->detach();
+    });
     semaphore.wait();
 }
 
@@ -60,7 +61,7 @@ void WorkQueueBase::platformInvalidate()
         Ref<RunLoop> protector(*m_runLoop);
         protector->stop();
         protector->dispatch([] {
-            RunLoop::current().stop();
+            RunLoop::currentSingleton().stop();
         });
     }
 }
@@ -98,14 +99,9 @@ void WorkQueueBase::dispatchAfter(Seconds delay, Function<void()>&& function)
     });
 }
 
-WorkQueue::WorkQueue(RunLoop& loop)
-    : WorkQueueBase(loop)
+WorkQueue::WorkQueue(MainTag)
+    : WorkQueueBase(RunLoop::mainSingleton())
 {
-}
-
-Ref<WorkQueue> WorkQueue::constructMainWorkQueue()
-{
-    return adoptRef(*new WorkQueue(RunLoop::main()));
 }
 
 }

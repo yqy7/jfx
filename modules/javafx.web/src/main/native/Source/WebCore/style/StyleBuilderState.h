@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2019-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,84 +28,180 @@
 #include "CSSToLengthConversionData.h"
 #include "CSSToStyleMap.h"
 #include "CascadeLevel.h"
+#include "Document.h"
+#include "FontTaggedSettings.h"
+#include "PositionArea.h"
+#include "PositionTryFallback.h"
 #include "PropertyCascade.h"
-#include "RenderStyle.h"
 #include "RuleSet.h"
 #include "SelectorChecker.h"
-#include <wtf/Bitmap.h>
+#include "StyleForVisitedLink.h"
+#include "TreeResolutionState.h"
+#include "platform/text/TextFlags.h"
+#include <wtf/BitSet.h>
+#include <wtf/RefCountedFixedVector.h>
 
 namespace WebCore {
 
+class FilterOperations;
+class FontCascadeDescription;
+class FontSelectionValue;
+class RenderStyle;
 class StyleImage;
 class StyleResolver;
+class TextAutospace;
+class TextSpacingTrim;
+
+struct FontPalette;
+struct FontSizeAdjust;
+
+namespace CSSCalc {
+struct RandomCachingKey;
+}
+
+namespace CSS {
+struct AppleColorFilterProperty;
+struct FilterProperty;
+}
 
 namespace Style {
 
-class Builder;
 class BuilderState;
+struct Color;
 
 void maybeUpdateFontForLetterSpacing(BuilderState&, CSSValue&);
 
-enum class ForVisitedLink : bool {
-    No,
-    Yes
+enum class ApplyValueType : uint8_t { Value, Initial, Inherit };
+
+struct BuilderPositionTryFallback {
+    RefPtr<const StyleProperties> properties;
+    Vector<PositionTryFallback::Tactic> tactics;
 };
 
 struct BuilderContext {
-    Ref<const Document> document;
-    const RenderStyle& parentStyle;
-    const RenderStyle* rootElementStyle = nullptr;
-    RefPtr<const Element> element = nullptr;
+    const RefPtr<const Document> document { };
+    const RenderStyle* parentStyle { };
+    const RenderStyle* rootElementStyle { };
+    RefPtr<const Element> element { };
+    CheckedPtr<TreeResolutionState> treeResolutionState { };
+    std::optional<BuilderPositionTryFallback> positionTryFallback { };
 };
 
 class BuilderState {
 public:
-    BuilderState(Builder&, RenderStyle&, BuilderContext&&);
-
-    Builder& builder() { return m_builder; }
+    BuilderState(RenderStyle&);
+    BuilderState(RenderStyle&, BuilderContext&&);
 
     RenderStyle& style() { return m_style; }
-    const RenderStyle& parentStyle() const { return m_context.parentStyle; }
+    const RenderStyle& style() const { return m_style; }
+
+    const RenderStyle& parentStyle() const { return *m_context.parentStyle; }
     const RenderStyle* rootElementStyle() const { return m_context.rootElementStyle; }
 
-    const Document& document() const { return m_context.document.get(); }
+    const Document& document() const { return *m_context.document; }
+    Ref<const Document> protectedDocument() const { return *m_context.document; }
     const Element* element() const { return m_context.element.get(); }
 
-    void setFontDescription(FontCascadeDescription&& fontDescription) { m_fontDirty |= m_style.setFontDescription(WTFMove(fontDescription)); }
-    void setFontSize(FontCascadeDescription&, float size);
-    void setZoom(float f) { m_fontDirty |= m_style.setZoom(f); }
-    void setEffectiveZoom(float f) { m_fontDirty |= m_style.setEffectiveZoom(f); }
-    void setWritingMode(WritingMode writingMode) { m_fontDirty |= m_style.setWritingMode(writingMode); }
-    void setTextOrientation(TextOrientation textOrientation) { m_fontDirty |= m_style.setTextOrientation(textOrientation); }
+    inline void setZoom(float);
+    inline void setUsedZoom(float);
+    inline void setWritingMode(StyleWritingMode);
+    inline void setTextOrientation(TextOrientation);
 
     bool fontDirty() const { return m_fontDirty; }
     void setFontDirty() { m_fontDirty = true; }
 
-    const FontCascadeDescription& fontDescription() { return m_style.fontDescription(); }
-    const FontCascadeDescription& parentFontDescription() { return parentStyle().fontDescription(); }
+    inline const FontCascadeDescription& fontDescription();
+    inline const FontCascadeDescription& parentFontDescription();
 
-    // FIXME: These are mutually exclusive, clean up the code to take that into account.
     bool applyPropertyToRegularStyle() const { return m_linkMatch != SelectorChecker::MatchVisited; }
-    bool applyPropertyToVisitedLinkStyle() const { return m_linkMatch == SelectorChecker::MatchVisited; }
+    bool applyPropertyToVisitedLinkStyle() const { return m_linkMatch != SelectorChecker::MatchLink; }
 
     bool useSVGZoomRules() const;
     bool useSVGZoomRulesForLength() const;
     ScopeOrdinal styleScopeOrdinal() const { return m_currentProperty->styleScopeOrdinal; }
 
-    Ref<CSSValue> resolveImageStyles(CSSValue&);
-    RefPtr<StyleImage> createStyleImage(CSSValue&);
-    bool createFilterOperations(const CSSValue&, FilterOperations& outOperations);
-
-    static bool isColorFromPrimitiveValueDerivedFromElement(const CSSPrimitiveValue&);
-    Color colorFromPrimitiveValue(const CSSPrimitiveValue&, ForVisitedLink = ForVisitedLink::No) const;
-    // FIXME: Remove. 'currentcolor' should be resolved at use time. All call sites are broken with inheritance.
-    Color colorFromPrimitiveValueWithResolvedCurrentColor(const CSSPrimitiveValue&) const;
+    RefPtr<StyleImage> createStyleImage(const CSSValue&) const;
+    FilterOperations createFilterOperations(const CSS::FilterProperty&) const;
+    FilterOperations createFilterOperations(const CSSValue&) const;
+    FilterOperations createAppleColorFilterOperations(const CSS::AppleColorFilterProperty&) const;
+    FilterOperations createAppleColorFilterOperations(const CSSValue&) const;
 
     const Vector<AtomString>& registeredContentAttributes() const { return m_registeredContentAttributes; }
     void registerContentAttribute(const AtomString& attributeLocalName);
 
     const CSSToLengthConversionData& cssToLengthConversionData() const { return m_cssToLengthConversionData; }
     CSSToStyleMap& styleMap() { return m_styleMap; }
+
+    void setIsBuildingKeyframeStyle() { m_isBuildingKeyframeStyle = true; }
+
+    bool isAuthorOrigin() const
+    {
+        return m_currentProperty && m_currentProperty->cascadeLevel == CascadeLevel::Author;
+    }
+
+    CSSPropertyID cssPropertyID() const;
+
+    bool isCurrentPropertyInvalidAtComputedValueTime() const;
+    void setCurrentPropertyInvalidAtComputedValueTime();
+
+    void setUsesViewportUnits();
+    void setUsesContainerUnits();
+
+    double lookupCSSRandomBaseValue(const CSSCalc::RandomCachingKey&, std::optional<CSS::Keyword::ElementShared>) const;
+
+    // Accessors for sibling information used by the sibling-count() and sibling-index() CSS functions.
+    unsigned siblingCount();
+    unsigned siblingIndex();
+
+    AnchorPositionedStates* anchorPositionedStates() { return m_context.treeResolutionState ? &m_context.treeResolutionState->anchorPositionedStates : nullptr; }
+    const std::optional<BuilderPositionTryFallback>& positionTryFallback() const { return m_context.positionTryFallback; }
+
+    // FIXME: Copying a FontCascadeDescription is really inefficient. Migrate all callers to
+    // setFontDescriptionXXX() variants below, then remove these functions.
+    inline void setFontDescription(FontCascadeDescription&&);
+    void setFontSize(FontCascadeDescription&, float size);
+
+    void setFontDescriptionKeywordSizeFromIdentifier(CSSValueID);
+    void setFontDescriptionIsAbsoluteSize(bool);
+    void setFontDescriptionFontSize(float);
+    void setFontDescriptionFamilies(RefCountedFixedVector<AtomString>&);
+    void setFontDescriptionFamilies(Vector<AtomString>&);
+    void setFontDescriptionIsSpecifiedFont(bool);
+    void setFontDescriptionFeatureSettings(FontFeatureSettings&&);
+    void setFontDescriptionFontPalette(const FontPalette&);
+    void setFontDescriptionFontSizeAdjust(FontSizeAdjust);
+    void setFontDescriptionFontSmoothing(FontSmoothingMode);
+    void setFontDescriptionFontSynthesisSmallCaps(FontSynthesisLonghandValue);
+    void setFontDescriptionFontSynthesisStyle(FontSynthesisLonghandValue);
+    void setFontDescriptionFontSynthesisWeight(FontSynthesisLonghandValue);
+    void setFontDescriptionKerning(Kerning);
+    void setFontDescriptionOpticalSizing(FontOpticalSizing);
+    void setFontDescriptionSpecifiedLocale(const AtomString&);
+    void setFontDescriptionTextAutospace(TextAutospace);
+    void setFontDescriptionTextRenderingMode(TextRenderingMode);
+    void setFontDescriptionTextSpacingTrim(TextSpacingTrim);
+    void setFontDescriptionVariantCaps(FontVariantCaps);
+    void setFontDescriptionVariantEmoji(FontVariantEmoji);
+    void setFontDescriptionVariantPosition(FontVariantPosition);
+    void setFontDescriptionVariationSettings(FontVariationSettings&&);
+    void setFontDescriptionWeight(FontSelectionValue);
+    void setFontDescriptionWidth(FontSelectionValue);
+    void setFontDescriptionVariantAlternates(const FontVariantAlternates&);
+    void setFontDescriptionVariantEastAsianVariant(FontVariantEastAsianVariant);
+    void setFontDescriptionVariantEastAsianWidth(FontVariantEastAsianWidth);
+    void setFontDescriptionVariantEastAsianRuby(FontVariantEastAsianRuby);
+    void setFontDescriptionKeywordSize(unsigned);
+    void setFontDescriptionVariantCommonLigatures(FontVariantLigatures);
+    void setFontDescriptionVariantDiscretionaryLigatures(FontVariantLigatures);
+    void setFontDescriptionVariantHistoricalLigatures(FontVariantLigatures);
+    void setFontDescriptionVariantContextualAlternates(FontVariantLigatures);
+    void setFontDescriptionVariantNumericFigure(FontVariantNumericFigure);
+    void setFontDescriptionVariantNumericSpacing(FontVariantNumericSpacing);
+    void setFontDescriptionVariantNumericFraction(FontVariantNumericFraction);
+    void setFontDescriptionVariantNumericOrdinal(FontVariantNumericOrdinal);
+    void setFontDescriptionVariantNumericSlashedZero(FontVariantNumericSlashedZero);
+
+    void disableNativeAppearanceIfNeeded(CSSPropertyID, CascadeLevel);
 
 private:
     // See the comment in maybeUpdateFontForLetterSpacing() about why this needs to be a friend.
@@ -122,26 +218,27 @@ private:
     void updateFontForGenericFamilyChange();
     void updateFontForOrientationChange();
 
-    Builder& m_builder;
-
     CSSToStyleMap m_styleMap;
 
     RenderStyle& m_style;
-    const BuilderContext m_context;
+    BuilderContext m_context;
 
     const CSSToLengthConversionData m_cssToLengthConversionData;
 
-    Bitmap<numCSSProperties> m_appliedProperties;
-    HashSet<String> m_appliedCustomProperties;
-    Bitmap<numCSSProperties> m_inProgressProperties;
-    HashSet<String> m_inProgressPropertiesCustom;
+    HashSet<AtomString> m_appliedCustomProperties;
+    HashSet<AtomString> m_inProgressCustomProperties;
+    HashSet<AtomString> m_inCycleCustomProperties;
+    WTF::BitSet<cssPropertyIDEnumValueCount> m_inProgressProperties;
+    WTF::BitSet<cssPropertyIDEnumValueCount> m_invalidAtComputedValueTimeProperties;
 
     const PropertyCascade::Property* m_currentProperty { nullptr };
     SelectorChecker::LinkMatchMask m_linkMatch { };
 
     bool m_fontDirty { false };
     Vector<AtomString> m_registeredContentAttributes;
+
+    bool m_isBuildingKeyframeStyle { false };
 };
 
-}
-}
+} // namespace Style
+} // namespace WebCore

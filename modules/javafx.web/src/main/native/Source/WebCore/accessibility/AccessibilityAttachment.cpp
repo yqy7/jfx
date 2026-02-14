@@ -38,14 +38,14 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-AccessibilityAttachment::AccessibilityAttachment(RenderAttachment* renderer)
-    : AccessibilityRenderObject(renderer)
+AccessibilityAttachment::AccessibilityAttachment(AXID axID, RenderAttachment& renderer, AXObjectCache& cache)
+    : AccessibilityRenderObject(axID, renderer, cache)
 {
 }
 
-Ref<AccessibilityAttachment> AccessibilityAttachment::create(RenderAttachment* renderer)
+Ref<AccessibilityAttachment> AccessibilityAttachment::create(AXID axID, RenderAttachment& renderer, AXObjectCache& cache)
 {
-    return adoptRef(*new AccessibilityAttachment(renderer));
+    return adoptRef(*new AccessibilityAttachment(axID, renderer, cache));
 }
 
 bool AccessibilityAttachment::hasProgress(float* progress) const
@@ -68,40 +68,32 @@ float AccessibilityAttachment::valueForRange() const
 HTMLAttachmentElement* AccessibilityAttachment::attachmentElement() const
 {
     ASSERT(is<HTMLAttachmentElement>(node()));
-    if (!is<HTMLAttachmentElement>(node()))
-        return nullptr;
-
-    return downcast<HTMLAttachmentElement>(node());
+    return dynamicDowncast<HTMLAttachmentElement>(node());
 }
 
-String AccessibilityAttachment::roleDescription() const
-{
-    return AXAttachmentRoleText();
-}
-
-bool AccessibilityAttachment::computeAccessibilityIsIgnored() const
+bool AccessibilityAttachment::computeIsIgnored() const
 {
     return false;
 }
 
 void AccessibilityAttachment::accessibilityText(Vector<AccessibilityText>& textOrder) const
 {
-    HTMLAttachmentElement* attachmentElement = this->attachmentElement();
+    RefPtr attachmentElement = this->attachmentElement();
     if (!attachmentElement)
         return;
 
     auto title = attachmentElement->attachmentTitle();
-    auto& subtitle = getAttribute(subtitleAttr);
+    auto& subtitle = attachmentElement->attachmentSubtitle();
     auto& action = getAttribute(actionAttr);
 
     if (action.length())
-        textOrder.append(AccessibilityText(action, AccessibilityTextSource::Action));
+        textOrder.append(AccessibilityText(WTFMove(action), AccessibilityTextSource::Action));
 
     if (title.length())
-        textOrder.append(AccessibilityText(title, AccessibilityTextSource::Title));
+        textOrder.append(AccessibilityText(WTFMove(title), AccessibilityTextSource::Title));
 
     if (subtitle.length())
-        textOrder.append(AccessibilityText(subtitle, AccessibilityTextSource::Subtitle));
+        textOrder.append(AccessibilityText(WTFMove(subtitle), AccessibilityTextSource::Subtitle));
 }
 
 } // namespace WebCore

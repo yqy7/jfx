@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2021-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,9 +26,9 @@
 #pragma once
 
 #include "GPUIntegralTypes.h"
+#include "WebGPUComputePassEncoder.h"
 #include <JavaScriptCore/Uint32Array.h>
 #include <optional>
-#include <pal/graphics/WebGPU/WebGPUComputePassEncoder.h>
 #include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
@@ -40,27 +40,32 @@ class GPUBindGroup;
 class GPUBuffer;
 class GPUComputePipeline;
 class GPUQuerySet;
+template<typename> class ExceptionOr;
+
+namespace WebGPU {
+class Device;
+}
 
 class GPUComputePassEncoder : public RefCounted<GPUComputePassEncoder> {
 public:
-    static Ref<GPUComputePassEncoder> create(Ref<PAL::WebGPU::ComputePassEncoder>&& backing)
+    static Ref<GPUComputePassEncoder> create(Ref<WebGPU::ComputePassEncoder>&& backing, WebGPU::Device& device)
     {
-        return adoptRef(*new GPUComputePassEncoder(WTFMove(backing)));
+        return adoptRef(*new GPUComputePassEncoder(WTFMove(backing), device));
     }
 
     String label() const;
     void setLabel(String&&);
 
     void setPipeline(const GPUComputePipeline&);
-    void dispatch(GPUSize32 workgroupCountX, GPUSize32 workgroupCountY, GPUSize32 workgroupCountZ);
-    void dispatchIndirect(const GPUBuffer& indirectBuffer, GPUSize64 indirectOffset);
+    void dispatchWorkgroups(GPUSize32 workgroupCountX, std::optional<GPUSize32> workgroupCountY, std::optional<GPUSize32> workgroupCountZ);
+    void dispatchWorkgroupsIndirect(const GPUBuffer& indirectBuffer, GPUSize64 indirectOffset);
 
     void end();
 
-    void setBindGroup(GPUIndex32, const GPUBindGroup&,
+    void setBindGroup(GPUIndex32, const GPUBindGroup*,
         std::optional<Vector<GPUBufferDynamicOffset>>&&);
 
-    void setBindGroup(GPUIndex32, const GPUBindGroup&,
+    ExceptionOr<void> setBindGroup(GPUIndex32, const GPUBindGroup*,
         const JSC::Uint32Array& dynamicOffsetsData,
         GPUSize64 dynamicOffsetsDataStart,
         GPUSize32 dynamicOffsetsDataLength);
@@ -69,16 +74,16 @@ public:
     void popDebugGroup();
     void insertDebugMarker(String&& markerLabel);
 
-    PAL::WebGPU::ComputePassEncoder& backing() { return m_backing; }
-    const PAL::WebGPU::ComputePassEncoder& backing() const { return m_backing; }
+    WebGPU::ComputePassEncoder& backing() { return m_backing; }
+    const WebGPU::ComputePassEncoder& backing() const { return m_backing; }
 
 private:
-    GPUComputePassEncoder(Ref<PAL::WebGPU::ComputePassEncoder>&& backing)
-        : m_backing(WTFMove(backing))
-    {
-    }
+    GPUComputePassEncoder(Ref<WebGPU::ComputePassEncoder>&&, WebGPU::Device&);
 
-    Ref<PAL::WebGPU::ComputePassEncoder> m_backing;
+    Ref<WebGPU::ComputePassEncoder> protectedBacking() { return m_backing; }
+
+    Ref<WebGPU::ComputePassEncoder> m_backing;
+    WeakPtr<WebGPU::Device> m_device;
 };
 
 }

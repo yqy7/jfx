@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2023 Apple Inc. All rights reserved.
  * Copyright (C) 2012 Research In Motion Limited. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,12 +29,13 @@
 
 #pragma once
 
-#include "ArgList.h"
+#include "BytecodeIndex.h"
 #include "JSCJSValue.h"
-#include "JSObject.h"
+#include "MacroAssemblerCodeRef.h"
+#include "NativeFunction.h"
 #include "Opcode.h"
-#include "StackAlignment.h"
 #include <wtf/HashMap.h>
+#include <wtf/TZoneMalloc.h>
 
 #if ENABLE(C_LOOP)
 #include "CLoopStack.h"
@@ -43,6 +44,7 @@
 
 namespace JSC {
 
+class CallLinkInfo;
 #if ENABLE(WEBASSEMBLY)
 namespace Wasm {
 class Callee;
@@ -50,10 +52,22 @@ struct HandlerInfo;
 }
 #endif
 
+template<typename> struct BaseInstruction;
+struct JSOpcodeTraits;
+struct WasmOpcodeTraits;
+using JSInstruction = BaseInstruction<JSOpcodeTraits>;
+using WasmInstruction = BaseInstruction<WasmOpcodeTraits>;
+
+using JSOrWasmInstruction = Variant<const JSInstruction*, const WasmInstruction*, uintptr_t /* IPIntOffset */>;
+
+    class ArgList;
+    class CachedCall;
     class CodeBlock;
     class EvalExecutable;
+    class Exception;
     class FunctionExecutable;
     class VM;
+    class JSBoundFunction;
     class JSFunction;
     class JSGlobalObject;
     class JSModuleEnvironment;
@@ -62,13 +76,12 @@ struct HandlerInfo;
     class ProgramExecutable;
     class ModuleProgramExecutable;
     class Register;
+    class JSObject;
     class JSScope;
     class SourceCode;
     class StackFrame;
     enum class HandlerType : uint8_t;
-    struct CallFrameClosure;
     struct HandlerInfo;
-    struct Instruction;
     struct ProtoCallFrame;
 
     enum DebugHookType {
@@ -79,6 +92,8 @@ struct HandlerInfo;
         WillLeaveCallFrame,
         WillExecuteStatement,
         WillExecuteExpression,
+        WillAwait,
+        DidAwait,
     };
 
     enum StackFrameCodeType {
@@ -100,29 +115,35 @@ struct HandlerInfo;
         bool m_valid { false };
         HandlerType m_type;
 #if ENABLE(JIT)
-        MacroAssemblerCodePtr<ExceptionHandlerPtrTag> m_nativeCode;
+        CodePtr<ExceptionHandlerPtrTag> m_nativeCode;
+        CodePtr<ExceptionHandlerPtrTag> m_nativeCodeForDispatchAndCatch;
 #endif
-        const Instruction* m_catchPCForInterpreter;
+        JSOrWasmInstruction m_catchPCForInterpreter;
+        uintptr_t m_catchMetadataPCForInterpreter { 0 };
+        uint32_t m_tryDepthForThrow { 0 };
     };
 
+    typedef uint8_t LexicallyScopedFeatures;
+
     class Interpreter {
-        WTF_MAKE_FAST_ALLOCATED;
+        WTF_MAKE_TZONE_NON_HEAP_ALLOCATABLE(Interpreter);
         friend class CachedCall;
         friend class LLIntOffsetsExtractor;
         friend class JIT;
         friend class VM;
 
     public:
-        Interpreter(VM &);
+        Interpreter();
         ~Interpreter();
 
 #if ENABLE(C_LOOP)
         CLoopStack& cloopStack() { return m_cloopStack; }
+        const CLoopStack& cloopStack() const { return m_cloopStack; }
 #endif
 
-        static inline Opcode getOpcode(OpcodeID);
+        static inline JSC::Opcode getOpcode(OpcodeID);
 
-        static inline OpcodeID getOpcodeID(Opcode);
+        static inline OpcodeID getOpcodeID(JSC::Opcode);
 
 #if ASSERT_ENABLED
         static bool isOpcode(Opcode);
@@ -130,69 +151,53 @@ struct HandlerInfo;
 
         JSValue executeProgram(const SourceCode&, JSGlobalObject*, JSObject* thisObj);
         JSValue executeModuleProgram(JSModuleRecord*, ModuleProgramExecutable*, JSGlobalObject*, JSModuleEnvironment*, JSValue sentValue, JSValue resumeMode);
-        JSValue executeCall(JSGlobalObject*, JSObject* function, const CallData&, JSValue thisValue, const ArgList&);
-        JSObject* executeConstruct(JSGlobalObject*, JSObject* function, const CallData&, const ArgList&, JSValue newTarget);
-        JSValue execute(EvalExecutable*, JSGlobalObject*, JSValue thisValue, JSScope*);
+        JSValue executeCall(JSObject* function, const CallData&, JSValue thisValue, const ArgList&);
+        JSObject* executeConstruct(JSObject* function, const CallData&, const ArgList&, JSValue newTarget);
+        JSValue executeEval(EvalExecutable*, JSValue thisValue, JSScope*);
 
         void getArgumentsData(CallFrame*, JSFunction*&, ptrdiff_t& firstParameterIndex, Register*& argv, int& argc);
 
         NEVER_INLINE CatchInfo unwind(VM&, CallFrame*&, Exception*);
         void notifyDebuggerOfExceptionToBeThrown(VM&, JSGlobalObject*, CallFrame*, Exception*);
-        NEVER_INLINE void debug(CallFrame*, DebugHookType);
+        NEVER_INLINE void debug(CallFrame*, DebugHookType, JSValue data);
         static String stackTraceAsString(VM&, const Vector<StackFrame>&);
 
-        void getStackTrace(JSCell* owner, Vector<StackFrame>& results, size_t framesToSkip = 0, size_t maxStackSize = std::numeric_limits<size_t>::max());
+        void getStackTrace(JSCell* owner, Vector<StackFrame>& results, size_t framesToSkip = 0, size_t maxStackSize = std::numeric_limits<size_t>::max(), JSCell* caller = nullptr, JSCell* ownerOfCallLinkInfo = nullptr, CallLinkInfo* = nullptr);
+
+        static JSValue checkVMEntryPermission();
 
     private:
         enum ExecutionFlag { Normal, InitializeAndReturn };
 
-        static JSValue checkedReturn(JSValue returnValue)
-        {
-            ASSERT(returnValue);
-            return returnValue;
-        }
+        CodeBlock* prepareForCachedCall(CachedCall&, JSFunction*);
 
-        static JSObject* checkedReturn(JSObject* returnValue)
-        {
-            ASSERT(returnValue);
-            return returnValue;
-        }
+        JSValue executeCachedCall(CachedCall&);
+        JSValue executeBoundCall(VM&, JSBoundFunction*, const ArgList&);
+        JSValue executeCallImpl(VM&, JSObject*, const CallData&, JSValue, const ArgList&);
 
-        CallFrameClosure prepareForRepeatCall(FunctionExecutable*, CallFrame*, ProtoCallFrame*, JSFunction*, int argumentCountIncludingThis, JSScope*, const ArgList&);
+#if CPU(ARM64) && CPU(ADDRESS64) && !ENABLE(C_LOOP)
+        template<typename... Args>
+        JSValue tryCallWithArguments(CachedCall&, JSValue, Args...);
+#endif
 
-        JSValue execute(CallFrameClosure&);
-
-        VM& m_vm;
+        inline VM& vm();
 #if ENABLE(C_LOOP)
         CLoopStack m_cloopStack;
 #endif
 
 #if ENABLE(COMPUTED_GOTO_OPCODES)
 #if !ENABLE(LLINT_EMBEDDED_OPCODE_ID) || ASSERT_ENABLED
-        static HashMap<Opcode, OpcodeID>& opcodeIDTable(); // Maps Opcode => OpcodeID.
+        static UncheckedKeyHashMap<Opcode, OpcodeID>& opcodeIDTable(); // Maps Opcode => OpcodeID.
 #endif // !ENABLE(LLINT_EMBEDDED_OPCODE_ID) || ASSERT_ENABLED
 #endif // ENABLE(COMPUTED_GOTO_OPCODES)
     };
 
-    JSValue eval(JSGlobalObject*, CallFrame*, ECMAMode);
+    JSValue eval(CallFrame*, JSValue thisValue, JSScope*, CodeBlock* callerBaselineCodeBlock, BytecodeIndex, LexicallyScopedFeatures);
 
-    inline CallFrame* calleeFrameForVarargs(CallFrame* callFrame, unsigned numUsedStackSlots, unsigned argumentCountIncludingThis)
-    {
-        // We want the new frame to be allocated on a stack aligned offset with a stack
-        // aligned size. Align the size here.
-        argumentCountIncludingThis = WTF::roundUpToMultipleOf(
-            stackAlignmentRegisters(),
-            argumentCountIncludingThis + CallFrame::headerSizeInRegisters) - CallFrame::headerSizeInRegisters;
-
-        // Align the frame offset here.
-        unsigned paddedCalleeFrameOffset = WTF::roundUpToMultipleOf(
-            stackAlignmentRegisters(),
-            numUsedStackSlots + argumentCountIncludingThis + CallFrame::headerSizeInRegisters);
-        return CallFrame::create(callFrame->registers() - paddedCalleeFrameOffset);
-    }
+    inline CallFrame* calleeFrameForVarargs(CallFrame*, unsigned numUsedStackSlots, unsigned argumentCountIncludingThis);
 
     unsigned sizeOfVarargs(JSGlobalObject*, JSValue arguments, uint32_t firstVarArgOffset);
-    static constexpr unsigned maxArguments = 0x10000;
+    static constexpr unsigned maxArguments = 0x100000;
     unsigned sizeFrameForVarargs(JSGlobalObject*, CallFrame*, VM&, JSValue arguments, unsigned numUsedStackSlots, uint32_t firstVarArgOffset);
     unsigned sizeFrameForForwardArguments(JSGlobalObject*, CallFrame*, VM&, unsigned numUsedStackSlots);
     void loadVarargs(JSGlobalObject*, JSValue* firstElementDest, JSValue source, uint32_t offset, uint32_t length);

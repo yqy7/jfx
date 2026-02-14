@@ -26,9 +26,10 @@
 #include "config.h"
 #include "ScrollBehavior.h"
 
+#include "ContainerNodeInlines.h"
 #include "Element.h"
 #include "RenderElement.h"
-#include "RenderStyle.h"
+#include "RenderStyleInlines.h"
 #include "Settings.h"
 
 namespace WebCore {
@@ -43,13 +44,13 @@ bool useSmoothScrolling(ScrollBehavior behavior, Element* associatedElement)
     if (associatedElement == associatedElement->document().scrollingElement())
         associatedElement = associatedElement->document().documentElement();
 
-    if (!associatedElement->renderer() || !associatedElement->document().settings().CSSOMViewSmoothScrollingEnabled())
+    if (!associatedElement->renderer())
         return false;
 
     // https://drafts.csswg.org/cssom-view/#scrolling
     switch (behavior) {
     case ScrollBehavior::Auto:
-        return associatedElement->renderer()->style().useSmoothScrolling();
+        return associatedElement->renderer()->style().scrollBehavior() == Style::ScrollBehavior::Smooth;
     case ScrollBehavior::Instant:
         return false;
     case ScrollBehavior::Smooth:

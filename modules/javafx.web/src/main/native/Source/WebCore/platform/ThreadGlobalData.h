@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2014 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008, 2014 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
 #pragma once
 
 #include <pal/ThreadGlobalData.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/text/StringHash.h>
 
@@ -41,48 +42,48 @@ class FontCache;
 class QualifiedNameCache;
 class ThreadTimers;
 
-struct CachedResourceRequestInitiators;
+struct CachedResourceRequestInitiatorTypes;
 struct EventNames;
 struct MIMETypeRegistryThreadGlobalData;
 
 class ThreadGlobalData : public PAL::ThreadGlobalData {
+    WTF_MAKE_TZONE_ALLOCATED_EXPORT(ThreadGlobalData, WEBCORE_EXPORT);
     WTF_MAKE_NONCOPYABLE(ThreadGlobalData);
-    WTF_MAKE_FAST_ALLOCATED;
 public:
     WEBCORE_EXPORT ThreadGlobalData();
     WEBCORE_EXPORT ~ThreadGlobalData();
     void destroy(); // called on workers to clean up the ThreadGlobalData before the thread exits.
 
-    const CachedResourceRequestInitiators& cachedResourceRequestInitiators()
+    const CachedResourceRequestInitiatorTypes& cachedResourceRequestInitiatorTypes()
     {
         ASSERT(!m_destroyed);
-        if (UNLIKELY(!m_cachedResourceRequestInitiators))
-            initializeCachedResourceRequestInitiators();
-        return *m_cachedResourceRequestInitiators;
+        if (!m_cachedResourceRequestInitiatorTypes) [[unlikely]]
+            initializeCachedResourceRequestInitiatorTypes();
+        return *m_cachedResourceRequestInitiatorTypes;
     }
     EventNames& eventNames()
     {
         ASSERT(!m_destroyed);
-        if (UNLIKELY(!m_eventNames))
+        if (!m_eventNames) [[unlikely]]
             initializeEventNames();
         return *m_eventNames;
     }
     QualifiedNameCache& qualifiedNameCache()
     {
         ASSERT(!m_destroyed);
-        if (UNLIKELY(!m_qualifiedNameCache))
+        if (!m_qualifiedNameCache) [[unlikely]]
             initializeQualifiedNameCache();
         return *m_qualifiedNameCache;
     }
     const MIMETypeRegistryThreadGlobalData& mimeTypeRegistryThreadGlobalData()
     {
         ASSERT(!m_destroyed);
-        if (UNLIKELY(!m_MIMETypeRegistryThreadGlobalData))
+        if (!m_MIMETypeRegistryThreadGlobalData) [[unlikely]]
             initializeMimeTypeRegistryThreadGlobalData();
         return *m_MIMETypeRegistryThreadGlobalData;
     }
 
-    ThreadTimers& threadTimers() { return *m_threadTimers; }
+    ThreadTimers& threadTimers() { return m_threadTimers; }
 
     JSC::JSGlobalObject* currentState() const { return m_currentState; }
     void setCurrentState(JSC::JSGlobalObject* state) { m_currentState = state; }
@@ -97,23 +98,26 @@ public:
     FontCache& fontCache()
     {
         ASSERT(!m_destroyed);
-        if (UNLIKELY(!m_fontCache))
+        if (!m_fontCache) [[unlikely]]
             initializeFontCache();
         return *m_fontCache;
     }
 
+    FontCache* fontCacheIfExists() { return m_fontCache.get(); }
     FontCache* fontCacheIfNotDestroyed() { return m_destroyed ? nullptr : &fontCache(); }
 
 private:
-    WEBCORE_EXPORT void initializeCachedResourceRequestInitiators();
+    bool m_destroyed { false };
+
+    WEBCORE_EXPORT void initializeCachedResourceRequestInitiatorTypes();
     WEBCORE_EXPORT void initializeEventNames();
     WEBCORE_EXPORT void initializeQualifiedNameCache();
     WEBCORE_EXPORT void initializeMimeTypeRegistryThreadGlobalData();
     WEBCORE_EXPORT void initializeFontCache();
 
-    std::unique_ptr<CachedResourceRequestInitiators> m_cachedResourceRequestInitiators;
+    std::unique_ptr<CachedResourceRequestInitiatorTypes> m_cachedResourceRequestInitiatorTypes;
     std::unique_ptr<EventNames> m_eventNames;
-    std::unique_ptr<ThreadTimers> m_threadTimers;
+    const UniqueRef<ThreadTimers> m_threadTimers;
     std::unique_ptr<QualifiedNameCache> m_qualifiedNameCache;
     JSC::JSGlobalObject* m_currentState { nullptr };
     std::unique_ptr<MIMETypeRegistryThreadGlobalData> m_MIMETypeRegistryThreadGlobalData;
@@ -124,15 +128,35 @@ private:
 #endif
 
     bool m_isInRemoveAllEventListeners { false };
-    bool m_destroyed { false };
 
-    WEBCORE_EXPORT friend ThreadGlobalData& threadGlobalData();
+    friend ThreadGlobalData& threadGlobalData();
 };
 
+
 #if USE(WEB_THREAD)
-WEBCORE_EXPORT ThreadGlobalData& threadGlobalData();
+WEBCORE_EXPORT ThreadGlobalData& threadGlobalDataSlow();
 #else
-WEBCORE_EXPORT ThreadGlobalData& threadGlobalData() PURE_FUNCTION;
+WEBCORE_EXPORT ThreadGlobalData& threadGlobalDataSlow() PURE_FUNCTION;
 #endif
+
+#if USE(WEB_THREAD)
+inline ThreadGlobalData& threadGlobalData()
+#else
+inline PURE_FUNCTION ThreadGlobalData& threadGlobalData()
+#endif
+{
+#if HAVE(FAST_TLS)
+    if (auto* thread = Thread::currentMayBeNull(); thread) [[likely]] {
+        if (auto* clientData = thread->m_clientData.get(); clientData) [[likely]]
+            return *static_cast<ThreadGlobalData*>(clientData);
+    }
+#else
+    auto& thread = Thread::currentSingleton();
+    auto* clientData = thread.m_clientData.get();
+    if (clientData) [[likely]]
+        return *static_cast<ThreadGlobalData*>(clientData);
+#endif
+    return threadGlobalDataSlow();
+}
 
 } // namespace WebCore

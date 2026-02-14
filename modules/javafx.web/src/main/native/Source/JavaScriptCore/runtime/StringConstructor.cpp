@@ -36,7 +36,7 @@ static JSC_DECLARE_HOST_FUNCTION(stringFromCodePoint);
 
 namespace JSC {
 
-const ClassInfo StringConstructor::s_info = { "Function", &InternalFunction::s_info, &stringConstructorTable, nullptr, CREATE_METHOD_TABLE(StringConstructor) };
+const ClassInfo StringConstructor::s_info = { "Function"_s, &Base::s_info, &stringConstructorTable, nullptr, CREATE_METHOD_TABLE(StringConstructor) };
 
 /* Source for StringConstructor.lut.h
 @begin stringConstructorTable
@@ -52,15 +52,26 @@ STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(StringConstructor);
 static JSC_DECLARE_HOST_FUNCTION(callStringConstructor);
 static JSC_DECLARE_HOST_FUNCTION(constructWithStringConstructor);
 
-StringConstructor::StringConstructor(VM& vm, Structure* structure)
-    : InternalFunction(vm, structure, callStringConstructor, constructWithStringConstructor)
+StringConstructor::StringConstructor(VM& vm, NativeExecutable* executable, JSGlobalObject* globalObject, Structure* structure)
+    : Base(vm, executable, globalObject, structure)
 {
 }
 
 void StringConstructor::finishCreation(VM& vm, StringPrototype* stringPrototype)
 {
-    Base::finishCreation(vm, 1, vm.propertyNames->String.string(), PropertyAdditionMode::WithoutStructureTransition);
+    Base::finishCreation(vm);
     putDirectWithoutTransition(vm, vm.propertyNames->prototype, stringPrototype, PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum | PropertyAttribute::DontDelete);
+    putDirectWithoutTransition(vm, vm.propertyNames->length, jsNumber(1), PropertyAttribute::DontEnum | PropertyAttribute::ReadOnly);
+    putDirectWithoutTransition(vm, vm.propertyNames->name, jsString(vm, vm.propertyNames->String.string()), PropertyAttribute::ReadOnly | PropertyAttribute::DontEnum);
+}
+
+StringConstructor* StringConstructor::create(VM& vm, Structure* structure, StringPrototype* stringPrototype)
+{
+    JSGlobalObject* globalObject = structure->globalObject();
+    NativeExecutable* executable = vm.getHostFunction(callStringConstructor, ImplementationVisibility::Public, StringConstructorIntrinsic, constructWithStringConstructor, nullptr, vm.propertyNames->String.string());
+    StringConstructor* constructor = new (NotNull, allocateCell<StringConstructor>(vm)) StringConstructor(vm, executable, globalObject, structure);
+    constructor->finishCreation(vm, stringPrototype);
+    return constructor;
 }
 
 // ------------------------------ Functions --------------------------------
@@ -71,26 +82,26 @@ JSC_DEFINE_HOST_FUNCTION(stringFromCharCode, (JSGlobalObject* globalObject, Call
     auto scope = DECLARE_THROW_SCOPE(vm);
 
     unsigned length = callFrame->argumentCount();
-    if (LIKELY(length == 1)) {
+    if (length == 1) [[likely]] {
         scope.release();
-        unsigned code = callFrame->uncheckedArgument(0).toUInt32(globalObject);
+        char16_t code = callFrame->uncheckedArgument(0).toUInt32(globalObject);
         // Not checking for an exception here is ok because jsSingleCharacterString will just fetch an unused string if there's an exception.
         return JSValue::encode(jsSingleCharacterString(vm, code));
     }
 
-    LChar* buf8Bit;
+    std::span<LChar> buf8Bit;
     auto impl8Bit = StringImpl::createUninitialized(length, buf8Bit);
     for (unsigned i = 0; i < length; ++i) {
-        UChar character = static_cast<UChar>(callFrame->uncheckedArgument(i).toUInt32(globalObject));
+        char16_t character = static_cast<char16_t>(callFrame->uncheckedArgument(i).toUInt32(globalObject));
         RETURN_IF_EXCEPTION(scope, encodedJSValue());
-        if (UNLIKELY(!isLatin1(character))) {
-            UChar* buf16Bit;
+        if (!isLatin1(character)) [[unlikely]] {
+            std::span<char16_t> buf16Bit;
             auto impl16Bit = StringImpl::createUninitialized(length, buf16Bit);
-            StringImpl::copyCharacters(buf16Bit, buf8Bit, i);
+            StringImpl::copyCharacters(buf16Bit, buf8Bit.first(i));
             buf16Bit[i] = character;
             ++i;
             for (; i < length; ++i) {
-                buf16Bit[i] = static_cast<UChar>(callFrame->uncheckedArgument(i).toUInt32(globalObject));
+                buf16Bit[i] = static_cast<char16_t>(callFrame->uncheckedArgument(i).toUInt32(globalObject));
                 RETURN_IF_EXCEPTION(scope, encodedJSValue());
             }
             RELEASE_AND_RETURN(scope, JSValue::encode(jsString(vm, WTFMove(impl16Bit))));
@@ -102,7 +113,7 @@ JSC_DEFINE_HOST_FUNCTION(stringFromCharCode, (JSGlobalObject* globalObject, Call
 
 JSString* stringFromCharCode(JSGlobalObject* globalObject, int32_t arg)
 {
-    return jsSingleCharacterString(globalObject->vm(), arg);
+    return jsSingleCharacterString(globalObject->vm(), static_cast<char16_t>(arg));
 }
 
 JSC_DEFINE_HOST_FUNCTION(stringFromCodePoint, (JSGlobalObject* globalObject, CallFrame* callFrame))
@@ -124,7 +135,7 @@ JSC_DEFINE_HOST_FUNCTION(stringFromCodePoint, (JSGlobalObject* globalObject, Cal
             return throwVMError(globalObject, scope, createRangeError(globalObject, "Arguments contain a value that is out of range of code points"_s));
 
         if (U_IS_BMP(codePoint))
-            builder.append(static_cast<UChar>(codePoint));
+            builder.append(static_cast<char16_t>(codePoint));
         else {
             builder.append(U16_LEAD(codePoint));
             builder.append(U16_TRAIL(codePoint));

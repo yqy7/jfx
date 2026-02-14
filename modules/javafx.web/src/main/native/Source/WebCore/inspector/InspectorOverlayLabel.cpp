@@ -35,8 +35,12 @@
 #include "FontCascadeDescription.h"
 #include "GraphicsContext.h"
 #include "Path.h"
+#include <wtf/TZoneMallocInlines.h>
+#include <wtf/text/MakeString.h>
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(InspectorOverlayLabel);
 
 static constexpr float labelPadding = 4;
 static constexpr float labelArrowSize = 6;
@@ -59,11 +63,11 @@ InspectorOverlayLabel::InspectorOverlayLabel(const String& text, FloatPoint loca
 static FontCascade systemFont()
 {
     FontCascadeDescription fontDescription;
-    fontDescription.setFamilies({ "system-ui" });
+    fontDescription.setFamilies({ "system-ui"_s });
     fontDescription.setWeight(FontSelectionValue(500));
     fontDescription.setComputedSize(12);
 
-    FontCascade font(WTFMove(fontDescription), 0, 0);
+    FontCascade font(WTFMove(fontDescription));
     font.update(nullptr);
     return font;
 }
@@ -206,11 +210,11 @@ struct ComputedContentRun {
 
 Path InspectorOverlayLabel::draw(GraphicsContext& context, float maximumLineWidth)
 {
-    constexpr UChar ellipsis = 0x2026;
+    constexpr char16_t ellipsis = 0x2026;
 
     auto font = systemFont();
-    float lineHeight = font.metricsOfPrimaryFont().floatHeight();
-    float lineDescent = font.metricsOfPrimaryFont().floatDescent();
+    float lineHeight = font.metricsOfPrimaryFont().height();
+    float lineDescent = font.metricsOfPrimaryFont().descent();
 
     Vector<ComputedContentRun> computedContentRuns;
 
@@ -234,11 +238,12 @@ Path InspectorOverlayLabel::draw(GraphicsContext& context, float maximumLineWidt
             auto textRun = TextRun(text);
             float textWidth = font.width(textRun);
 
+            // FIXME: This looks very inefficient.
             if (maximumLineWidth && currentLineWidth + textWidth + (labelPadding * 2) > maximumLineWidth) {
-                text.append(ellipsis);
+                text = makeString(text, ellipsis);
                 while (currentLineWidth + textWidth + (labelPadding * 2) > maximumLineWidth && text.length() > 1) {
                     // Remove the second from last character (the character before the ellipsis) and remeasure.
-                    text.remove(text.length() - 2);
+                    text = makeStringByRemoving(text, text.length() - 2, 1);
                     textRun = TextRun(text);
                     textWidth = font.width(textRun);
                 }
@@ -330,13 +335,11 @@ Path InspectorOverlayLabel::draw(GraphicsContext& context, float maximumLineWidt
     context.fillPath(labelPath);
     context.strokePath(labelPath);
 
-    int line = 0;
     float xOffset = 0;
     float yOffset = 0;
     for (auto& computedContentRun : computedContentRuns) {
         if (computedContentRun.startsNewLine) {
             xOffset = 0;
-            ++line;
             yOffset += lineHeight + labelAdditionalLineSpacing;
         }
 
@@ -376,7 +379,7 @@ Path InspectorOverlayLabel::draw(GraphicsContext& context, float maximumLineWidt
 FloatSize InspectorOverlayLabel::expectedSize(const Vector<Content>& contents, Arrow::Direction direction)
 {
     auto font = systemFont();
-    float lineHeight = font.metricsOfPrimaryFont().floatHeight();
+    float lineHeight = font.metricsOfPrimaryFont().height();
 
     float longestLineWidth = 0;
     int currentLine = 0;
@@ -394,7 +397,7 @@ FloatSize InspectorOverlayLabel::expectedSize(const Vector<Content>& contents, A
             if (text.isEmpty())
                 continue;
 
-            currentLineWidth += font.width(TextRun(text));
+            currentLineWidth += font.width(text);
             if (currentLineWidth > longestLineWidth)
                 longestLineWidth = currentLineWidth;
         }

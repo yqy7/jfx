@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,9 +32,7 @@ import javafx.scene.Node;
 import javafx.scene.shape.Shape;
 import javafx.util.Duration;
 
-import com.sun.javafx.geom.Path2D;
 import com.sun.javafx.geom.PathIterator;
-import com.sun.javafx.geom.transform.BaseTransform;
 import com.sun.javafx.scene.NodeHelper;
 import com.sun.javafx.scene.shape.ShapeHelper;
 import java.util.ArrayList;
@@ -44,7 +42,7 @@ import java.util.ArrayList;
  * {@link #durationProperty() duration}. The translation along the path is done by updating the
  * {@code translateX} and {@code translateY} variables of the {@code node}, and
  * the {@code rotate} variable will get updated if {@code orientation} is set to
- * {@code OrientationType.ORTHOGONAL_TO_TANGENT}, at regular interval.
+ * {@code OrientationType.ORTHOGONAL_TO_TANGENT}, at regular intervals.
  * <p>
  * The animated path is defined by the outline of a shape.
  *
@@ -117,7 +115,7 @@ public final class PathTransition extends Transition {
 
     public final ObjectProperty<Node> nodeProperty() {
         if (node == null) {
-            node = new SimpleObjectProperty<Node>(this, "node", DEFAULT_NODE);
+            node = new SimpleObjectProperty<>(this, "node", DEFAULT_NODE);
         }
         return node;
     }
@@ -211,7 +209,7 @@ public final class PathTransition extends Transition {
 
     public final ObjectProperty<Shape> pathProperty() {
         if (path == null) {
-            path = new SimpleObjectProperty<Shape>(this, "path", DEFAULT_PATH);
+            path = new SimpleObjectProperty<>(this, "path", DEFAULT_PATH);
         }
         return path;
     }
@@ -223,7 +221,7 @@ public final class PathTransition extends Transition {
     public static enum OrientationType {
 
         /**
-         * The targeted {@code node}'s rotation matrix stays unchange along the
+         * The targeted {@code node}'s rotation matrix stays unchanged along the
          * geometric path.
          */
         NONE,
@@ -261,7 +259,7 @@ public final class PathTransition extends Transition {
 
     public final ObjectProperty<OrientationType> orientationProperty() {
         if (orientation == null) {
-            orientation = new SimpleObjectProperty<OrientationType>(this, "orientation", DEFAULT_ORIENTATION);
+            orientation = new SimpleObjectProperty<>(this, "orientation", DEFAULT_ORIENTATION);
         }
         return orientation;
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -97,9 +97,6 @@ import com.sun.javafx.logging.PlatformLogger;
  * * Supports spotlight attenuation factors as described in its class docs.
  *
  * <p>
- * An application cannot add its own light types. Extending {@code LightBase} directly may lead to an
- * {@code UnsupportedOperationException} being thrown.
- * <p>
  * All light types are not affected by scaling and shearing transforms.
  *
  * <h2><a id="Color">Color</a></h2>
@@ -166,7 +163,7 @@ import com.sun.javafx.logging.PlatformLogger;
  *
  * @since JavaFX 8.0
  */
-public abstract class LightBase extends Node {
+public abstract sealed class LightBase extends Node permits AmbientLight, DirectionalLight, PointLight {
     static {
          // This is used by classes in different packages to get access to
          // private and package private methods.
@@ -242,7 +239,7 @@ public abstract class LightBase extends Node {
 
     public final ObjectProperty<Color> colorProperty() {
         if (color == null) {
-            color = new SimpleObjectProperty<Color>(LightBase.this, "color") {
+            color = new SimpleObjectProperty<>(LightBase.this, "color") {
                 @Override
                 protected void invalidated() {
                     NodeHelper.markDirty(LightBase.this, DirtyBits.NODE_LIGHT);
@@ -399,7 +396,7 @@ public abstract class LightBase extends Node {
     private void markChildrenDirty(Node node) {
         if (node instanceof Shape3D) {
             // Dirty using a lightweight DirtyBits.NODE_DRAWMODE bit
-            NodeHelper.markDirty(((Shape3D) node), DirtyBits.NODE_DRAWMODE);
+            NodeHelper.markDirty(node, DirtyBits.NODE_DRAWMODE);
         } else if (node instanceof Parent) {
             for (Node child : ((Parent) node).getChildren()) {
                 if ((scope != null && getScope().contains(child)) ||

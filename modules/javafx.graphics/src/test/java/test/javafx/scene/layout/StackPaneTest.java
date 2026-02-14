@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,6 @@
 
 package test.javafx.scene.layout;
 
-import test.javafx.scene.layout.MockBiased;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
@@ -35,33 +32,39 @@ import javafx.scene.ParentShim;
 import javafx.scene.layout.StackPane;
 import javafx.scene.shape.Rectangle;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 
 public class StackPaneTest {
     StackPane stack;
 
-    @Before public void setUp() {
+    @BeforeEach
+    public void setUp() {
         this.stack = new StackPane();
     }
 
-    @Test public void testStackPaneDefaults() {
+    @Test
+    public void testStackPaneDefaults() {
         assertEquals(Pos.CENTER, stack.getAlignment());
     }
 
-    @Test public void testStackPaneNulls() {
+    @Test
+    public void testStackPaneNulls() {
         stack.setAlignment(null);
 
         // this musn't throw NPE
         stack.autosize();
         stack.layout();
 
-        assertNull(null, stack.getAlignment());
-        assertNull(null, stack.alignmentProperty().get());
+        assertNull(stack.getAlignment());
+        assertNull(stack.alignmentProperty().get());
     }
 
-    @Test public void testSimpleStackPane() {
+    @Test
+    public void testSimpleStackPane() {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
         Rectangle child2 = new Rectangle(100, 100);
         ParentShim.getChildren(stack).addAll(child1, child2);
@@ -94,7 +97,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneAlignmentTopLeft() {
+    @Test
+    public void testStackPaneAlignmentTopLeft() {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
         Rectangle child2 = new Rectangle(100, 100);
         ParentShim.getChildren(stack).addAll(child1, child2);
@@ -112,7 +116,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneAlignmentTopCenter() {
+    @Test
+    public void testStackPaneAlignmentTopCenter() {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
         Rectangle child2 = new Rectangle(100, 100);
         ParentShim.getChildren(stack).addAll(child1, child2);
@@ -130,7 +135,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneAlignmentTopRight() {
+    @Test
+    public void testStackPaneAlignmentTopRight() {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
         Rectangle child2 = new Rectangle(100, 100);
         ParentShim.getChildren(stack).addAll(child1, child2);
@@ -148,7 +154,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneAlignmentCenterLeft() {
+    @Test
+    public void testStackPaneAlignmentCenterLeft() {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
         Rectangle child2 = new Rectangle(100, 100);
         ParentShim.getChildren(stack).addAll(child1, child2);
@@ -166,7 +173,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneAlignmentCenter() {
+    @Test
+    public void testStackPaneAlignmentCenter() {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
         Rectangle child2 = new Rectangle(100, 100);
         ParentShim.getChildren(stack).addAll(child1, child2);
@@ -184,7 +192,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneAlignmentCenterRight() {
+    @Test
+    public void testStackPaneAlignmentCenterRight() {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
         Rectangle child2 = new Rectangle(100, 100);
         ParentShim.getChildren(stack).addAll(child1, child2);
@@ -202,7 +211,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneAlignmentBottomLeft() {
+    @Test
+    public void testStackPaneAlignmentBottomLeft() {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
         Rectangle child2 = new Rectangle(100, 100);
         ParentShim.getChildren(stack).addAll(child1, child2);
@@ -220,7 +230,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneAlignmentBottomCenter() {
+    @Test
+    public void testStackPaneAlignmentBottomCenter() {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
         Rectangle child2 = new Rectangle(100, 100);
         ParentShim.getChildren(stack).addAll(child1, child2);
@@ -238,7 +249,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneAlignmentBottomRight() {
+    @Test
+    public void testStackPaneAlignmentBottomRight() {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
         Rectangle child2 = new Rectangle(100, 100);
         ParentShim.getChildren(stack).addAll(child1, child2);
@@ -256,7 +268,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneAlignmentBaselineLeft() {
+    @Test
+    public void testStackPaneAlignmentBaselineLeft() {
         MockResizable child1 = new MockResizable(300,300);
         Rectangle child2 = new Rectangle(100, 100);
         ParentShim.getChildren(stack).addAll(child1, child2);
@@ -274,7 +287,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneAlignmentBaselineCenter() {
+    @Test
+    public void testStackPaneAlignmentBaselineCenter() {
         MockResizable child1 = new MockResizable(300,300);
         Rectangle child2 = new Rectangle(100, 100);
         ParentShim.getChildren(stack).addAll(child1, child2);
@@ -292,7 +306,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneAlignmentBaselineRight() {
+    @Test
+    public void testStackPaneAlignmentBaselineRight() {
         MockResizable child1 = new MockResizable(300,300);
         Rectangle child2 = new Rectangle(100, 100);
         ParentShim.getChildren(stack).addAll(child1, child2);
@@ -310,7 +325,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneAlignmentBaselineLeftComputed() {
+    @Test
+    public void testStackPaneAlignmentBaselineLeftComputed() {
         MockResizable child1 = new MockResizable(300,300) {
             @Override public double getBaselineOffset() {
                 return BASELINE_OFFSET_SAME_AS_HEIGHT; // should be prefHeight
@@ -332,7 +348,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneAlignmentBaselineCenterComputed() {
+    @Test
+    public void testStackPaneAlignmentBaselineCenterComputed() {
         MockResizable child1 = new MockResizable(300,300) {
             @Override public double getBaselineOffset() {
                 return BASELINE_OFFSET_SAME_AS_HEIGHT; // should be prefHeight
@@ -354,7 +371,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneAlignmentBaselineRightComputed() {
+    @Test
+    public void testStackPaneAlignmentBaselineRightComputed() {
         MockResizable child1 = new MockResizable(300,300) {
             @Override public double getBaselineOffset() {
                 return BASELINE_OFFSET_SAME_AS_HEIGHT; // should be prefHeight
@@ -375,7 +393,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneContentBiasNullNoChildHasContentBias() {
+    @Test
+    public void testStackPaneContentBiasNullNoChildHasContentBias() {
         Rectangle r = new Rectangle(100,100);
         MockResizable child = new MockResizable(100,200);
         ParentShim.getChildren(stack).addAll(r, child);
@@ -383,7 +402,8 @@ public class StackPaneTest {
         assertNull(stack.getContentBias());
     }
 
-    @Test public void testStackPaneContentBiasHORIZONTALIfChildHORIZONTAL() {
+    @Test
+    public void testStackPaneContentBiasHORIZONTALIfChildHORIZONTAL() {
         Rectangle r = new Rectangle(100,100);
         MockBiased biased = new MockBiased(Orientation.HORIZONTAL, 100, 200);
         MockResizable child = new MockResizable(100,100);
@@ -395,7 +415,8 @@ public class StackPaneTest {
         assertEquals(100, stack.prefHeight(200), 0);
     }
 
-    @Test public void testStackPaneContentBiasVERTICALIfChildVERTICAL() {
+    @Test
+    public void testStackPaneContentBiasVERTICALIfChildVERTICAL() {
         Rectangle r = new Rectangle(100,100);
         MockBiased biased = new MockBiased(Orientation.VERTICAL, 100, 200);
         MockResizable child = new MockResizable(100,100);
@@ -407,7 +428,8 @@ public class StackPaneTest {
         assertEquals(200, stack.prefWidth(100), 0);
     }
 
-    @Test public void testStackPaneSetMarginConstraint() {
+    @Test
+    public void testStackPaneSetMarginConstraint() {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
 
         assertNull(StackPane.getMargin(child1));
@@ -420,7 +442,8 @@ public class StackPaneTest {
         assertNull(StackPane.getMargin(child1));
     }
 
-    @Test public void testStackPaneMarginConstraint() {
+    @Test
+    public void testStackPaneMarginConstraint() {
         StackPane stack = new StackPane();
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
         Rectangle child2 = new Rectangle(100, 100);
@@ -456,7 +479,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneSetAlignmentConstraint() {
+    @Test
+    public void testStackPaneSetAlignmentConstraint() {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
 
         assertNull(StackPane.getAlignment(child1));
@@ -468,7 +492,8 @@ public class StackPaneTest {
         assertNull(StackPane.getAlignment(child1));
     }
 
-    @Test public void testStackPaneAlignmentConstraint() {
+    @Test
+    public void testStackPaneAlignmentConstraint() {
         StackPane stack = new StackPane();
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
         Rectangle child2 = new Rectangle(100, 100);
@@ -504,7 +529,8 @@ public class StackPaneTest {
         assertEquals(100, child2.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneWithHorizontalBiasedChild() {
+    @Test
+    public void testStackPaneWithHorizontalBiasedChild() {
         StackPane stack = new StackPane();
 
         MockBiased biased = new MockBiased(Orientation.HORIZONTAL, 100,100);
@@ -529,7 +555,8 @@ public class StackPaneTest {
         assertEquals(50, biased.getLayoutBounds().getHeight(), 1e-100);
     }
 
-    @Test public void testStackPaneWithVerticalBiasedChild() {
+    @Test
+    public void testStackPaneWithVerticalBiasedChild() {
         StackPane stack = new StackPane();
 
         MockBiased biased = new MockBiased(Orientation.VERTICAL, 100,100);

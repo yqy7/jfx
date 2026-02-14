@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,6 @@
 package javafx.scene.control.cell;
 
 import javafx.beans.NamedArg;
-import javafx.beans.property.Property;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.value.ObservableValue;
 import javafx.scene.control.TreeItem;
@@ -126,6 +125,8 @@ import com.sun.javafx.logging.PlatformLogger.Level;
  * unconditionally.
  * </p>
  *
+ * @param <S> the TableView type
+ * @param <T> the TreeTableColumn type
  * @see TreeTableColumn
  * @see TreeTableView
  * @see TreeTableCell
@@ -170,7 +171,7 @@ public class TreeItemPropertyValueFactory<S,T> implements Callback<TreeTableColu
         try {
             // we attempt to cache the property reference here, as otherwise
             // performance suffers when working in large data models. For
-            // a bit of reference, refer to RT-13937.
+            // a bit of reference, refer to JDK-8112885.
             if (columnClass == null || previousProperty == null ||
                     ! columnClass.equals(rowData.getClass()) ||
                     ! previousProperty.equals(getProperty())) {
@@ -178,7 +179,7 @@ public class TreeItemPropertyValueFactory<S,T> implements Callback<TreeTableColu
                 // create a new PropertyReference
                 this.columnClass = rowData.getClass();
                 this.previousProperty = getProperty();
-                this.propertyRef = new PropertyReference<T>(rowData.getClass(), getProperty());
+                this.propertyRef = new PropertyReference<>(rowData.getClass(), getProperty());
             }
 
             if (propertyRef != null) {
@@ -188,7 +189,7 @@ public class TreeItemPropertyValueFactory<S,T> implements Callback<TreeTableColu
             try {
                 // attempt to just get the value
                 T value = propertyRef.get(rowData);
-                return new ReadOnlyObjectWrapper<T>(value);
+                return new ReadOnlyObjectWrapper<>(value);
             } catch (RuntimeException e2) {
                 // fall through to logged exception below
             }

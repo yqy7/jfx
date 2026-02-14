@@ -36,9 +36,6 @@ namespace Style {
 
 std::unique_ptr<Relations> commitRelationsToRenderStyle(RenderStyle& style, const Element& element, const Relations& relations)
 {
-    if (!relations.isEmpty())
-        style.setUnique();
-
     std::unique_ptr<Relations> remainingRelations;
 
     auto appendStyleRelation = [&remainingRelations] (const Relation& relation) {
@@ -63,8 +60,6 @@ std::unique_ptr<Relations> commitRelationsToRenderStyle(RenderStyle& style, cons
         case Relation::LastChild:
             style.setLastChildState();
             break;
-        case Relation::Unique:
-            break;
         case Relation::AffectedByPreviousSibling:
         case Relation::DescendantsAffectedByPreviousSibling:
         case Relation::AffectsNextSibling:
@@ -73,9 +68,9 @@ std::unique_ptr<Relations> commitRelationsToRenderStyle(RenderStyle& style, cons
         case Relation::ChildrenAffectedByBackwardPositionalRules:
         case Relation::DescendantsAffectedByBackwardPositionalRules:
         case Relation::ChildrenAffectedByFirstChildRules:
-        case Relation::ChildrenAffectedByPropertyBasedBackwardPositionalRules:
         case Relation::ChildrenAffectedByLastChildRules:
         case Relation::NthChildIndex:
+        case Relation::AffectedByHasWithPositionalPseudoClass:
             appendStyleRelation(relation);
             break;
         }
@@ -120,12 +115,11 @@ void commitRelations(std::unique_ptr<Relations> relations, Update& update)
         case Relation::ChildrenAffectedByFirstChildRules:
             element.setChildrenAffectedByFirstChildRules();
             break;
-        case Relation::ChildrenAffectedByPropertyBasedBackwardPositionalRules:
-            element.setChildrenAffectedByBackwardPositionalRules();
-            element.setChildrenAffectedByPropertyBasedBackwardPositionalRules();
-            break;
         case Relation::ChildrenAffectedByLastChildRules:
             element.setChildrenAffectedByLastChildRules();
+            break;
+        case Relation::AffectedByHasWithPositionalPseudoClass:
+            element.setAffectedByHasWithPositionalPseudoClass();
             break;
         case Relation::FirstChild:
             if (auto* style = update.elementStyle(element))
@@ -136,16 +130,20 @@ void commitRelations(std::unique_ptr<Relations> relations, Update& update)
                 style->setLastChildState();
             break;
         case Relation::NthChildIndex:
-            if (auto* style = update.elementStyle(element))
-                style->setUnique();
             element.setChildIndex(relation.value);
-            break;
-        case Relation::Unique:
-            if (auto* style = update.elementStyle(element))
-                style->setUnique();
             break;
         }
     }
+}
+
+void copyRelations(RenderStyle& to, const RenderStyle& from)
+{
+    if (from.emptyState())
+        to.setEmptyState(true);
+    if (from.firstChildState())
+        to.setFirstChildState();
+    if (from.lastChildState())
+        to.setLastChildState();
 }
 
 }

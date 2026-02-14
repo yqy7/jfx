@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -41,13 +41,15 @@ import javafx.css.RuleShim;
 import javafx.css.Selector;
 import javafx.css.StyleOrigin;
 import javafx.css.Stylesheet;
-import javafx.css.StylesheetShim;
 import javafx.scene.Node;
-import org.junit.AfterClass;
-import org.junit.Test;
-import static org.junit.Assert.*;
-import org.junit.BeforeClass;
-import org.junit.Ignore;
+
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.fail;
 
 
 public class RuleTest {
@@ -55,17 +57,17 @@ public class RuleTest {
     public RuleTest() {
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void setUpClass() throws Exception {
     }
 
-    @AfterClass
+    @AfterAll
     public static void tearDownClass() throws Exception {
     }
 
     @Test
     public void testGetUnobservedSelectorList() {
-        List<Selector> expResult = new ArrayList<Selector>();
+        List<Selector> expResult = new ArrayList<>();
         expResult.add(Selector.createSelector("One.two#three"));
         expResult.add(Selector.createSelector("Four.five#six"));
         Rule instance = RuleShim.getRule(expResult, Collections.EMPTY_LIST);
@@ -75,7 +77,7 @@ public class RuleTest {
 
     @Test
     public void testGetUnobservedDeclarationList() {
-        List<Declaration> expResult = new ArrayList<Declaration>();
+        List<Declaration> expResult = new ArrayList<>();
         expResult.add(DeclarationShim.getDeclaration("one", new ParsedValueImpl<String,String>("one", null), false));
         expResult.add(DeclarationShim.getDeclaration("two", new ParsedValueImpl<String,String>("two", null), false));
         expResult.add(DeclarationShim.getDeclaration("three", new ParsedValueImpl<String,String>("three", null), false));
@@ -86,7 +88,7 @@ public class RuleTest {
 
     @Test
     public void testGetSelectors() {
-        List<Selector> expResult = new ArrayList<Selector>();
+        List<Selector> expResult = new ArrayList<>();
         expResult.add(Selector.createSelector("One.two#three"));
         expResult.add(Selector.createSelector("Four.five#six"));
         Rule instance = RuleShim.getRule(expResult, Collections.EMPTY_LIST);
@@ -96,7 +98,7 @@ public class RuleTest {
 
     @Test
     public void testGetDeclarations() {
-        List<Declaration> expResult = new ArrayList<Declaration>();
+        List<Declaration> expResult = new ArrayList<>();
         expResult.add(DeclarationShim.getDeclaration("one", new ParsedValueImpl<String,String>("one", null), false));
         expResult.add(DeclarationShim.getDeclaration("two", new ParsedValueImpl<String,String>("two", null), false));
         expResult.add(DeclarationShim.getDeclaration("three", new ParsedValueImpl<String,String>("three", null), false));
@@ -154,7 +156,7 @@ public class RuleTest {
         assertNull(result);
     }
 
-    @Ignore("JDK-8234154")
+    @Disabled("JDK-8234154")
     @Test
     public void testApplies() {
         System.out.println("applies");
@@ -166,7 +168,7 @@ public class RuleTest {
         fail("The test case is a prototype.");
     }
 
-    @Ignore("JDK-8234154")
+    @Disabled("JDK-8234154")
     @Test
     public void testWriteBinary() throws Exception {
         System.out.println("writeBinary");
@@ -177,7 +179,7 @@ public class RuleTest {
         fail("The test case is a prototype.");
     }
 
-    @Ignore("JDK-8234154")
+    @Disabled("JDK-8234154")
     @Test
     public void testReadBinary() throws Exception {
         System.out.println("readBinary");

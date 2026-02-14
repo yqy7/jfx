@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,12 +55,10 @@ import javafx.scene.input.ScrollEvent;
 import javafx.stage.Window;
 import java.lang.ref.WeakReference;
 import java.nio.IntBuffer;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import com.sun.javafx.embed.swing.Disposer;
-import com.sun.javafx.embed.swing.DisposerRecord;
 import com.sun.javafx.geom.BaseBounds;
 import com.sun.javafx.geom.transform.BaseTransform;
+import com.sun.javafx.scene.AbstractNode;
 import com.sun.javafx.scene.DirtyBits;
 import com.sun.javafx.sg.prism.NGExternalNode;
 import com.sun.javafx.sg.prism.NGNode;
@@ -71,6 +69,7 @@ import com.sun.javafx.PlatformUtil;
 import com.sun.javafx.scene.NodeHelper;
 import static javafx.stage.WindowEvent.WINDOW_HIDDEN;
 
+import com.sun.javafx.embed.swing.DisposerRecord;
 import com.sun.javafx.embed.swing.SwingNodeHelper;
 import com.sun.javafx.embed.swing.SwingEvents;
 import com.sun.javafx.embed.swing.newimpl.SwingNodeInteropN;
@@ -116,20 +115,10 @@ import com.sun.javafx.embed.swing.newimpl.SwingNodeInteropN;
  * </pre>
  * @since JavaFX 8.0
  */
-public class SwingNode extends Node {
-    private static boolean isThreadMerged;
+public class SwingNode extends AbstractNode {
+    private static boolean isThreadMerged = Boolean.valueOf(System.getProperty("javafx.embed.singleThread"));
 
     static {
-        @SuppressWarnings("removal")
-        var dummy = AccessController.doPrivileged(new PrivilegedAction<Object>() {
-            public Object run() {
-                isThreadMerged = Boolean.valueOf(
-                        System.getProperty("javafx.embed.singleThread"));
-                return null;
-            }
-        });
-
-
          // This is used by classes in different packages to get access to
          // private and package private methods.
         SwingNodeHelper.setSwingNodeAccessor(new SwingNodeHelper.SwingNodeAccessor() {
@@ -251,6 +240,8 @@ public class SwingNode extends Node {
     private boolean grabbed; // lwframe initiated grab
     private Timer deactivate; // lwFrame deactivate delay for Linux
     private SwingNodeInteropN swNodeIOP;
+    private DisposerRecord rec;
+    private WeakReference disposerRecRef;
 
     {
         // To initialize the class helper at the begining each constructor of this class
@@ -271,7 +262,7 @@ public class SwingNode extends Node {
              activateLwFrame(newValue);
         });
 
-        //Workaround for RT-34170
+        //Workaround for JDK-8120878
         javafx.scene.text.Font.getFamilies();
     }
 
@@ -282,15 +273,20 @@ public class SwingNode extends Node {
             TKStage tk = WindowHelper.getPeer(w);
             if (tk != null) {
                 if (isThreadMerged) {
-                    swNodeIOP.overrideNativeWindowHandle(lwFrame, 0L, null);
+                    var hFrame = lwFrame;
+                    if (hFrame != null) {
+                        swNodeIOP.overrideNativeWindowHandle(hFrame, 0L, null);
+                    }
                 } else {
                     // Postpone actual window closing to ensure that
                     // a native window handler is valid on a Swing side
                     tk.postponeClose();
                     SwingNodeHelper.runOnEDT(() -> {
-                        swNodeIOP.overrideNativeWindowHandle(lwFrame, 0L,
-                            (Runnable) () -> SwingNodeHelper.runOnFxThread(
+                        if (lwFrame != null) {
+                            swNodeIOP.overrideNativeWindowHandle(lwFrame, 0L,
+                                (Runnable) () -> SwingNodeHelper.runOnFxThread(
                                         () -> tk.closePostponed()));
+                        }
                     });
                 }
             }
@@ -310,7 +306,8 @@ public class SwingNode extends Node {
             hWindow = window;
         }
 
-        if (lwFrame != null) {
+        var hFrame = lwFrame;
+        if (hFrame != null) {
             long rawHandle = 0L;
             if (window != null) {
                 TKStage tkStage = WindowHelper.getPeer(window);
@@ -318,7 +315,7 @@ public class SwingNode extends Node {
                     rawHandle = tkStage.getRawHandle();
                 }
             }
-            swNodeIOP.overrideNativeWindowHandle(lwFrame, rawHandle, null);
+            swNodeIOP.overrideNativeWindowHandle(hFrame, rawHandle, null);
         }
     }
 
@@ -361,7 +358,10 @@ public class SwingNode extends Node {
      */
     private void setContentImpl(JComponent content) {
         if (lwFrame != null) {
-            swNodeIOP.disposeFrame(lwFrame);
+            rec.dispose();
+            Disposer.removeRecord(disposerRecRef);
+            rec = null;
+            disposerRecRef = null;
             lwFrame = null;
         }
         if (content != null) {
@@ -381,13 +381,13 @@ public class SwingNode extends Node {
             swNodeIOP.setContent(lwFrame, swNodeIOP.createSwingNodeContent(content, this));
             swNodeIOP.setVisible(lwFrame, true);
 
-            Disposer.addRecord(this, swNodeIOP.createSwingNodeDisposer(lwFrame));
-
-            if (getScene() != null) {
-                notifyNativeHandle(getScene().getWindow());
-            }
+            rec = swNodeIOP.createSwingNodeDisposer(lwFrame, swNodeIOP);
+            disposerRecRef = Disposer.addRecord(this, rec);
 
             SwingNodeHelper.runOnFxThread(() -> {
+                if (getScene() != null) {
+                    notifyNativeHandle(getScene().getWindow());
+                }
                 locateLwFrame();// initialize location
 
                 if (focusedProperty().get()) {
@@ -474,11 +474,7 @@ public class SwingNode extends Node {
             this.fxHeight = height;
             NodeHelper.geomChanged(this);
             NodeHelper.markDirty(this, DirtyBits.NODE_GEOMETRY);
-            SwingNodeHelper.runOnEDT(() -> {
-                if (lwFrame != null) {
-                    locateLwFrame();
-                }
-            });
+            locateLwFrame();
         }
     }
 
@@ -555,12 +551,11 @@ public class SwingNode extends Node {
         locateLwFrame();
     };
 
-    @SuppressWarnings("removal")
     private final EventHandler<FocusUngrabEvent> ungrabHandler = event -> {
         if (!skipBackwardUnrgabNotification) {
-            if (lwFrame != null) {
-                AccessController.doPrivileged(new PostEventAction(
-                    swNodeIOP.createUngrabEvent(lwFrame)));
+            var hFrame = lwFrame;
+            if (hFrame != null) {
+                postAWTEvent(swNodeIOP.createUngrabEvent(hFrame));
             }
         }
     };
@@ -782,7 +777,7 @@ public class SwingNode extends Node {
         private WeakReference<SwingNode> swingNodeRef;
 
         SwingNodeWindowFocusListener(SwingNode swingNode) {
-            this.swingNodeRef = new WeakReference<SwingNode>(swingNode);
+            this.swingNodeRef = new WeakReference<>(swingNode);
         }
 
         @Override
@@ -823,17 +818,9 @@ public class SwingNode extends Node {
         }
     }
 
-    private class PostEventAction implements PrivilegedAction<Void> {
-        private AWTEvent event;
-        PostEventAction(AWTEvent event) {
-            this.event = event;
-        }
-        @Override
-        public Void run() {
-            EventQueue eq = Toolkit.getDefaultToolkit().getSystemEventQueue();
-            eq.postEvent(event);
-            return null;
-        }
+    private static void postAWTEvent(AWTEvent event) {
+        EventQueue eq = Toolkit.getDefaultToolkit().getSystemEventQueue();
+        eq.postEvent(event);
     }
 
     private class SwingMouseEventHandler implements EventHandler<MouseEvent> {
@@ -864,7 +851,7 @@ public class SwingNode extends Node {
                 mouseClickedAllowed.clear();
             } else if (type == MouseEvent.MOUSE_CLICKED) {
                 if (event.getClickCount() == 1 && !mouseClickedAllowed.contains(event.getButton())) {
-                    // RT-34610: In FX, CLICKED events are generated even after dragging the mouse pointer
+                    // JDK-8122146: In FX, CLICKED events are generated even after dragging the mouse pointer
                     // Note that this is only relevant for single clicks. Double clicks use a smudge factor.
                     return;
                 }
@@ -883,8 +870,7 @@ public class SwingNode extends Node {
                         frame, swingID, swingWhen, swingModifiers,
                         relX, relY, absX, absY,
                         event.getClickCount(), swingPopupTrigger, swingButton);
-            @SuppressWarnings("removal")
-            var dummy = AccessController.doPrivileged(new PostEventAction(mouseEvent));
+            postAWTEvent(mouseEvent);
         }
     }
 
@@ -925,8 +911,7 @@ public class SwingNode extends Node {
             int y = (int) Math.round(fxY);
             MouseWheelEvent mouseWheelEvent =
                 swNodeIOP.createMouseWheelEvent(source, swingModifiers, x, y, -wheelRotation);
-            @SuppressWarnings("removal")
-            var dummy = AccessController.doPrivileged(new PostEventAction(mouseWheelEvent));
+            postAWTEvent(mouseWheelEvent);
         }
     }
 
@@ -971,10 +956,7 @@ public class SwingNode extends Node {
             java.awt.event.KeyEvent keyEvent = swNodeIOP.createKeyEvent(frame,
                 swingID, swingWhen, swingModifiers, swingKeyCode,
                 swingChar);
-            @SuppressWarnings("removal")
-            var dummy = AccessController.doPrivileged(new PostEventAction(keyEvent));
+            postAWTEvent(keyEvent);
         }
     }
 }
-
-

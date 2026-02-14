@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Google, Inc. All Rights Reserved.
+ * Copyright (C) 2010 Google, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include "CSSTokenizerInputStream.h"
 #include "SegmentedString.h"
 #include <wtf/text/OrdinalNumber.h>
 
@@ -72,7 +73,7 @@ public:
 
     void markEndOfFile()
     {
-        m_last->append(String { &kEndOfFileMarker, 1 });
+        m_last->append(span(kEndOfFileMarker));
         m_last->close();
     }
 

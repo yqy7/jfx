@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005-2020 Apple Inc. All rights reserved.
+ * Copyright (C) 2005-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,6 +34,15 @@
 #include <wtf/WeakPtr.h>
 
 namespace WebCore {
+class NetscapePlugInStreamLoaderClient;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::NetscapePlugInStreamLoaderClient> : std::true_type { };
+}
+
+namespace WebCore {
 
 class NetscapePlugInStreamLoader;
 class SharedBuffer;
@@ -53,7 +62,7 @@ protected:
 
 class NetscapePlugInStreamLoader final : public ResourceLoader {
 public:
-    WEBCORE_EXPORT static void create(Frame&, NetscapePlugInStreamLoaderClient&, ResourceRequest&&, CompletionHandler<void(RefPtr<NetscapePlugInStreamLoader>&&)>&&);
+    WEBCORE_EXPORT static void create(LocalFrame&, NetscapePlugInStreamLoaderClient&, ResourceRequest&&, CompletionHandler<void(RefPtr<NetscapePlugInStreamLoader>&&)>&&);
     virtual ~NetscapePlugInStreamLoader();
 
     WEBCORE_EXPORT bool isDone() const;
@@ -62,17 +71,17 @@ private:
     void init(ResourceRequest&&, CompletionHandler<void(bool)>&&) override;
 
     void willSendRequest(ResourceRequest&&, const ResourceResponse& redirectResponse, CompletionHandler<void(ResourceRequest&&)>&& callback) override;
-    void didReceiveResponse(const ResourceResponse&, CompletionHandler<void()>&& policyCompletionHandler) override;
+    void didReceiveResponse(ResourceResponse&&, CompletionHandler<void()>&& policyCompletionHandler) override;
     void didReceiveData(const SharedBuffer&, long long encodedDataLength, DataPayloadType) override;
     void didFinishLoading(const NetworkLoadMetrics&) override;
     void didFail(const ResourceError&) override;
 
     void releaseResources() override;
 
-    NetscapePlugInStreamLoader(Frame&, NetscapePlugInStreamLoaderClient&);
+    NetscapePlugInStreamLoader(LocalFrame&, NetscapePlugInStreamLoaderClient&);
 
     void willCancel(const ResourceError&) override;
-    void didCancel(const ResourceError&) override;
+    void didCancel(LoadWillContinueInAnotherProcess) override;
 
     void notifyDone();
 

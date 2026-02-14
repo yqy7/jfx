@@ -21,9 +21,11 @@
 #pragma once
 
 #include "CSSParserContext.h"
+#include <optional>
+#include <wtf/CheckedRef.h>
 #include <wtf/Function.h>
 #include <wtf/HashMap.h>
-#include <wtf/RefCounted.h>
+#include <wtf/RefCountedAndCanMakeWeakPtr.h>
 #include <wtf/URL.h>
 #include <wtf/Vector.h>
 #include <wtf/WeakPtr.h>
@@ -45,7 +47,7 @@ class StyleRuleNamespace;
 
 enum class CachePolicy : uint8_t;
 
-class StyleSheetContents final : public RefCounted<StyleSheetContents>, public CanMakeWeakPtr<StyleSheetContents> {
+class StyleSheetContents final : public RefCountedAndCanMakeWeakPtr<StyleSheetContents> {
 public:
     static Ref<StyleSheetContents> create(const CSSParserContext& context = CSSParserContext(HTMLStandardMode))
     {
@@ -71,6 +73,7 @@ public:
     WEBCORE_EXPORT bool parseString(const String&);
 
     bool isCacheable() const;
+    bool isCacheableWithNoBaseURLDependency() const;
 
     bool isLoading() const;
     bool subresourcesAllowReuse(CachePolicy, FrameLoader&) const;
@@ -83,12 +86,14 @@ public:
     Node* singleOwnerNode() const;
     Document* singleOwnerDocument() const;
 
-    const String& charset() const { return m_parserContext.charset; }
+    ASCIILiteral charset() const { return m_parserContext.charset; }
 
     bool loadCompleted() const { return m_loadCompleted; }
 
-    bool traverseRules(const Function<bool(const StyleRuleBase&)>& handler) const;
-    bool traverseSubresources(const Function<bool(const CachedResource&)>& handler) const;
+    bool mayDependOnBaseURL() const;
+
+    bool traverseRules(NOESCAPE const Function<bool(const StyleRuleBase&)>& handler) const;
+    bool traverseSubresources(NOESCAPE const Function<bool(const CachedResource&)>& handler) const;
 
     void setIsUserStyleSheet(bool b) { m_isUserStyleSheet = b; }
     bool isUserStyleSheet() const { return m_isUserStyleSheet; }
@@ -103,10 +108,10 @@ public:
     void clearRules();
 
     String encodingFromCharsetRule() const { return m_encodingFromCharsetRule; }
-    const Vector<RefPtr<StyleRuleLayer>>& layerRulesBeforeImportRules() const { return m_layerRulesBeforeImportRules; }
-    const Vector<RefPtr<StyleRuleImport>>& importRules() const { return m_importRules; }
-    const Vector<RefPtr<StyleRuleNamespace>>& namespaceRules() const { return m_namespaceRules; }
-    const Vector<RefPtr<StyleRuleBase>>& childRules() const { return m_childRules; }
+    const Vector<Ref<StyleRuleLayer>>& layerRulesBeforeImportRules() const { return m_layerRulesBeforeImportRules; }
+    const Vector<Ref<StyleRuleImport>>& importRules() const { return m_importRules; }
+    const Vector<Ref<StyleRuleNamespace>>& namespaceRules() const { return m_namespaceRules; }
+    const Vector<Ref<StyleRuleBase>>& childRules() const { return m_childRules; }
 
     void notifyLoadedSheet(const CachedCSSStyleSheet*);
 
@@ -120,6 +125,7 @@ public:
     String originalURL() const { return m_originalURL; }
     const URL& baseURL() const { return m_parserContext.baseURL; }
 
+    bool isEmpty() const { return !ruleCount(); }
     unsigned ruleCount() const;
     StyleRuleBase* ruleAt(unsigned index) const;
 
@@ -128,16 +134,20 @@ public:
     unsigned estimatedSizeInBytes() const;
 
     bool wrapperInsertRule(Ref<StyleRuleBase>&&, unsigned index);
-    void wrapperDeleteRule(unsigned index);
+    bool wrapperDeleteRule(unsigned index);
 
     Ref<StyleSheetContents> copy() const { return adoptRef(*new StyleSheetContents(*this)); }
 
     void registerClient(CSSStyleSheet*);
     void unregisterClient(CSSStyleSheet*);
     bool hasOneClient() { return m_clients.size() == 1; }
+    Vector<CSSStyleSheet*> clients() const { return m_clients; }
 
     bool isMutable() const { return m_isMutable; }
     void setMutable() { m_isMutable = true; }
+
+    bool hasNestingRules() const;
+    void clearHasNestingRulesCache() { m_hasNestingRulesCache = { }; }
 
     bool isInMemoryCache() const { return m_inMemoryCacheCount; }
     void addedToMemoryCache();
@@ -145,10 +155,15 @@ public:
 
     void shrinkToFit();
 
-    void setAsOpaque() { m_parserContext.isContentOpaque = true; }
-    bool isContentOpaque() const { return m_parserContext.isContentOpaque; }
+    void setAsLoadedFromOpaqueSource() { m_parserContext.loadedFromOpaqueSource = LoadedFromOpaqueSource::Yes; }
+    LoadedFromOpaqueSource loadedFromOpaqueSource() const { return m_parserContext.loadedFromOpaqueSource; }
 
     void setLoadErrorOccured() { m_didLoadErrorOccur = true; }
+
+    friend class CSSStyleSheet;
+
+    bool hasResolvedNesting() const { return m_hasResolvedNesting; }
+    void setHasResolvedNesting(bool value) const { m_hasResolvedNesting = value; }
 
 private:
     WEBCORE_EXPORT StyleSheetContents(StyleRuleImport* ownerRule, const String& originalURL, const CSSParserContext&);
@@ -156,15 +171,15 @@ private:
 
     void clearCharsetRule();
 
-    StyleRuleImport* m_ownerRule;
+    StyleRuleImport* m_ownerRule { nullptr };
 
     String m_originalURL;
 
     String m_encodingFromCharsetRule;
-    Vector<RefPtr<StyleRuleLayer>> m_layerRulesBeforeImportRules;
-    Vector<RefPtr<StyleRuleImport>> m_importRules;
-    Vector<RefPtr<StyleRuleNamespace>> m_namespaceRules;
-    Vector<RefPtr<StyleRuleBase>> m_childRules;
+    Vector<Ref<StyleRuleLayer>> m_layerRulesBeforeImportRules;
+    Vector<Ref<StyleRuleImport>> m_importRules;
+    Vector<Ref<StyleRuleNamespace>> m_namespaceRules;
+    Vector<Ref<StyleRuleBase>> m_childRules;
     typedef HashMap<AtomString, AtomString> PrefixNamespaceURIMap;
     PrefixNamespaceURIMap m_namespaces;
     AtomString m_defaultNamespace;
@@ -175,6 +190,8 @@ private:
     bool m_didLoadErrorOccur { false };
     bool m_usesStyleBasedEditability { false };
     bool m_isMutable { false };
+    mutable bool m_hasResolvedNesting { false };
+    mutable std::optional<bool> m_hasNestingRulesCache;
     unsigned m_inMemoryCacheCount { 0 };
 
     CSSParserContext m_parserContext;

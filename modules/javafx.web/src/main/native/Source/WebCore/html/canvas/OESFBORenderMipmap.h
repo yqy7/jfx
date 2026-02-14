@@ -26,16 +26,17 @@
 #pragma once
 
 #include "WebGLExtension.h"
+#include "WebGLRenderingContextBase.h"
+#include <wtf/Noncopyable.h>
+#include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
 
-class OESFBORenderMipmap final : public WebGLExtension {
-    WTF_MAKE_ISO_ALLOCATED(OESFBORenderMipmap);
+class OESFBORenderMipmap final : public WebGLExtension<WebGLRenderingContextBase> {
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(OESFBORenderMipmap);
 public:
-    OESFBORenderMipmap(WebGLRenderingContextBase&);
-    virtual ~OESFBORenderMipmap();
-
-    ExtensionName getName() const override;
+    explicit OESFBORenderMipmap(WebGLRenderingContextBase&);
+    ~OESFBORenderMipmap();
 
     static bool supported(GraphicsContextGL&);
 };

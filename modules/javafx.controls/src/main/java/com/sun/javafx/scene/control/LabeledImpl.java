@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,7 +44,6 @@ import javafx.css.Styleable;
 import javafx.css.StyleableProperty;
 import javafx.scene.layout.Region;
 
-
 public class LabeledImpl extends Label {
 
     public LabeledImpl(final Labeled labeled) {
@@ -56,6 +55,10 @@ public class LabeledImpl extends Label {
 
         labeledImpl.setText(labeled.getText());
         labeled.textProperty().addListener(shuttler);
+
+        labeledImpl.textTruncatedProperty().subscribe(v -> {
+            LabeledHelper.setTextTruncated(labeled, v);
+        });
 
         labeledImpl.setGraphic(labeled.getGraphic());
         labeled.graphicProperty().addListener(shuttler);
@@ -144,7 +147,7 @@ public class LabeledImpl extends Label {
             final List<CssMetaData<? extends Styleable, ?>> labeledStyleables = Labeled.getClassCssMetaData();
             final List<CssMetaData<? extends Styleable, ?>> parentStyleables = Region.getClassCssMetaData();
             final List<CssMetaData<? extends Styleable, ?>> styleables =
-                new ArrayList<CssMetaData<? extends Styleable, ?>>(labeledStyleables);
+                new ArrayList<>(labeledStyleables);
             styleables.removeAll(parentStyleables);
             STYLEABLES_TO_MIRROR = Collections.unmodifiableList(styleables);
         }

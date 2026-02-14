@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,23 +25,18 @@
 
 package test.javafx.scene.control;
 
-import com.sun.javafx.scene.control.behavior.TreeCellBehavior;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import java.util.List;
 import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.scene.Group;
 import javafx.scene.control.Button;
-import javafx.scene.input.KeyCode;
-import java.util.List;
-import com.sun.javafx.PlatformUtil;
-import com.sun.javafx.util.Utils;
-import test.com.sun.javafx.scene.control.behavior.TreeViewAnchorRetriever;
-import test.com.sun.javafx.scene.control.infrastructure.ControlTestUtils;
-import test.com.sun.javafx.scene.control.infrastructure.KeyEventFirer;
-import test.com.sun.javafx.scene.control.infrastructure.KeyModifier;
-import test.com.sun.javafx.scene.control.infrastructure.StageLoader;
-import test.com.sun.javafx.scene.control.infrastructure.VirtualFlowTestUtils;
-import com.sun.javafx.tk.Toolkit;
 import javafx.scene.control.FocusModel;
 import javafx.scene.control.IndexedCell;
 import javafx.scene.control.MultipleSelectionModel;
@@ -49,17 +44,21 @@ import javafx.scene.control.SelectionMode;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeView;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Ignore;
-import org.junit.Test;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNotSame;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import javafx.scene.input.KeyCode;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.PlatformUtil;
+import com.sun.javafx.scene.control.behavior.TreeCellBehavior;
+import com.sun.javafx.tk.Toolkit;
+import com.sun.javafx.util.Utils;
+import test.com.sun.javafx.scene.control.behavior.TreeViewAnchorRetriever;
+import test.com.sun.javafx.scene.control.infrastructure.ControlTestUtils;
+import test.com.sun.javafx.scene.control.infrastructure.KeyEventFirer;
+import test.com.sun.javafx.scene.control.infrastructure.KeyModifier;
+import test.com.sun.javafx.scene.control.infrastructure.StageLoader;
+import test.com.sun.javafx.scene.control.infrastructure.VirtualFlowTestUtils;
 
 public class TreeViewKeyInputTest {
     private TreeView<String> treeView;
@@ -69,22 +68,23 @@ public class TreeViewKeyInputTest {
     private KeyEventFirer keyboard;
     private StageLoader stageLoader;
 
-    private final TreeItem<String> root = new TreeItem<String>("Root");                     // 0
-        private final TreeItem<String> child1 = new TreeItem<String>("Child 1");            // 1
-        private final TreeItem<String> child2 = new TreeItem<String>("Child 2");            // 2
-        private final TreeItem<String> child3 = new TreeItem<String>("Child 3");            // 3
-            private final TreeItem<String> subchild1 = new TreeItem<String>("Subchild 1");  // 4
-            private final TreeItem<String> subchild2 = new TreeItem<String>("Subchild 2");  // 5
-            private final TreeItem<String> subchild3 = new TreeItem<String>("Subchild 3");  // 6
-        private final TreeItem<String> child4 = new TreeItem<String>("Child 4");            // 7
-        private final TreeItem<String> child5 = new TreeItem<String>("Child 5");            // 8
-        private final TreeItem<String> child6 = new TreeItem<String>("Child 6");            // 9
-        private final TreeItem<String> child7 = new TreeItem<String>("Child 7");            // 10
-        private final TreeItem<String> child8 = new TreeItem<String>("Child 8");            // 11
-        private final TreeItem<String> child9 = new TreeItem<String>("Child 9");            // 12
-        private final TreeItem<String> child10 = new TreeItem<String>("Child 10");          // 13
+    private final TreeItem<String> root = new TreeItem<>("Root");                     // 0
+        private final TreeItem<String> child1 = new TreeItem<>("Child 1");            // 1
+        private final TreeItem<String> child2 = new TreeItem<>("Child 2");            // 2
+        private final TreeItem<String> child3 = new TreeItem<>("Child 3");            // 3
+            private final TreeItem<String> subchild1 = new TreeItem<>("Subchild 1");  // 4
+            private final TreeItem<String> subchild2 = new TreeItem<>("Subchild 2");  // 5
+            private final TreeItem<String> subchild3 = new TreeItem<>("Subchild 3");  // 6
+        private final TreeItem<String> child4 = new TreeItem<>("Child 4");            // 7
+        private final TreeItem<String> child5 = new TreeItem<>("Child 5");            // 8
+        private final TreeItem<String> child6 = new TreeItem<>("Child 6");            // 9
+        private final TreeItem<String> child7 = new TreeItem<>("Child 7");            // 10
+        private final TreeItem<String> child8 = new TreeItem<>("Child 8");            // 11
+        private final TreeItem<String> child9 = new TreeItem<>("Child 9");            // 12
+        private final TreeItem<String> child10 = new TreeItem<>("Child 10");          // 13
 
-    @Before public void setup() {
+    @BeforeEach
+    public void setup() {
         // reset tree structure
         root.getChildren().clear();
         root.setExpanded(true);
@@ -112,7 +112,7 @@ public class TreeViewKeyInputTest {
         child10.setExpanded(false);
 
         // recreate treeview and gather models
-        treeView = new TreeView<String>();
+        treeView = new TreeView<>();
         treeView.setRoot(root);
         sm = treeView.getSelectionModel();
         sm.setSelectionMode(SelectionMode.MULTIPLE);
@@ -126,7 +126,8 @@ public class TreeViewKeyInputTest {
         stageLoader.getStage().show();
     }
 
-    @After public void tearDown() {
+    @AfterEach
+    public void tearDown() {
         treeView.getSkin().dispose();
         stageLoader.dispose();
     }
@@ -203,7 +204,7 @@ public class TreeViewKeyInputTest {
     @Test public void testDownArrowDoesNotChangeSelectionWhenAtLastIndex() {
         int endIndex = getItemCount();
         sm.clearAndSelect(endIndex);
-        assertTrue(debug(), sm.isSelected(endIndex));
+        assertTrue(sm.isSelected(endIndex), debug());
         keyboard.doDownArrowPress();
         assertTrue(sm.isSelected(endIndex));
     }
@@ -325,7 +326,7 @@ public class TreeViewKeyInputTest {
     @Test public void testEndKey() {
         sm.clearAndSelect(3);
         keyboard.doKeyPress(KeyCode.END);
-        assertTrue(debug(), isSelected(getItemCount()));
+        assertTrue(isSelected(getItemCount()), debug());
         assertTrue(isNotSelected(1,2,3));
     }
 
@@ -353,7 +354,7 @@ public class TreeViewKeyInputTest {
         keyboard.doKeyPress(KeyCode.SPACE, KeyModifier.getShortcutKey(),
                 (Utils.isMac()  ? KeyModifier.CTRL : null));
         assertTrue(isNotSelected(5));
-        assertTrue(debug(), fm.isFocused(5));
+        assertTrue(fm.isFocused(5), debug());
         assertTrue(isAnchor(5));
     }
 
@@ -410,7 +411,7 @@ public class TreeViewKeyInputTest {
         keyboard.doDownArrowPress(KeyModifier.SHIFT);
         keyboard.doDownArrowPress(KeyModifier.SHIFT);
         keyboard.doUpArrowPress(KeyModifier.SHIFT);
-        assertTrue(debug(), sm.isSelected(0));
+        assertTrue(sm.isSelected(0), debug());
         assertTrue(sm.isSelected(1));
         assertFalse(sm.isSelected(2));
     }
@@ -555,7 +556,7 @@ public class TreeViewKeyInputTest {
         keyboard.doKeyPress(KeyCode.SPACE, KeyModifier.SHIFT);  // select 0,1,2
         assertTrue(isSelected(0, 1, 2));
         assertTrue(isNotSelected(3));
-        assertTrue(debug(), isAnchor(2));
+        assertTrue(isAnchor(2), debug());
     }
 
     // test 33
@@ -593,7 +594,7 @@ public class TreeViewKeyInputTest {
         keyboard.doKeyPress(KeyCode.SPACE, KeyModifier.SHIFT);  // select 0,1,2
         assertTrue(isSelected(0, 1, 2));
         assertTrue(isNotSelected(3, 4));
-        assertTrue(debug(), isAnchor(2));
+        assertTrue(isAnchor(2), debug());
     }
 
     // test 35
@@ -712,7 +713,7 @@ public class TreeViewKeyInputTest {
         keyboard.doKeyPress(KeyCode.HOME, KeyModifier.SHIFT);
         assertTrue(isSelected(0,1,2));
         assertTrue(isNotSelected(3,4));
-        assertTrue(debug(),isAnchor(2));
+        assertTrue(isAnchor(2), debug());
     }
 
     // test 51
@@ -731,7 +732,7 @@ public class TreeViewKeyInputTest {
         keyboard.doKeyPress(KeyCode.END, KeyModifier.SHIFT);
         assertTrue(isSelected(3,4,5,6,7,8,9));
         assertTrue(isNotSelected(0,1,2));
-        assertTrue(debug(),isAnchor(3));
+        assertTrue(isAnchor(3), debug());
     }
 
     // test 42
@@ -777,7 +778,7 @@ public class TreeViewKeyInputTest {
         keyboard.doKeyPress(KeyCode.HOME, KeyModifier.SHIFT);
         assertTrue(isSelected(0,1,2,3));
         assertTrue(isNotSelected(4,5));
-        assertTrue(debug(), isAnchor(3));
+        assertTrue(isAnchor(3), debug());
     }
 
     // test 49
@@ -827,7 +828,7 @@ public class TreeViewKeyInputTest {
 
 
     /***************************************************************************
-     * Tests for discontinuous multiple selection (RT-18952)
+     * Tests for discontinuous multiple selection (JDK-8127476)
      **************************************************************************/
 
     // Test 1
@@ -842,7 +843,7 @@ public class TreeViewKeyInputTest {
 
         keyboard.doDownArrowPress(KeyModifier.getShortcutKey(), KeyModifier.SHIFT);
         keyboard.doDownArrowPress(KeyModifier.getShortcutKey(), KeyModifier.SHIFT);
-        assertTrue(debug(),isSelected(0,2,3,4));
+        assertTrue(isSelected(0,2,3,4));
         assertTrue(isAnchor(2));
     }
 
@@ -1151,7 +1152,7 @@ public class TreeViewKeyInputTest {
     }
 
     // Test 24 (TreeView test cases)
-    @Ignore("Not yet working")
+    @Disabled("Not yet working")
     @Test public void testExpandCollapseImpactOnSelection() {
         sm.clearAndSelect(5);
         assertTrue(child3.isExpanded());
@@ -1238,7 +1239,7 @@ public class TreeViewKeyInputTest {
 
         keyboard.doKeyPress(KeyCode.HOME, KeyModifier.SHIFT);
         assertTrue(isSelected(0,1,2,3,4,5));
-        assertTrue(debug(), isNotSelected(6,7,8,9));
+        assertTrue(isNotSelected(6,7,8,9), debug());
     }
 
     @Test public void test_rt14451_2() {
@@ -1250,7 +1251,7 @@ public class TreeViewKeyInputTest {
 
         keyboard.doKeyPress(KeyCode.HOME, KeyModifier.SHIFT);
         assertTrue(isSelected(0,1,2,3,4,5));
-        assertTrue(debug(), isNotSelected(6,7,8,9));
+        assertTrue(isNotSelected(6,7,8,9), debug());
 
         keyboard.doKeyPress(KeyCode.END, KeyModifier.SHIFT);
         assertTrue(isNotSelected(0,1,2,3,4));
@@ -1266,13 +1267,13 @@ public class TreeViewKeyInputTest {
     @Test public void test_rt26835_2() {
         sm.clearAndSelect(5);
         keyboard.doKeyPress(KeyCode.END, KeyModifier.getShortcutKey());
-        assertTrue(debug(), fm.isFocused(getItemCount()));
+        assertTrue(fm.isFocused(getItemCount()), debug());
     }
 
     @Test public void test_rt27175() {
         sm.clearAndSelect(5);
         keyboard.doKeyPress(KeyCode.HOME, KeyModifier.SHIFT, KeyModifier.getShortcutKey());
-        assertTrue(debug(), fm.isFocused(0));
+        assertTrue(fm.isFocused(0));
         assertTrue(isSelected(0,1,2,3,4,5));
     }
 
@@ -1389,7 +1390,7 @@ public class TreeViewKeyInputTest {
     @Test public void test_rt32383_pageDown() {
         // this test requires a lot of data
         for (int i = 0; i < 100; i++) {
-            root.getChildren().add(new TreeItem<String>("Row " + i));
+            root.getChildren().add(new TreeItem<>("Row " + i));
         }
 
         final MultipleSelectionModel sm = treeView.getSelectionModel();
@@ -1413,7 +1414,7 @@ public class TreeViewKeyInputTest {
     @Test public void test_rt32383_pageUp() {
         // this test requires a lot of data
         for (int i = 0; i < 100; i++) {
-            root.getChildren().add(new TreeItem<String>("Row " + i));
+            root.getChildren().add(new TreeItem<>("Row " + i));
         }
 
         final int lastIndex = 99;
@@ -1753,7 +1754,7 @@ public class TreeViewKeyInputTest {
         assertTrue(isNotSelected(0,1));
         assertTrue(isSelected(2,3,4));
         assertEquals(3, sm.getSelectedItems().size());
-        assertTrue("Focus index incorrectly at: " + fm.getFocusedIndex(), fm.isFocused(4));
+        assertTrue(fm.isFocused(4), "Focus index incorrectly at: " + fm.getFocusedIndex());
     }
 
     @Test public void test_rt33301_multipleSelection_up() {
@@ -1889,7 +1890,7 @@ public class TreeViewKeyInputTest {
 
         keyboard.doKeyPress(KeyCode.SPACE,  KeyModifier.getShortcutKey(), KeyModifier.SHIFT);
         Toolkit.getToolkit().firePulse();
-        assertTrue(debug(), isSelected(0,1,2,3));
+        assertTrue(isSelected(0,1,2,3), debug());
         assertEquals(4, sm.getSelectedItems().size());
         assertTrue(fm.isFocused(3));
     }
@@ -2024,9 +2025,9 @@ public class TreeViewKeyInputTest {
         keyboard.doKeyPress(KeyCode.PAGE_DOWN, KeyModifier.SHIFT);
         final int leadSelectedIndex = sm.getSelectedIndex();
         final int selectedIndicesCount = sm.getSelectedIndices().size();
-        assertEquals(6, leadSelectedIndex);
-        assertEquals(6, fm.getFocusedIndex());
-        assertEquals(7, selectedIndicesCount);
+        assertEquals(4, leadSelectedIndex);
+        assertEquals(4, fm.getFocusedIndex());
+        assertEquals(5, selectedIndicesCount);
 
         keyboard.doKeyPress(KeyCode.PAGE_DOWN, KeyModifier.SHIFT);
         assertEquals(leadSelectedIndex * 2, sm.getSelectedIndex());
@@ -2067,10 +2068,10 @@ public class TreeViewKeyInputTest {
         keyboard.doKeyPress(KeyCode.PAGE_UP, KeyModifier.SHIFT);
         final int leadSelectedIndex = sm.getSelectedIndex();
         final int selectedIndicesCount = sm.getSelectedIndices().size();
-        final int diff = 4;//99 - leadSelectedIndex;
+        final int diff = 2;//99 - leadSelectedIndex;
         assertEquals(99 - diff, leadSelectedIndex);
         assertEquals(99 - diff, fm.getFocusedIndex());
-        assertEquals(5, selectedIndicesCount);
+        assertEquals(3, selectedIndicesCount);
 
         keyboard.doKeyPress(KeyCode.PAGE_UP, KeyModifier.SHIFT);
         assertEquals(99 - diff * 2 - 1, sm.getSelectedIndex());
@@ -2397,7 +2398,7 @@ public class TreeViewKeyInputTest {
         assertEquals(1, indices.size());
 
         keyboard.doKeyPress(KeyCode.END, KeyModifier.SHIFT);
-        assertEquals(debug(), expectedSize, indices.size());
+        assertEquals(expectedSize, indices.size(), debug());
         assertEquals(9, (int) indices.get(lookupIndex));
 
         if (resetSelection) {
@@ -2410,7 +2411,7 @@ public class TreeViewKeyInputTest {
 
         keyboard.doKeyPress(KeyCode.HOME, KeyModifier.SHIFT);
         assertEquals(expectedSize, indices.size());
-        assertTrue(debug(),sm.isSelected(0));
+        assertTrue(sm.isSelected(0), debug());
 
         if (resetSelection) {
             sm.clearAndSelect(0);

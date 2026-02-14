@@ -37,7 +37,7 @@ namespace JSC {
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(JSInternalPromiseConstructor);
 
-const ClassInfo JSInternalPromiseConstructor::s_info = { "Function", &Base::s_info, &internalPromiseConstructorTable, nullptr, CREATE_METHOD_TABLE(JSInternalPromiseConstructor) };
+const ClassInfo JSInternalPromiseConstructor::s_info = { "Function"_s, &Base::s_info, &internalPromiseConstructorTable, nullptr, CREATE_METHOD_TABLE(JSInternalPromiseConstructor) };
 
 /* Source for JSInternalPromiseConstructor.lut.h
 @begin internalPromiseConstructorTable
@@ -45,12 +45,12 @@ const ClassInfo JSInternalPromiseConstructor::s_info = { "Function", &Base::s_in
 @end
 */
 
-JSInternalPromiseConstructor* JSInternalPromiseConstructor::create(VM& vm, Structure* structure, JSInternalPromisePrototype* promisePrototype, GetterSetter* speciesSymbol)
+JSInternalPromiseConstructor* JSInternalPromiseConstructor::create(VM& vm, Structure* structure, JSInternalPromisePrototype* promisePrototype)
 {
     JSGlobalObject* globalObject = structure->globalObject();
     FunctionExecutable* executable = promiseConstructorInternalPromiseConstructorCodeGenerator(vm);
     JSInternalPromiseConstructor* constructor = new (NotNull, allocateCell<JSInternalPromiseConstructor>(vm)) JSInternalPromiseConstructor(vm, executable, globalObject, structure);
-    constructor->finishCreation(vm, promisePrototype, speciesSymbol);
+    constructor->finishCreation(vm, promisePrototype);
     return constructor;
 }
 

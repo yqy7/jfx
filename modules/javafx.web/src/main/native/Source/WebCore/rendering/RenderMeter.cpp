@@ -23,18 +23,21 @@
 
 #include "HTMLMeterElement.h"
 #include "HTMLNames.h"
+#include "RenderBoxInlines.h"
+#include "RenderBoxModelObjectInlines.h"
 #include "RenderTheme.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(RenderMeter);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(RenderMeter);
 
 RenderMeter::RenderMeter(HTMLElement& element, RenderStyle&& style)
-    : RenderBlockFlow(element, WTFMove(style))
+    : RenderBlockFlow(Type::Meter, element, WTFMove(style))
 {
+    ASSERT(isRenderMeter());
 }
 
 RenderMeter::~RenderMeter() = default;
@@ -43,19 +46,19 @@ HTMLMeterElement* RenderMeter::meterElement() const
 {
     ASSERT(element());
 
-    if (is<HTMLMeterElement>(*element()))
-        return downcast<HTMLMeterElement>(element());
+    if (auto* meterElement = dynamicDowncast<HTMLMeterElement>(*element()))
+        return meterElement;
 
-    ASSERT(element()->shadowHost());
-    return downcast<HTMLMeterElement>(element()->shadowHost());
+    ASSERT(protectedElement()->shadowHost());
+    return downcast<HTMLMeterElement>(protectedElement()->shadowHost());
 }
 
 void RenderMeter::updateLogicalWidth()
 {
     RenderBox::updateLogicalWidth();
 
-    IntSize frameSize = theme().meterSizeForBounds(*this, snappedIntRect(frameRect()));
-    setLogicalWidth(isHorizontalWritingMode() ? frameSize.width() : frameSize.height());
+    auto frameSize = theme().meterSizeForBounds(*this, snappedIntRect(frameRect()));
+    setLogicalWidth(LayoutUnit(isHorizontalWritingMode() ? frameSize.width() : frameSize.height()));
 }
 
 RenderBox::LogicalExtentComputedValues RenderMeter::computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop) const
@@ -66,7 +69,7 @@ RenderBox::LogicalExtentComputedValues RenderMeter::computeLogicalHeight(LayoutU
         frame.setHeight(computedValues.m_extent);
     else
         frame.setWidth(computedValues.m_extent);
-    IntSize frameSize = theme().meterSizeForBounds(*this, snappedIntRect(frame));
+    auto frameSize = theme().meterSizeForBounds(*this, snappedIntRect(frame));
     computedValues.m_extent = isHorizontalWritingMode() ? frameSize.height() : frameSize.width();
     return computedValues;
 }

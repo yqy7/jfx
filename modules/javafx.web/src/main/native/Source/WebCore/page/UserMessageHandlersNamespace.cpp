@@ -29,14 +29,16 @@
 #if ENABLE(USER_MESSAGE_HANDLERS)
 
 #include "DOMWrapperWorld.h"
-#include "Frame.h"
+#include "FrameDestructionObserverInlines.h"
+#include "FrameInlines.h"
+#include "LocalFrame.h"
 #include "Page.h"
 #include "UserContentController.h"
 #include "UserMessageHandler.h"
 
 namespace WebCore {
 
-UserMessageHandlersNamespace::UserMessageHandlersNamespace(Frame& frame, UserContentProvider& userContentProvider)
+UserMessageHandlersNamespace::UserMessageHandlersNamespace(LocalFrame& frame, UserContentProvider& userContentProvider)
     : FrameDestructionObserver(&frame)
     , m_userContentProvider(userContentProvider)
 {
@@ -71,21 +73,28 @@ Vector<AtomString> UserMessageHandlersNamespace::supportedPropertyNames() const
     return { };
 }
 
+bool UserMessageHandlersNamespace::isSupportedPropertyName(const AtomString&)
+{
+    // FIXME: Consider adding support for this. It would require adding support for passing the
+    // DOMWrapperWorld to isSupportedPropertyName().
+    return false;
+}
+
 UserMessageHandler* UserMessageHandlersNamespace::namedItem(DOMWrapperWorld& world, const AtomString& name)
 {
-    Frame* frame = this->frame();
+    RefPtr frame = this->frame();
     if (!frame)
         return nullptr;
 
-    Page* page = frame->page();
+    RefPtr page = frame->page();
     if (!page)
         return nullptr;
 
-    UserMessageHandler* handler = m_messageHandlers.get(std::pair<AtomString, RefPtr<DOMWrapperWorld>>(name, &world));
+    RefPtr handler = m_messageHandlers.get(std::pair<AtomString, RefPtr<DOMWrapperWorld>>(name, &world));
     if (handler)
-        return handler;
+        return handler.get();
 
-    page->userContentProvider().forEachUserMessageHandler([&](const UserMessageHandlerDescriptor& descriptor) {
+    page->protectedUserContentProvider()->forEachUserMessageHandler([&](const UserMessageHandlerDescriptor& descriptor) {
         if (descriptor.name() != name || &descriptor.world() != &world)
             return;
 
@@ -95,7 +104,7 @@ UserMessageHandler* UserMessageHandlersNamespace::namedItem(DOMWrapperWorld& wor
         handler = addResult.iterator->value.get();
     });
 
-    return handler;
+    return handler.get();
 }
 
 } // namespace WebCore

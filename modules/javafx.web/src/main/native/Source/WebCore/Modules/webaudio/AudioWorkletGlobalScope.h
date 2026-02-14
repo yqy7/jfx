@@ -32,7 +32,8 @@
 #include "AudioWorkletThread.h"
 #include "MessagePort.h"
 #include "WorkletGlobalScope.h"
-#include <wtf/WeakHashSet.h>
+#include <wtf/RobinHoodHashMap.h>
+#include <wtf/ThreadSafeWeakHashSet.h>
 
 namespace JSC {
 class VM;
@@ -48,7 +49,7 @@ class JSAudioWorkletProcessorConstructor;
 struct WorkletParameters;
 
 class AudioWorkletGlobalScope final : public WorkletGlobalScope {
-    WTF_MAKE_ISO_ALLOCATED(AudioWorkletGlobalScope);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(AudioWorkletGlobalScope);
 public:
     static RefPtr<AudioWorkletGlobalScope> tryCreate(AudioWorkletThread&, const WorkletParameters&);
     ~AudioWorkletGlobalScope();
@@ -81,17 +82,20 @@ private:
 
     size_t m_currentFrame { 0 };
     const float m_sampleRate;
-    HashMap<String, RefPtr<JSAudioWorkletProcessorConstructor>> m_processorConstructorMap;
-    Lock m_processorsLock;
-    WeakHashSet<AudioWorkletProcessor, WTF::EmptyCounter, EnableWeakPtrThreadingAssertions::No> m_processors WTF_GUARDED_BY_LOCK(m_processorsLock);
+    MemoryCompactRobinHoodHashMap<String, RefPtr<JSAudioWorkletProcessorConstructor>> m_processorConstructorMap;
+    ThreadSafeWeakHashSet<AudioWorkletProcessor> m_processors;
     std::unique_ptr<AudioWorkletProcessorConstructionData> m_pendingProcessorConstructionData;
-    std::optional<JSC::JSLockHolder> m_lockDuringRendering;
+    std::optional<JSC::VM::DrainMicrotaskDelayScope> m_delayMicrotaskDrainingDuringRendering;
 };
 
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::AudioWorkletGlobalScope)
-static bool isType(const WebCore::ScriptExecutionContext& context) { return is<WebCore::WorkletGlobalScope>(context) && downcast<WebCore::WorkletGlobalScope>(context).isAudioWorkletGlobalScope(); }
+static bool isType(const WebCore::ScriptExecutionContext& context)
+{
+    auto* workletGlobalScope = dynamicDowncast<WebCore::WorkletGlobalScope>(context);
+    return workletGlobalScope && workletGlobalScope->isAudioWorkletGlobalScope();
+}
 static bool isType(const WebCore::WorkletGlobalScope& context) { return context.isAudioWorkletGlobalScope(); }
 SPECIALIZE_TYPE_TRAITS_END()
 

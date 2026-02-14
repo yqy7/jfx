@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -45,7 +45,6 @@ import javafx.beans.binding.DoubleExpression;
 import javafx.beans.binding.ObjectExpression;
 import javafx.beans.binding.StringExpression;
 import javafx.beans.property.*;
-import javafx.beans.value.WritableValue;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.css.FontCssMetaData;
@@ -76,6 +75,8 @@ import javafx.util.Duration;
  * Some examples of concrete subclasses include {@link NumberAxis} whose axis plots data
  * in numbers and {@link CategoryAxis} whose values / ticks represent string
  * categories along its axis.
+ *
+ * @param<T> the axis data type
  * @since JavaFX 2.0
  */
 public abstract class Axis<T> extends Region {
@@ -108,7 +109,7 @@ public abstract class Axis<T> extends Region {
     public ObservableList<TickMark<T>> getTickMarks() { return unmodifiableTickMarks; }
 
     /** The side of the plot which this axis is being drawn on */
-    private ObjectProperty<Side> side = new StyleableObjectProperty<Side>(){
+    private ObjectProperty<Side> side = new StyleableObjectProperty<>(){
         @Override protected void invalidated() {
             // cause refreshTickMarks
             Side edge = get();
@@ -153,7 +154,7 @@ public abstract class Axis<T> extends Region {
     }
 
     /** The axis label */
-    private ObjectProperty<String> label = new ObjectPropertyBase<String>() {
+    private ObjectProperty<String> label = new ObjectPropertyBase<>() {
         @Override protected void invalidated() {
             axisLabel.setText(get());
             requestAxisLayout();
@@ -419,7 +420,7 @@ public abstract class Axis<T> extends Region {
     // -------------- METHODS ------------------------------------------------------------------------------------------
 
     /**
-     * See if the current range is valid, if it is not then any range dependent calulcations need to redone on the next layout pass
+     * See if the current range is valid, if it is not then any range dependent calculations need to redone on the next layout pass
      *
      * @return true if current range calculations are valid
      */
@@ -680,7 +681,7 @@ public abstract class Axis<T> extends Region {
 
             // add new tick marks for new values
             for(T newValue: newTickValues) {
-                final TickMark<T> tick = new TickMark<T>();
+                final TickMark<T> tick = new TickMark<>();
                 tick.setValue(newValue);
                 tick.textNode.setText(getTickMarkLabel(newValue));
                 tick.textNode.setFont(getTickLabelFont());
@@ -697,8 +698,6 @@ public abstract class Axis<T> extends Region {
                 }
             }
 
-            // call tick marks updated to inform subclasses that we have updated tick marks
-            tickMarksUpdated();
             // mark all done
             oldLength = length;
             rangeValid = true;
@@ -707,7 +706,7 @@ public abstract class Axis<T> extends Region {
         if (lengthDiffers || rangeInvalid || measureInvalid || tickLabelsVisibleInvalid) {
             measureInvalid = false;
             tickLabelsVisibleInvalid = false;
-            // RT-12272 : tick labels overlapping
+            // JDK-8112169 : tick labels overlapping
             // first check if all visible labels fit, if not, retain every nth label
             labelsToSkip.clear();
             int numLabelsToSkip = 0;
@@ -749,6 +748,9 @@ public abstract class Axis<T> extends Region {
                 }
             }
             updateTickMarks(side, length);
+
+            // call tick marks updated to inform subclasses that we have updated tick marks
+            tickMarksUpdated();
         }
     }
 
@@ -978,6 +980,8 @@ public abstract class Axis<T> extends Region {
     /**
      * TickMark represents the label text, its associated properties for each tick
      * along the Axis.
+     *
+     * @param <T> the axis data type
      * @since JavaFX 2.0
      */
     public static final class TickMark<T> {
@@ -1006,7 +1010,7 @@ public abstract class Axis<T> extends Region {
         /**
          * The value for this tick mark in data units
          */
-        private ObjectProperty<T> value = new SimpleObjectProperty<T>(this, "value");
+        private ObjectProperty<T> value = new SimpleObjectProperty<>(this, "value");
         public final T getValue() { return value.get(); }
         public final void setValue(T v) { value.set(v); }
         public final ObjectExpression<T> valueProperty() { return value; }
@@ -1071,8 +1075,8 @@ public abstract class Axis<T> extends Region {
 
     private static class StyleableProperties {
         private static final CssMetaData<Axis<?>,Side> SIDE =
-            new CssMetaData<Axis<?>,Side>("-fx-side",
-                new EnumConverter<Side>(Side.class)) {
+            new CssMetaData<>("-fx-side",
+                new EnumConverter<>(Side.class)) {
 
             @Override
             public boolean isSettable(Axis<?> n) {
@@ -1087,7 +1091,7 @@ public abstract class Axis<T> extends Region {
         };
 
         private static final CssMetaData<Axis<?>,Number> TICK_LENGTH =
-            new CssMetaData<Axis<?>,Number>("-fx-tick-length",
+            new CssMetaData<>("-fx-tick-length",
                 SizeConverter.getInstance(), 8.0) {
 
             @Override
@@ -1097,12 +1101,12 @@ public abstract class Axis<T> extends Region {
 
             @Override
             public StyleableProperty<Number> getStyleableProperty(Axis<?> n) {
-                return (StyleableProperty<Number>)(WritableValue<Number>)n.tickLengthProperty();
+                return (StyleableProperty<Number>)n.tickLengthProperty();
             }
         };
 
         private static final CssMetaData<Axis<?>,Font> TICK_LABEL_FONT =
-            new FontCssMetaData<Axis<?>>("-fx-tick-label-font",
+            new FontCssMetaData<>("-fx-tick-label-font",
                 Font.font("system", 8.0)) {
 
             @Override
@@ -1118,7 +1122,7 @@ public abstract class Axis<T> extends Region {
         };
 
         private static final CssMetaData<Axis<?>,Paint> TICK_LABEL_FILL =
-            new CssMetaData<Axis<?>,Paint>("-fx-tick-label-fill",
+            new CssMetaData<>("-fx-tick-label-fill",
                 PaintConverter.getInstance(), Color.BLACK) {
 
             @Override
@@ -1134,7 +1138,7 @@ public abstract class Axis<T> extends Region {
         };
 
         private static final CssMetaData<Axis<?>,Number> TICK_LABEL_TICK_GAP =
-            new CssMetaData<Axis<?>,Number>("-fx-tick-label-gap",
+            new CssMetaData<>("-fx-tick-label-gap",
                 SizeConverter.getInstance(), 3.0) {
 
             @Override
@@ -1144,12 +1148,12 @@ public abstract class Axis<T> extends Region {
 
             @Override
             public StyleableProperty<Number> getStyleableProperty(Axis<?> n) {
-                return (StyleableProperty<Number>)(WritableValue<Number>)n.tickLabelGapProperty();
+                return (StyleableProperty<Number>)n.tickLabelGapProperty();
             }
         };
 
         private static final CssMetaData<Axis<?>,Boolean> TICK_MARK_VISIBLE =
-            new CssMetaData<Axis<?>,Boolean>("-fx-tick-mark-visible",
+            new CssMetaData<>("-fx-tick-mark-visible",
                 BooleanConverter.getInstance(), Boolean.TRUE) {
 
             @Override
@@ -1159,12 +1163,12 @@ public abstract class Axis<T> extends Region {
 
             @Override
             public StyleableProperty<Boolean> getStyleableProperty(Axis<?> n) {
-                return (StyleableProperty<Boolean>)(WritableValue<Boolean>)n.tickMarkVisibleProperty();
+                return (StyleableProperty<Boolean>)n.tickMarkVisibleProperty();
             }
         };
 
         private static final CssMetaData<Axis<?>,Boolean> TICK_LABELS_VISIBLE =
-            new CssMetaData<Axis<?>,Boolean>("-fx-tick-labels-visible",
+            new CssMetaData<>("-fx-tick-labels-visible",
                 BooleanConverter.getInstance(), Boolean.TRUE) {
 
             @Override
@@ -1174,14 +1178,14 @@ public abstract class Axis<T> extends Region {
 
             @Override
             public StyleableProperty<Boolean> getStyleableProperty(Axis<?> n) {
-                return (StyleableProperty<Boolean>)(WritableValue<Boolean>)n.tickLabelsVisibleProperty();
+                return (StyleableProperty<Boolean>)n.tickLabelsVisibleProperty();
             }
         };
 
         private static final List<CssMetaData<? extends Styleable, ?>> STYLEABLES;
         static {
         final List<CssMetaData<? extends Styleable, ?>> styleables =
-            new ArrayList<CssMetaData<? extends Styleable, ?>>(Region.getClassCssMetaData());
+            new ArrayList<>(Region.getClassCssMetaData());
             styleables.add(SIDE);
             styleables.add(TICK_LENGTH);
             styleables.add(TICK_LABEL_FONT);

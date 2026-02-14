@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -56,6 +56,7 @@ class DummyResourceFactory extends BaseShaderFactory {
         return context;
     }
 
+    @Override
     public TextureResourcePool getTextureResourcePool() {
         return DummyTexturePool.instance;
     }
@@ -74,10 +75,12 @@ class DummyResourceFactory extends BaseShaderFactory {
         return createTexture(format, usagehint, wrapMode, w, h);
     }
 
+    @Override
     public int getRTTWidth(int w, WrapMode wrapMode) {
         return w;
     }
 
+    @Override
     public int getRTTHeight(int h, WrapMode wrapMode) {
         return h;
     }
@@ -98,12 +101,15 @@ class DummyResourceFactory extends BaseShaderFactory {
     }
 
     // Glass-Prism bringup
+    @Override
     public Presentable createPresentable(PresentableState pState) {
         DummyRTTexture rtt = new DummyRTTexture(context, WrapMode.CLAMP_NOT_NEEDED, pState.getWidth(), pState.getHeight());
         return new DummySwapChain(context, pState, rtt);
     }
 
-    public Shader createShader(InputStream pixelShaderCode,
+    @Override
+    public Shader createShader(String pixelShaderName,
+                               InputStream pixelShaderCode,
                                Map<String, Integer> samplers,
                                Map<String, Integer> params,
                                int maxTexCoordIndex,
@@ -113,6 +119,17 @@ class DummyResourceFactory extends BaseShaderFactory {
         return new DummyShader(context, params);
     }
 
+    @Override
+    public Shader createShader(String shaderName,
+                               Map<String, Integer> samplers,
+                               Map<String, Integer> params,
+                               int maxTexCoordIndex,
+                               boolean isPixcoordUsed,
+                               boolean isPerVertexColorUsed) {
+        return new DummyShader(context, params);
+    }
+
+    @Override
     public Shader createStockShader(String name) {
         return new DummyShader(context, name);
     }
@@ -126,23 +143,28 @@ class DummyResourceFactory extends BaseShaderFactory {
         return true;
     }
 
+    @Override
     public int getMaximumTextureSize() {
         return 65536;
     }
 
+    @Override
     public Texture createTexture(MediaFrame frame) {
         return new DummyTexture(context, frame.getPixelFormat(), WrapMode.CLAMP_TO_EDGE,
                                 frame.getWidth(), frame.getHeight());
     }
 
+    @Override
     public PhongMaterial createPhongMaterial() {
         throw new UnsupportedOperationException("Not supported yet.");
 }
 
+    @Override
     public MeshView createMeshView(Mesh mesh) {
         throw new UnsupportedOperationException("Not supported yet.");
     }
 
+    @Override
     public Mesh createMesh() {
         throw new UnsupportedOperationException("Not supported yet.");
     }

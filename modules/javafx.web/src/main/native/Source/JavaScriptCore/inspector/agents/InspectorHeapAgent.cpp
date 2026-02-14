@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,15 +34,18 @@
 #include "JSBigInt.h"
 #include "VM.h"
 #include <wtf/Stopwatch.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace Inspector {
 
 using namespace JSC;
 
+WTF_MAKE_TZONE_ALLOCATED_IMPL(InspectorHeapAgent);
+
 InspectorHeapAgent::InspectorHeapAgent(AgentContext& context)
     : InspectorAgentBase("Heap"_s)
     , m_injectedScriptManager(context.injectedScriptManager)
-    , m_frontendDispatcher(makeUnique<HeapFrontendDispatcher>(context.frontendRouter))
+    , m_frontendDispatcher(makeUniqueRef<HeapFrontendDispatcher>(context.frontendRouter))
     , m_backendDispatcher(HeapBackendDispatcher::create(context.backendDispatcher, this))
     , m_environment(context.environment)
 {
@@ -50,7 +53,7 @@ InspectorHeapAgent::InspectorHeapAgent(AgentContext& context)
 
 InspectorHeapAgent::~InspectorHeapAgent() = default;
 
-void InspectorHeapAgent::didCreateFrontendAndBackend(FrontendRouter*, BackendDispatcher*)
+void InspectorHeapAgent::didCreateFrontendAndBackend()
 {
 }
 
@@ -102,19 +105,12 @@ Protocol::ErrorStringOr<std::tuple<double, Protocol::Heap::HeapSnapshotData>> In
     JSLockHolder lock(vm);
 
     HeapSnapshotBuilder snapshotBuilder(vm.ensureHeapProfiler());
+    snapshotBuilder.setClient(this);
+
     snapshotBuilder.buildSnapshot();
 
     auto timestamp = m_environment.executionStopwatch().elapsedTime().seconds();
-    auto snapshotData = snapshotBuilder.json([&] (const HeapSnapshotNode& node) {
-        if (Structure* structure = node.cell->structure(vm)) {
-            if (JSGlobalObject* globalObject = structure->globalObject()) {
-                if (!m_environment.canAccessInspectedScriptState(globalObject))
-                    return false;
-            }
-        }
-        return true;
-    });
-
+    auto snapshotData = snapshotBuilder.json();
     return { { timestamp, snapshotData } };
 }
 
@@ -200,7 +196,7 @@ Protocol::ErrorStringOr<std::tuple<String, RefPtr<Protocol::Debugger::FunctionDe
 
     // FIXME: Provide preview information for Internal Objects? CodeBlock, Executable, etc.
 
-    Structure* structure = cell->structure(vm);
+    Structure* structure = cell->structure();
     if (!structure)
         return makeUnexpected("Unable to get object details - Structure"_s);
 
@@ -213,7 +209,7 @@ Protocol::ErrorStringOr<std::tuple<String, RefPtr<Protocol::Debugger::FunctionDe
         return makeUnexpected("Unable to get object details - InjectedScript"_s);
 
     // Function preview.
-    if (cell->inherits<JSFunction>(vm)) {
+    if (cell->inherits<JSFunction>()) {
         RefPtr<Protocol::Debugger::FunctionDetails> functionDetails;
         injectedScript.functionDetails(errorString, cell, functionDetails);
         if (!functionDetails)
@@ -240,7 +236,7 @@ Protocol::ErrorStringOr<Ref<Protocol::Runtime::RemoteObject>> InspectorHeapAgent
         return makeUnexpected(errorString);
 
     JSCell* cell = optionalNode->cell;
-    Structure* structure = cell->structure(vm);
+    Structure* structure = cell->structure();
     if (!structure)
         return makeUnexpected("Unable to get object details - Structure"_s);
 
@@ -254,7 +250,7 @@ Protocol::ErrorStringOr<Ref<Protocol::Runtime::RemoteObject>> InspectorHeapAgent
 
     auto object = injectedScript.wrapObject(cell, objectGroup, true);
     if (!object)
-        return makeUnexpected("Internal error: unable to cast Object");
+        return makeUnexpected("Internal error: unable to cast Object"_s);
 
     return object.releaseNonNull();
 }
@@ -286,7 +282,7 @@ void InspectorHeapAgent::didGarbageCollect(CollectionScope scope)
         return;
     }
 
-    if (std::isnan(m_gcStartTime)) {
+    if (m_gcStartTime.isNaN()) {
         // We were not enabled when the GC began.
         return;
     }
@@ -297,6 +293,17 @@ void InspectorHeapAgent::didGarbageCollect(CollectionScope scope)
     dispatchGarbageCollectedEvent(protocolTypeForHeapOperation(scope), m_gcStartTime, endTime);
 
     m_gcStartTime = Seconds::nan();
+}
+
+bool InspectorHeapAgent::heapSnapshotBuilderIgnoreNode(HeapSnapshotBuilder&, JSC::JSCell* cell)
+{
+    if (const Structure* structure = cell->structure()) {
+        if (JSGlobalObject* globalObject = structure->globalObject()) {
+            if (!m_environment.canAccessInspectedScriptState(globalObject))
+                return true;
+        }
+    }
+    return false;
 }
 
 void InspectorHeapAgent::clearHeapSnapshots()

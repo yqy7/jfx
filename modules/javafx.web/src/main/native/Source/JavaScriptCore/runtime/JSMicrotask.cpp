@@ -28,63 +28,58 @@
 
 #include "CatchScope.h"
 #include "Debugger.h"
+#include "DeferTermination.h"
 #include "JSGlobalObject.h"
 #include "JSObjectInlines.h"
 #include "Microtask.h"
-#include "StrongInlines.h"
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 namespace JSC {
 
-class JSMicrotask final : public Microtask {
-public:
-    static constexpr unsigned maxArguments = 4;
-    JSMicrotask(VM& vm, JSValue job, JSValue argument0, JSValue argument1, JSValue argument2, JSValue argument3)
-    {
-        m_job.set(vm, job);
-        m_arguments[0].set(vm, argument0);
-        m_arguments[1].set(vm, argument1);
-        m_arguments[2].set(vm, argument2);
-        m_arguments[3].set(vm, argument3);
-    }
-
-private:
-    void run(JSGlobalObject*) final;
-
-    Strong<Unknown> m_job;
-    Strong<Unknown> m_arguments[maxArguments];
-};
-
-Ref<Microtask> createJSMicrotask(VM& vm, JSValue job, JSValue argument0, JSValue argument1, JSValue argument2, JSValue argument3)
-{
-    return adoptRef(*new JSMicrotask(vm, job, argument0, argument1, argument2, argument3));
-}
-
-void JSMicrotask::run(JSGlobalObject* globalObject)
+void runJSMicrotask(JSGlobalObject* globalObject, MicrotaskIdentifier identifier, JSValue job, std::span<const JSValue> arguments)
 {
     VM& vm = globalObject->vm();
+
     auto scope = DECLARE_CATCH_SCOPE(vm);
 
-    auto handlerCallData = getCallData(vm, m_job.get());
-    ASSERT(handlerCallData.type != CallData::Type::None);
-
-    MarkedArgumentBuffer handlerArguments;
-    for (unsigned index = 0; index < maxArguments; ++index) {
-        JSValue arg = m_arguments[index].get();
-        if (!arg)
-            break;
-        handlerArguments.append(arg);
-    }
-    if (UNLIKELY(handlerArguments.hasOverflowed()))
+    if (!job.isObject()) [[unlikely]]
         return;
 
-    if (UNLIKELY(globalObject->hasDebugger()))
-        globalObject->debugger()->willRunMicrotask();
+    // If termination is issued, do not run microtasks. Otherwise, microtask should not care about exceptions.
+    if (!scope.clearExceptionExceptTermination()) [[unlikely]]
+        return;
 
-    profiledCall(globalObject, ProfilingReason::Microtask, m_job.get(), handlerCallData, jsUndefined(), handlerArguments);
+    auto handlerCallData = JSC::getCallData(job);
+    if (!scope.clearExceptionExceptTermination()) [[unlikely]]
+        return;
+    ASSERT(handlerCallData.type != CallData::Type::None);
+
+    unsigned count = 0;
+    for (auto argument : arguments) {
+        if (!argument)
+            break;
+        ++count;
+    }
+
+    if (globalObject->hasDebugger()) [[unlikely]] {
+        DeferTerminationForAWhile deferTerminationForAWhile(vm);
+        globalObject->debugger()->willRunMicrotask(globalObject, identifier);
+        scope.clearException();
+    }
+
+    if (!vm.hasPendingTerminationException()) [[likely]] {
+        profiledCall(globalObject, ProfilingReason::Microtask, job, handlerCallData, jsUndefined(), ArgList { std::bit_cast<EncodedJSValue*>(arguments.data()), count });
+        scope.clearExceptionExceptTermination();
+    }
+
+    if (globalObject->hasDebugger()) [[unlikely]] {
+        DeferTerminationForAWhile deferTerminationForAWhile(vm);
+        globalObject->debugger()->didRunMicrotask(globalObject, identifier);
     scope.clearException();
-
-    if (UNLIKELY(globalObject->hasDebugger()))
-        globalObject->debugger()->didRunMicrotask();
+    }
 }
 
 } // namespace JSC
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

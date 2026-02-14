@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,14 +32,14 @@ import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleMapProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableMap;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class MapExpressionTest {
 
@@ -57,15 +57,15 @@ public class MapExpressionTest {
     private MapProperty<Number, Integer> op1;
     private MapProperty<Number, Integer> op2;
 
-    @Before
+    @BeforeEach
     public void setUp() {
-        opNull = new SimpleMapProperty<Number, Integer>();
-        opEmpty = new SimpleMapProperty<Number, Integer>(FXCollections.observableMap(Collections.<Number, Integer>emptyMap()));
-        op1 = new SimpleMapProperty<Number, Integer>(FXCollections.observableMap(Collections.singletonMap(key1_0, data1_0)));
-        final Map<Number, Integer> map = new HashMap<Number, Integer>();
+        opNull = new SimpleMapProperty<>();
+        opEmpty = new SimpleMapProperty<>(FXCollections.observableMap(Collections.<Number, Integer>emptyMap()));
+        op1 = new SimpleMapProperty<>(FXCollections.observableMap(Collections.singletonMap(key1_0, data1_0)));
+        final Map<Number, Integer> map = new HashMap<>();
         map.put(key2_0, data2_0);
         map.put(key2_1, data2_1);
-        op2 = new SimpleMapProperty<Number, Integer>(FXCollections.observableMap(map));
+        op2 = new SimpleMapProperty<>(FXCollections.observableMap(map));
     }
 
     @Test
@@ -116,7 +116,7 @@ public class MapExpressionTest {
     public void testIsEqualTo() {
         final ObservableMap<Number, Integer> emptyMap = FXCollections.observableMap(Collections.<Number, Integer>emptyMap());
         final ObservableMap<Number, Integer> map1 = FXCollections.observableMap(Collections.singletonMap(key1_0, data1_0));
-        final Map<Number, Integer> map = new HashMap<Number, Integer>();
+        final Map<Number, Integer> map = new HashMap<>();
         map.put(key2_0, data2_0);
         map.put(key2_1, data2_1);
         final ObservableMap<Number, Integer> map2= FXCollections.observableMap(map);
@@ -155,7 +155,7 @@ public class MapExpressionTest {
     public void testIsNotEqualTo() {
         final ObservableMap<Number, Integer> emptyMap = FXCollections.observableMap(Collections.<Number, Integer>emptyMap());
         final ObservableMap<Number, Integer> list1 = FXCollections.observableMap(Collections.singletonMap(key1_0, data1_0));
-        final Map<Number, Integer> map = new HashMap<Number, Integer>();
+        final Map<Number, Integer> map = new HashMap<>();
         map.put(key2_0, data2_0);
         map.put(key2_1, data2_1);
         final ObservableMap<Number, Integer> list2 = FXCollections.observableMap(map);

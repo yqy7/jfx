@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,8 +25,6 @@
 
 #pragma once
 
-#if ENABLE(CSS_TYPED_OM)
-
 #include "CSSMathValue.h"
 #include "CSSNumericValue.h"
 
@@ -34,26 +32,30 @@ namespace WebCore {
 
 class CSSNumericArray;
 
-class CSSMathProduct : public CSSMathValue {
-    WTF_MAKE_ISO_ALLOCATED(CSSMathProduct);
+class CSSMathProduct final : public CSSMathValue {
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(CSSMathProduct);
 public:
-    static Ref<CSSMathProduct> create(FixedVector<CSSNumberish>&&);
-    const CSSNumericArray& values() const;
+    static ExceptionOr<Ref<CSSMathProduct>> create(FixedVector<CSSNumberish>);
+    static ExceptionOr<Ref<CSSMathProduct>> create(Vector<Ref<CSSNumericValue>>);
+    const CSSNumericArray& values() const { return m_values.get(); }
 
-    CSSMathOperator getOperator() const final { return CSSMathOperator::Product; }
+    std::optional<CSSCalc::Child> toCalcTreeNode() const final;
 
 private:
-    CSSMathProduct(FixedVector<CSSNumberish>&&);
-    Ref<CSSNumericArray> m_values;
+    CSSMathOperator getOperator() const final { return CSSMathOperator::Product; }
+    CSSStyleValueType getType() const final { return CSSStyleValueType::CSSMathProduct; }
+    void serialize(StringBuilder&, OptionSet<SerializationArguments>) const;
+    std::optional<SumValue> toSumValue() const final;
+    bool equals(const CSSNumericValue& other) const final { return equalsImpl<CSSMathProduct>(other); }
+
+    CSSMathProduct(Vector<Ref<CSSNumericValue>>, CSSNumericType);
+    const Ref<CSSNumericArray> m_values;
 };
 
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::CSSMathProduct)
-    static bool isType(const WebCore::CSSStyleValue& styleValue) { return is<WebCore::CSSNumericValue>(styleValue) && isType(downcast<WebCore::CSSNumericValue>(styleValue)); }
-    static bool isType(const WebCore::CSSNumericValue& numericValue) { return is<WebCore::CSSMathValue>(numericValue) && isType(downcast<WebCore::CSSMathValue>(numericValue)); }
-    static bool isType(const WebCore::CSSMathValue& mathValue) { return mathValue.getOperator() == WebCore::CSSMathOperator::Product; }
+static bool isType(const WebCore::CSSStyleValue& styleValue) { return styleValue.getType() == WebCore::CSSStyleValueType::CSSMathProduct; }
+static bool isType(const WebCore::CSSNumericValue& numericValue) { return numericValue.getType() == WebCore::CSSStyleValueType::CSSMathProduct; }
+static bool isType(const WebCore::CSSMathValue& mathValue) { return mathValue.getType() == WebCore::CSSStyleValueType::CSSMathProduct; }
 SPECIALIZE_TYPE_TRAITS_END()
-
-
-#endif

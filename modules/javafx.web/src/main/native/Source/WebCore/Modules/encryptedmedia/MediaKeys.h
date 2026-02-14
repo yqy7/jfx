@@ -31,7 +31,6 @@
 #if ENABLE(ENCRYPTED_MEDIA)
 
 #include "CDMInstance.h"
-#include "ExceptionOr.h"
 #include "MediaKeySessionType.h"
 #include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
@@ -51,6 +50,7 @@ class BufferSource;
 class DeferredPromise;
 class Document;
 class MediaKeySession;
+template<typename> class ExceptionOr;
 
 class MediaKeys final
     : public RefCounted<MediaKeys>
@@ -63,7 +63,10 @@ public:
         return adoptRef(*new MediaKeys(document, useDistinctiveIdentifier, persistentStateAllowed, supportedSessionTypes, WTFMove(implementation), WTFMove(instance)));
     }
 
-    ~MediaKeys();
+    WEBCORE_EXPORT ~MediaKeys();
+
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
 
     ExceptionOr<Ref<MediaKeySession>> createSession(Document&, MediaKeySessionType);
     void setServerCertificate(const BufferSource&, Ref<DeferredPromise>&&);
@@ -77,7 +80,7 @@ public:
     const CDMInstance& cdmInstance() const { return m_instance; }
 
 #if !RELEASE_LOG_DISABLED
-    const void* nextChildIdentifier() const;
+    uint64_t nextChildIdentifier() const;
 #endif
 
     unsigned internalInstanceObjectRefCount() const { return m_instance->refCount(); }
@@ -86,25 +89,25 @@ protected:
     MediaKeys(Document&, bool useDistinctiveIdentifier, bool persistentStateAllowed, const Vector<MediaKeySessionType>&, Ref<CDM>&&, Ref<CDMInstance>&&);
 
     // CDMInstanceClient
-    void unrequestedInitializationDataReceived(const String&, Ref<FragmentedSharedBuffer>&&) final;
+    void unrequestedInitializationDataReceived(const String&, Ref<SharedBuffer>&&) final;
 
 #if !RELEASE_LOG_DISABLED
-    const Logger& logger() const { return m_logger; }
-    const void* logIdentifier() const { return m_logIdentifier; }
+    const Logger& logger() const final { return m_logger; }
+    uint64_t logIdentifier() const final { return m_logIdentifier; }
 #endif
 
     bool m_useDistinctiveIdentifier;
     bool m_persistentStateAllowed;
     Vector<MediaKeySessionType> m_supportedSessionTypes;
-    Ref<CDM> m_implementation;
-    Ref<CDMInstance> m_instance;
+    const Ref<CDM> m_implementation;
+    const Ref<CDMInstance> m_instance;
 
     Vector<Ref<MediaKeySession>> m_sessions;
     WeakHashSet<CDMClient> m_cdmClients;
 
 #if !RELEASE_LOG_DISABLED
-    Ref<Logger> m_logger;
-    const void* m_logIdentifier;
+    const Ref<const Logger> m_logger;
+    const uint64_t m_logIdentifier;
     mutable uint64_t m_childIdentifierSeed { 0 };
 #endif
 };

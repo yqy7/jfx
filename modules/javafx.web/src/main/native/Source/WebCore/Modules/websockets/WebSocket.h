@@ -32,11 +32,10 @@
 
 #include "ActiveDOMObject.h"
 #include "EventTarget.h"
-#include "ExceptionOr.h"
-#include <wtf/URL.h>
 #include "WebSocketChannelClient.h"
 #include <wtf/HashSet.h>
 #include <wtf/Lock.h>
+#include <wtf/URL.h>
 
 namespace JSC {
 class ArrayBuffer;
@@ -47,11 +46,15 @@ namespace WebCore {
 
 class Blob;
 class ThreadableWebSocketChannel;
+template<typename> class ExceptionOr;
 
-class WebSocket final : public RefCounted<WebSocket>, public EventTargetWithInlineData, public ActiveDOMObject, private WebSocketChannelClient {
-    WTF_MAKE_ISO_ALLOCATED(WebSocket);
+class WebSocket final : public RefCounted<WebSocket>, public EventTarget, public ActiveDOMObject, private WebSocketChannelClient {
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(WebSocket);
 public:
-    static const char* subprotocolSeparator();
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
+
+    static ASCIILiteral subprotocolSeparator();
 
     static ExceptionOr<Ref<WebSocket>> create(ScriptExecutionContext&, const String& url);
     static ExceptionOr<Ref<WebSocket>> create(ScriptExecutionContext&, const String& url, const String& protocol);
@@ -88,13 +91,11 @@ public:
     String protocol() const;
     String extensions() const;
 
-    String binaryType() const;
-    ExceptionOr<void> setBinaryType(const String&);
+    enum class BinaryType : bool { Blob, Arraybuffer };
+    BinaryType binaryType() const { return m_binaryType; }
+    void setBinaryType(BinaryType);
 
     ScriptExecutionContext* scriptExecutionContext() const final;
-
-    using RefCounted::ref;
-    using RefCounted::deref;
 
 private:
     explicit WebSocket(ScriptExecutionContext&);
@@ -102,20 +103,21 @@ private:
     void dispatchErrorEventIfNeeded();
 
     void contextDestroyed() final;
+
+    // ActiveDOMObject.
     void suspend(ReasonForSuspension) final;
     void resume() final;
     void stop() final;
-    const char* activeDOMObjectName() const final;
 
-    EventTargetInterface eventTargetInterface() const final;
+    enum EventTargetInterfaceType eventTargetInterface() const final;
 
     void refEventTarget() final { ref(); }
     void derefEventTarget() final { deref(); }
 
     void didConnect() final;
-    void didReceiveMessage(const String& message) final;
+    void didReceiveMessage(String&& message) final;
     void didReceiveBinaryData(Vector<uint8_t>&&) final;
-    void didReceiveMessageError() final;
+    void didReceiveMessageError(String&& reason) final;
     void didUpdateBufferedAmount(unsigned bufferedAmount) final;
     void didStartClosingHandshake() final;
     void didClose(unsigned unhandledBufferedAmount, ClosingHandshakeCompletionStatus, unsigned short code, const String& reason) final;
@@ -124,8 +126,6 @@ private:
     size_t getFramingOverhead(size_t payloadSize);
 
     void failAsynchronously();
-
-    enum class BinaryType { Blob, ArrayBuffer };
 
     static Lock s_allActiveWebSocketsLock;
     RefPtr<ThreadableWebSocketChannel> m_channel;

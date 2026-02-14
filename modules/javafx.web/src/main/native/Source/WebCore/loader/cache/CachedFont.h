@@ -28,7 +28,9 @@
 #include "CachedResource.h"
 #include "CachedResourceClient.h"
 #include "Font.h"
+#include "FrameLoaderTypes.h"
 #include "TextFlags.h"
+#include "TrustedFonts.h"
 #include <pal/SessionID.h>
 
 namespace WebCore {
@@ -53,11 +55,13 @@ public:
     void beginLoadIfNeeded(CachedResourceLoader&);
     bool stillNeedsLoad() const override { return !m_loadInitiated; }
 
-    virtual bool ensureCustomFontData(const AtomString& remoteURI);
-    static std::unique_ptr<FontCustomPlatformData> createCustomFontData(SharedBuffer&, const String& itemInCollection, bool& wrapping);
+    virtual bool ensureCustomFontData();
+    static RefPtr<FontCustomPlatformData> createCustomFontData(SharedBuffer&, const String& itemInCollection, bool& wrapping, DownloadableBinaryFontTrustedTypes);
     static FontPlatformData platformDataFromCustomData(FontCustomPlatformData&, const FontDescription&, bool bold, bool italic, const FontCreationContext&);
 
-    virtual RefPtr<Font> createFont(const FontDescription&, const AtomString& remoteURI, bool syntheticBold, bool syntheticItalic, const FontCreationContext&);
+    virtual RefPtr<Font> createFont(const FontDescription&, bool syntheticBold, bool syntheticItalic, const FontCreationContext&);
+
+    bool didRefuseToParseCustomFontWithSafeFontParser() const { return m_didRefuseToParseCustomFont; }
 
 protected:
     FontPlatformData platformDataFromCustomData(const FontDescription&, bool bold, bool italic, const FontCreationContext&);
@@ -65,9 +69,13 @@ protected:
     bool ensureCustomFontData(SharedBuffer* data);
 
 private:
+    static RefPtr<FontCustomPlatformData> createCustomFontDataWithPolicy(SharedBuffer&, const String& itemInCollection, bool& wrapping, FontParsingPolicy);
+    static RefPtr<FontCustomPlatformData> createCustomFontDataSystemParser(SharedBuffer&, const String& itemInCollection, bool& wrapping);
+    static RefPtr<FontCustomPlatformData> createCustomFontDataSafeFontParser(SharedBuffer&, const String& itemInCollection, bool& wrapping);
+
     String calculateItemInCollection() const;
 
-    void checkNotify(const NetworkLoadMetrics&) override;
+    void checkNotify(const NetworkLoadMetrics&, LoadWillContinueInAnotherProcess = LoadWillContinueInAnotherProcess::No) override;
     bool mayTryReplaceEncodedData() const override;
 
     void load(CachedResourceLoader&) override;
@@ -78,14 +86,22 @@ private:
 
     void allClientsRemoved() override;
 
+    FontParsingPolicy policyForCustomFont(const Ref<SharedBuffer>& data);
+    void setErrorAndDeleteData();
+
     bool m_loadInitiated;
     bool m_hasCreatedFontDataWrappingResource;
 
-    std::unique_ptr<FontCustomPlatformData> m_fontCustomPlatformData;
+    FontParsingPolicy m_fontParsingPolicy { FontParsingPolicy::Deny };
+    bool m_didRefuseToParseCustomFont { false };
+
+    RefPtr<FontCustomPlatformData> m_fontCustomPlatformData;
 
     friend class MemoryCache;
 };
 
 } // namespace WebCore
 
-SPECIALIZE_TYPE_TRAITS_CACHED_RESOURCE(CachedFont, CachedResource::Type::FontResource)
+SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::CachedFont)
+    static bool isType(const WebCore::CachedResource& resource) { return resource.type() == WebCore::CachedResource::Type::FontResource || resource.type() == WebCore::CachedResource::Type::SVGFontResource; }
+SPECIALIZE_TYPE_TRAITS_END()

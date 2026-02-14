@@ -26,24 +26,25 @@
 #include "config.h"
 #include "ExtendableEvent.h"
 
-#if ENABLE(SERVICE_WORKER)
-
+#include "EventLoop.h"
+#include "ExceptionOr.h"
+#include "JSDOMGlobalObject.h"
 #include "JSDOMPromise.h"
 #include "ScriptExecutionContext.h"
 #include <JavaScriptCore/Microtask.h>
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(ExtendableEvent);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(ExtendableEvent);
 
-ExtendableEvent::ExtendableEvent(const AtomString& type, const ExtendableEventInit& initializer, IsTrusted isTrusted)
-    : Event(type, initializer, isTrusted)
+ExtendableEvent::ExtendableEvent(enum EventInterfaceType eventInterface, const AtomString& type, const ExtendableEventInit& initializer, IsTrusted isTrusted)
+    : Event(eventInterface, type, initializer, isTrusted)
 {
 }
 
-ExtendableEvent::ExtendableEvent(const AtomString& type, CanBubble canBubble, IsCancelable cancelable)
-    : Event(type, canBubble, cancelable)
+ExtendableEvent::ExtendableEvent(enum EventInterfaceType eventInterface, const AtomString& type, CanBubble canBubble, IsCancelable cancelable)
+    : Event(eventInterface, type, canBubble, cancelable)
 {
 }
 
@@ -55,60 +56,43 @@ ExtendableEvent::~ExtendableEvent()
 ExceptionOr<void> ExtendableEvent::waitUntil(Ref<DOMPromise>&& promise)
 {
     if (!isTrusted())
-        return Exception { InvalidStateError, "Event is not trusted"_s };
+        return Exception { ExceptionCode::InvalidStateError, "Event is not trusted"_s };
 
     // If the pending promises count is zero and the dispatch flag is unset, throw an "InvalidStateError" DOMException.
     if (!m_pendingPromiseCount && !isBeingDispatched())
-        return Exception { InvalidStateError, "Event is no longer being dispatched and has no pending promises"_s };
+        return Exception { ExceptionCode::InvalidStateError, "Event is no longer being dispatched and has no pending promises"_s };
 
     addExtendLifetimePromise(WTFMove(promise));
     return { };
 }
 
-class FunctionMicrotask final : public JSC::Microtask {
-public:
-    static Ref<FunctionMicrotask> create(Function<void()>&& function)
-    {
-        return adoptRef(*new FunctionMicrotask(WTFMove(function)));
-    }
-
-private:
-    explicit FunctionMicrotask(Function<void()>&& function)
-        : m_function(WTFMove(function))
-    {
-    }
-
-    void run(JSC::JSGlobalObject*) final
-    {
-        m_function();
-    }
-
-    Function<void()> m_function;
-};
-
 void ExtendableEvent::addExtendLifetimePromise(Ref<DOMPromise>&& promise)
 {
-    promise->whenSettled([this, protectedThis = Ref { *this }, settledPromise = promise.ptr()] () mutable {
+    promise->whenSettled([this, protectedThis = Ref { *this }, settledPromise = promise.copyRef()] () mutable {
         auto& globalObject = *settledPromise->globalObject();
-        globalObject.queueMicrotask(FunctionMicrotask::create([this, protectedThis = WTFMove(protectedThis), settledPromise = WTFMove(settledPromise)] () mutable {
+        RefPtr context = globalObject.scriptExecutionContext();
+        if (!context)
+            return;
+        context->eventLoop().queueMicrotask([this, protectedThis = WTFMove(protectedThis), settledPromise = WTFMove(settledPromise)]() mutable {
             --m_pendingPromiseCount;
 
             // FIXME: Let registration be the context object's relevant global object's associated service worker's containing service worker registration.
             // FIXME: If registration's uninstalling flag is set, invoke Try Clear Registration with registration.
             // FIXME: If registration is not null, invoke Try Activate with registration.
 
-            auto* context = settledPromise->globalObject()->scriptExecutionContext();
+            RefPtr context = settledPromise->globalObject()->scriptExecutionContext();
             if (!context)
                 return;
             context->postTask([this, protectedThis = WTFMove(protectedThis)] (ScriptExecutionContext&) mutable {
                 if (m_pendingPromiseCount)
                     return;
 
+                m_isWaiting = false;
                 auto settledPromises = WTFMove(m_extendLifetimePromises);
                 if (auto handler = WTFMove(m_whenAllExtendLifetimePromisesAreSettledHandler))
                     handler(WTFMove(settledPromises));
             });
-        }));
+    });
     });
 
     m_extendLifetimePromises.add(WTFMove(promise));
@@ -121,6 +105,7 @@ void ExtendableEvent::whenAllExtendLifetimePromisesAreSettled(Function<void(Hash
     ASSERT(!m_whenAllExtendLifetimePromisesAreSettledHandler);
 
     if (!m_pendingPromiseCount) {
+        m_isWaiting = false;
         handler(WTFMove(m_extendLifetimePromises));
         return;
     }
@@ -129,5 +114,3 @@ void ExtendableEvent::whenAllExtendLifetimePromisesAreSettled(Function<void(Hash
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(SERVICE_WORKER)

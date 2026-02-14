@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,6 +32,7 @@
 #include <wtf/MathExtras.h>
 #include <wtf/PrintStream.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/Vector.h>
 
 #if OS(DARWIN)
@@ -75,7 +76,7 @@ public:
     {
         ASSERT(!!bytecodeIndex);
 #if CPU(ADDRESS64)
-        ASSERT(!(bitwise_cast<uintptr_t>(inlineCallFrame) & ~s_maskCompositeValueForPointer));
+        ASSERT(!(std::bit_cast<uintptr_t>(inlineCallFrame) & ~s_maskCompositeValueForPointer));
 #endif
     }
 
@@ -83,10 +84,10 @@ public:
     CodeOrigin& operator=(const CodeOrigin& other)
     {
         if (this != &other) {
-            if (UNLIKELY(isOutOfLine()))
+            if (isOutOfLine()) [[unlikely]]
                 delete outOfLineCodeOrigin();
 
-            if (UNLIKELY(other.isOutOfLine()))
+            if (other.isOutOfLine()) [[unlikely]]
                 m_compositeValue = buildCompositeValue(other.inlineCallFrame(), other.bytecodeIndex());
             else
                 m_compositeValue = other.m_compositeValue;
@@ -96,7 +97,7 @@ public:
     CodeOrigin& operator=(CodeOrigin&& other)
     {
         if (this != &other) {
-            if (UNLIKELY(isOutOfLine()))
+            if (isOutOfLine()) [[unlikely]]
                 delete outOfLineCodeOrigin();
 
             m_compositeValue = std::exchange(other.m_compositeValue, 0);
@@ -108,7 +109,7 @@ public:
     {
         // We don't use the member initializer list because it would not let us optimize the common case where there is no out-of-line storage
         // (in which case we don't have to extract the components of the composite value just to reassemble it).
-        if (UNLIKELY(other.isOutOfLine()))
+        if (other.isOutOfLine()) [[unlikely]]
             m_compositeValue = buildCompositeValue(other.inlineCallFrame(), other.bytecodeIndex());
         else
             m_compositeValue = other.m_compositeValue;
@@ -120,7 +121,7 @@ public:
 
     ~CodeOrigin()
     {
-        if (UNLIKELY(isOutOfLine()))
+        if (isOutOfLine()) [[unlikely]]
             delete outOfLineCodeOrigin();
     }
 #endif
@@ -155,8 +156,7 @@ public:
     int stackOffset() const;
 
     unsigned hash() const;
-    bool operator==(const CodeOrigin& other) const;
-    bool operator!=(const CodeOrigin& other) const { return !(*this == other); }
+    bool operator==(const CodeOrigin&) const;
 
     // This checks if the two code origins correspond to the same stack trace snippets,
     // but ignore whether the InlineCallFrame's are identical.
@@ -165,7 +165,7 @@ public:
     unsigned approximateHash(InlineCallFrame* terminal = nullptr) const;
 
     template <typename Function>
-    void walkUpInlineStack(const Function&) const;
+    void walkUpInlineStack(NOESCAPE const Function&) const;
 
     inline bool inlineStackContainsActiveCheckpoint() const;
 
@@ -180,7 +180,7 @@ public:
 #if CPU(ADDRESS64)
         if (!isSet())
             return BytecodeIndex();
-        if (UNLIKELY(isOutOfLine()))
+        if (isOutOfLine()) [[unlikely]]
             return outOfLineCodeOrigin()->bytecodeIndex;
         return BytecodeIndex::fromBits(m_compositeValue >> (64 - s_freeBitsAtTop));
 #else
@@ -191,9 +191,9 @@ public:
     InlineCallFrame* inlineCallFrame() const
     {
 #if CPU(ADDRESS64)
-        if (UNLIKELY(isOutOfLine()))
+        if (isOutOfLine()) [[unlikely]]
             return outOfLineCodeOrigin()->inlineCallFrame;
-        return bitwise_cast<InlineCallFrame*>(m_compositeValue & s_maskCompositeValueForPointer);
+        return std::bit_cast<InlineCallFrame*>(m_compositeValue & s_maskCompositeValueForPointer);
 #else
         return m_inlineCallFrame;
 #endif
@@ -205,7 +205,7 @@ private:
     static constexpr uintptr_t s_maskIsBytecodeIndexInvalid = 2;
 
     struct OutOfLineCodeOrigin {
-        WTF_MAKE_FAST_ALLOCATED;
+        WTF_MAKE_TZONE_ALLOCATED(OutOfLineCodeOrigin);
     public:
         InlineCallFrame* inlineCallFrame;
         BytecodeIndex bytecodeIndex;
@@ -224,7 +224,7 @@ private:
     OutOfLineCodeOrigin* outOfLineCodeOrigin() const
     {
         ASSERT(isOutOfLine());
-        return bitwise_cast<OutOfLineCodeOrigin*>(m_compositeValue & s_maskCompositeValueForPointer);
+        return std::bit_cast<OutOfLineCodeOrigin*>(m_compositeValue & s_maskCompositeValueForOutOfLinePointer);
     }
 #endif
 
@@ -235,25 +235,26 @@ private:
         ASSERT(value & s_maskCompositeValueForPointer);
         ASSERT(!(value & ~s_maskCompositeValueForPointer));
 #endif
-        return bitwise_cast<InlineCallFrame*>(value);
+        return std::bit_cast<InlineCallFrame*>(value);
     }
 
 #if CPU(ADDRESS64)
     static constexpr unsigned s_freeBitsAtTop = 64 - OS_CONSTANT(EFFECTIVE_ADDRESS_WIDTH);
-    static constexpr uintptr_t s_maskCompositeValueForPointer = ((1ULL << OS_CONSTANT(EFFECTIVE_ADDRESS_WIDTH)) - 1) & ~(8ULL - 1);
+    static constexpr uintptr_t s_maskCompositeValueForOutOfLinePointer = ~7ULL;
+    static constexpr uintptr_t s_maskCompositeValueForPointer = ((1ULL << OS_CONSTANT(EFFECTIVE_ADDRESS_WIDTH)) - 1) & s_maskCompositeValueForOutOfLinePointer;
     static uintptr_t buildCompositeValue(InlineCallFrame* inlineCallFrame, BytecodeIndex bytecodeIndex)
     {
         if (!bytecodeIndex)
-            return bitwise_cast<uintptr_t>(inlineCallFrame) | s_maskIsBytecodeIndexInvalid;
+            return std::bit_cast<uintptr_t>(inlineCallFrame) | s_maskIsBytecodeIndexInvalid;
 
-        if (UNLIKELY(bytecodeIndex.asBits() >= 1 << s_freeBitsAtTop)) {
+        if (bytecodeIndex.asBits() >= 1 << s_freeBitsAtTop) [[unlikely]] {
             auto* outOfLine = new OutOfLineCodeOrigin(inlineCallFrame, bytecodeIndex);
-            return bitwise_cast<uintptr_t>(outOfLine) | s_maskIsOutOfLine;
+            return std::bit_cast<uintptr_t>(outOfLine) | s_maskIsOutOfLine;
         }
 
         uintptr_t encodedBytecodeIndex = static_cast<uintptr_t>(bytecodeIndex.asBits()) << (64 - s_freeBitsAtTop);
-        ASSERT(!(encodedBytecodeIndex & bitwise_cast<uintptr_t>(inlineCallFrame)));
-        return encodedBytecodeIndex | bitwise_cast<uintptr_t>(inlineCallFrame);
+        ASSERT(!(encodedBytecodeIndex & std::bit_cast<uintptr_t>(inlineCallFrame)));
+        return encodedBytecodeIndex | std::bit_cast<uintptr_t>(inlineCallFrame);
     }
 
     // The bottom bit indicates whether to look at an out-of-line implementation (because of a bytecode index which is too big for us to store).

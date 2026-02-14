@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,11 +25,13 @@
 
 package javafx.scene.control;
 
-import javafx.css.PseudoClass;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.ObjectPropertyBase;
+import javafx.beans.property.ReadOnlyBooleanProperty;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.css.PseudoClass;
 import javafx.event.ActionEvent;
 import javafx.event.Event;
 import javafx.event.EventHandler;
@@ -39,8 +41,7 @@ import javafx.scene.AccessibleAction;
 import javafx.scene.AccessibleRole;
 import javafx.scene.Node;
 import javafx.scene.control.skin.MenuButtonSkin;
-import javafx.beans.property.ReadOnlyBooleanProperty;
-import javafx.beans.property.ReadOnlyBooleanWrapper;
+import com.sun.javafx.tk.Toolkit;
 
 /**
  * MenuButton is a button which, when clicked or pressed, will show a
@@ -92,28 +93,28 @@ public class MenuButton extends ButtonBase {
      * @since JavaFX 8u60
      */
     public static final EventType<Event> ON_SHOWING =
-            new EventType<Event>(Event.ANY, "MENU_BUTTON_ON_SHOWING");
+            new EventType<>(Event.ANY, "MENU_BUTTON_ON_SHOWING");
 
     /**
      * Called after the MenuButton has shown its popup.
      * @since JavaFX 8u60
      */
     public static final EventType<Event> ON_SHOWN =
-            new EventType<Event>(Event.ANY, "MENU_BUTTON_ON_SHOWN");
+            new EventType<>(Event.ANY, "MENU_BUTTON_ON_SHOWN");
 
     /**
      * Called when the MenuButton popup <b>will</b> be hidden.
      * @since JavaFX 8u60
      */
     public static final EventType<Event> ON_HIDING =
-            new EventType<Event>(Event.ANY, "MENU_BUTTON_ON_HIDING");
+            new EventType<>(Event.ANY, "MENU_BUTTON_ON_HIDING");
 
     /**
      * Called when the MenuButton popup has been hidden.
      * @since JavaFX 8u60
      */
     public static final EventType<Event> ON_HIDDEN =
-            new EventType<Event>(Event.ANY, "MENU_BUTTON_ON_HIDDEN");
+            new EventType<>(Event.ANY, "MENU_BUTTON_ON_HIDDEN");
 
 
     /* *************************************************************************
@@ -278,7 +279,7 @@ public class MenuButton extends ButtonBase {
     public final ObjectProperty<EventHandler<Event>> onShowingProperty() { return onShowing; }
     public final void setOnShowing(EventHandler<Event> value) { onShowingProperty().set(value); }
     public final EventHandler<Event> getOnShowing() { return onShowingProperty().get(); }
-    private ObjectProperty<EventHandler<Event>> onShowing = new ObjectPropertyBase<EventHandler<Event>>() {
+    private ObjectProperty<EventHandler<Event>> onShowing = new ObjectPropertyBase<>() {
         @Override protected void invalidated() {
             setEventHandler(ON_SHOWING, get());
         }
@@ -300,7 +301,7 @@ public class MenuButton extends ButtonBase {
     public final ObjectProperty<EventHandler<Event>> onShownProperty() { return onShown; }
     public final void setOnShown(EventHandler<Event> value) { onShownProperty().set(value); }
     public final EventHandler<Event> getOnShown() { return onShownProperty().get(); }
-    private ObjectProperty<EventHandler<Event>> onShown = new ObjectPropertyBase<EventHandler<Event>>() {
+    private ObjectProperty<EventHandler<Event>> onShown = new ObjectPropertyBase<>() {
         @Override protected void invalidated() {
             setEventHandler(ON_SHOWN, get());
         }
@@ -322,7 +323,7 @@ public class MenuButton extends ButtonBase {
     public final ObjectProperty<EventHandler<Event>> onHidingProperty() { return onHiding; }
     public final void setOnHiding(EventHandler<Event> value) { onHidingProperty().set(value); }
     public final EventHandler<Event> getOnHiding() { return onHidingProperty().get(); }
-    private ObjectProperty<EventHandler<Event>> onHiding = new ObjectPropertyBase<EventHandler<Event>>() {
+    private ObjectProperty<EventHandler<Event>> onHiding = new ObjectPropertyBase<>() {
         @Override protected void invalidated() {
             setEventHandler(ON_HIDING, get());
         }
@@ -344,7 +345,7 @@ public class MenuButton extends ButtonBase {
     public final ObjectProperty<EventHandler<Event>> onHiddenProperty() { return onHidden; }
     public final void setOnHidden(EventHandler<Event> value) { onHiddenProperty().set(value); }
     public final EventHandler<Event> getOnHidden() { return onHiddenProperty().get(); }
-    private ObjectProperty<EventHandler<Event>> onHidden = new ObjectPropertyBase<EventHandler<Event>>() {
+    private ObjectProperty<EventHandler<Event>> onHidden = new ObjectPropertyBase<>() {
         @Override protected void invalidated() {
             setEventHandler(ON_HIDDEN, get());
         }
@@ -368,10 +369,13 @@ public class MenuButton extends ButtonBase {
     /**
      * Shows the {@link ContextMenu}, assuming this MenuButton is not disabled.
      *
+     * @throws IllegalStateException if this method is called on a thread
+     *     other than the JavaFX Application Thread.
      * @see #isDisabled()
      * @see #isShowing()
      */
     public void show() {
+        Toolkit.getToolkit().checkFxUserThread();
         // TODO: isBound check is probably unnecessary here
         if (!isDisabled() && !showing.isBound()) {
             setShowing(true);
@@ -381,9 +385,12 @@ public class MenuButton extends ButtonBase {
     /**
      * Hides the {@link ContextMenu}.
      *
+     * @throws IllegalStateException if this method is called on a thread
+     *     other than the JavaFX Application Thread.
      * @see #isShowing()
      */
     public void hide() {
+        Toolkit.getToolkit().checkFxUserThread();
         // TODO: isBound check is probably unnecessary here
         if (!showing.isBound()) {
             setShowing(false);

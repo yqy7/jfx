@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,11 +29,11 @@ import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.List;
 import javafx.collections.MapChangeListener;
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class MockMapObserver<K, V> implements MapChangeListener<K, V> {
 
-    private List<Call> calls = new ArrayList<Call>();
+    private List<Call> calls = new ArrayList<>();
 
     @Override
     public void onChanged(Change<? extends K,? extends V> c) {
@@ -57,7 +57,7 @@ public class MockMapObserver<K, V> implements MapChangeListener<K, V> {
     }
 
     public void assertAdded(int call, Tuple<K, V> tuple) {
-        assertTrue("Missing call to the observer # " + call, call < calls.size());
+        assertTrue(call < calls.size(), "Missing call to the observer # " + call);
         assertEquals(calls.get(call).key, tuple.key);
         assertEquals(calls.get(call).added, tuple.val);
     }
@@ -65,14 +65,14 @@ public class MockMapObserver<K, V> implements MapChangeListener<K, V> {
     public void assertMultipleCalls(Call<K, V>... calls) {
         assertEquals(this.calls.size(), calls.length);
         for (Call<K,V> c : calls) {
-            assertTrue(Arrays.toString(calls) + " doesn't contain "  + c, this.calls.contains(c));
+            assertTrue(this.calls.contains(c), Arrays.toString(calls) + " doesn't contain " + c);
         }
     }
 
     public void assertMultipleRemove(Tuple<K, V>... tuples) {
         assertEquals(this.calls.size(), tuples.length);
         for (Tuple<K,V> t : tuples) {
-            assertTrue(calls + " doesn't contain "  + t, this.calls.contains(new Call<K,V>(t.key, t.val, null)));
+            assertTrue(this.calls.contains(new Call<>(t.key, t.val, null)), calls + " doesn't contain " + t);
         }
     }
 
@@ -81,7 +81,7 @@ public class MockMapObserver<K, V> implements MapChangeListener<K, V> {
     }
 
     public void assertRemoved(int call, Tuple<K, V> tuple) {
-        assertTrue("Missing call to the observer # " + call, call < calls.size());
+        assertTrue(call < calls.size(), "Missing call to the observer # " + call);
         assertEquals(calls.get(call).key, tuple.key);
         assertEquals(calls.get(call).removed, tuple.val);
     }
@@ -112,7 +112,7 @@ public class MockMapObserver<K, V> implements MapChangeListener<K, V> {
         }
 
         public static<K, V> Call<K, V> call(K k, V o, V n) {
-            return new Call<K, V>(k, o, n);
+            return new Call<>(k, o, n);
         }
 
         @Override
@@ -163,7 +163,7 @@ public class MockMapObserver<K, V> implements MapChangeListener<K, V> {
         }
 
         public static<K, V> Tuple<K, V> tup(K k, V v) {
-            return new Tuple<K, V>(k, v);
+            return new Tuple<>(k, v);
         }
     }
 

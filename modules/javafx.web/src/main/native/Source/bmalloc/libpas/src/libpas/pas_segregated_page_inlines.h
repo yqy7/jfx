@@ -205,7 +205,7 @@ static PAS_ALWAYS_INLINE void pas_segregated_page_switch_lock_impl(
     pas_segregated_page* page,
     pas_lock** held_lock)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
 
     pas_lock* held_lock_value;
     pas_lock* page_lock;
@@ -273,7 +273,7 @@ static PAS_ALWAYS_INLINE bool pas_segregated_page_switch_lock_with_mode(
         pas_segregated_page_switch_lock_impl(page, held_lock);
         return true;
     } }
-    PAS_ASSERT(!"Should not be reached");
+    PAS_ASSERT_NOT_REACHED();
     return true;
 }
 
@@ -326,7 +326,7 @@ pas_segregated_page_deallocate_with_page(pas_segregated_page* page,
                                          pas_segregated_page_config page_config,
                                          pas_segregated_page_role role)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
     static const bool count_things = false;
 
     static uint64_t count_exclusive;
@@ -341,10 +341,10 @@ pas_segregated_page_deallocate_with_page(pas_segregated_page* page,
     PAS_ASSERT(page_config.base.is_enabled);
 
     if (verbose) {
-        pas_log("Freeing %p in %p(%s), num_non_empty_words = %u\n",
+        pas_log("Freeing %p in %p(%s), num_non_empty_words = %llu\n",
                 (void*)begin, page,
                 pas_segregated_page_config_kind_get_string(page_config.kind),
-                page->num_non_empty_words);
+                (unsigned long long)page->emptiness.num_non_empty_words);
     }
 
     bit_index_unmasked = begin >> page_config.base.min_align_shift;
@@ -366,6 +366,7 @@ pas_segregated_page_deallocate_with_page(pas_segregated_page* page,
 
     word = page->alloc_bits[word_index];
 
+    // FIXME: Try removing this guard and unconditionally checking for double frees https://bugs.webkit.org/show_bug.cgi?id=295638
     if (page_config.check_deallocation) {
 #if !PAS_ARM && !PAS_RISCV
         new_word = word;
@@ -443,16 +444,10 @@ pas_segregated_page_deallocate_with_page(pas_segregated_page* page,
         } }
     }
 
-    if (page_config.base.page_size > page_config.base.granule_size) {
-        /* This is the partial decommit case. It's intended for medium pages. It requires doing
-           more work, but it's a bounded amount of work, and it only happens when freeing
-           medium objects. */
-
         uintptr_t object_size;
         pas_segregated_view owner;
         size_t offset_in_page;
         size_t bit_index;
-        bool did_find_empty_granule;
 
         offset_in_page = pas_modulo_power_of_2(begin, page_config.base.page_size);
         bit_index = offset_in_page >> page_config.base.min_align_shift;
@@ -468,6 +463,15 @@ pas_segregated_page_deallocate_with_page(pas_segregated_page* page,
                     page_config)->directory)->object_size;
         }
 
+    PAS_PROFILE(SEGREGATED_PAGE_DEALLOCATION, page_config, begin, object_size);
+
+    if (page_config.base.page_size > page_config.base.granule_size) {
+        /* This is the partial decommit case. It's intended for medium pages. It requires doing
+           more work, but it's a bounded amount of work, and it only happens when freeing
+           medium objects. */
+
+        bool did_find_empty_granule;
+
         did_find_empty_granule = pas_page_base_free_granule_uses_in_range(
             pas_segregated_page_get_granule_use_counts(page, page_config),
             offset_in_page,
@@ -478,17 +482,23 @@ pas_segregated_page_deallocate_with_page(pas_segregated_page* page,
             pas_segregated_page_verify_granules(page);
 
         if (did_find_empty_granule)
-            pas_segregated_page_note_emptiness(page);
+            pas_segregated_page_note_emptiness(page, pas_note_emptiness_keep_num_non_empty_words);
     }
 
     if (!new_word) {
-        PAS_TESTING_ASSERT(page->num_non_empty_words);
-        if (!--page->num_non_empty_words) {
+        /* Double check we didn't somehow double free this allocation. */
+        if (PAS_UNLIKELY(!word))
+             pas_segregated_page_deallocation_did_fail(begin);
+
+        PAS_TESTING_ASSERT(page->emptiness.num_non_empty_words);
+        uintptr_t num_non_empty_words = page->emptiness.num_non_empty_words;
+        if (!--num_non_empty_words) {
             /* This has to happen last since it effectively unlocks the lock. That's due to
                the things that happen in switch_lock_and_try_to_take_bias. Specifically, its
                reliance on the fully_empty bit. */
-            pas_segregated_page_note_emptiness(page);
-        }
+            pas_segregated_page_note_emptiness(page, pas_note_emptiness_clear_num_non_empty_words);
+        } else
+            page->emptiness.num_non_empty_words = num_non_empty_words;
     }
 }
 
@@ -533,7 +543,7 @@ pas_segregated_page_get_directory_for_address_in_page(pas_segregated_page* page,
                 pas_segregated_view_get_shared_handle(owning_view), begin, page_config)->directory);
     }
 
-    PAS_ASSERT(!"Should not be reached");
+    PAS_ASSERT_NOT_REACHED();
     return NULL;
 }
 
@@ -573,7 +583,7 @@ pas_segregated_page_get_object_size_for_address_in_page(pas_segregated_page* pag
                 begin, page_config)->directory)->object_size;
     } }
 
-    PAS_ASSERT(!"Should not be reached");
+    PAS_ASSERT_NOT_REACHED();
     return 0;
 }
 

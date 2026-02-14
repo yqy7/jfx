@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2022 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2015-2022 Apple Inc. All rights reserved.
  * Copyright (C) 2016 Yusuke Suzuki <utatane.tea@gmail.com>.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -38,7 +38,7 @@ class SourceCode;
 class JSModuleLoader final : public JSNonFinalObject {
 public:
     using Base = JSNonFinalObject;
-    static constexpr unsigned StructureFlags = Base::StructureFlags | HasStaticPropertyTable;
+    static constexpr unsigned StructureFlags = Base::StructureFlags;
 
     template<typename CellType, SubspaceAccess>
     static GCClient::IsoSubspace* subspaceFor(VM& vm)
@@ -64,22 +64,18 @@ public:
 
     DECLARE_INFO;
 
-    static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
-    {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
-    }
+    inline static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
     // APIs to control the module loader.
     JSValue provideFetch(JSGlobalObject*, JSValue key, const SourceCode&);
     JSInternalPromise* loadAndEvaluateModule(JSGlobalObject*, JSValue moduleName, JSValue parameters, JSValue scriptFetcher);
     JSInternalPromise* loadModule(JSGlobalObject*, JSValue moduleName, JSValue parameters, JSValue scriptFetcher);
     JSValue linkAndEvaluateModule(JSGlobalObject*, JSValue moduleKey, JSValue scriptFetcher);
-    JSInternalPromise* requestImportModule(JSGlobalObject*, const Identifier&, JSValue parameters, JSValue scriptFetcher);
+    JSInternalPromise* requestImportModule(JSGlobalObject*, const Identifier&, JSValue referrer, JSValue parameters, JSValue scriptFetcher);
 
     // Platform dependent hooked APIs.
     JSInternalPromise* importModule(JSGlobalObject*, JSString* moduleName, JSValue parameters, const SourceOrigin& referrer);
-    JSInternalPromise* resolve(JSGlobalObject*, JSValue name, JSValue referrer, JSValue scriptFetcher);
-    Identifier resolveSync(JSGlobalObject*, JSValue name, JSValue referrer, JSValue scriptFetcher);
+    Identifier resolve(JSGlobalObject*, JSValue name, JSValue referrer, JSValue scriptFetcher);
     JSInternalPromise* fetch(JSGlobalObject*, JSValue key, JSValue parameters, JSValue scriptFetcher);
     JSObject* createImportMetaProperties(JSGlobalObject*, JSValue key, JSModuleRecord*, JSValue scriptFetcher);
 

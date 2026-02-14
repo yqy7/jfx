@@ -24,6 +24,7 @@
 #include "config.h"
 #include "RenderListItem.h"
 
+#include "ContainerNodeInlines.h"
 #include "CSSFontSelector.h"
 #include "ElementInlines.h"
 #include "ElementTraversal.h"
@@ -31,24 +32,29 @@
 #include "HTMLOListElement.h"
 #include "HTMLUListElement.h"
 #include "PseudoElement.h"
-#include "RenderStyleConstants.h"
+#include "RenderBoxInlines.h"
+#include "RenderBoxModelObjectInlines.h"
+#include "RenderElementInlines.h"
+#include "RenderObjectInlines.h"
+#include "RenderStyleSetters.h"
 #include "RenderTreeBuilder.h"
 #include "RenderView.h"
 #include "StyleInheritedData.h"
 #include "UnicodeBidi.h"
-#include <wtf/IsoMallocInlines.h>
 #include <wtf/StackStats.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(RenderListItem);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(RenderListItem);
 
 RenderListItem::RenderListItem(Element& element, RenderStyle&& style)
-    : RenderBlockFlow(element, WTFMove(style))
+    : RenderBlockFlow(Type::ListItem, element, WTFMove(style))
 {
+    ASSERT(isRenderListItem());
     setInline(false);
 }
 
@@ -61,7 +67,7 @@ RenderListItem::~RenderListItem()
 RenderStyle RenderListItem::computeMarkerStyle() const
 {
     if (!is<PseudoElement>(element())) {
-        if (auto markerStyle = getCachedPseudoStyle(PseudoId::Marker, &style()))
+        if (auto markerStyle = getCachedPseudoStyle({ PseudoId::Marker }, &style()))
             return RenderStyle::clone(*markerStyle);
     }
 
@@ -76,27 +82,11 @@ RenderStyle RenderListItem::computeMarkerStyle() const
     auto fontDescription = style().fontDescription();
     fontDescription.setVariantNumericSpacing(FontVariantNumericSpacing::TabularNumbers);
     markerStyle.setFontDescription(WTFMove(fontDescription));
-    markerStyle.fontCascade().update(&document().fontSelector());
     markerStyle.setUnicodeBidi(UnicodeBidi::Isolate);
-    markerStyle.setWhiteSpace(WhiteSpace::Pre);
-    markerStyle.setTextTransform(TextTransform::None);
+    markerStyle.setWhiteSpaceCollapse(WhiteSpaceCollapse::Preserve);
+    markerStyle.setTextWrapMode(TextWrapMode::NoWrap);
+    markerStyle.setTextTransform({ });
     return markerStyle;
-}
-
-void RenderListItem::insertedIntoTree(IsInternalMove isInternalMove)
-{
-    RenderBlockFlow::insertedIntoTree(isInternalMove);
-
-    if (isInternalMove == IsInternalMove::No)
-        updateListMarkerNumbers();
-}
-
-void RenderListItem::willBeRemovedFromTree(IsInternalMove isInternalMove)
-{
-    RenderBlockFlow::willBeRemovedFromTree(isInternalMove);
-
-    if (isInternalMove == IsInternalMove::No)
-        updateListMarkerNumbers();
 }
 
 bool isHTMLListElement(const Node& node)
@@ -107,10 +97,11 @@ bool isHTMLListElement(const Node& node)
 // Returns the enclosing list with respect to the DOM order.
 static Element* enclosingList(const RenderListItem& listItem)
 {
-    auto& element = listItem.element();
-    auto* parent = is<PseudoElement>(element) ? downcast<PseudoElement>(element).hostElement() : element.parentElement();
+    auto* element = listItem.element();
+    auto* pseudoElement = dynamicDowncast<PseudoElement>(element);
+    auto* parent = pseudoElement ? pseudoElement->hostElement() : element->parentElement();
     for (auto* ancestor = parent; ancestor; ancestor = ancestor->parentElement()) {
-        if (isHTMLListElement(*ancestor))
+        if (isHTMLListElement(*ancestor) || (ancestor->renderer() && ancestor->renderer()->shouldApplyStyleContainment()))
             return ancestor;
     }
 
@@ -124,17 +115,19 @@ static RenderListItem* nextListItemHelper(const Element& list, const Element& el
 {
     auto* current = &element;
     auto advance = [&] {
-        current = ElementTraversal::nextIncludingPseudo(*current, &list);
+        if (!current->renderOrDisplayContentsStyle())
+            current = ElementTraversal::nextIncludingPseudoSkippingChildren(*current, &list);
+        else
+            current = ElementTraversal::nextIncludingPseudo(*current, &list);
     };
     advance();
     while (current) {
-        auto* renderer = current->renderer();
-        if (!is<RenderListItem>(renderer)) {
+        auto* item = dynamicDowncast<RenderListItem>(current->renderer());
+        if (!item) {
             advance();
             continue;
         }
-        auto& item = downcast<RenderListItem>(*renderer);
-        auto* otherList = enclosingList(item);
+        auto* otherList = enclosingList(*item);
         if (!otherList) {
             advance();
             continue;
@@ -142,7 +135,7 @@ static RenderListItem* nextListItemHelper(const Element& list, const Element& el
 
         // This item is part of our current list, so it's what we're looking for.
         if (&list == otherList)
-            return &item;
+            return item;
 
         // We found ourself inside another list; skip the rest of its contents.
         current = ElementTraversal::nextIncludingPseudoSkippingChildren(*current, &list);
@@ -153,7 +146,7 @@ static RenderListItem* nextListItemHelper(const Element& list, const Element& el
 
 static inline RenderListItem* nextListItem(const Element& list, const RenderListItem& item)
 {
-    return nextListItemHelper(list, item.element());
+    return nextListItemHelper(list, *item.element());
 }
 
 static inline RenderListItem* firstListItem(const Element& list)
@@ -163,19 +156,18 @@ static inline RenderListItem* firstListItem(const Element& list)
 
 static RenderListItem* previousListItem(const Element& list, const RenderListItem& item)
 {
-    auto* current = &item.element();
+    auto* current = item.element();
     auto advance = [&] {
         current = ElementTraversal::previousIncludingPseudo(*current, &list);
     };
     advance();
     while (current) {
-        auto* renderer = current->renderer();
-        if (!is<RenderListItem>(renderer)) {
+        auto* item = dynamicDowncast<RenderListItem>(current->renderer());
+        if (!item) {
             advance();
             continue;
         }
-        auto& item = downcast<RenderListItem>(*renderer);
-        auto* otherList = enclosingList(item);
+        auto* otherList = enclosingList(*item);
         if (!otherList) {
             advance();
             continue;
@@ -183,7 +175,7 @@ static RenderListItem* previousListItem(const Element& list, const RenderListIte
 
         // This item is part of our current list, so we found what we're looking for.
         if (&list == otherList)
-            return &item;
+            return item;
 
         // We found ourself inside another list; skip the rest of its contents by
         // advancing to it. However, since the list itself might be a list item,
@@ -214,6 +206,7 @@ void RenderListItem::updateValueNow() const
 
     // The start item is either the closest item before this one in the list that already has a value,
     // or the first item in the list if none have before this have values yet.
+    // FIXME: This should skip over items with counter-reset.
     auto* startItem = this;
     if (list) {
         auto* item = this;
@@ -224,47 +217,63 @@ void RenderListItem::updateValueNow() const
         }
     }
 
+    int defaultIncrement = orderedList && orderedList->isReversed() ? -1 : 1;
+    auto valueForItem = [&](int previousValue, CounterDirectives& directives) {
+        if (directives.setValue)
+            return *directives.setValue;
+        int increment = directives.incrementValue.value_or(defaultIncrement);
+        if (directives.resetValue)
+            return *directives.resetValue + increment;
+        return previousValue + increment;
+    };
+
     auto& startValue = startItem->m_value;
-    if (!startValue)
-        startValue = orderedList ? orderedList->start() : 1;
+    if (!startValue) {
+        // Take in account enclosing list counter-reset.
+        // FIXME: This can be a lot more simple when lists use presentational hints.
+        if (list && list->renderer()) {
+            auto listDirectives = list->renderer()->style().counterDirectives().map.get("list-item"_s);
+            if (listDirectives.resetValue)
+                startValue = *listDirectives.resetValue;
+            else
+                startValue = orderedList ? orderedList->start() - defaultIncrement : 0;
+        }
+        auto directives = startItem->style().counterDirectives().map.get("list-item"_s);
+        startValue = valueForItem(startValue.value_or(0), directives);
+    }
+
     int value = *startValue;
-    int increment = (orderedList && orderedList->isReversed()) ? -1 : 1;
 
     for (auto* item = startItem; item != this; ) {
         item = nextListItem(*list, *item);
-        item->m_value = (value += increment);
+        auto directives = item->style().counterDirectives().map.get("list-item"_s);
+        item->m_value = valueForItem(value, directives);
+        // counter-reset creates a new nested counter, so it should not be counted towards the current counter.
+        if (!directives.resetValue)
+            value = *item->m_value;
     }
 }
 
 void RenderListItem::updateValue()
 {
-    if (!m_valueWasSetExplicitly) {
         m_value = std::nullopt;
         if (m_marker)
-            m_marker->setNeedsLayoutAndPrefWidthsRecalc();
-    }
+        m_marker->setNeedsLayoutAndPreferredWidthsUpdate();
 }
 
-void RenderListItem::layout()
+void RenderListItem::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
 {
-    StackStats::LayoutCheckPoint layoutCheckPoint;
-    ASSERT(needsLayout());
+    RenderBlockFlow::styleDidChange(diff, oldStyle);
 
-    RenderBlockFlow::layout();
-}
-
-void RenderListItem::addOverflowFromChildren()
-{
-    if (m_marker)
-        m_marker->addOverflowFromListMarker();
-    RenderBlockFlow::addOverflowFromChildren();
+    if (diff == StyleDifference::Layout && oldStyle && oldStyle->counterDirectives().map.get("list-item"_s) != style().counterDirectives().map.get("list-item"_s))
+    counterDirectivesChanged();
 }
 
 void RenderListItem::computePreferredLogicalWidths()
 {
-    // FIXME: RenderListMarker::updateMargins() mutates margin style which affects preferred widths.
-    if (m_marker && m_marker->preferredLogicalWidthsDirty())
-        m_marker->updateMarginsAndContent();
+    // FIXME: RenderListMarker::updateInlineMargins() mutates margin style which affects preferred widths.
+    if (m_marker && m_marker->needsPreferredLogicalWidthsUpdate())
+        m_marker->updateInlineMarginsAndContent();
 
     RenderBlockFlow::computePreferredLogicalWidths();
 }
@@ -277,24 +286,24 @@ void RenderListItem::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
     RenderBlockFlow::paint(paintInfo, paintOffset);
 }
 
-StringView RenderListItem::markerTextWithoutSuffix() const
+String RenderListItem::markerTextWithoutSuffix() const
 {
     if (!m_marker)
         return { };
     return m_marker->textWithoutSuffix();
 }
 
-StringView RenderListItem::markerTextWithSuffix() const
+String RenderListItem::markerTextWithSuffix() const
 {
     if (!m_marker)
         return { };
     return m_marker->textWithSuffix();
 }
 
-void RenderListItem::explicitValueChanged()
+void RenderListItem::counterDirectivesChanged()
 {
     if (m_marker)
-        m_marker->setNeedsLayoutAndPrefWidthsRecalc();
+        m_marker->setNeedsLayoutAndPreferredWidthsUpdate();
 
     updateValue();
     auto* list = enclosingList(*this);
@@ -305,20 +314,6 @@ void RenderListItem::explicitValueChanged()
         item->updateValue();
 }
 
-void RenderListItem::setExplicitValue(std::optional<int> value)
-{
-    if (!value) {
-        if (!m_valueWasSetExplicitly)
-            return;
-    } else {
-        if (m_valueWasSetExplicitly && m_value == value)
-            return;
-    }
-    m_valueWasSetExplicitly = value.has_value();
-    m_value = value;
-    explicitValueChanged();
-}
-
 void RenderListItem::updateListMarkerNumbers()
 {
     auto* list = enclosingList(*this);
@@ -326,10 +321,9 @@ void RenderListItem::updateListMarkerNumbers()
         return;
 
     bool isInReversedOrderedList = false;
-    if (is<HTMLOListElement>(*list)) {
-        auto& orderedList = downcast<HTMLOListElement>(*list);
-        orderedList.itemCountChanged();
-        isInReversedOrderedList = orderedList.isReversed();
+    if (RefPtr orderedList = dynamicDowncast<HTMLOListElement>(*list)) {
+        orderedList->itemCountChanged();
+        isInReversedOrderedList = orderedList->isReversed();
     }
 
     // If an item has been marked for update before, we know that all following items have, too.
@@ -342,8 +336,8 @@ void RenderListItem::updateListMarkerNumbers()
 
 bool RenderListItem::isInReversedOrderedList() const
 {
-    auto* list = enclosingList(*this);
-    return is<HTMLOListElement>(list) && downcast<HTMLOListElement>(*list).isReversed();
+    auto* list = dynamicDowncast<HTMLOListElement>(enclosingList(*this));
+    return list && list->isReversed();
 }
 
 } // namespace WebCore

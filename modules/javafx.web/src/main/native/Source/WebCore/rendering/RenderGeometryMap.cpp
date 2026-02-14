@@ -28,6 +28,8 @@
 
 #include "RenderFragmentedFlow.h"
 #include "RenderLayer.h"
+#include "RenderObjectInlines.h"
+#include "RenderStyleInlines.h"
 #include "RenderView.h"
 #include "TransformState.h"
 #include <wtf/SetForScope.h>
@@ -46,7 +48,6 @@ void RenderGeometryMap::mapToContainer(TransformState& transformState, const Ren
     // If the mapping includes something like columns, we have to go via renderers.
     if (hasNonUniformStep()) {
         m_mapping.last().m_renderer->mapLocalToContainer(container, transformState, ApplyContainerFlip | m_mapCoordinatesFlags);
-        transformState.flatten();
         return;
     }
 
@@ -92,7 +93,6 @@ void RenderGeometryMap::mapToContainer(TransformState& transformState, const Ren
     }
 
     ASSERT(foundContainer);
-    transformState.flatten();
 }
 
 FloatPoint RenderGeometryMap::mapToContainer(const FloatPoint& p, const RenderLayerModelObject* container) const
@@ -109,8 +109,8 @@ FloatPoint RenderGeometryMap::mapToContainer(const FloatPoint& p, const RenderLa
     } else {
         TransformState transformState(TransformState::ApplyTransformDirection, p);
         mapToContainer(transformState, container);
-        result = transformState.lastPlanarPoint();
-        ASSERT(areEssentiallyEqual(rendererMappedResult, result));
+        result = transformState.mappedPoint();
+        ASSERT(m_accumulatedOffsetMightBeSaturated ||  areEssentiallyEqual(rendererMappedResult, result));
     }
 
     return result;
@@ -126,16 +126,16 @@ FloatQuad RenderGeometryMap::mapToContainer(const FloatRect& rect, const RenderL
     } else {
         TransformState transformState(TransformState::ApplyTransformDirection, rect.center(), rect);
         mapToContainer(transformState, container);
-        result = transformState.lastPlanarQuad();
+        result = transformState.mappedQuad();
     }
 
     return result;
 }
 
-void RenderGeometryMap::pushMappingsToAncestor(const RenderObject* renderer, const RenderLayerModelObject* ancestorRenderer)
+void RenderGeometryMap::pushMappingsToAncestor(const RenderElement* renderer, const RenderLayerModelObject* ancestorRenderer)
 {
     // We need to push mappings in reverse order here, so do insertions rather than appends.
-    SetForScope<size_t> positionChange(m_insertionPosition, m_mapping.size());
+    SetForScope positionChange(m_insertionPosition, m_mapping.size());
     do {
         renderer = renderer->pushMappingToContainer(ancestorRenderer, *this);
     } while (renderer && renderer != ancestorRenderer);
@@ -147,16 +147,16 @@ static bool canMapBetweenRenderersViaLayers(const RenderLayerModelObject& render
 {
     for (const RenderElement* current = &renderer; ; current = current->parent()) {
         const RenderStyle& style = current->style();
-        if (current->isFixedPositioned() || style.isFlippedBlocksWritingMode())
+        if (current->isFixedPositioned() || style.writingMode().isBlockFlipped())
             return false;
 
-        if (current->hasTransformRelatedProperty() && (style.hasTransform() || style.translate() || style.scale() || style.rotate() || style.hasPerspective()))
+        if (current->hasTransformOrPerspective())
             return false;
 
         if (current->isRenderFragmentedFlow())
             return false;
 
-        if (current->isLegacySVGRoot())
+        if (current->isLegacyRenderSVGRoot())
             return false;
 
         if (current == &ancestor)
@@ -168,19 +168,30 @@ static bool canMapBetweenRenderersViaLayers(const RenderLayerModelObject& render
 
 void RenderGeometryMap::pushMappingsToAncestor(const RenderLayer* layer, const RenderLayer* ancestorLayer, bool respectTransforms)
 {
+    if (!ancestorLayer) {
+        ASSERT(!m_mapping.size());
+        pushMappingsToAncestor(&layer->renderer().view(), nullptr);
+
+        SetForScope positionChange(m_insertionPosition, m_mapping.size());
+        while (layer->parent()) {
+            pushMappingsToAncestor(layer, layer->parent(), respectTransforms);
+            layer = layer->parent();
+        }
+        ASSERT(m_mapping[0].m_renderer->isRenderView());
+        return;
+    }
+
     OptionSet<MapCoordinatesMode> newFlags = m_mapCoordinatesFlags;
     if (!respectTransforms)
         newFlags.remove(UseTransforms);
 
-    SetForScope<OptionSet<MapCoordinatesMode>> flagsChange(m_mapCoordinatesFlags, newFlags);
+    SetForScope flagsChange(m_mapCoordinatesFlags, newFlags);
 
     const RenderLayerModelObject& renderer = layer->renderer();
 
     // We have to visit all the renderers to detect flipped blocks. This might defeat the gains
     // from mapping via layers.
-    bool canConvertInLayerTree = ancestorLayer ? canMapBetweenRenderersViaLayers(layer->renderer(), ancestorLayer->renderer()) : false;
-
-    if (canConvertInLayerTree) {
+    if (canMapBetweenRenderersViaLayers(renderer, ancestorLayer->renderer())) {
         LayoutSize layerOffset = layer->offsetFromAncestor(ancestorLayer);
 
         // The RenderView must be pushed first.
@@ -189,11 +200,11 @@ void RenderGeometryMap::pushMappingsToAncestor(const RenderLayer* layer, const R
             pushMappingsToAncestor(&ancestorLayer->renderer(), nullptr);
         }
 
-        SetForScope<size_t> positionChange(m_insertionPosition, m_mapping.size());
+        SetForScope positionChange(m_insertionPosition, m_mapping.size());
         push(&renderer, layerOffset, /*accumulatingTransform*/ true, /*isNonUniform*/ false, /*isFixedPosition*/ false, /*hasTransform*/ false);
         return;
     }
-    const RenderLayerModelObject* ancestorRenderer = ancestorLayer ? &ancestorLayer->renderer() : nullptr;
+    const RenderLayerModelObject* ancestorRenderer = &ancestorLayer->renderer();
     pushMappingsToAncestor(&renderer, ancestorRenderer);
 }
 

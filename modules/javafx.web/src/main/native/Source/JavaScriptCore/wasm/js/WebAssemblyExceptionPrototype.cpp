@@ -31,7 +31,9 @@
 #include "AuxiliaryBarrierInlines.h"
 #include "JSCInlines.h"
 #include "JSWebAssemblyException.h"
+#include "JSWebAssemblyHelpers.h"
 #include "JSWebAssemblyTag.h"
+#include <wtf/text/MakeString.h>
 
 namespace JSC {
 static JSC_DECLARE_HOST_FUNCTION(webAssemblyExceptionProtoFuncGetArg);
@@ -42,7 +44,7 @@ static JSC_DECLARE_HOST_FUNCTION(webAssemblyExceptionProtoFuncIs);
 
 namespace JSC {
 
-const ClassInfo WebAssemblyExceptionPrototype::s_info = { "WebAssembly.Exception", &Base::s_info, &prototypeTableWebAssemblyException, nullptr, CREATE_METHOD_TABLE(WebAssemblyExceptionPrototype) };
+const ClassInfo WebAssemblyExceptionPrototype::s_info = { "WebAssembly.Exception"_s, &Base::s_info, &prototypeTableWebAssemblyException, nullptr, CREATE_METHOD_TABLE(WebAssemblyExceptionPrototype) };
 
 /* Source for WebAssemblyExceptionPrototype.lut.h
  @begin prototypeTableWebAssemblyException
@@ -66,7 +68,7 @@ Structure* WebAssemblyExceptionPrototype::createStructure(VM& vm, JSGlobalObject
 void WebAssemblyExceptionPrototype::finishCreation(VM& vm)
 {
     Base::finishCreation(vm);
-    ASSERT(inherits(vm, info()));
+    ASSERT(inherits(info()));
     JSC_TO_STRING_TAG_WITHOUT_TRANSITION();
 }
 
@@ -80,22 +82,15 @@ ALWAYS_INLINE static JSWebAssemblyException* getException(JSGlobalObject* global
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    if (UNLIKELY(!thisValue.isCell())) {
+    if (!thisValue.isCell()) [[unlikely]] {
         throwVMError(globalObject, scope, createNotAnObjectError(globalObject, thisValue));
         return nullptr;
     }
-    auto* tag = jsDynamicCast<JSWebAssemblyException*>(vm, thisValue.asCell());
-    if (LIKELY(tag))
+    auto* tag = jsDynamicCast<JSWebAssemblyException*>(thisValue.asCell());
+    if (tag) [[likely]]
         return tag;
     throwTypeError(globalObject, scope, "WebAssembly.Exception operation called on non-Exception object"_s);
     return nullptr;
-}
-
-ALWAYS_INLINE static JSWebAssemblyTag* getTag(VM& vm, JSValue tagValue)
-{
-    if (!tagValue.isCell())
-        return nullptr;
-    return jsDynamicCast<JSWebAssemblyTag*>(vm, tagValue.asCell());
 }
 
 JSC_DEFINE_HOST_FUNCTION(webAssemblyExceptionProtoFuncGetArg, (JSGlobalObject* globalObject, CallFrame* callFrame))
@@ -104,28 +99,27 @@ JSC_DEFINE_HOST_FUNCTION(webAssemblyExceptionProtoFuncGetArg, (JSGlobalObject* g
     auto throwScope = DECLARE_THROW_SCOPE(vm);
 
     const auto& formatMessage = [&](const auto& message) {
-        return makeString("WebAssembly.Exception.getArg(): ", message);
-    };
-    const auto& typeError = [&](const auto& message) {
-        return throwVMTypeError(globalObject, throwScope, formatMessage(message));
+        return makeString("WebAssembly.Exception.getArg(): "_s, message);
     };
 
     JSWebAssemblyException* jsException = getException(globalObject, callFrame->thisValue());
     RETURN_IF_EXCEPTION(throwScope, { });
 
-    if (UNLIKELY(callFrame->argumentCount() < 2))
+    if (callFrame->argumentCount() < 2) [[unlikely]]
         return JSValue::encode(throwException(globalObject, throwScope, createNotEnoughArgumentsError(globalObject)));
 
-    JSWebAssemblyTag* tag = getTag(vm, callFrame->argument(0));
-    if (!tag)
-        return typeError("First argument must be a WebAssembly.Tag");
+    JSWebAssemblyTag* tag = jsDynamicCast<JSWebAssemblyTag*>(callFrame->argument(0));
+    if (!tag) [[unlikely]]
+        return throwVMTypeError(globalObject, throwScope, formatMessage("First argument must be a WebAssembly.Tag"_s));
 
-    if (jsException->tag() != tag->tag())
-        return typeError("First argument does not match the exception tag");
+    uint32_t index = toNonWrappingUint32(globalObject, callFrame->argument(1), ErrorType::RangeError);
+    RETURN_IF_EXCEPTION(throwScope, { });
 
-    uint32_t index = callFrame->argument(1).toUInt32(globalObject);
-    if (index >= tag->tag().parameterCount())
-        return typeError("Index out of range");
+    if (jsException->tag() != tag->tag()) [[unlikely]]
+        return throwVMTypeError(globalObject, throwScope, formatMessage("First argument does not match the exception tag"_s));
+
+    if (index >= tag->tag().parameterCount()) [[unlikely]]
+        return throwVMRangeError(globalObject, throwScope, formatMessage("Index out of range"_s));
 
     RELEASE_AND_RETURN(throwScope, JSValue::encode(jsException->getArg(globalObject, index)));
 }
@@ -138,12 +132,12 @@ JSC_DEFINE_HOST_FUNCTION(webAssemblyExceptionProtoFuncIs, (JSGlobalObject* globa
     JSWebAssemblyException* jsException = getException(globalObject, callFrame->thisValue());
     RETURN_IF_EXCEPTION(throwScope, { });
 
-    if (UNLIKELY(callFrame->argumentCount() < 1))
+    if (callFrame->argumentCount() < 1) [[unlikely]]
         return JSValue::encode(throwException(globalObject, throwScope, createNotEnoughArgumentsError(globalObject)));
 
-    JSWebAssemblyTag* tag = getTag(vm, callFrame->argument(0));
+    JSWebAssemblyTag* tag = jsDynamicCast<JSWebAssemblyTag*>(callFrame->argument(0));
     if (!tag)
-        return throwVMTypeError(globalObject, throwScope, "WebAssembly.Exception.is(): First argument must be a WebAssembly.Tag");
+        return throwVMTypeError(globalObject, throwScope, "WebAssembly.Exception.is(): First argument must be a WebAssembly.Tag"_s);
 
     RELEASE_AND_RETURN(throwScope, JSValue::encode(jsBoolean(jsException->tag() == tag->tag())));
 }

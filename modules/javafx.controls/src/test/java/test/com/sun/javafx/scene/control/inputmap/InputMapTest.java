@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,24 +24,7 @@
  */
 package test.com.sun.javafx.scene.control.inputmap;
 
-import javafx.event.Event;
-import javafx.event.EventType;
-import javafx.scene.Node;
-import javafx.scene.input.KeyCode;
-import javafx.scene.input.KeyEvent;
-import javafx.scene.input.MouseButton;
-import javafx.scene.input.MouseEvent;
-import javafx.scene.input.PickResult;
-import javafx.scene.layout.Region;
-import javafx.scene.shape.Rectangle;
-import org.junit.Before;
-import org.junit.Test;
-
-import java.util.Optional;
-import java.util.function.Predicate;
-
-import static org.junit.Assert.*;
-import static javafx.scene.input.KeyCode.*;
+import org.junit.jupiter.api.Test;
 
 /**
  * Thoughts / Considerations (search for [1], etc in comments below):
@@ -306,15 +289,15 @@ public class InputMapTest {
 //    }
 //
 //    // TODO [1], [2]
-////    @Test public void testLookup_mouseMapping_mappingThatIsInstalled_usingAnyEventType() {
-////        InputMap<?> map = createDummyInputMap();
-////        InputMap.MouseMapping mapping = new InputMap.MouseMapping(MouseEvent.MOUSE_PRESSED, e -> { });
-////        map.getMappings().add(mapping);
-////
-////        Optional<InputMap.Mapping<?>> returnedMapping = map.lookupMapping(MouseEvent.ANY);
-////        assertNotNull(returnedMapping);
-////        assertTrue(returnedMapping.isPresent());
-////    }
+//--    @Test public void testLookup_mouseMapping_mappingThatIsInstalled_usingAnyEventType() {
+//--        InputMap<?> map = createDummyInputMap();
+//--        InputMap.MouseMapping mapping = new InputMap.MouseMapping(MouseEvent.MOUSE_PRESSED, e -> { });
+//--        map.getMappings().add(mapping);
+//--
+//--        Optional<InputMap.Mapping<?>> returnedMapping = map.lookupMapping(MouseEvent.ANY);
+//--        assertNotNull(returnedMapping);
+//--        assertTrue(returnedMapping.isPresent());
+//--    }
 //
 //    @Test public void testLookup_keyMapping_mappingThatIsInstalledOnChildMap() {
 //        Rectangle dummy = new Rectangle();

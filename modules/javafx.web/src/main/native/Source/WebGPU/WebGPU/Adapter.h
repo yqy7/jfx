@@ -25,40 +25,66 @@
 
 #pragma once
 
+#import "HardwareCapabilities.h"
+#import <Metal/Metal.h>
+#import <bmalloc/CompactAllocationMode.h>
+#import <wtf/Assertions.h>
+#import <wtf/CompletionHandler.h>
 #import <wtf/FastMalloc.h>
-#import <wtf/Function.h>
+#import <wtf/HashSet.h>
 #import <wtf/Ref.h>
 #import <wtf/RefCounted.h>
 #import <wtf/RefPtr.h>
+#import <wtf/TZoneMalloc.h>
+#import <wtf/ThreadSafeWeakPtr.h>
+#import <wtf/WeakPtr.h>
+
+struct WGPUAdapterImpl {
+};
 
 namespace WebGPU {
 
 class Device;
+class Instance;
 
-class Adapter : public RefCounted<Adapter> {
-    WTF_MAKE_FAST_ALLOCATED;
+// https://gpuweb.github.io/gpuweb/#gpuadapter
+class Adapter : public WGPUAdapterImpl, public RefCounted<Adapter> {
+    WTF_MAKE_TZONE_ALLOCATED(Adapter);
 public:
-    static Ref<Adapter> create(id <MTLDevice> device)
+    static Ref<Adapter> create(id<MTLDevice> device, Instance& instance, bool xrCompatible, HardwareCapabilities&& capabilities)
     {
-        return adoptRef(*new Adapter(device));
+        return adoptRef(*new Adapter(device, instance, xrCompatible, WTFMove(capabilities)));
+    }
+    static Ref<Adapter> createInvalid(Instance& instance)
+    {
+        return adoptRef(*new Adapter(instance));
     }
 
     ~Adapter();
 
     size_t enumerateFeatures(WGPUFeatureName* features);
-    bool getLimits(WGPUSupportedLimits*);
-    void getProperties(WGPUAdapterProperties*);
+    bool getLimits(WGPUSupportedLimits&);
+    void getProperties(WGPUAdapterProperties&);
     bool hasFeature(WGPUFeatureName);
-    void requestDevice(const WGPUDeviceDescriptor*, WTF::Function<void(WGPURequestDeviceStatus, RefPtr<Device>&&, const char*)>&& callback);
+    void requestDevice(const WGPUDeviceDescriptor&, CompletionHandler<void(WGPURequestDeviceStatus, Ref<Device>&&, String&&)>&& callback);
+
+    bool isValid() const { return m_device; }
+    void makeInvalid() { m_device = nil; }
+    bool isXRCompatible() const;
+
+    RefPtr<Instance> instance() const { return m_instance.get(); }
+    ThreadSafeWeakPtr<Instance> weakInstance() const { return m_instance; }
 
 private:
-    Adapter(id <MTLDevice>);
+    Adapter(id<MTLDevice>, Instance&, bool xrCompatible, HardwareCapabilities&&);
+    Adapter(Instance&);
 
-    id <MTLDevice> m_device { nil };
+    id<MTLDevice> m_device { nil };
+    const ThreadSafeWeakPtr<Instance> m_instance;
+
+    const HardwareCapabilities m_capabilities { };
+    bool m_deviceRequested { false };
+    bool m_xrCompatible { false };
 };
 
 } // namespace WebGPU
-
-struct WGPUAdapterImpl {
-    Ref<WebGPU::Adapter> adapter;
-};

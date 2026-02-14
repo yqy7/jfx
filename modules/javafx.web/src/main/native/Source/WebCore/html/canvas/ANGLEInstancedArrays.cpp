@@ -28,56 +28,44 @@
 #if ENABLE(WEBGL)
 #include "ANGLEInstancedArrays.h"
 
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(ANGLEInstancedArrays);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(ANGLEInstancedArrays);
 
 ANGLEInstancedArrays::ANGLEInstancedArrays(WebGLRenderingContextBase& context)
-    : WebGLExtension(context)
+    : WebGLExtension(context, WebGLExtensionName::ANGLEInstancedArrays)
 {
-#if USE(ANGLE)
-    context.graphicsContextGL()->ensureExtensionEnabled("GL_ANGLE_instanced_arrays");
-#endif
+    context.protectedGraphicsContextGL()->ensureExtensionEnabled("GL_ANGLE_instanced_arrays"_s);
 }
 
 ANGLEInstancedArrays::~ANGLEInstancedArrays() = default;
 
-WebGLExtension::ExtensionName ANGLEInstancedArrays::getName() const
-{
-    return ANGLEInstancedArraysName;
-}
-
 bool ANGLEInstancedArrays::supported(GraphicsContextGL& context)
 {
-#if USE(ANGLE) || PLATFORM(GTK) || PLATFORM(WPE)
-    return context.supportsExtension("GL_ANGLE_instanced_arrays");
-#else
-    UNUSED_PARAM(context);
-    return false;
-#endif
+    return context.supportsExtension("GL_ANGLE_instanced_arrays"_s);
 }
 
 void ANGLEInstancedArrays::drawArraysInstancedANGLE(GCGLenum mode, GCGLint first, GCGLsizei count, GCGLsizei primcount)
 {
-    if (!m_context || m_context->isContextLost())
+    if (isContextLost())
         return;
-    m_context->drawArraysInstanced(mode, first, count, primcount);
+    protectedContext()->drawArraysInstanced(mode, first, count, primcount);
 }
 
 void ANGLEInstancedArrays::drawElementsInstancedANGLE(GCGLenum mode, GCGLsizei count, GCGLenum type, long long offset, GCGLsizei primcount)
 {
-    if (!m_context || m_context->isContextLost())
+    if (isContextLost())
         return;
-    m_context->drawElementsInstanced(mode, count, type, offset, primcount);
+    protectedContext()->drawElementsInstanced(mode, count, type, offset, primcount);
 }
 
 void ANGLEInstancedArrays::vertexAttribDivisorANGLE(GCGLuint index, GCGLuint divisor)
 {
-    if (!m_context || m_context->isContextLost())
+    if (isContextLost())
         return;
-    m_context->vertexAttribDivisor(index, divisor);
+    protectedContext()->vertexAttribDivisor(index, divisor);
 }
 
 } // namespace WebCore

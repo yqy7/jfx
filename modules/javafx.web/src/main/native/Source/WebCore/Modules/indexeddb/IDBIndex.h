@@ -28,7 +28,7 @@
 #include "IDBCursor.h"
 #include "IDBIndexInfo.h"
 #include "IDBRequest.h"
-#include <wtf/IsoMalloc.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/UniqueRef.h>
 
 namespace JSC {
@@ -38,11 +38,12 @@ class CallFrame;
 namespace WebCore {
 
 class IDBKeyRange;
+class WebCoreOpaqueRoot;
 
 struct IDBKeyRangeData;
 
 class IDBIndex final : public ActiveDOMObject {
-    WTF_MAKE_ISO_ALLOCATED(IDBIndex);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(IDBIndex);
 public:
     static UniqueRef<IDBIndex> create(ScriptExecutionContext&, const IDBIndexInfo&, IDBObjectStore&);
 
@@ -80,10 +81,11 @@ public:
     void markAsDeleted();
     bool isDeleted() const { return m_deleted; }
 
-    void ref();
-    void deref();
+    // ActiveDOMObject.
+    void ref() const final;
+    void deref() const final;
 
-    void* objectStoreAsOpaqueRoot() { return &m_objectStore; }
+    WebCoreOpaqueRoot opaqueRoot();
 
 private:
     IDBIndex(ScriptExecutionContext&, const IDBIndexInfo&, IDBObjectStore&);
@@ -97,7 +99,6 @@ private:
     ExceptionOr<Ref<IDBRequest>> doGetAllKeys(std::optional<uint32_t> count, Function<ExceptionOr<RefPtr<IDBKeyRange>>()> &&);
 
     // ActiveDOMObject.
-    const char* activeDOMObjectName() const final;
     bool virtualHasPendingActivity() const final;
 
     IDBIndexInfo m_info;
@@ -107,7 +108,9 @@ private:
 
     // IDBIndex objects are always owned by their referencing IDBObjectStore.
     // Indexes will never outlive ObjectStores so its okay to keep a raw C++ reference here.
-    IDBObjectStore& m_objectStore;
+    CheckedRef<IDBObjectStore> m_objectStore;
 };
+
+WebCoreOpaqueRoot root(IDBIndex*);
 
 } // namespace WebCore

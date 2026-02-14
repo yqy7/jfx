@@ -26,7 +26,10 @@
 #pragma once
 
 #include "BytecodeStructs.h"
+#include "ClonedArguments.h"
 #include "CommonSlowPaths.h"
+#include "DirectArguments.h"
+#include "ScopedArguments.h"
 
 namespace JSC {
 
@@ -50,7 +53,7 @@ inline void tryCachePutToScopeGlobal(
             metadata.m_getPutInfo = GetPutInfo(metadata.m_getPutInfo.resolveMode(), newResolveType, metadata.m_getPutInfo.initializationMode(), metadata.m_getPutInfo.ecmaMode());
             break;
         }
-        FALLTHROUGH;
+        [[fallthrough]];
     }
     case GlobalProperty:
     case GlobalPropertyWithVarInjectionChecks: {
@@ -75,11 +78,11 @@ inline void tryCachePutToScopeGlobal(
     if (resolveType == GlobalProperty || resolveType == GlobalPropertyWithVarInjectionChecks) {
         VM& vm = getVM(globalObject);
         JSGlobalObject* globalObject = codeBlock->globalObject();
-        ASSERT(globalObject == scope || globalObject->varInjectionWatchpoint()->hasBeenInvalidated());
+        ASSERT(globalObject == scope || globalObject->varInjectionWatchpointSet().hasBeenInvalidated());
         if (!slot.isCacheablePut()
             || slot.base() != scope
             || scope != globalObject
-            || !scope->structure(vm)->propertyAccessesAreCacheable())
+            || !scope->structure()->propertyAccessesAreCacheable())
             return;
 
         if (slot.type() == PutPropertySlot::NewProperty) {
@@ -88,10 +91,10 @@ inline void tryCachePutToScopeGlobal(
             return;
         }
 
-        scope->structure(vm)->didCachePropertyReplacement(vm, slot.cachedOffset());
+        scope->structure()->didCachePropertyReplacement(vm, slot.cachedOffset());
 
         ConcurrentJSLocker locker(codeBlock->m_lock);
-        metadata.m_structure.set(vm, codeBlock, scope->structure(vm));
+        metadata.m_structure.set(vm, codeBlock, scope->structure());
         metadata.m_operand = slot.cachedOffset();
     }
 }
@@ -112,7 +115,7 @@ inline void tryCacheGetFromScopeGlobal(
             metadata.m_getPutInfo = GetPutInfo(metadata.m_getPutInfo.resolveMode(), newResolveType, metadata.m_getPutInfo.initializationMode(), metadata.m_getPutInfo.ecmaMode());
             break;
         }
-        FALLTHROUGH;
+        [[fallthrough]];
     }
     case GlobalProperty:
     case GlobalPropertyWithVarInjectionChecks: {
@@ -136,9 +139,9 @@ inline void tryCacheGetFromScopeGlobal(
 
     // Covers implicit globals. Since they don't exist until they first execute, we didn't know how to cache them at compile time.
     if (resolveType == GlobalProperty || resolveType == GlobalPropertyWithVarInjectionChecks) {
-        ASSERT(scope == globalObject || globalObject->varInjectionWatchpoint()->hasBeenInvalidated());
-        if (slot.isCacheableValue() && slot.slotBase() == scope && scope == globalObject && scope->structure(vm)->propertyAccessesAreCacheable()) {
-            Structure* structure = scope->structure(vm);
+        ASSERT(scope == globalObject || globalObject->varInjectionWatchpointSet().hasBeenInvalidated());
+        if (slot.isCacheableValue() && slot.slotBase() == scope && scope == globalObject && scope->structure()->propertyAccessesAreCacheable()) {
+            Structure* structure = scope->structure();
             {
                 ConcurrentJSLocker locker(codeBlock->m_lock);
                 metadata.m_structure.set(vm, codeBlock, structure);
@@ -147,6 +150,99 @@ inline void tryCacheGetFromScopeGlobal(
             structure->startWatchingPropertyForReplacements(vm, slot.cachedOffset());
         }
     }
+}
+
+ALWAYS_INLINE JSImmutableButterfly* trySpreadFast(JSGlobalObject* globalObject, JSCell* iterable)
+{
+    if (isJSArray(iterable)) {
+        JSArray* array = jsCast<JSArray*>(iterable);
+        if (array->isIteratorProtocolFastAndNonObservable()) {
+            // JSImmutableButterfly::createFromArray does not consult the prototype chain,
+            // so we must be sure that not consulting the prototype chain would
+            // produce the same value during iteration.
+            return JSImmutableButterfly::createFromArray(globalObject, globalObject->vm(), array);
+        }
+        return nullptr;
+    }
+
+    switch (iterable->type()) {
+    case StringType: {
+        if (globalObject->isStringPrototypeIteratorProtocolFastAndNonObservable()) [[likely]]
+            return JSImmutableButterfly::createFromString(globalObject, jsCast<JSString*>(iterable));
+        return nullptr;
+    }
+    case ClonedArgumentsType: {
+        auto* arguments = jsCast<ClonedArguments*>(iterable);
+        if (arguments->isIteratorProtocolFastAndNonObservable()) [[likely]]
+            return JSImmutableButterfly::createFromClonedArguments(globalObject, arguments);
+        return nullptr;
+    }
+    case DirectArgumentsType: {
+        auto* arguments = jsCast<DirectArguments*>(iterable);
+        if (arguments->isIteratorProtocolFastAndNonObservable()) [[likely]]
+            return JSImmutableButterfly::createFromDirectArguments(globalObject, arguments);
+        return nullptr;
+    }
+    case ScopedArgumentsType: {
+        auto* arguments = jsCast<ScopedArguments*>(iterable);
+        if (arguments->isIteratorProtocolFastAndNonObservable()) [[likely]]
+            return JSImmutableButterfly::createFromScopedArguments(globalObject, arguments);
+        return nullptr;
+    }
+    default:
+        return nullptr;
+    }
+}
+
+inline void opEnumeratorPutByVal(JSGlobalObject* globalObject, JSValue baseValue, JSValue propertyNameValue, JSValue value, ECMAMode ecmaMode, unsigned index, JSPropertyNameEnumerator::Flag mode, JSPropertyNameEnumerator* enumerator, ArrayProfile* arrayProfile = nullptr, uint8_t* enumeratorMetadata = nullptr)
+{
+    VM& vm = getVM(globalObject);
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
+    switch (mode) {
+    case JSPropertyNameEnumerator::IndexedMode: {
+        if (arrayProfile) {
+            if (baseValue.isCell()) [[likely]]
+            arrayProfile->observeStructureID(baseValue.asCell()->structureID());
+        }
+        scope.release();
+        baseValue.putByIndex(globalObject, static_cast<unsigned>(index), value, ecmaMode.isStrict());
+        return;
+    }
+    case JSPropertyNameEnumerator::OwnStructureMode: {
+        if (baseValue.isCell()) [[likely]] {
+            auto* baseCell = baseValue.asCell();
+            auto* structure = baseCell->structure();
+            if (structure->id() == enumerator->cachedStructureID() && !structure->isWatchingReplacement() && !structure->hasReadOnlyOrGetterSetterPropertiesExcludingProto()) {
+            // We'll only match the structure ID if the base is an object.
+            ASSERT(index < enumerator->endStructurePropertyIndex());
+            scope.release();
+            asObject(baseValue)->putDirectOffset(vm, index < enumerator->cachedInlineCapacity() ? index : index - enumerator->cachedInlineCapacity() + firstOutOfLineOffset, value);
+            return;
+        }
+        }
+        if (enumeratorMetadata)
+            *enumeratorMetadata |= static_cast<uint8_t>(JSPropertyNameEnumerator::HasSeenOwnStructureModeStructureMismatch);
+        [[fallthrough]];
+    }
+
+    case JSPropertyNameEnumerator::GenericMode: {
+        if (arrayProfile && baseValue.isCell() && mode != JSPropertyNameEnumerator::OwnStructureMode)
+            arrayProfile->observeStructureID(baseValue.asCell()->structureID());
+        JSString* string = asString(propertyNameValue);
+        auto propertyName = string->toIdentifier(globalObject);
+        RETURN_IF_EXCEPTION(scope, void());
+        scope.release();
+        PutPropertySlot slot(baseValue, ecmaMode.isStrict());
+        baseValue.put(globalObject, propertyName, value, slot);
+        return;
+    }
+
+    default:
+        RELEASE_ASSERT_NOT_REACHED();
+        break;
+    };
+    RELEASE_ASSERT_NOT_REACHED();
 }
 
 }} // namespace JSC::CommonSlowPaths

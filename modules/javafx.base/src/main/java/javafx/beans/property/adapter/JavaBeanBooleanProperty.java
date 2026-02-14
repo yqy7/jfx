@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,10 +36,6 @@ import javafx.beans.value.ObservableValue;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.UndeclaredThrowableException;
-
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 
 /**
  * A {@code JavaBeanBooleanProperty} provides an adapter between a regular
@@ -90,20 +86,17 @@ import java.security.PrivilegedAction;
  */
 public final class JavaBeanBooleanProperty extends BooleanProperty implements JavaBeanProperty<Boolean> {
 
-    private final PropertyDescriptor descriptor;
-    private final PropertyDescriptor.Listener<Boolean> listener;
+    private final PropertyDescriptor<Boolean> descriptor;
+    private final PropertyDescriptor<Boolean>.Listener listener;
 
     private ObservableValue<? extends Boolean> observable = null;
     private ExpressionHelper<Boolean> helper = null;
 
-    @SuppressWarnings("removal")
-    private final AccessControlContext acc = AccessController.getContext();
-
-    JavaBeanBooleanProperty(PropertyDescriptor descriptor, Object bean) {
+    JavaBeanBooleanProperty(PropertyDescriptor<Boolean> descriptor, Object bean) {
         this.descriptor = descriptor;
-        this.listener = descriptor.new Listener<Boolean>(bean, this);
+        this.listener = descriptor.new Listener(bean, this);
         descriptor.addListener(listener);
-        Disposer.addRecord(this, new DescriptorListenerCleaner(descriptor, listener));
+        Disposer.addRecord(this, new DescriptorListenerCleaner<>(descriptor, listener));
     }
 
     /**
@@ -113,18 +106,15 @@ public final class JavaBeanBooleanProperty extends BooleanProperty implements Ja
      * property throws an {@code IllegalAccessException} or an
      * {@code InvocationTargetException}.
      */
-    @SuppressWarnings("removal")
     @Override
     public boolean get() {
-        return AccessController.doPrivileged((PrivilegedAction<Boolean>) () -> {
-            try {
-                return (Boolean)MethodHelper.invoke(descriptor.getGetter(), getBean(), (Object[])null);
-            } catch (IllegalAccessException e) {
-                throw new UndeclaredThrowableException(e);
-            } catch (InvocationTargetException e) {
-                throw new UndeclaredThrowableException(e);
-            }
-        }, acc);
+        try {
+            return (Boolean)MethodHelper.invoke(descriptor.getGetter(), getBean(), (Object[])null);
+        } catch (IllegalAccessException e) {
+            throw new UndeclaredThrowableException(e);
+        } catch (InvocationTargetException e) {
+            throw new UndeclaredThrowableException(e);
+        }
     }
 
     /**
@@ -134,24 +124,19 @@ public final class JavaBeanBooleanProperty extends BooleanProperty implements Ja
      * property throws an {@code IllegalAccessException} or an
      * {@code InvocationTargetException}.
      */
-    @SuppressWarnings("removal")
     @Override
     public void set(final boolean value) {
         if (isBound()) {
             throw new RuntimeException("A bound value cannot be set.");
         }
-
-        AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            try {
-                MethodHelper.invoke(descriptor.getSetter(), getBean(), new Object[] {value});
-                ExpressionHelper.fireValueChangedEvent(helper);
-            } catch (IllegalAccessException e) {
-                throw new UndeclaredThrowableException(e);
-            } catch (InvocationTargetException e) {
-                throw new UndeclaredThrowableException(e);
-            }
-            return null;
-        }, acc);
+        try {
+            MethodHelper.invoke(descriptor.getSetter(), getBean(), new Object[] {value});
+            ExpressionHelper.fireValueChangedEvent(helper);
+        } catch (IllegalAccessException e) {
+            throw new UndeclaredThrowableException(e);
+        } catch (InvocationTargetException e) {
+            throw new UndeclaredThrowableException(e);
+        }
     }
 
     /**

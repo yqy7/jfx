@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,57 +25,60 @@
 
 package test.javafx.scene.control;
 
-import javafx.collections.FXCollections;
-import javafx.scene.control.ComboBox;
-import javafx.scene.control.Tab;
-import javafx.scene.control.TabPane;
-import org.junit.After;
-import test.com.sun.javafx.scene.control.infrastructure.StageLoader;
-import javafx.css.CssMetaData;
-import static test.com.sun.javafx.scene.control.infrastructure.ControlTestUtils.*;
-
-import test.com.sun.javafx.pgstub.StubToolkit;
-import javafx.scene.control.skin.SplitPaneSkin;
-import com.sun.javafx.tk.Toolkit;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static test.com.sun.javafx.scene.control.infrastructure.ControlTestUtils.assertPseudoClassDoesNotExist;
+import static test.com.sun.javafx.scene.control.infrastructure.ControlTestUtils.assertPseudoClassExists;
+import static test.com.sun.javafx.scene.control.infrastructure.ControlTestUtils.assertStyleClassContains;
+import java.util.concurrent.atomic.AtomicInteger;
 import javafx.application.Platform;
 import javafx.beans.property.DoubleProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleObjectProperty;
+import javafx.collections.FXCollections;
+import javafx.css.CssMetaData;
 import javafx.css.StyleableProperty;
 import javafx.geometry.Orientation;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.SplitPane;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
+import javafx.scene.control.skin.SplitPaneSkin;
 import javafx.scene.layout.AnchorPane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
-import static org.junit.Assert.*;
-
-
-import org.junit.Before;
-import org.junit.Test;
-
-import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.tk.Toolkit;
+import test.com.sun.javafx.pgstub.StubToolkit;
+import test.com.sun.javafx.scene.control.infrastructure.StageLoader;
 
 /**
  *
  * @author srikalyc
  */
 public class SplitPaneTest {
-    private SplitPane splitPane;//Empty string
+    private SplitPane splitPane;
     private SplitPane.Divider divider1;
     private SplitPane.Divider divider2;
-    private Toolkit tk;
     private Scene scene;
     private Stage stage;
     private StackPane root;
     private StageLoader stageLoader;
 
-    @Before public void setup() {
-        tk = (StubToolkit)Toolkit.getToolkit();//This step is not needed (Just to make sure StubToolkit is loaded into VM)
+    @BeforeEach
+    public void setup() {
+        assertTrue(Toolkit.getToolkit() instanceof StubToolkit);  // Ensure StubToolkit is loaded
+
         splitPane = new SplitPane();
         splitPane.setSkin(new SplitPaneSkin(splitPane));
         divider1 = new SplitPane.Divider();
@@ -87,7 +90,7 @@ public class SplitPaneTest {
         stage.setScene(scene);
     }
 
-    @After
+    @AfterEach
     public void cleanup() {
         if (stageLoader != null) stageLoader.dispose();
     }
@@ -150,27 +153,27 @@ public class SplitPaneTest {
      ********************************************************************/
 
     @Test public void checkHBarPolicyPropertyBind() {
-        ObjectProperty objPr = new SimpleObjectProperty<Orientation>(Orientation.VERTICAL);
+        ObjectProperty objPr = new SimpleObjectProperty<>(Orientation.VERTICAL);
         splitPane.orientationProperty().bind(objPr);
-        assertSame("orientationProperty cannot be bound", splitPane.orientationProperty().getValue(), Orientation.VERTICAL);
+        assertSame(splitPane.orientationProperty().getValue(), Orientation.VERTICAL, "orientationProperty cannot be bound");
         objPr.setValue(Orientation.HORIZONTAL);
-        assertSame("orientationProperty cannot be bound", splitPane.orientationProperty().getValue(), Orientation.HORIZONTAL);
+        assertSame(splitPane.orientationProperty().getValue(), Orientation.HORIZONTAL, "orientationProperty cannot be bound");
     }
 
     @Test public void checkDividerPositionPropertyBind() {
         DoubleProperty objPr = new SimpleDoubleProperty(0.6);
         divider1.positionProperty().bind(objPr);
-        assertEquals("positionProperty cannot be bound", divider1.positionProperty().getValue(), 0.6, 0.0);
+        assertEquals(divider1.positionProperty().getValue(), 0.6, 0.0, "positionProperty cannot be bound");
         objPr.setValue(0.9);
-        assertEquals("positionProperty cannot be bound", divider1.positionProperty().getValue(), 0.9, 0.0);
+        assertEquals(divider1.positionProperty().getValue(), 0.9, 0.0, "positionProperty cannot be bound");
     }
 
     @Test public void checkOrientationPropertyBind() {
-        ObjectProperty objPr = new SimpleObjectProperty<Orientation>(Orientation.HORIZONTAL);
+        ObjectProperty objPr = new SimpleObjectProperty<>(Orientation.HORIZONTAL);
         splitPane.orientationProperty().bind(objPr);
-        assertSame("orientationProperty cannot be bound", splitPane.orientationProperty().getValue(), Orientation.HORIZONTAL);
+        assertSame(splitPane.orientationProperty().getValue(), Orientation.HORIZONTAL, "orientationProperty cannot be bound");
         objPr.setValue(Orientation.VERTICAL);
-        assertSame("orientationProperty cannot be bound", splitPane.orientationProperty().getValue(), Orientation.VERTICAL);
+        assertSame(splitPane.orientationProperty().getValue(), Orientation.VERTICAL, "orientationProperty cannot be bound");
     }
 
     @Test public void orientationPropertyHasBeanReference() {
@@ -228,7 +231,7 @@ public class SplitPaneTest {
     @Test public void whenOrientationIsBound_CssMetaData_isSettable_ReturnsFalse() {
         CssMetaData styleable = ((StyleableProperty)splitPane.orientationProperty()).getCssMetaData();
         assertTrue(styleable.isSettable(splitPane));
-        ObjectProperty<Orientation> other = new SimpleObjectProperty<Orientation>(Orientation.VERTICAL);
+        ObjectProperty<Orientation> other = new SimpleObjectProperty<>(Orientation.VERTICAL);
         splitPane.orientationProperty().bind(other);
         assertFalse(styleable.isSettable(splitPane));
     }

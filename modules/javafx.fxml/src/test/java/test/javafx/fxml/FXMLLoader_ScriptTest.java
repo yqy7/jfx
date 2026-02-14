@@ -1,6 +1,5 @@
-package test.javafx.fxml;
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,9 +22,10 @@ package test.javafx.fxml;
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+package test.javafx.fxml;
 
 import com.sun.javafx.fxml.FXMLLoaderHelper;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -34,13 +34,19 @@ import javafx.fxml.LoadListener;
 import javax.script.ScriptEngineManager;
 import javax.script.ScriptEngine;
 
-import static org.junit.Assert.*;
-import static org.junit.Assume.assumeTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 public class FXMLLoader_ScriptTest {
     @Test
-    @SuppressWarnings("deprecation")
     public void testStaticScriptLoad() throws IOException {
+        // This test needs Nashorn script engine.
+        // Test will be rewritten under - JDK-8245568
+        assumeTrue(isNashornEngineAvailable());
+
         FXMLLoader fxmlLoader = new FXMLLoader(getClass().getResource("static_script_load.fxml"));
         FXMLLoaderHelper.setStaticLoad(fxmlLoader, true);
         AtomicBoolean scriptCalled = new AtomicBoolean();

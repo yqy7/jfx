@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,39 +25,72 @@
 
 #pragma once
 
-#import <Foundation/Foundation.h>
+#import <WebGPU/WebGPU.h>
+#import <WebGPU/WebGPUExt.h>
+#import <wtf/CompletionHandler.h>
+#import <wtf/Deque.h>
 #import <wtf/FastMalloc.h>
-#import <wtf/Function.h>
+#import <wtf/Lock.h>
+#import <wtf/MachSendRight.h>
 #import <wtf/Ref.h>
-#import <wtf/RefCounted.h>
-#import <wtf/RefPtr.h>
+#import <wtf/TZoneMalloc.h>
+#import <wtf/ThreadSafeRefCounted.h>
+#import <wtf/ThreadSafetyAnalysis.h>
+#import <wtf/WeakObjCPtr.h>
+#import <wtf/WeakPtr.h>
+
+struct WGPUInstanceImpl {
+};
+
+namespace WTF {
+class MachSendRight;
+}
 
 namespace WebGPU {
 
 class Adapter;
-class Surface;
+class Device;
+class PresentationContext;
 
-class Instance : public RefCounted<Instance> {
-    WTF_MAKE_FAST_ALLOCATED;
+// https://gpuweb.github.io/gpuweb/#gpu
+class Instance : public WGPUInstanceImpl, public ThreadSafeRefCountedAndCanMakeThreadSafeWeakPtr<Instance> {
+    WTF_MAKE_TZONE_ALLOCATED(Instance);
 public:
-    static RefPtr<Instance> create(const WGPUInstanceDescriptor*);
+    static Ref<Instance> create(const WGPUInstanceDescriptor&);
+    static Ref<Instance> createInvalid()
+    {
+        return adoptRef(*new Instance());
+    }
 
-    ~Instance();
+    virtual ~Instance();
 
-    RefPtr<Surface> createSurface(const WGPUSurfaceDescriptor*);
+    Ref<PresentationContext> createSurface(const WGPUSurfaceDescriptor&);
     void processEvents();
-    void requestAdapter(const WGPURequestAdapterOptions*, WTF::Function<void(WGPURequestAdapterStatus, RefPtr<Adapter>&&, const char*)>&& callback);
+    void requestAdapter(const WGPURequestAdapterOptions&, CompletionHandler<void(WGPURequestAdapterStatus, Ref<Adapter>&&, String&&)>&& callback);
 
-    NSRunLoop *runLoop() const { return m_runLoop; }
+    bool isValid() const { return m_isValid; }
+    void retainDevice(Device&, id<MTLCommandBuffer>);
+
+    // This can be called on a background thread.
+    using WorkItem = Function<void()>;
+    void scheduleWork(WorkItem&&);
+    const std::optional<const MachSendRight>& webProcessID() const;
 
 private:
-    Instance(NSRunLoop *);
+    Instance(WGPUScheduleWorkBlock, const WTF::MachSendRight* webProcessResourceOwner);
+    explicit Instance();
 
-    NSRunLoop *m_runLoop;
+    // This can be called on a background thread.
+    void defaultScheduleWork(WGPUWorkItem&&);
+
+    // This can be used on a background thread.
+    Deque<WGPUWorkItem> m_pendingWork WTF_GUARDED_BY_LOCK(m_lock);
+    using CommandBufferContainer = Vector<WeakObjCPtr<id<MTLCommandBuffer>>>;
+    HashMap<RefPtr<Device>, CommandBufferContainer> retainedDeviceInstances WTF_GUARDED_BY_LOCK(m_lock);
+    const std::optional<const MachSendRight> m_webProcessID;
+    const WGPUScheduleWorkBlock m_scheduleWorkBlock;
+    Lock m_lock;
+    bool m_isValid { true };
 };
 
 } // namespace WebGPU
-
-struct WGPUInstanceImpl {
-    Ref<WebGPU::Instance> instance;
-};

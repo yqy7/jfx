@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,15 +25,15 @@
 
 package test.com.sun.glass.ui.monocle.headless;
 
-import com.sun.glass.ui.Screen;
+import java.util.concurrent.CountDownLatch;
 import javafx.application.Application;
 import javafx.stage.Stage;
-import junit.framework.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
-
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import com.sun.glass.ui.Screen;
+import test.util.Util;
 
 public class HeadlessGeometry2Test {
 
@@ -53,22 +53,26 @@ public class HeadlessGeometry2Test {
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void setup() throws Exception {
         System.setProperty("glass.platform", "Monocle");
         System.setProperty("monocle.platform", "Headless");
         System.setProperty("prism.order", "sw");
         System.setProperty("headless.geometry", "150x250-16");
-        new Thread(() -> Application.launch(TestApp.class)).start();
-        startupLatch.await(5, TimeUnit.SECONDS);
-        Assert.assertEquals(0, startupLatch.getCount());
+
+        Util.launch(startupLatch, TestApp.class);
+        Assertions.assertEquals(0, startupLatch.getCount());
+    }
+
+    @AfterAll
+    public static void shutdown() {
+        Util.shutdown();
     }
 
     @Test
     public void setScreenBounds() throws Exception {
-        Assert.assertEquals(150, width);
-        Assert.assertEquals(250, height);
-        Assert.assertEquals(16, depth);
+        Assertions.assertEquals(150, width);
+        Assertions.assertEquals(250, height);
+        Assertions.assertEquals(16, depth);
     }
-
 }

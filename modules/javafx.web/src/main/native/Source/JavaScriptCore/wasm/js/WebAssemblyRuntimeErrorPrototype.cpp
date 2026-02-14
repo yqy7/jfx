@@ -30,16 +30,10 @@
 
 #include "AuxiliaryBarrierInlines.h"
 #include "JSCInlines.h"
-#include "WebAssemblyRuntimeErrorPrototype.lut.h"
 
 namespace JSC {
 
-const ClassInfo WebAssemblyRuntimeErrorPrototype::s_info = { "WebAssembly.RuntimeError", &Base::s_info, &prototypeTableWebAssemblyRuntimeError, nullptr, CREATE_METHOD_TABLE(WebAssemblyRuntimeErrorPrototype) };
-
-/* Source for WebAssemblyRuntimeErrorPrototype.lut.h
- @begin prototypeTableWebAssemblyRuntimeError
- @end
- */
+const ClassInfo WebAssemblyRuntimeErrorPrototype::s_info = { "WebAssembly.RuntimeError"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(WebAssemblyRuntimeErrorPrototype) };
 
 WebAssemblyRuntimeErrorPrototype* WebAssemblyRuntimeErrorPrototype::create(VM& vm, JSGlobalObject*, Structure* structure)
 {
@@ -56,7 +50,7 @@ Structure* WebAssemblyRuntimeErrorPrototype::createStructure(VM& vm, JSGlobalObj
 void WebAssemblyRuntimeErrorPrototype::finishCreation(VM& vm)
 {
     Base::finishCreation(vm);
-    ASSERT(inherits(vm, info()));
+    ASSERT(inherits(info()));
     putDirectWithoutTransition(vm, vm.propertyNames->name, jsNontrivialString(vm, "RuntimeError"_s), static_cast<unsigned>(PropertyAttribute::DontEnum));
     putDirectWithoutTransition(vm, vm.propertyNames->message, jsEmptyString(vm), static_cast<unsigned>(PropertyAttribute::DontEnum));
 }

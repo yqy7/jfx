@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,13 +26,11 @@
 package test.com.sun.javafx.css;
 
 import com.sun.javafx.css.ParsedValueImpl;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
-
 import javafx.css.ParsedValue;
 import javafx.scene.text.Font;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import javafx.css.converter.StringConverter;
 import javafx.css.converter.URLConverter;
@@ -89,21 +87,21 @@ public class URLTypeTest {
 
         for(int n=0; n<testPairs.length; n++) {
             ParsedValue[] values = new ParsedValue[] {
-                new ParsedValueImpl<String,String>(testPairs[n][0], StringConverter.getInstance()),
+                new ParsedValueImpl<>(testPairs[n][0], StringConverter.getInstance()),
                 new ParsedValueImpl<String, String>(baseURL, null)
             };
-            urls[n] = new ParsedValueImpl<ParsedValue[],String>(values, URLConverter.getInstance());
-        };
+            urls[n] = new ParsedValueImpl<>(values, URLConverter.getInstance());
+        }
 
         ParsedValue<ParsedValue<ParsedValue[],String>[],String[]> value =
-                new ParsedValueImpl<ParsedValue<ParsedValue[],String>[],String[]>(urls, URLConverter.SequenceConverter.getInstance());
+                new ParsedValueImpl<>(urls, URLConverter.SequenceConverter.getInstance());
 
         Font font = null;
         String[] result = value.convert(font);
         assertEquals(testPairs.length, result.length);
         for(int n=0; n<result.length; n++) {
             String msg = "[" + n + "]" + "resolve \'" + testPairs[n][0] + "\'";
-            assertEquals(msg, testPairs[n][1], result[n]);
+            assertEquals(testPairs[n][1], result[n], msg);
         }
     }
 

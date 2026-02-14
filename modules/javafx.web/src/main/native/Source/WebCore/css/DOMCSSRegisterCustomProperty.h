@@ -26,16 +26,17 @@
 #pragma once
 
 #include "DOMCSSCustomPropertyDescriptor.h"
-#include "ExceptionOr.h"
 #include "Supplementable.h"
 
 namespace WebCore {
 
 class Document;
 class DOMCSSNamespace;
+template<typename> class ExceptionOr;
 
+DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(DOMCSSRegisterCustomProperty);
 class DOMCSSRegisterCustomProperty final : public Supplement<DOMCSSNamespace> {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(DOMCSSRegisterCustomProperty, DOMCSSRegisterCustomProperty);
 public:
     explicit DOMCSSRegisterCustomProperty(DOMCSSNamespace&) { }
 
@@ -43,7 +44,7 @@ public:
 
 private:
     static DOMCSSRegisterCustomProperty* from(DOMCSSNamespace&);
-    static const char* supplementName();
+    static ASCIILiteral supplementName();
 };
 
 }

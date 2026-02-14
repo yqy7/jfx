@@ -27,14 +27,11 @@
 
 #include "CSSRule.h"
 
-#include "StyleRule.h"
-
 namespace WebCore {
 
-class CSSStyleDeclaration;
 class DOMMapAdapter;
-class StyleRuleFontFace;
-class StyleRuleCSSStyleDeclaration;
+class StyleRuleCSSStyleProperties;
+class StyleRuleFontPaletteValues;
 
 class CSSFontPaletteValuesRule final : public CSSRule {
 public:

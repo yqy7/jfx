@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2016 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,9 +36,11 @@ class MacOSInlineMediaControls extends InlineMediaControls
 
         this.element.classList.add("mac");
 
+        this.timeControl.scrubber.knobStyle = Slider.KnobStyle.Bar;
+
         this._backgroundClickDelegateNotifier = new BackgroundClickDelegateNotifier(this);
 
-        this.volumeSlider = new Slider("volume");
+        this.volumeSlider = new Slider(this, "volume");
         this.volumeSlider.width = 60;
 
         this._volumeSliderContainer = new LayoutNode(`<div class="volume-slider-container"></div>`);

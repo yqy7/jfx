@@ -25,23 +25,27 @@
 #include "config.h"
 #include "SVGLinearGradientElement.h"
 
+#include "ContainerNodeInlines.h"
 #include "Document.h"
 #include "FloatPoint.h"
+#include "LegacyRenderSVGResourceLinearGradient.h"
 #include "LinearGradientAttributes.h"
+#include "NodeName.h"
 #include "RenderSVGResourceLinearGradient.h"
 #include "SVGElementTypeHelpers.h"
 #include "SVGLengthValue.h"
 #include "SVGNames.h"
+#include "SVGParsingError.h"
 #include "SVGUnitTypes.h"
-#include <wtf/IsoMallocInlines.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(SVGLinearGradientElement);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(SVGLinearGradientElement);
 
 inline SVGLinearGradientElement::SVGLinearGradientElement(const QualifiedName& tagName, Document& document)
-    : SVGGradientElement(tagName, document)
+    : SVGGradientElement(tagName, document, makeUniqueRef<PropertyRegistry>(*this))
 {
     // Spec: If the x2 attribute is not specified, the effect is as if a value of "100%" were specified.
     ASSERT(hasTagName(SVGNames::linearGradientTag));
@@ -60,22 +64,29 @@ Ref<SVGLinearGradientElement> SVGLinearGradientElement::create(const QualifiedNa
     return adoptRef(*new SVGLinearGradientElement(tagName, document));
 }
 
-void SVGLinearGradientElement::parseAttribute(const QualifiedName& name, const AtomString& value)
+void SVGLinearGradientElement::attributeChanged(const QualifiedName& name, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason attributeModificationReason)
 {
-    SVGParsingError parseError = NoError;
+    auto parseError = SVGParsingError::None;
 
-    if (name == SVGNames::x1Attr)
-        m_x1->setBaseValInternal(SVGLengthValue::construct(SVGLengthMode::Width, value, parseError));
-    else if (name == SVGNames::y1Attr)
-        m_y1->setBaseValInternal(SVGLengthValue::construct(SVGLengthMode::Height, value, parseError));
-    else if (name == SVGNames::x2Attr)
-        m_x2->setBaseValInternal(SVGLengthValue::construct(SVGLengthMode::Width, value, parseError));
-    else if (name == SVGNames::y2Attr)
-        m_y2->setBaseValInternal(SVGLengthValue::construct(SVGLengthMode::Height, value, parseError));
+    switch (name.nodeName()) {
+    case AttributeNames::x1Attr:
+        Ref { m_x1 }->setBaseValInternal(SVGLengthValue::construct(SVGLengthMode::Width, newValue, parseError));
+        break;
+    case AttributeNames::y1Attr:
+        Ref { m_y1 }->setBaseValInternal(SVGLengthValue::construct(SVGLengthMode::Height, newValue, parseError));
+        break;
+    case AttributeNames::x2Attr:
+        Ref { m_x2 }->setBaseValInternal(SVGLengthValue::construct(SVGLengthMode::Width, newValue, parseError));
+        break;
+    case AttributeNames::y2Attr:
+        Ref { m_y2 }->setBaseValInternal(SVGLengthValue::construct(SVGLengthMode::Height, newValue, parseError));
+        break;
+    default:
+        break;
+    }
+    reportAttributeParsingError(parseError, name, newValue);
 
-    reportAttributeParsingError(parseError, name, value);
-
-    SVGGradientElement::parseAttribute(name, value);
+    SVGGradientElement::attributeChanged(name, oldValue, newValue, attributeModificationReason);
 }
 
 void SVGLinearGradientElement::svgAttributeChanged(const QualifiedName& attrName)
@@ -83,8 +94,7 @@ void SVGLinearGradientElement::svgAttributeChanged(const QualifiedName& attrName
     if (PropertyRegistry::isKnownAttribute(attrName)) {
         InstanceInvalidationGuard guard(*this);
         updateRelativeLengthsInformation();
-        if (RenderObject* object = renderer())
-            object->setNeedsLayout();
+        invalidateGradientResource();
         return;
     }
 
@@ -93,7 +103,9 @@ void SVGLinearGradientElement::svgAttributeChanged(const QualifiedName& attrName
 
 RenderPtr<RenderElement> SVGLinearGradientElement::createElementRenderer(RenderStyle&& style, const RenderTreePosition&)
 {
+    if (document().settings().layerBasedSVGEngineEnabled())
     return createRenderer<RenderSVGResourceLinearGradient>(*this, WTFMove(style));
+    return createRenderer<LegacyRenderSVGResourceLinearGradient>(*this, WTFMove(style));
 }
 
 static void setGradientAttributes(SVGGradientElement& element, LinearGradientAttributes& attributes, bool isLinear = true)
@@ -140,9 +152,9 @@ bool SVGLinearGradientElement::collectGradientAttributes(LinearGradientAttribute
 
     while (true) {
         // Respect xlink:href, take attributes from referenced element
-        auto target = SVGURIReference::targetElementFromIRIString(current->href(), treeScope());
-        if (is<SVGGradientElement>(target.element)) {
-            current = downcast<SVGGradientElement>(*target.element);
+        auto target = SVGURIReference::targetElementFromIRIString(current->href(), treeScopeForSVGReferences());
+        if (auto* gradientElement = dynamicDowncast<SVGGradientElement>(target.element.get())) {
+            current = *gradientElement;
 
             // Cycle detection
             if (processedGradients.contains(current))

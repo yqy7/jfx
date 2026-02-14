@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
 
 #include "FetchOptions.h"
 #include "LoadableScript.h"
+#include "LoadableScriptError.h"
 #include "ModuleFetchParameters.h"
 #include <JavaScriptCore/ScriptFetcher.h>
 #include <wtf/text/WTFString.h>
@@ -38,9 +39,9 @@ class Document;
 
 class WorkerScriptFetcher final : public JSC::ScriptFetcher {
 public:
-    static Ref<WorkerScriptFetcher> create(FetchOptions::Credentials credentials, FetchOptions::Destination destination, ReferrerPolicy referrerPolicy)
+    static Ref<WorkerScriptFetcher> create(Ref<ModuleFetchParameters>&& parameters, FetchOptions::Credentials credentials, FetchOptions::Destination destination, ReferrerPolicy referrerPolicy)
     {
-        return adoptRef(*new WorkerScriptFetcher(credentials, destination, referrerPolicy));
+        return adoptRef(*new WorkerScriptFetcher(WTFMove(parameters), credentials, destination, referrerPolicy));
     }
 
     FetchOptions::Credentials credentials() const { return m_credentials; }
@@ -49,7 +50,7 @@ public:
 
     void notifyLoadCompleted(UniquedStringImpl& moduleKey)
     {
-        m_moduleKey = &moduleKey;
+        m_moduleKey = moduleKey;
         m_isLoaded = true;
     }
 
@@ -69,6 +70,7 @@ public:
     std::optional<LoadableScript::Error> error() const { return m_error; }
     bool wasCanceled() const { return m_wasCanceled; }
     UniquedStringImpl* moduleKey() const { return m_moduleKey.get(); }
+    RefPtr<UniquedStringImpl> protectedModuleKey() const { return m_moduleKey; }
     ModuleFetchParameters& parameters() { return m_parameters.get(); }
 
     void setReferrerPolicy(ReferrerPolicy referrerPolicy)
@@ -77,11 +79,11 @@ public:
     }
 
 protected:
-    WorkerScriptFetcher(FetchOptions::Credentials credentials, FetchOptions::Destination destination, ReferrerPolicy referrerPolicy)
+    WorkerScriptFetcher(Ref<ModuleFetchParameters>&& parameters, FetchOptions::Credentials credentials, FetchOptions::Destination destination, ReferrerPolicy referrerPolicy)
         : m_credentials(credentials)
         , m_destination(destination)
         , m_referrerPolicy(referrerPolicy)
-        , m_parameters(ModuleFetchParameters::create(emptyString(), /* isTopLevelModule */ true))
+        , m_parameters(WTFMove(parameters))
     {
     }
 
@@ -90,7 +92,7 @@ private:
     FetchOptions::Destination m_destination;
     ReferrerPolicy m_referrerPolicy { ReferrerPolicy::EmptyString };
     RefPtr<UniquedStringImpl> m_moduleKey;
-    Ref<ModuleFetchParameters> m_parameters;
+    const Ref<ModuleFetchParameters> m_parameters;
     std::optional<LoadableScript::Error> m_error;
     bool m_wasCanceled { false };
     bool m_isLoaded { false };

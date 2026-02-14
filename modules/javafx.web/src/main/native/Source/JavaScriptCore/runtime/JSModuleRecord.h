@@ -42,7 +42,9 @@ public:
 
     DECLARE_EXPORT_INFO;
 
-    static constexpr bool needsDestruction = true;
+    DECLARE_VISIT_CHILDREN;
+
+    static constexpr DestructionMode needsDestruction = NeedsDestruction;
     static void destroy(JSCell*);
 
     template<typename CellType, SubspaceAccess mode>
@@ -52,7 +54,7 @@ public:
     }
 
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
-    static JSModuleRecord* create(JSGlobalObject*, VM&, Structure*, const Identifier&, const SourceCode&, const VariableEnvironment&, const VariableEnvironment&);
+    static JSModuleRecord* create(JSGlobalObject*, VM&, Structure*, const Identifier&, const SourceCode&, const VariableEnvironment&, const VariableEnvironment&, CodeFeatures);
 
     Synchronousness link(JSGlobalObject*, JSValue scriptFetcher);
     JS_EXPORT_PRIVATE JSValue evaluate(JSGlobalObject*, JSValue sentValue, JSValue resumeMode);
@@ -62,11 +64,9 @@ public:
     const VariableEnvironment& lexicalVariables() const { return m_lexicalVariables; }
 
 private:
-    JSModuleRecord(VM&, Structure*, const Identifier&, const SourceCode&, const VariableEnvironment&, const VariableEnvironment&);
+    JSModuleRecord(VM&, Structure*, const Identifier&, const SourceCode&, const VariableEnvironment&, const VariableEnvironment&, CodeFeatures);
 
     void finishCreation(JSGlobalObject*, VM&);
-
-    DECLARE_VISIT_CHILDREN;
 
     void instantiateDeclarations(JSGlobalObject*, ModuleProgramExecutable*, JSValue scriptFetcher);
 
@@ -74,6 +74,7 @@ private:
     VariableEnvironment m_declaredVariables;
     VariableEnvironment m_lexicalVariables;
     WriteBarrier<ModuleProgramExecutable> m_moduleProgramExecutable;
+    CodeFeatures m_features;
 };
 
 } // namespace JSC

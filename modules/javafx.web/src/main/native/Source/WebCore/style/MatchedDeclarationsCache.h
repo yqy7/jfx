@@ -28,40 +28,57 @@
 #include "MatchResult.h"
 #include "RenderStyle.h"
 #include "Timer.h"
+#include <wtf/TZoneMalloc.h>
+#include <wtf/WeakRef.h>
 
 namespace WebCore {
 
 namespace Style {
 
+class Resolver;
+
 class MatchedDeclarationsCache {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(MatchedDeclarationsCache);
 public:
-    MatchedDeclarationsCache();
+    explicit MatchedDeclarationsCache(const Resolver&);
     ~MatchedDeclarationsCache();
 
     static bool isCacheable(const Element&, const RenderStyle&, const RenderStyle& parentStyle);
-    static unsigned computeHash(const MatchResult&);
+    static unsigned computeHash(const MatchResult&, const Style::CustomPropertyData& inheritedCustomProperties);
 
     struct Entry {
-        MatchResult matchResult;
+        RefPtr<const MatchResult> matchResult;
         std::unique_ptr<const RenderStyle> renderStyle;
         std::unique_ptr<const RenderStyle> parentRenderStyle;
 
         bool isUsableAfterHighPriorityProperties(const RenderStyle&) const;
     };
 
-    const Entry* find(unsigned hash, const MatchResult&);
-    void add(const RenderStyle&, const RenderStyle& parentStyle, unsigned hash, const MatchResult&);
+    struct Result {
+        const Entry& entry;
+        bool inheritedEqual;
+    };
+
+    std::optional<Result> find(unsigned hash, const MatchResult&, const Style::CustomPropertyData& inheritedCustomProperties, const RenderStyle&);
+    void add(const RenderStyle&, const RenderStyle& parentStyle,  unsigned hash, const MatchResult&);
+    void remove(unsigned hash);
 
     // Every N additions to the matched declaration cache trigger a sweep where entries holding
     // the last reference to a style declaration are garbage collected.
     void invalidate();
     void clearEntriesAffectedByViewportUnits();
 
+    void ref() const;
+    void deref() const;
+
 private:
+    template<typename Callback>
+    void removeAllMatching(const Callback& matches);
+
     void sweep();
 
-    HashMap<unsigned, Entry> m_entries;
+    SingleThreadWeakRef<const Resolver> m_owner;
+    HashMap<unsigned, Vector<Entry>, AlreadyHashed> m_entries;
     Timer m_sweepTimer;
     unsigned m_additionsSinceLastSweep { 0 };
 };

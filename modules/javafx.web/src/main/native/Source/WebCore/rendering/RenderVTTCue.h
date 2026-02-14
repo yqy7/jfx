@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2012 Victor Carbune (victor@rosedu.org)
+ * Copyright (C) 2014-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,6 +29,7 @@
 #if ENABLE(VIDEO)
 
 #include "FloatPoint.h"
+#include "InlineIteratorInlineBox.h"
 #include "RenderBlockFlow.h"
 
 namespace WebCore {
@@ -37,13 +39,13 @@ class VTTCue;
 class VTTCueBox;
 
 class RenderVTTCue final : public RenderBlockFlow {
-    WTF_MAKE_ISO_ALLOCATED(RenderVTTCue);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(RenderVTTCue);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(RenderVTTCue);
 public:
     RenderVTTCue(VTTCueBox&, RenderStyle&&);
+    virtual ~RenderVTTCue();
 
 private:
-    bool isRenderVTTCue() const final { return true; }
-
     void layout() override;
 
     bool isOutside() const;
@@ -51,23 +53,23 @@ private:
     bool isOverlapping() const;
     RenderVTTCue* overlappingObject() const;
     RenderVTTCue* overlappingObjectForRect(const IntRect&) const;
-    bool shouldSwitchDirection(LegacyInlineFlowBox*, LayoutUnit) const;
+    bool shouldSwitchDirection(const InlineIterator::InlineBox&, LayoutUnit) const;
 
     void moveBoxesByStep(LayoutUnit);
     bool switchDirection(bool&, LayoutUnit&);
     void moveIfNecessaryToKeepWithinContainer();
     bool findNonOverlappingPosition(int& x, int& y) const;
 
-    bool initializeLayoutParameters(LegacyInlineFlowBox*&, LayoutUnit&, LayoutUnit&);
+    bool initializeLayoutParameters(LayoutUnit&, LayoutUnit&);
     void placeBoxInDefaultPosition(LayoutUnit, bool&);
     void repositionCueSnapToLinesSet();
     void repositionCueSnapToLinesNotSet();
     void repositionGenericCue();
 
-    RenderBlockFlow& backdropBox() const;
-    RenderInline& cueBox() const;
+    RenderBlockFlow* backdropBox() const;
+    RenderInline* cueBox() const;
 
-    VTTCue* m_cue;
+    WeakPtr<VTTCue, WeakPtrImplWithEventTargetData> m_cue;
     FloatPoint m_fallbackPosition;
 };
 

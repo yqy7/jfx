@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -71,22 +71,23 @@ public enum AccessibleAttribute {
     ACCELERATOR(KeyCombination.class),
 
     /**
-     * Returns the bounds for the node.
+     * Returns the bounds for the node, in screen coordinates.
      * <ul>
      * <li>Used by: Node </li>
      * <li>Needs notify: no </li>
-     * <li>Return Type: {@link Bounds} </li>
+     * <li>Return Type: {@link Bounds} in screen coordinates</li>
      * <li>Parameters: </li>
      * </ul>
      */
     BOUNDS(Bounds.class),
 
     /**
-     * Returns the array of bounding rectangles for the given character range.
+     * Returns the array of bounding rectangles for the given character range,
+     * in screen coordinates.
      * <ul>
      * <li>Used by: TextField and TextArea </li>
      * <li>Needs notify: no </li>
-     * <li>Return Type: {@link Bounds}[] </li>
+     * <li>Return Type: {@link Bounds}[] in screen coordinates</li>
      * <li>Parameters:
      *   <ul>
      *    <li>{@link Integer} the start offset </li>
@@ -327,7 +328,7 @@ public enum AccessibleAttribute {
     HORIZONTAL_SCROLLBAR(Node.class),
 
     /**
-     * Returns true of the node is indeterminaite, otherwise false.
+     * Returns true of the node is indeterminate, otherwise false.
      * <ul>
      * <li>Used by: CheckBox and ProgressIndicator </li>
      * <li>Needs notify: yes </li>
@@ -336,6 +337,27 @@ public enum AccessibleAttribute {
      * </ul>
      */
     INDETERMINATE(Boolean.class),
+
+    /**
+     * Returns {@link ToggleState toggle state} of CheckBox of CheckBoxTreeItem.
+     * <ul>
+     * <li>Used by: CheckBoxTreeItem</li>
+     * <li>Needs notify: yes </li>
+     * <li>Return Type: {@link ToggleState}
+     *   <ul>
+     *    <li>{@link ToggleState#UNCHECKED ToggleState.UNCHECKED}: control is not selected</li>
+     *    <li>{@link ToggleState#CHECKED ToggleState.CHECKED}: control is selected</li>
+     *    <li>{@link ToggleState#INDETERMINATE ToggleState.INDETERMINATE}:
+     *                                     selection state of control cannot be determined</li>
+     *   </ul>
+     * </li>
+     * <li>Parameters: </li>
+     * </ul>
+     *
+     * @see ToggleState
+     * @since 21
+     */
+    TOGGLE_STATE(ToggleState.class),
 
     /**
      * Returns the item at the given index.
@@ -497,7 +519,7 @@ public enum AccessibleAttribute {
      * <li>Return Type: {@link Node} </li>
      * <li>Parameters:
      *   <ul>
-     *   <li> {@link javafx.geometry.Point2D} the point location </li>
+     *   <li> {@link javafx.geometry.Point2D} the point location, in screen coordinates </li>
      *   </ul>
      * </li>
      * </ul>
@@ -512,7 +534,7 @@ public enum AccessibleAttribute {
      * <li>Return Type: {@link Integer} </li>
      * <li>Parameters:
      *   <ul>
-     *   <li> {@link javafx.geometry.Point2D} the point location </li>
+     *   <li> {@link javafx.geometry.Point2D} the point location, in screen coordinates </li>
      *   </ul>
      * </li>
      * </ul>
@@ -657,6 +679,7 @@ public enum AccessibleAttribute {
 
     /**
      * Returns the text selection end offset for the node.
+     * Selection end corresponds to the larger position in the selection range.
      * <ul>
      * <li>Used by: TextField and TextArea </li>
      * <li>Needs notify: yes </li>
@@ -668,6 +691,7 @@ public enum AccessibleAttribute {
 
     /**
      * Returns the text selection start offset for the node.
+     * Selection start corresponds to the smaller position in the selection range.
      * <ul>
      * <li>Used by: TextField and TextArea </li>
      * <li>Needs notify: yes </li>
@@ -754,6 +778,19 @@ public enum AccessibleAttribute {
     VALUE(Double.class),
 
     /**
+     * Returns the value as string for the node.
+     * <ul>
+     * <li>Used by: Spinner </li>
+     * <li>Needs notify: yes </li>
+     * <li>Return Type: {@link String} </li>
+     * <li>Parameters: </li>
+     * </ul>
+     *
+     * @since 22
+     */
+    VALUE_STRING(String.class),
+
+    /**
      * Returns the vertical scroll bar for the node.
      * <ul>
      * <li>Used by: ListView, ScrollPane, and others </li>
@@ -799,5 +836,27 @@ public enum AccessibleAttribute {
      */
     public Class<?> getReturnType() {
         return returnClass;
+    }
+
+    /**
+     * This enum describes the values for {@link AccessibleAttribute#TOGGLE_STATE TOGGLE_STATE} attribute.
+     *
+     * @since 21
+     */
+    public enum ToggleState {
+        /**
+         * Indicates that the toggle control is not selected.
+         */
+        UNCHECKED,
+
+        /**
+         * Indicates that the toggle control is selected.
+         */
+        CHECKED,
+
+        /**
+         * Indicates that the toggle state of the control cannot be determined.
+         */
+        INDETERMINATE
     }
 }

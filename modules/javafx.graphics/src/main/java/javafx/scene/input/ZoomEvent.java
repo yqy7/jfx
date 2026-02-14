@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -50,7 +50,7 @@ import javafx.event.EventType;
  * indirectly as on track pad - the mouse cursor location is usually used
  * as the gesture coordinates).
  * <p>
- * The gesture's {@code ZOOM} events are surounded by {@code ZOOM_STARTED}
+ * The gesture's {@code ZOOM} events are surrounded by {@code ZOOM_STARTED}
  * and {@code ZOOM_FINISHED} events. If zooming inertia is active on the
  * given platform, some {@code ZOOM} events with {@code isInertia()} returning
  * {@code true} can come after {@code ZOOM_FINISHED}.
@@ -65,26 +65,26 @@ public final class ZoomEvent extends GestureEvent {
      * Common supertype for all zoom event types.
      */
     public static final EventType<ZoomEvent> ANY =
-            new EventType<ZoomEvent>(GestureEvent.ANY, "ANY_ZOOM");
+            new EventType<>(GestureEvent.ANY, "ANY_ZOOM");
 
     /**
      * This event occurs when user performs a zooming gesture such as
      * dragging two fingers apart.
      */
     public static final EventType<ZoomEvent> ZOOM =
-            new EventType<ZoomEvent>(ZoomEvent.ANY, "ZOOM");
+            new EventType<>(ZoomEvent.ANY, "ZOOM");
 
     /**
      * This event occurs when a zooming gesture is detected.
      */
     public static final EventType<ZoomEvent> ZOOM_STARTED =
-            new EventType<ZoomEvent>(ZoomEvent.ANY, "ZOOM_STARTED");
+            new EventType<>(ZoomEvent.ANY, "ZOOM_STARTED");
 
     /**
      * This event occurs when a zooming gesture ends.
      */
     public static final EventType<ZoomEvent> ZOOM_FINISHED =
-            new EventType<ZoomEvent>(ZoomEvent.ANY, "ZOOM_FINISHED");
+            new EventType<>(ZoomEvent.ANY, "ZOOM_FINISHED");
 
     /**
      * Constructs new ZoomEvent event.
@@ -164,6 +164,7 @@ public final class ZoomEvent extends GestureEvent {
                 pickResult);
     }
 
+    @SuppressWarnings("doclint:missing")
     private final double zoomFactor;
 
     /**
@@ -177,6 +178,7 @@ public final class ZoomEvent extends GestureEvent {
         return zoomFactor;
     }
 
+    @SuppressWarnings("doclint:missing")
     private final double totalZoomFactor;
 
     /**

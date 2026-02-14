@@ -28,6 +28,7 @@
 #if ENABLE(JIT)
 
 #include "CompilationResult.h"
+#include "JITCode.h"
 #include "JITCompilationKey.h"
 #include "JITCompilationMode.h"
 #include "JITPlanStage.h"
@@ -47,7 +48,7 @@ protected:
     JITPlan(JITCompilationMode, CodeBlock*);
 
 public:
-    virtual ~JITPlan() { }
+    virtual ~JITPlan();
 
     VM* vm() const { return m_vm; }
     CodeBlock* codeBlock() const { return m_codeBlock; }
@@ -56,10 +57,25 @@ public:
     JITCompilationMode mode() const { return m_mode; }
 
     JITPlanStage stage() const { return m_stage; }
+    bool isDFG() const { return ::JSC::isDFG(m_mode); }
     bool isFTL() const { return ::JSC::isFTL(m_mode); }
+    bool isUnlinked() const { return ::JSC::isUnlinked(m_mode); }
 
     enum class Tier { Baseline = 0, DFG = 1, FTL = 2, Count = 3 };
     Tier tier() const;
+    JITType jitType() const
+    {
+        switch (tier()) {
+        case Tier::Baseline:
+            return JITType::BaselineJIT;
+        case Tier::DFG:
+            return JITType::DFGJIT;
+        case Tier::FTL:
+            return JITType::FTLJIT;
+        default:
+            return JITType::None;
+        }
+    }
 
     JITCompilationKey key();
 
@@ -77,8 +93,35 @@ public:
 
     virtual bool isKnownToBeLiveAfterGC();
     virtual bool isKnownToBeLiveDuringGC(AbstractSlotVisitor&);
-    virtual bool iterateCodeBlocksForGC(AbstractSlotVisitor&, const Function<void(CodeBlock*)>&);
+    virtual bool iterateCodeBlocksForGC(AbstractSlotVisitor&, NOESCAPE const Function<void(CodeBlock*)>&);
     virtual bool checkLivenessAndVisitChildren(AbstractSlotVisitor&);
+
+    bool isInSafepoint() const;
+    bool safepointKeepsDependenciesLive() const;
+
+    template<typename Functor>
+    void addMainThreadFinalizationTask(const Functor& functor)
+    {
+        m_mainThreadFinalizationTasks.append(createSharedTask<void()>(functor));
+    }
+
+    void runMainThreadFinalizationTasks();
+
+    enum class SignpostDetail { None, Canceled };
+
+    CString signpostMessage();
+
+    void beginSignpost()
+    {
+        if (Options::useCompilerSignpost()) [[unlikely]]
+            beginSignpostImpl();
+    }
+
+    void endSignpost(SignpostDetail detail = SignpostDetail::None)
+    {
+        if (Options::useCompilerSignpost()) [[unlikely]]
+            endSignpostImpl(detail);
+    }
 
 protected:
     bool computeCompileTimes() const;
@@ -87,12 +130,17 @@ protected:
     enum CompilationPath { FailPath, BaselinePath, DFGPath, FTLPath, CancelPath };
     virtual CompilationPath compileInThreadImpl() = 0;
 
+    void beginSignpostImpl();
+    void endSignpostImpl(SignpostDetail);
+
     JITPlanStage m_stage { JITPlanStage::Preparing };
     JITCompilationMode m_mode;
     MonotonicTime m_timeBeforeFTL;
     VM* m_vm;
     CodeBlock* m_codeBlock;
     JITWorklistThread* m_thread { nullptr };
+    Vector<RefPtr<SharedTask<void()>>> m_mainThreadFinalizationTasks;
+    CString m_signpostMessage; // Non-null iff Options::useCompilerSignpost()
 };
 
 } // namespace JSC

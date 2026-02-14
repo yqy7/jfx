@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Google Inc. All Rights Reserved.
+ * Copyright (C) 2010 Google Inc. All rights reserved.
  * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,11 +28,13 @@
 #include "HTMLMetaCharsetParser.h"
 
 #include "HTMLNames.h"
-#include "HTMLParserIdioms.h"
 #include <pal/text/TextCodec.h>
 #include <pal/text/TextEncodingRegistry.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(HTMLMetaCharsetParser);
 
 using namespace HTMLNames;
 
@@ -41,11 +43,11 @@ HTMLMetaCharsetParser::HTMLMetaCharsetParser()
 {
 }
 
-static StringView extractCharset(const String& value)
+static StringView extractCharset(StringView value)
 {
     unsigned length = value.length();
     for (size_t pos = 0; pos < length; ) {
-        pos = value.findIgnoringASCIICase("charset", pos);
+        pos = value.findIgnoringASCIICase("charset"_s, pos);
         if (pos == notFound)
             break;
 
@@ -56,6 +58,10 @@ static StringView extractCharset(const String& value)
         while (pos < length && value[pos] <= ' ')
             ++pos;
 
+        // Ensure we're in bounds before checking for '='.
+        if (pos >= length)
+            break;
+
         if (value[pos] != '=')
             continue;
 
@@ -64,7 +70,7 @@ static StringView extractCharset(const String& value)
         while (pos < length && value[pos] <= ' ')
             ++pos;
 
-        UChar quoteMark = 0;
+        char16_t quoteMark = 0;
         if (pos < length && (value[pos] == '"' || value[pos] == '\''))
             quoteMark = value[pos++];
 
@@ -78,43 +84,39 @@ static StringView extractCharset(const String& value)
         if (quoteMark && (end == length))
             break; // Close quote not found.
 
-        return StringView(value).substring(pos, end - pos);
+        return value.substring(pos, end - pos);
     }
-    return StringView();
+    return { };
 }
 
 bool HTMLMetaCharsetParser::processMeta(HTMLToken& token)
 {
-    AttributeList attributes;
-    for (auto& attribute : token.attributes()) {
-        String attributeName = StringImpl::create8BitIfPossible(attribute.name);
-        String attributeValue = StringImpl::create8BitIfPossible(attribute.value);
-        attributes.append(std::make_pair(attributeName, attributeValue));
-    }
-
+    auto attributes = token.attributes().map([](auto& attribute) {
+        return std::pair { StringView { attribute.name.span() }, StringView { attribute.value.span() } };
+    });
     m_encoding = encodingFromMetaAttributes(attributes);
     return m_encoding.isValid();
 }
 
-PAL::TextEncoding HTMLMetaCharsetParser::encodingFromMetaAttributes(const AttributeList& attributes)
+PAL::TextEncoding HTMLMetaCharsetParser::encodingFromMetaAttributes(std::span<const std::pair<StringView, StringView>> attributes)
 {
     bool gotPragma = false;
     enum { None, Charset, Pragma } mode = None;
     StringView charset;
 
     for (auto& attribute : attributes) {
-        const String& attributeName = attribute.first;
-        const String& attributeValue = attribute.second;
+        auto& attributeName = attribute.first;
+        auto& attributeValue = attribute.second;
 
-        if (attributeName == http_equivAttr) {
-            if (equalLettersIgnoringASCIICase(attributeValue, "content-type"))
+        if (attributeName == "http-equiv"_s) {
+            if (equalLettersIgnoringASCIICase(attributeValue, "content-type"_s))
                 gotPragma = true;
-        } else if (attributeName == charsetAttr) {
+        } else if (attributeName == "charset"_s) {
             charset = attributeValue;
             mode = Charset;
             // Charset attribute takes precedence
             break;
-        } else if (attributeName == contentAttr) {
+        } else if (attributeName == "content"_s) {
             charset = extractCharset(attributeValue);
             if (charset.length())
                 mode = Pragma;
@@ -122,12 +124,12 @@ PAL::TextEncoding HTMLMetaCharsetParser::encodingFromMetaAttributes(const Attrib
     }
 
     if (mode == Charset || (mode == Pragma && gotPragma))
-        return PAL::TextEncoding(stripLeadingAndTrailingHTMLSpaces(charset.toStringWithoutCopying()));
+        return charset.trim(isASCIIWhitespace<char16_t>);
 
     return PAL::TextEncoding();
 }
 
-bool HTMLMetaCharsetParser::checkForMetaCharset(const char* data, size_t length)
+bool HTMLMetaCharsetParser::checkForMetaCharset(std::span<const uint8_t> data)
 {
     if (m_doneChecking)
         return true;
@@ -155,26 +157,26 @@ bool HTMLMetaCharsetParser::checkForMetaCharset(const char* data, size_t length)
     constexpr int bytesToCheckUnconditionally = 1024;
 
     bool ignoredSawErrorFlag;
-    m_input.append(m_codec->decode(data, length, false, false, ignoredSawErrorFlag));
+    m_input.append(m_codec->decode(data, false, false, ignoredSawErrorFlag));
 
     while (auto token = m_tokenizer.nextToken(m_input)) {
-        bool isEnd = token->type() == HTMLToken::EndTag;
-        if (isEnd || token->type() == HTMLToken::StartTag) {
-            AtomString tagName(token->name());
+        bool isEnd = token->type() == HTMLToken::Type::EndTag;
+        if (isEnd || token->type() == HTMLToken::Type::StartTag) {
+            auto knownTagName = AtomString::lookUp(token->name().span());
             if (!isEnd) {
-                m_tokenizer.updateStateFor(tagName);
-                if (tagName == metaTag && processMeta(*token)) {
+                m_tokenizer.updateStateFor(knownTagName);
+                if (knownTagName == metaTag && processMeta(*token)) {
                     m_doneChecking = true;
                     return true;
                 }
             }
 
-            if (tagName != scriptTag && tagName != noscriptTag
-                && tagName != styleTag && tagName != linkTag
-                && tagName != metaTag && tagName != objectTag
-                && tagName != titleTag && tagName != baseTag
-                && (isEnd || tagName != htmlTag)
-                && (isEnd || tagName != headTag)) {
+            if (knownTagName != scriptTag && knownTagName != noscriptTag
+                && knownTagName != styleTag && knownTagName != linkTag
+                && knownTagName != metaTag && knownTagName != objectTag
+                && knownTagName != titleTag && knownTagName != baseTag
+                && (isEnd || knownTagName != htmlTag)
+                && (isEnd || knownTagName != headTag)) {
                 m_inHeadSection = false;
             }
         }

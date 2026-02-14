@@ -27,22 +27,24 @@
 
 #include "SVGAttributeAnimator.h"
 #include "SVGPropertyOwner.h"
-#include <wtf/RefCounted.h>
+#include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/WeakHashSet.h>
+#include <wtf/WeakPtr.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 class SVGElement;
+class WeakPtrImplWithEventTargetData;
 
-class SVGAnimatedProperty : public RefCounted<SVGAnimatedProperty>, public SVGPropertyOwner {
+class SVGAnimatedProperty : public ThreadSafeRefCounted<SVGAnimatedProperty>, public SVGPropertyOwner {
 public:
     virtual ~SVGAnimatedProperty() = default;
 
     // Manage the relationship with the owner.
-    bool isAttached() const { return m_contextElement; }
+    bool isAttached() const { return !!m_contextElement; }
     void detach() { m_contextElement = nullptr; }
-    SVGElement* contextElement() const { return m_contextElement; }
+    SVGElement* contextElement() const;
 
     virtual String baseValAsString() const { return emptyString(); }
     virtual String animValAsString() const { return emptyString(); }
@@ -53,24 +55,20 @@ public:
     virtual std::optional<String> synchronize() { return std::nullopt; }
 
     // Control the animation life cycle.
-    bool isAnimating() const { return m_animators.computeSize(); }
+    bool isAnimating() const { return !m_animators.isEmptyIgnoringNullReferences(); }
     virtual void startAnimation(SVGAttributeAnimator& animator) { m_animators.add(animator); }
     virtual void stopAnimation(SVGAttributeAnimator& animator) { m_animators.remove(animator); }
 
-    // Attach/Detach the animVal of the traget element's property by the instance element's property.
+    // Attach/Detach the animVal of the target element's property by the instance element's property.
     virtual void instanceStartAnimation(SVGAttributeAnimator& animator, SVGAnimatedProperty&) { startAnimation(animator); }
     virtual void instanceStopAnimation(SVGAttributeAnimator& animator) { stopAnimation(animator); }
 
 protected:
-    SVGAnimatedProperty(SVGElement* contextElement)
-        : m_contextElement(contextElement)
-    {
-    }
-
+    explicit SVGAnimatedProperty(SVGElement*);
     SVGPropertyOwner* owner() const override;
     void commitPropertyChange(SVGProperty*) override;
 
-    SVGElement* m_contextElement { nullptr };
+    WeakPtr<SVGElement, WeakPtrImplWithEventTargetData> m_contextElement;
     WeakHashSet<SVGAttributeAnimator> m_animators;
 };
 

@@ -32,11 +32,11 @@
 #include "EventNames.h"
 #include "ScriptExecutionContext.h"
 #include "TrackEvent.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(TrackListBase);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(TrackListBase);
 
 TrackListBase::TrackListBase(ScriptExecutionContext* context, Type type)
     : ActiveDOMObject(context)
@@ -44,20 +44,46 @@ TrackListBase::TrackListBase(ScriptExecutionContext* context, Type type)
 {
 }
 
-TrackListBase::~TrackListBase()
+TrackListBase::~TrackListBase() = default;
+
+ScriptExecutionContext* TrackListBase::scriptExecutionContext() const
 {
+    return ContextDestructionObserver::scriptExecutionContext();
 }
 
-void* TrackListBase::opaqueRoot()
+void TrackListBase::didMoveToNewDocument(Document& newDocument)
+{
+    ActiveDOMObject::didMoveToNewDocument(newDocument);
+    for (RefPtr track : m_inbandTracks)
+        track->didMoveToNewDocument(newDocument);
+}
+
+WebCoreOpaqueRoot TrackListBase::opaqueRoot()
 {
     if (auto* rootObserver = m_opaqueRootObserver.get())
         return (*rootObserver)();
-    return this;
+    return WebCoreOpaqueRoot { this };
 }
 
 unsigned TrackListBase::length() const
 {
     return m_inbandTracks.size();
+}
+
+RefPtr<TrackBase> TrackListBase::find(TrackID trackID) const
+{
+    size_t index = m_inbandTracks.findIf([&](auto& value) {
+        return value->trackId() == trackID;
+    });
+    if (index == notFound)
+        return nullptr;
+    return m_inbandTracks[index];
+}
+
+void TrackListBase::remove(TrackID trackID, bool scheduleEvent)
+{
+    if (RefPtr track = find(trackID))
+        remove(*track, scheduleEvent);
 }
 
 void TrackListBase::remove(TrackBase& track, bool scheduleEvent)
@@ -71,7 +97,7 @@ void TrackListBase::remove(TrackBase& track, bool scheduleEvent)
 
     Ref<TrackBase> trackRef = *m_inbandTracks[index];
 
-    m_inbandTracks.remove(index);
+    m_inbandTracks.removeAt(index);
 
     if (scheduleEvent)
         scheduleRemoveTrackEvent(WTFMove(trackRef));
@@ -80,6 +106,11 @@ void TrackListBase::remove(TrackBase& track, bool scheduleEvent)
 bool TrackListBase::contains(TrackBase& track) const
 {
     return m_inbandTracks.find(&track) != notFound;
+}
+
+bool TrackListBase::contains(TrackID trackID) const
+{
+    return find(trackID);
 }
 
 void TrackListBase::scheduleTrackEvent(const AtomString& eventName, Ref<TrackBase>&& track)
@@ -148,9 +179,11 @@ void TrackListBase::scheduleChangeEvent()
     // selected, the user agent must queue a task to fire a simple event named
     // change at the VideoTrackList object.
     m_isChangeEventScheduled = true;
-    queueTaskKeepingObjectAlive(*this, TaskSource::MediaElement, [this] {
-        m_isChangeEventScheduled = false;
-        dispatchEvent(Event::create(eventNames().changeEvent, Event::CanBubble::No, Event::IsCancelable::No));
+    queueTaskKeepingObjectAlive(*this, TaskSource::MediaElement, [](auto& trackList) {
+        if (trackList.isContextStopped())
+            return;
+        trackList.m_isChangeEventScheduled = false;
+        trackList.dispatchEvent(Event::create(eventNames().changeEvent, Event::CanBubble::No, Event::IsCancelable::No));
     });
 }
 

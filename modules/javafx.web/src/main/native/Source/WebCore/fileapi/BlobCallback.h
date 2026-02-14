@@ -39,9 +39,13 @@ class BlobCallback : public RefCounted<BlobCallback>, public ActiveDOMCallback {
 public:
     using ActiveDOMCallback::ActiveDOMCallback;
 
-    virtual CallbackResult<void> handleEvent(Blob*) = 0;
+    virtual CallbackResult<void> invoke(Blob*) = 0;
+    virtual CallbackResult<void> invokeRethrowingException(Blob*) = 0;
 
     void scheduleCallback(ScriptExecutionContext&, RefPtr<Blob>&&);
+
+private:
+    virtual bool hasCallback() const = 0;
 };
 
 } // namespace WebCore

@@ -22,11 +22,13 @@
 #pragma once
 
 #include "SVGFilterPrimitiveStandardAttributes.h"
+#include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
 
 class SVGFEOffsetElement final : public SVGFilterPrimitiveStandardAttributes {
-    WTF_MAKE_ISO_ALLOCATED(SVGFEOffsetElement);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(SVGFEOffsetElement);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(SVGFEOffsetElement);
 public:
     static Ref<SVGFEOffsetElement> create(const QualifiedName&, Document&);
 
@@ -38,19 +40,20 @@ public:
     SVGAnimatedNumber& dxAnimated() { return m_dx; }
     SVGAnimatedNumber& dyAnimated() { return m_dy; }
 
+    using PropertyRegistry = SVGPropertyOwnerRegistry<SVGFEOffsetElement, SVGFilterPrimitiveStandardAttributes>;
+
 private:
     SVGFEOffsetElement(const QualifiedName&, Document&);
 
-    using PropertyRegistry = SVGPropertyOwnerRegistry<SVGFEOffsetElement, SVGFilterPrimitiveStandardAttributes>;
-    const SVGPropertyRegistry& propertyRegistry() const final { return m_propertyRegistry; }
-
-    void parseAttribute(const QualifiedName&, const AtomString&) override;
+    void attributeChanged(const QualifiedName&, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason) override;
     void svgAttributeChanged(const QualifiedName&) override;
 
-    Vector<AtomString> filterEffectInputsNames() const override { return { in1() }; }
-    RefPtr<FilterEffect> filterEffect(const SVGFilterBuilder&, const FilterEffectVector&) const override;
+    bool setFilterEffectAttribute(FilterEffect&, const QualifiedName&) override;
+    Vector<AtomString> filterEffectInputsNames() const override { return { AtomString { in1() } }; }
+    bool isIdentity() const override;
+    IntOutsets outsets(const FloatRect& targetBoundingBox, SVGUnitTypes::SVGUnitType primitiveUnits) const override;
+    RefPtr<FilterEffect> createFilterEffect(const FilterEffectVector&, const GraphicsContext& destinationContext) const override;
 
-    PropertyRegistry m_propertyRegistry { *this };
     Ref<SVGAnimatedString> m_in1 { SVGAnimatedString::create(this) };
     Ref<SVGAnimatedNumber> m_dx { SVGAnimatedNumber::create(this) };
     Ref<SVGAnimatedNumber> m_dy { SVGAnimatedNumber::create(this) };

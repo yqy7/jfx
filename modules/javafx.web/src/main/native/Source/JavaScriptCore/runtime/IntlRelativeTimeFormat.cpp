@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2020 Sony Interactive Entertainment Inc.
- * Copyright (C) 2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2021-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,11 +31,12 @@
 #include "IntlObjectInlines.h"
 #include "JSCInlines.h"
 #include "ObjectConstructor.h"
+#include <wtf/text/MakeString.h>
 #include <wtf/unicode/icu/ICUHelpers.h>
 
 namespace JSC {
 
-const ClassInfo IntlRelativeTimeFormat::s_info = { "Object", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(IntlRelativeTimeFormat) };
+const ClassInfo IntlRelativeTimeFormat::s_info = { "Object"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(IntlRelativeTimeFormat) };
 
 namespace IntlRelativeTimeFormatInternal {
 }
@@ -55,12 +56,6 @@ Structure* IntlRelativeTimeFormat::createStructure(VM& vm, JSGlobalObject* globa
 IntlRelativeTimeFormat::IntlRelativeTimeFormat(VM& vm, Structure* structure)
     : Base(vm, structure)
 {
-}
-
-void IntlRelativeTimeFormat::finishCreation(VM& vm)
-{
-    Base::finishCreation(vm);
-    ASSERT(inherits(vm, info()));
 }
 
 template<typename Visitor>
@@ -96,7 +91,7 @@ void IntlRelativeTimeFormat::initializeRelativeTimeFormat(JSGlobalObject* global
     LocaleMatcher localeMatcher = intlOption<LocaleMatcher>(globalObject, options, vm.propertyNames->localeMatcher, { { "lookup"_s, LocaleMatcher::Lookup }, { "best fit"_s, LocaleMatcher::BestFit } }, "localeMatcher must be either \"lookup\" or \"best fit\""_s, LocaleMatcher::BestFit);
     RETURN_IF_EXCEPTION(scope, void());
 
-    String numberingSystem = intlStringOption(globalObject, options, vm.propertyNames->numberingSystem, { }, nullptr, nullptr);
+    String numberingSystem = intlStringOption(globalObject, options, vm.propertyNames->numberingSystem, { }, { }, { });
     RETURN_IF_EXCEPTION(scope, void());
     if (!numberingSystem.isNull()) {
         if (!isUnicodeLocaleIdentifierType(numberingSystem)) {
@@ -115,7 +110,7 @@ void IntlRelativeTimeFormat::initializeRelativeTimeFormat(JSGlobalObject* global
     }
 
     m_numberingSystem = resolved.extensions[static_cast<unsigned>(RelevantExtensionKey::Nu)];
-    CString dataLocaleWithExtensions = makeString(resolved.dataLocale, "-u-nu-", m_numberingSystem).utf8();
+    CString dataLocaleWithExtensions = makeString(resolved.dataLocale, "-u-nu-"_s, m_numberingSystem).utf8();
 
     m_style = intlOption<Style>(globalObject, options, vm.propertyNames->style, { { "long"_s, Style::Long }, { "short"_s, Style::Short }, { "narrow"_s, Style::Narrow } }, "style must be either \"long\", \"short\", or \"narrow\""_s, Style::Long);
     RETURN_IF_EXCEPTION(scope, void());
@@ -137,7 +132,7 @@ void IntlRelativeTimeFormat::initializeRelativeTimeFormat(JSGlobalObject* global
 
     UErrorCode status = U_ZERO_ERROR;
     m_numberFormat = std::unique_ptr<UNumberFormat, UNumberFormatDeleter>(unum_open(UNUM_DECIMAL, nullptr, 0, dataLocaleWithExtensions.data(), nullptr, &status));
-    if (UNLIKELY(U_FAILURE(status))) {
+    if (U_FAILURE(status)) [[unlikely]] {
         throwTypeError(globalObject, scope, "failed to initialize RelativeTimeFormat"_s);
         return;
     }
@@ -162,13 +157,13 @@ void IntlRelativeTimeFormat::initializeRelativeTimeFormat(JSGlobalObject* global
     unum_setAttribute(m_numberFormat.get(), UNUM_MINIMUM_GROUPING_DIGITS, useLocaleDefault);
 
     UNumberFormat* clonedNumberFormat = unum_clone(m_numberFormat.get(), &status);
-    if (UNLIKELY(U_FAILURE(status))) {
+    if (U_FAILURE(status)) [[unlikely]] {
         throwTypeError(globalObject, scope, "failed to initialize RelativeTimeFormat"_s);
         return;
     }
 
     m_relativeDateTimeFormatter = std::unique_ptr<URelativeDateTimeFormatter, URelativeDateTimeFormatterDeleter>(ureldatefmt_open(dataLocaleWithExtensions.data(), clonedNumberFormat, icuStyle, UDISPCTX_CAPITALIZATION_FOR_STANDALONE, &status));
-    if (UNLIKELY(U_FAILURE(status))) {
+    if (U_FAILURE(status)) [[unlikely]] {
         throwTypeError(globalObject, scope, "failed to initialize RelativeTimeFormat"_s);
         return;
     }
@@ -185,7 +180,7 @@ ASCIILiteral IntlRelativeTimeFormat::styleString(Style style)
         return "narrow"_s;
     }
     ASSERT_NOT_REACHED();
-    return ASCIILiteral::null();
+    return { };
 }
 
 // https://tc39.es/ecma402/#sec-intl.relativetimeformat.prototype.resolvedoptions
@@ -203,7 +198,7 @@ JSObject* IntlRelativeTimeFormat::resolvedOptions(JSGlobalObject* globalObject) 
 static StringView singularUnit(StringView unit)
 {
     // Plurals are allowed, but thankfully they're all just a simple -s.
-    return unit.endsWith("s") ? unit.left(unit.length() - 1) : unit;
+    return unit.endsWith('s') ? unit.left(unit.length() - 1) : unit;
 }
 
 // https://tc39.es/ecma402/#sec-singularrelativetimeunit
@@ -211,21 +206,21 @@ static std::optional<URelativeDateTimeUnit> relativeTimeUnitType(StringView unit
 {
     StringView singular = singularUnit(unit);
 
-    if (singular == "second")
+    if (singular == "second"_s)
         return UDAT_REL_UNIT_SECOND;
-    if (singular == "minute")
+    if (singular == "minute"_s)
         return UDAT_REL_UNIT_MINUTE;
-    if (singular == "hour")
+    if (singular == "hour"_s)
         return UDAT_REL_UNIT_HOUR;
-    if (singular == "day")
+    if (singular == "day"_s)
         return UDAT_REL_UNIT_DAY;
-    if (singular == "week")
+    if (singular == "week"_s)
         return UDAT_REL_UNIT_WEEK;
-    if (singular == "month")
+    if (singular == "month"_s)
         return UDAT_REL_UNIT_MONTH;
-    if (singular == "quarter")
+    if (singular == "quarter"_s)
         return UDAT_REL_UNIT_QUARTER;
-    if (singular == "year")
+    if (singular == "year"_s)
         return UDAT_REL_UNIT_YEAR;
 
     return std::nullopt;
@@ -251,9 +246,9 @@ String IntlRelativeTimeFormat::formatInternal(JSGlobalObject* globalObject, doub
 
     auto formatRelativeTime = m_numeric ? ureldatefmt_formatNumeric : ureldatefmt_format;
 
-    Vector<UChar, 32> result;
+    Vector<char16_t, 32> result;
     auto status = callBufferProducingFunction(formatRelativeTime, m_relativeDateTimeFormatter.get(), value, unitType.value(), result);
-    if (UNLIKELY(U_FAILURE(status))) {
+    if (U_FAILURE(status)) [[unlikely]] {
         throwTypeError(globalObject, scope, "failed to format relative time"_s);
         return String();
     }
@@ -270,7 +265,7 @@ JSValue IntlRelativeTimeFormat::format(JSGlobalObject* globalObject, double valu
     String result = formatInternal(globalObject, value, unit);
     RETURN_IF_EXCEPTION(scope, { });
 
-    return jsString(vm, result);
+    return jsString(vm, WTFMove(result));
 }
 
 // https://tc39.es/ecma402/#sec-FormatRelativeTimeToParts
@@ -288,7 +283,7 @@ JSValue IntlRelativeTimeFormat::formatToParts(JSGlobalObject* globalObject, doub
 
     double absValue = std::abs(value);
 
-    Vector<UChar, 32> buffer;
+    Vector<char16_t, 32> buffer;
     status = callBufferProducingFunction(unum_formatDoubleForFields, m_numberFormat.get(), absValue, buffer, iterator.get());
     if (U_FAILURE(status))
         return throwTypeError(globalObject, scope, "failed to format relative time"_s);
@@ -318,7 +313,7 @@ JSValue IntlRelativeTimeFormat::formatToParts(JSGlobalObject* globalObject, doub
         }
 
         IntlFieldIterator fieldIterator(*iterator.get());
-        IntlNumberFormat::formatToPartsInternal(globalObject, IntlNumberFormat::Style::Decimal, std::signbit(absValue), IntlMathematicalValue::numberTypeFromDouble(absValue), formattedNumber, fieldIterator, parts, nullptr, jsString(vm, singularUnit(unit).toString()));
+        IntlNumberFormat::formatToPartsInternal(globalObject, IntlNumberFormat::Style::Decimal, std::signbit(absValue), IntlMathematicalValue::numberTypeFromDouble(absValue), formattedNumber, fieldIterator, parts, nullptr, jsString(vm, singularUnit(unit)));
         RETURN_IF_EXCEPTION(scope, { });
     }
 

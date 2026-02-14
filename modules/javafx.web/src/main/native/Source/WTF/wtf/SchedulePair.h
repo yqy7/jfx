@@ -29,6 +29,7 @@
 #pragma once
 
 #include <wtf/HashSet.h>
+#include <wtf/Hasher.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/text/WTFString.h>
@@ -58,31 +59,43 @@ private:
         : m_runLoop(runLoop)
     {
         if (mode)
-            m_mode = adoptCF(CFStringCreateCopy(nullptr, mode));
+            lazyInitialize(m_mode, adoptCF(CFStringCreateCopy(nullptr, mode)));
     }
 
 #if PLATFORM(COCOA)
     WTF_EXPORT_PRIVATE SchedulePair(NSRunLoop*, CFStringRef);
-    RetainPtr<NSRunLoop> m_nsRunLoop;
+    const RetainPtr<NSRunLoop> m_nsRunLoop;
 #endif
 
-    RetainPtr<CFRunLoopRef> m_runLoop;
-    RetainPtr<CFStringRef> m_mode;
+    const RetainPtr<CFRunLoopRef> m_runLoop;
+    const RetainPtr<CFStringRef> m_mode;
 };
 
+inline void add(Hasher& hasher, const SchedulePair& pair)
+{
+    // FIXME: Hashing a CFHash here is unfortunate.
+    add(hasher, pair.runLoop(), pair.mode() ? CFHash(pair.mode()) : 0);
+}
+
 struct SchedulePairHash {
-    static unsigned hash(const RefPtr<SchedulePair>& pair)
+    static unsigned hash(const SchedulePair* pair)
     {
-        uintptr_t hashCodes[2] = { reinterpret_cast<uintptr_t>(pair->runLoop()), pair->mode() ? CFHash(pair->mode()) : 0 };
-        return StringHasher::hashMemory<sizeof(hashCodes)>(hashCodes);
+        return computeHash(*pair);
     }
 
+    static unsigned hash(const RefPtr<SchedulePair>& pair)
+    {
+        return computeHash(*pair);
+    }
+
+    static bool equal(const SchedulePair* a, const RefPtr<SchedulePair>& b) { return a == b; }
     static bool equal(const RefPtr<SchedulePair>& a, const RefPtr<SchedulePair>& b) { return a == b; }
+    static bool equal(const RefPtr<SchedulePair>& a, const SchedulePair* b) { return a == b; }
 
     static constexpr bool safeToCompareToEmptyOrDeleted = true;
 };
 
-typedef HashSet<RefPtr<SchedulePair>, SchedulePairHash> SchedulePairHashSet;
+using SchedulePairHashSet = HashSet<RefPtr<SchedulePair>, SchedulePairHash>;
 
 } // namespace WTF
 

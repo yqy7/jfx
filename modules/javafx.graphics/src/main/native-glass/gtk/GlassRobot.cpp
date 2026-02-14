@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -71,22 +71,17 @@ static void keyButton(jint code, gboolean press)
 {
     Display *xdisplay = gdk_x11_get_default_xdisplay();
     gint gdk_keyval = find_gdk_keyval_for_glass_keycode(code);
-    GdkKeymapKey *keys;
-    gint n_keys;
     if (gdk_keyval == -1) {
         return;
     }
-    gdk_keymap_get_entries_for_keyval(gdk_keymap_get_default(),
-            gdk_keyval, &keys, &n_keys);
-    if (n_keys < 1) {
+    int keycode = find_gdk_keycode_for_keyval(gdk_keyval);
+    if (keycode == -1) {
         return;
     }
-
     XTestFakeKeyEvent(xdisplay,
-                      keys[0].keycode,
+                      keycode,
                       press ? True : False,
                       CurrentTime);
-    g_free(keys);
     XSync(xdisplay, False);
 }
 
@@ -259,17 +254,40 @@ JNIEXPORT void JNICALL Java_com_sun_glass_ui_gtk_GtkRobot__1getScreenCapture
 {
     (void)obj;
 
+    if (!data) {
+        return;
+    }
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    const int maxPixels = INT_MAX / 4;
+    if (width >= maxPixels / height) {
+        return;
+    }
+
+    const int numPixels = width * height;
+    if (numPixels > env->GetArrayLength(data)) {
+        return;
+    }
+
     GdkPixbuf *screenshot, *tmp;
     GdkWindow *root_window = gdk_get_default_root_window();
 
     tmp = glass_pixbuf_from_window(root_window, x, y, width, height);
+    if (!tmp) {
+        return;
+    }
     screenshot = gdk_pixbuf_add_alpha(tmp, FALSE, 0, 0, 0);
     g_object_unref(tmp);
+    if (!screenshot) {
+        return;
+    }
 
     jint *pixels = (jint *)convert_BGRA_to_RGBA((int*)gdk_pixbuf_get_pixels(screenshot), width * 4, height);
-    env->SetIntArrayRegion(data, 0, height * width, pixels);
-    g_free(pixels);
-
+    if (pixels) {
+        env->SetIntArrayRegion(data, 0, numPixels, pixels);
+        g_free(pixels);
+    }
     g_object_unref(screenshot);
 }
 

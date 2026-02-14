@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,9 +31,11 @@
 #include "CachedApplicationManifest.h"
 #include "CachedResourceLoader.h"
 #include "CachedResourceRequest.h"
-#include "CachedResourceRequestInitiators.h"
+#include "CachedResourceRequestInitiatorTypes.h"
+#include "DocumentInlines.h"
 #include "DocumentLoader.h"
-#include "Frame.h"
+#include "FrameDestructionObserverInlines.h"
+#include "LocalFrame.h"
 
 namespace WebCore {
 
@@ -52,11 +54,11 @@ ApplicationManifestLoader::~ApplicationManifestLoader()
 bool ApplicationManifestLoader::startLoading()
 {
     ASSERT(!m_resource);
-    auto* frame = m_documentLoader.frame();
+    RefPtr frame = m_documentLoader->frame();
     if (!frame)
         return false;
 
-    ResourceRequest resourceRequest = m_url;
+    ResourceRequest resourceRequest { URL { m_url } };
     resourceRequest.setPriority(ResourceLoadPriority::Low);
 #if !ERROR_DISABLED
     // Copy this because we may want to access it after transferring the
@@ -66,6 +68,8 @@ bool ApplicationManifestLoader::startLoading()
 #endif
 
     auto credentials = m_useCredentials ? FetchOptions::Credentials::Include : FetchOptions::Credentials::Omit;
+    // The "linked resource fetch setup steps" are defined as part of:
+    // https://html.spec.whatwg.org/#link-type-manifest
     auto options = ResourceLoaderOptions(
         SendCallbackPolicy::SendCallbacks,
         ContentSniffingPolicy::SniffContent,
@@ -74,18 +78,19 @@ bool ApplicationManifestLoader::startLoading()
         ClientCredentialPolicy::CannotAskClientForCredentials,
         credentials,
         SecurityCheckPolicy::DoSecurityCheck,
-        FetchOptions::Mode::NoCors,
+        FetchOptions::Mode::Cors,
         CertificateInfoPolicy::DoNotIncludeCertificateInfo,
         ContentSecurityPolicyImposition::DoPolicyCheck,
         DefersLoadingPolicy::AllowDefersLoading,
         CachingPolicy::AllowCaching);
     options.destination = FetchOptions::Destination::Manifest;
+    options.sameOriginDataURLFlag = SameOriginDataURLFlag::Set;
     CachedResourceRequest request(WTFMove(resourceRequest), options);
 
-    auto cachedResource = frame->document()->cachedResourceLoader().requestApplicationManifest(WTFMove(request));
+    auto cachedResource = frame->document()->protectedCachedResourceLoader()->requestApplicationManifest(WTFMove(request));
     m_resource = cachedResource.value_or(nullptr);
-    if (m_resource)
-        m_resource->addClient(*this);
+    if (CachedResourceHandle resource = m_resource)
+        resource->addClient(*this);
     else {
         LOG_ERROR("Failed to start load for application manifest at url %s (error: %s)", resourceRequestURL.string().ascii().data(), cachedResource.error().localizedDescription().utf8().data());
         return false;
@@ -96,28 +101,28 @@ bool ApplicationManifestLoader::startLoading()
 
 void ApplicationManifestLoader::stopLoading()
 {
-    if (m_resource) {
-        m_resource->removeClient(*this);
-        m_resource = nullptr;
-    }
+    if (CachedResourceHandle resource = std::exchange(m_resource, nullptr))
+        resource->removeClient(*this);
 }
 
 std::optional<ApplicationManifest>& ApplicationManifestLoader::processManifest()
 {
-    if (!m_processedManifest && m_resource) {
+    if (!m_processedManifest) {
+        if (CachedResourceHandle resource = m_resource) {
         auto manifestURL = m_url;
-        auto documentURL = m_documentLoader.url();
-        auto frame = m_documentLoader.frame();
-        auto document = frame ? frame->document() : nullptr;
-        m_processedManifest = m_resource->process(manifestURL, documentURL, document);
+        auto documentURL = m_documentLoader->url();
+        auto frame = m_documentLoader->frame();
+            RefPtr document = frame ? frame->document() : nullptr;
+            m_processedManifest = resource->process(manifestURL, documentURL, document.get());
+    }
     }
     return m_processedManifest;
 }
 
-void ApplicationManifestLoader::notifyFinished(CachedResource& resource, const NetworkLoadMetrics&)
+void ApplicationManifestLoader::notifyFinished(CachedResource& resource, const NetworkLoadMetrics&, LoadWillContinueInAnotherProcess)
 {
     ASSERT_UNUSED(resource, &resource == m_resource);
-    m_documentLoader.finishedLoadingApplicationManifest(*this);
+    Ref { m_documentLoader.get() }->finishedLoadingApplicationManifest(*this);
 }
 
 } // namespace WebCore

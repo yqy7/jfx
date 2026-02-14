@@ -38,7 +38,8 @@
 namespace WebCore {
 
 class MediaKeySession;
-class FragmentedSharedBuffer;
+class ScriptExecutionContext;
+class SharedBuffer;
 
 class MediaKeyStatusMap : public RefCounted<MediaKeyStatusMap> {
 public:
@@ -63,15 +64,15 @@ public:
         std::optional<KeyValuePair<BufferSource::VariantType, MediaKeyStatus>> next();
 
     private:
-        Ref<MediaKeyStatusMap> m_map;
+        const Ref<MediaKeyStatusMap> m_map;
         size_t m_index { 0 };
     };
-    Iterator createIterator() { return Iterator(*this); }
+    Iterator createIterator(ScriptExecutionContext*) { return Iterator(*this); }
 
 private:
     MediaKeyStatusMap(const MediaKeySession&);
 
-    const MediaKeySession* m_session;
+    WeakPtr<const MediaKeySession> m_session;
 };
 
 } // namespace WebCore

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@
 
 
 #include <WebCore/HTMLCollection.h>
+#include <WebCore/ElementInlines.h>
 #include <WebCore/HTMLFormElement.h>
 #include <WebCore/HTMLNames.h>
 #include <WebCore/JSExecState.h>
@@ -53,7 +54,7 @@ JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_getAcceptC
 JNIEXPORT void JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_setAcceptCharsetImpl(JNIEnv* env, jclass, jlong peer, jstring value)
 {
     WebCore::JSMainThreadNullState state;
-    IMPL->setAttributeWithoutSynchronization(WebCore::HTMLNames::accept_charsetAttr, String(env, value));
+    IMPL->setAttributeWithoutSynchronization(WebCore::HTMLNames::accept_charsetAttr, AtomString {String(env, value)});
 }
 
 JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_getActionImpl(JNIEnv* env, jclass, jlong peer)
@@ -65,31 +66,7 @@ JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_getActionI
 JNIEXPORT void JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_setActionImpl(JNIEnv* env, jclass, jlong peer, jstring value)
 {
     WebCore::JSMainThreadNullState state;
-    IMPL->setAttributeWithoutSynchronization(WebCore::HTMLNames::actionAttr, String(env, value));
-}
-
-JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_getAutocompleteImpl(JNIEnv* env, jclass, jlong peer)
-{
-    WebCore::JSMainThreadNullState state;
-    return JavaReturn<String>(env, IMPL->autocomplete());
-}
-
-JNIEXPORT void JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_setAutocompleteImpl(JNIEnv* env, jclass, jlong peer, jstring value)
-{
-    WebCore::JSMainThreadNullState state;
-    IMPL->setAutocomplete(String(env, value));
-}
-
-JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_getEnctypeImpl(JNIEnv* env, jclass, jlong peer)
-{
-    WebCore::JSMainThreadNullState state;
-    return JavaReturn<String>(env, IMPL->enctype());
-}
-
-JNIEXPORT void JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_setEnctypeImpl(JNIEnv* env, jclass, jlong peer, jstring value)
-{
-    WebCore::JSMainThreadNullState state;
-    IMPL->setEnctype(String(env, value));
+    IMPL->setAttributeWithoutSynchronization(WebCore::HTMLNames::actionAttr, AtomString {String(env, value)});
 }
 
 JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_getEncodingImpl(JNIEnv* env, jclass, jlong peer)
@@ -98,22 +75,10 @@ JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_getEncodin
     return JavaReturn<String>(env, IMPL->enctype());
 }
 
-JNIEXPORT void JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_setEncodingImpl(JNIEnv* env, jclass, jlong peer, jstring value)
-{
-    WebCore::JSMainThreadNullState state;
-    IMPL->setEnctype(String(env, value));
-}
-
 JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_getMethodImpl(JNIEnv* env, jclass, jlong peer)
 {
     WebCore::JSMainThreadNullState state;
     return JavaReturn<String>(env, IMPL->method());
-}
-
-JNIEXPORT void JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_setMethodImpl(JNIEnv* env, jclass, jlong peer, jstring value)
-{
-    WebCore::JSMainThreadNullState state;
-    IMPL->setMethod(String(env, value));
 }
 
 JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_getNameImpl(JNIEnv* env, jclass, jlong peer)
@@ -125,7 +90,7 @@ JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_getNameImp
 JNIEXPORT void JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_setNameImpl(JNIEnv* env, jclass, jlong peer, jstring value)
 {
     WebCore::JSMainThreadNullState state;
-    IMPL->setAttributeWithoutSynchronization(WebCore::HTMLNames::nameAttr, String(env, value));
+    IMPL->setAttributeWithoutSynchronization(WebCore::HTMLNames::nameAttr, AtomString {String(env, value)});
 }
 
 JNIEXPORT jboolean JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_getNoValidateImpl(JNIEnv*, jclass, jlong peer)
@@ -149,7 +114,7 @@ JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_getTargetI
 JNIEXPORT void JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_setTargetImpl(JNIEnv* env, jclass, jlong peer, jstring value)
 {
     WebCore::JSMainThreadNullState state;
-    IMPL->setAttributeWithoutSynchronization(WebCore::HTMLNames::targetAttr, String(env, value));
+    IMPL->setAttributeWithoutSynchronization(WebCore::HTMLNames::targetAttr, AtomString {String(env, value)});
 }
 
 JNIEXPORT jlong JNICALL Java_com_sun_webkit_dom_HTMLFormElementImpl_getElementsImpl(JNIEnv* env, jclass, jlong peer)

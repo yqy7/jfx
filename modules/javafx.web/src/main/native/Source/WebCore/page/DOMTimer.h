@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2014 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008, 2014 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,60 +26,68 @@
 
 #pragma once
 
-#include "SuspendableTimer.h"
+#include "ActiveDOMObject.h"
+#include "EventLoop.h"
 #include "UserGestureIndicator.h"
 #include <memory>
 #include <wtf/MonotonicTime.h>
-#include <wtf/RefCounted.h>
+#include <wtf/RefCountedAndCanMakeWeakPtr.h>
 #include <wtf/Seconds.h>
+#include <wtf/TZoneMalloc.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
 class DOMTimerFireState;
 class Document;
-class HTMLPlugInElement;
+class ImminentlyScheduledWorkScope;
 class ScheduledAction;
 
-class DOMTimer final : public RefCounted<DOMTimer>, public SuspendableTimerBase {
+class DOMTimer final : public RefCountedAndCanMakeWeakPtr<DOMTimer>, public ActiveDOMObject {
     WTF_MAKE_NONCOPYABLE(DOMTimer);
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(DOMTimer);
 public:
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
+
     WEBCORE_EXPORT virtual ~DOMTimer();
 
     static Seconds defaultMinimumInterval() { return 4_ms; }
     static Seconds defaultAlignmentInterval() { return 0_s; }
-    static Seconds defaultAlignmentIntervalInLowPowerMode() { return 30_ms; }
+    static Seconds defaultAlignmentIntervalInLowPowerOrThermallyMitigatedMode() { return 30_ms; }
     static Seconds nonInteractedCrossOriginFrameAlignmentInterval() { return 30_ms; }
     static Seconds hiddenPageAlignmentInterval() { return 1_s; }
 
-    // Creates a new timer owned by specified ScriptExecutionContext, starts it
-    // and returns its Id.
-    static int install(ScriptExecutionContext&, std::unique_ptr<ScheduledAction>, Seconds timeout, bool singleShot);
-    static int install(ScriptExecutionContext&, Function<void(ScriptExecutionContext&)>&&, Seconds timeout, bool singleShot);
+    enum class Type : bool { SingleShot, Repeating };
+    static int install(ScriptExecutionContext&, std::unique_ptr<ScheduledAction>, Seconds timeout, Type);
+    static int install(ScriptExecutionContext&, Function<void(ScriptExecutionContext&)>&&, Seconds timeout, Type);
     static void removeById(ScriptExecutionContext&, int timeoutId);
 
     // Notify that the interval may need updating (e.g. because the minimum interval
     // setting for the context has changed).
     void updateTimerIntervalIfNecessary();
 
-    static void scriptDidInteractWithPlugin(HTMLPlugInElement&);
+    static void scriptDidInteractWithPlugin();
+
+    EventLoopTimerHandle timer() const { return m_timer; }
+    bool hasReachedMaxNestingLevel() const { return m_hasReachedMaxNestingLevel; }
 
 private:
-    DOMTimer(ScriptExecutionContext&, Function<void(ScriptExecutionContext&)>&&, Seconds interval, bool singleShot);
+    DOMTimer(ScriptExecutionContext&, Function<void(ScriptExecutionContext&)>&&, Seconds interval, Type);
     friend class Internals;
 
     WEBCORE_EXPORT Seconds intervalClampedToMinimum() const;
 
-    bool isDOMTimersThrottlingEnabled(Document&) const;
+    bool isDOMTimersThrottlingEnabled(const Document&) const;
     void updateThrottlingStateIfNecessary(const DOMTimerFireState&);
 
-    // SuspendableTimerBase
-    void fired() override;
-    void didStop() override;
-    WEBCORE_EXPORT std::optional<MonotonicTime> alignedFireTime(MonotonicTime) const override;
+    void fired();
 
-    // ActiveDOMObject API.
-    const char* activeDOMObjectName() const override;
+    // ActiveDOMObject.
+    void stop() final;
+
+    void makeImminentlyScheduledWorkScopeIfPossible(ScriptExecutionContext&);
+    void clearImminentlyScheduledWorkScope();
 
     enum TimerThrottleState {
         Undetermined,
@@ -89,11 +97,15 @@ private:
 
     int m_timeoutId;
     int m_nestingLevel;
+    EventLoopTimerHandle m_timer;
     Function<void(ScriptExecutionContext&)> m_action;
     Seconds m_originalInterval;
     TimerThrottleState m_throttleState;
+    bool m_oneShot;
+    bool m_hasReachedMaxNestingLevel;
     Seconds m_currentTimerInterval;
     RefPtr<UserGestureToken> m_userGestureTokenToForward;
+    RefPtr<ImminentlyScheduledWorkScope> m_imminentlyScheduledWorkScope;
 };
 
 } // namespace WebCore

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,10 +25,9 @@
 
 package test.javafx.scene.control;
 
-import java.util.Arrays;
-import java.util.Collection;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import java.util.stream.Stream;
 import javafx.event.Event;
-import javafx.event.EventHandler;
 import javafx.event.EventType;
 import javafx.scene.Node;
 import javafx.scene.control.CheckBoxTreeItem;
@@ -45,53 +44,38 @@ import javafx.scene.control.TreeTablePosition;
 import javafx.scene.control.TreeTableView;
 import javafx.scene.control.TreeView;
 import javafx.scene.shape.Rectangle;
-import static org.junit.Assert.assertTrue;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-import org.junit.runners.Parameterized.Parameters;
-import org.junit.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
-@RunWith(Parameterized.class)
 public class EventAnyTest {
-    @Parameters
-    public static Collection getParams() {
-        return Arrays.asList(new Object[][] {
-            { CheckBoxTreeItem.TreeModificationEvent.ANY, checkBoxTreeEvent(), Rectangle.class, true},
-            { CheckBoxTreeItem.TreeModificationEvent.ANY, listViewEditEvent(), Rectangle.class, false},
-            { ListView.EditEvent.ANY, listViewEditEvent(), ListView.class, true},
-            { ListView.EditEvent.ANY, checkBoxTreeEvent(), ListView.class, false},
-            { ScrollToEvent.ANY, scrollToEvent(), Rectangle.class, true},
-            { ScrollToEvent.ANY, listViewEditEvent(), Rectangle.class, false},
-            { SortEvent.ANY, sortEvent(), Rectangle.class, true},
-            { SortEvent.ANY, scrollToEvent(), Rectangle.class, false},
-            { TableColumn.CellEditEvent.ANY, tableColumnCellEditEvent(), Rectangle.class, true },
-            { TableColumn.CellEditEvent.ANY, listViewEditEvent(), Rectangle.class, false },
-            { TreeItem.TreeModificationEvent.ANY, treeItemModificationEvent(), Rectangle.class, true},
-            { TreeItem.TreeModificationEvent.ANY, checkBoxTreeEvent(), Rectangle.class, false},
-            { TreeTableColumn.CellEditEvent.ANY, treeTableColumnCellEditEvent(), Rectangle.class, true },
-            { TreeTableColumn.CellEditEvent.ANY, tableColumnCellEditEvent(), Rectangle.class, false },
-            { TreeTableView.EditEvent.ANY, treeTableViewEditEvent(), TreeTableView.class, true },
-            { TreeTableView.EditEvent.ANY, treeTableColumnCellEditEvent(), TreeTableView.class, false },
-            { TreeView.EditEvent.ANY, treeViewEditEvent(), TreeView.class, true },
-            { TreeView.EditEvent.ANY, treeTableViewEditEvent(), TreeView.class, false },
-        });
+    private static Stream<Arguments> parameters() {
+        return Stream.of(
+            Arguments.of(CheckBoxTreeItem.TreeModificationEvent.ANY, checkBoxTreeEvent(), Rectangle.class, true),
+            Arguments.of(CheckBoxTreeItem.TreeModificationEvent.ANY, listViewEditEvent(), Rectangle.class, false),
+            Arguments.of(ListView.EditEvent.ANY, listViewEditEvent(), ListView.class, true),
+            Arguments.of(ListView.EditEvent.ANY, checkBoxTreeEvent(), ListView.class, false),
+            Arguments.of(ScrollToEvent.ANY, scrollToEvent(), Rectangle.class, true),
+            Arguments.of(ScrollToEvent.ANY, listViewEditEvent(), Rectangle.class, false),
+            Arguments.of(SortEvent.ANY, sortEvent(), Rectangle.class, true),
+            Arguments.of(SortEvent.ANY, scrollToEvent(), Rectangle.class, false),
+            Arguments.of(TableColumn.CellEditEvent.ANY, tableColumnCellEditEvent(), Rectangle.class, true),
+            Arguments.of(TableColumn.CellEditEvent.ANY, listViewEditEvent(), Rectangle.class, false),
+            Arguments.of(TreeItem.TreeModificationEvent.ANY, treeItemModificationEvent(), Rectangle.class, true),
+            Arguments.of(TreeItem.TreeModificationEvent.ANY, checkBoxTreeEvent(), Rectangle.class, false),
+            Arguments.of(TreeTableColumn.CellEditEvent.ANY, treeTableColumnCellEditEvent(), Rectangle.class, true),
+            Arguments.of(TreeTableColumn.CellEditEvent.ANY, tableColumnCellEditEvent(), Rectangle.class, false),
+            Arguments.of(TreeTableView.EditEvent.ANY, treeTableViewEditEvent(), TreeTableView.class, true),
+            Arguments.of(TreeTableView.EditEvent.ANY, treeTableColumnCellEditEvent(), TreeTableView.class, false),
+            Arguments.of(TreeView.EditEvent.ANY, treeViewEditEvent(), TreeView.class, true),
+            Arguments.of(TreeView.EditEvent.ANY, treeTableViewEditEvent(), TreeView.class, false));
     }
 
     private boolean delivered;
-    private EventType type;
-    private Event event;
-    private Class target;
-    private boolean matches;
 
-    public EventAnyTest(EventType type, Event event, Class target, boolean matches) {
-        this.type = type;
-        this.event = event;
-        this.matches = matches;
-        this.target = target;
-    }
-
-    @Test
-    public void testEventDelivery() throws Exception {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testEventDelivery(EventType type, Event event, Class<?> target, boolean matches) throws Exception {
         Node n = (Node) target.getDeclaredConstructor().newInstance();
         delivered = false;
 
@@ -110,7 +94,7 @@ public class EventAnyTest {
     }
 
     private static Event listViewEditEvent() {
-        return new ListView.EditEvent<String>(new ListView<String>(),
+        return new ListView.EditEvent<>(new ListView<String>(),
                 ListView.<String>editCommitEvent(), "", 1);
     }
 
@@ -124,8 +108,8 @@ public class EventAnyTest {
     }
 
     private static Event tableColumnCellEditEvent() {
-        TableView<String> tw = new TableView<String>();
-        return new TableColumn.CellEditEvent<String, String>(
+        TableView<String> tw = new TableView<>();
+        return new TableColumn.CellEditEvent<>(
                 tw, new TablePosition<String, String>(tw, 1, null),
                 TableColumn.<String, String>editCommitEvent(), "");
 
@@ -138,22 +122,22 @@ public class EventAnyTest {
     }
 
     private static Event treeTableColumnCellEditEvent() {
-        TreeTableView<String> tw = new TreeTableView<String>();
-        return new TreeTableColumn.CellEditEvent<String, String>(
+        TreeTableView<String> tw = new TreeTableView<>();
+        return new TreeTableColumn.CellEditEvent<>(
                 tw, new TreeTablePosition<String, String>(tw, 1, null),
                 TreeTableColumn.<String, String>editCommitEvent(), "");
 
     }
 
     private static Event treeTableViewEditEvent() {
-        TreeTableView<String> tw = new TreeTableView<String>();
-        return new TreeTableView.EditEvent<String>(
+        TreeTableView<String> tw = new TreeTableView<>();
+        return new TreeTableView.EditEvent<>(
                 tw, TreeTableView.editCommitEvent(), null, "", "");
     }
 
     private static Event treeViewEditEvent() {
-        TreeView<String> tw = new TreeView<String>();
-        return new TreeView.EditEvent<String>(
+        TreeView<String> tw = new TreeView<>();
+        return new TreeView.EditEvent<>(
                 tw, TreeView.editCommitEvent(), null, "", "");
     }
 }

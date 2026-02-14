@@ -24,11 +24,13 @@
  */
 
 #include "config.h"
+#include "VideoTrackList.h"
 
 #if ENABLE(VIDEO)
 
-#include "VideoTrackList.h"
-
+#include "ContextDestructionObserverInlines.h"
+#include "EventTargetInterfaces.h"
+#include "ScriptExecutionContext.h"
 #include "VideoTrack.h"
 
 namespace WebCore {
@@ -46,8 +48,8 @@ void VideoTrackList::append(Ref<VideoTrack>&& track)
     size_t index = track->inbandTrackIndex();
     size_t insertionIndex;
     for (insertionIndex = 0; insertionIndex < m_inbandTracks.size(); ++insertionIndex) {
-        auto& otherTrack = downcast<VideoTrack>(*m_inbandTracks[insertionIndex]);
-        if (otherTrack.inbandTrackIndex() > index)
+        Ref otherTrack = downcast<VideoTrack>(*m_inbandTracks[insertionIndex]);
+        if (otherTrack->inbandTrackIndex() > index)
             break;
     }
     m_inbandTracks.insert(insertionIndex, track.ptr());
@@ -68,8 +70,18 @@ VideoTrack* VideoTrackList::item(unsigned index) const
 VideoTrack* VideoTrackList::getTrackById(const AtomString& id) const
 {
     for (auto& inbandTracks : m_inbandTracks) {
+        Ref track = downcast<VideoTrack>(*inbandTracks);
+        if (track->id() == id)
+            return track.ptr();
+    }
+    return nullptr;
+}
+
+VideoTrack* VideoTrackList::getTrackById(TrackID id) const
+{
+    for (auto& inbandTracks : m_inbandTracks) {
         auto& track = downcast<VideoTrack>(*inbandTracks);
-        if (track.id() == id)
+        if (track.trackId() == id)
             return &track;
     }
     return nullptr;
@@ -89,14 +101,18 @@ int VideoTrackList::selectedIndex() const
     return -1;
 }
 
-EventTargetInterface VideoTrackList::eventTargetInterface() const
+VideoTrack* VideoTrackList::selectedItem() const
 {
-    return VideoTrackListEventTargetInterfaceType;
+    auto selectedIndex = this->selectedIndex();
+    if (selectedIndex < 0)
+        return nullptr;
+
+    return item(selectedIndex);
 }
 
-const char* VideoTrackList::activeDOMObjectName() const
+enum EventTargetInterfaceType VideoTrackList::eventTargetInterface() const
 {
-    return "VideoTrackList";
+    return EventTargetInterfaceType::VideoTrackList;
 }
 
 } // namespace WebCore

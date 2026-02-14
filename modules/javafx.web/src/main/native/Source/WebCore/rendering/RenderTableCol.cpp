@@ -26,59 +26,67 @@
 #include "config.h"
 #include "RenderTableCol.h"
 
+#include "BorderData.h"
 #include "HTMLNames.h"
 #include "HTMLTableColElement.h"
+#include "RenderBoxInlines.h"
+#include "RenderBoxModelObjectInlines.h"
 #include "RenderChildIterator.h"
 #include "RenderIterator.h"
+#include "RenderObjectInlines.h"
+#include "RenderStyleInlines.h"
 #include "RenderTable.h"
 #include "RenderTableCaption.h"
 #include "RenderTableCell.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/CheckedPtr.h>
+#include <wtf/CheckedRef.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(RenderTableCol);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(RenderTableCol);
 
 RenderTableCol::RenderTableCol(Element& element, RenderStyle&& style)
-    : RenderBox(element, WTFMove(style), 0)
+    : RenderBox(Type::TableCol, element, WTFMove(style))
 {
     // init RenderObject attributes
     setInline(true); // our object is not Inline
     updateFromElement();
+    ASSERT(isRenderTableCol());
 }
 
 RenderTableCol::RenderTableCol(Document& document, RenderStyle&& style)
-    : RenderBox(document, WTFMove(style), 0)
+    : RenderBox(Type::TableCol, document, WTFMove(style))
 {
     setInline(true);
+    ASSERT(isRenderTableCol());
 }
+
+RenderTableCol::~RenderTableCol() = default;
 
 void RenderTableCol::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
 {
     RenderBox::styleDidChange(diff, oldStyle);
-    RenderTable* table = this->table();
+    CheckedPtr table = this->table();
     if (!table)
         return;
     // If border was changed, notify table.
     if (!oldStyle)
         return;
-    if (oldStyle->border() != style().border()) {
-        table->invalidateCollapsedBorders();
-        return;
-    }
+    table->invalidateCollapsedBordersAfterStyleChangeIfNeeded(*oldStyle, checkedStyle());
     if (oldStyle->width() != style().width()) {
         table->recalcSectionsIfNeeded();
-        for (auto& section : childrenOfType<RenderTableSection>(*table)) {
+        for (CheckedRef section : childrenOfType<RenderTableSection>(*table)) {
             unsigned nEffCols = table->numEffCols();
             for (unsigned j = 0; j < nEffCols; j++) {
-                unsigned rowCount = section.numRows();
+                unsigned rowCount = section->numRows();
                 for (unsigned i = 0; i < rowCount; i++) {
-                    RenderTableCell* cell = section.primaryCellAt(i, j);
+                    CheckedPtr cell = section->primaryCellAt(i, j);
                     if (!cell)
                         continue;
-                    cell->setPreferredLogicalWidthsDirty(true);
+                    cell->setNeedsPreferredWidthsUpdate();
                 }
             }
         }
@@ -93,21 +101,28 @@ void RenderTableCol::updateFromElement()
         HTMLTableColElement& tc = static_cast<HTMLTableColElement&>(*element());
         m_span = tc.span();
     } else
-        m_span = !(hasInitializedStyle() && style().display() == DisplayType::TableColumnGroup);
-    if (m_span != oldSpan && hasInitializedStyle() && parent())
-        setNeedsLayoutAndPrefWidthsRecalc();
+        m_span = 1;
+    if (m_span != oldSpan && parent()) {
+        if (hasInitializedStyle())
+            setNeedsLayoutAndPreferredWidthsUpdate();
+        if (CheckedPtr table = this->table())
+            table->invalidateColumns();
+    }
 }
 
-void RenderTableCol::insertedIntoTree(IsInternalMove isInternalMove)
+void RenderTableCol::insertedIntoTree()
 {
-    RenderBox::insertedIntoTree(isInternalMove);
-    table()->addColumn(this);
+    RenderBox::insertedIntoTree();
+    checkedTable()->addColumn(this);
 }
 
-void RenderTableCol::willBeRemovedFromTree(IsInternalMove isInternalMove)
+void RenderTableCol::willBeRemovedFromTree()
 {
-    RenderBox::willBeRemovedFromTree(isInternalMove);
-    table()->removeColumn(this);
+    RenderBox::willBeRemovedFromTree();
+    if (CheckedPtr table = this->table()) {
+        // We only need to invalidate the column cache when only individual columns are being removed (as opposed to when the entire table is being collapsed).
+        table->invalidateColumns();
+    }
 }
 
 bool RenderTableCol::isChildAllowed(const RenderObject& child, const RenderStyle& style) const
@@ -130,24 +145,33 @@ LayoutRect RenderTableCol::clippedOverflowRect(const RenderLayerModelObject* rep
     // might have propagated a background color or borders into.
     // FIXME: check for repaintContainer each time here?
 
-    RenderTable* parentTable = table();
+    CheckedPtr parentTable = table();
     if (!parentTable)
-        return LayoutRect();
+        return { };
+
     return parentTable->clippedOverflowRect(repaintContainer, context);
+}
+
+auto RenderTableCol::rectsForRepaintingAfterLayout(const RenderLayerModelObject* repaintContainer, RepaintOutlineBounds) const -> RepaintRects
+{
+    // Ignore RepaintOutlineBounds because it doesn't make sense to use the table's outline bounds to repaint a column.
+    return { clippedOverflowRect(repaintContainer, visibleRectContextForRepaint()) };
 }
 
 void RenderTableCol::imageChanged(WrappedImagePtr, const IntRect*)
 {
     // FIXME: Repaint only the rect the image paints in.
+    if (!parent())
+        return;
     repaint();
 }
 
-void RenderTableCol::clearPreferredLogicalWidthsDirtyBits()
+void RenderTableCol::clearNeedsPreferredLogicalWidthsUpdate()
 {
-    setPreferredLogicalWidthsDirty(false);
+    clearNeedsPreferredWidthsUpdate();
 
-    for (auto& child : childrenOfType<RenderObject>(*this))
-        child.setPreferredLogicalWidthsDirty(false);
+    for (CheckedRef child : childrenOfType<RenderObject>(*this))
+        child->clearNeedsPreferredWidthsUpdate();
 }
 
 RenderTable* RenderTableCol::table() const
@@ -158,81 +182,85 @@ RenderTable* RenderTableCol::table() const
     return dynamicDowncast<RenderTable>(table);
 }
 
+CheckedPtr<RenderTable> RenderTableCol::checkedTable() const
+{
+    return table();
+}
+
 RenderTableCol* RenderTableCol::enclosingColumnGroup() const
 {
-    if (!is<RenderTableCol>(*parent()))
+    auto* parentColumnGroup = dynamicDowncast<RenderTableCol>(*parent());
+    if (!parentColumnGroup)
         return nullptr;
 
-    RenderTableCol& parentColumnGroup = downcast<RenderTableCol>(*parent());
-    ASSERT(parentColumnGroup.isTableColumnGroup());
+    ASSERT(parentColumnGroup->isTableColumnGroup());
     ASSERT(isTableColumn());
-    return &parentColumnGroup;
+    return parentColumnGroup;
 }
 
 RenderTableCol* RenderTableCol::nextColumn() const
 {
     // If |this| is a column-group, the next column is the colgroup's first child column.
-    if (RenderObject* firstChild = this->firstChild())
-        return downcast<RenderTableCol>(firstChild);
+    if (CheckedPtr firstChild = this->firstChild())
+        return downcast<RenderTableCol>(firstChild.get());
 
     // Otherwise it's the next column along.
-    RenderObject* next = nextSibling();
+    CheckedPtr next = nextSibling();
 
     // Failing that, the child is the last column in a column-group, so the next column is the next column/column-group after its column-group.
     if (!next && is<RenderTableCol>(*parent()))
-        next = parent()->nextSibling();
+        next = checkedParent()->nextSibling();
 
-    for (; next && !is<RenderTableCol>(*next); next = next->nextSibling()) {
-        // We allow captions mixed with columns and column-groups.
-        if (is<RenderTableCaption>(*next))
-            continue;
-
-        return nullptr;
+    for (; next; next = next->nextSibling()) {
+        if (auto* column = dynamicDowncast<RenderTableCol>(*next))
+            return column;
     }
 
-    return downcast<RenderTableCol>(next);
+    return nullptr;
 }
 
 const BorderValue& RenderTableCol::borderAdjoiningCellStartBorder() const
 {
-    return style().borderStart();
+    return checkedStyle()->borderStart(table()->writingMode());
 }
 
 const BorderValue& RenderTableCol::borderAdjoiningCellEndBorder() const
 {
-    return style().borderEnd();
+    return checkedStyle()->borderEnd(table()->writingMode());
 }
 
 const BorderValue& RenderTableCol::borderAdjoiningCellBefore(const RenderTableCell& cell) const
 {
-    ASSERT_UNUSED(cell, table()->colElement(cell.col() + cell.colSpan()) == this);
-    return style().borderStart();
+    CheckedPtr table = this->table();
+    ASSERT_UNUSED(cell, table->colElement(cell.col() + cell.colSpan()) == this);
+    return checkedStyle()->borderStart(table->writingMode());
 }
 
 const BorderValue& RenderTableCol::borderAdjoiningCellAfter(const RenderTableCell& cell) const
 {
-    ASSERT_UNUSED(cell, table()->colElement(cell.col() - 1) == this);
-    return style().borderEnd();
+    CheckedPtr table = this->table();
+    ASSERT_UNUSED(cell, table->colElement(cell.col() - 1) == this);
+    return checkedStyle()->borderEnd(table->writingMode());
 }
 
 LayoutUnit RenderTableCol::offsetLeft() const
 {
-    return table()->offsetLeftForColumn(*this);
+    return checkedTable()->offsetLeftForColumn(*this);
 }
 
 LayoutUnit RenderTableCol::offsetTop() const
 {
-    return table()->offsetTopForColumn(*this);
+    return checkedTable()->offsetTopForColumn(*this);
 }
 
 LayoutUnit RenderTableCol::offsetWidth() const
 {
-    return table()->offsetWidthForColumn(*this);
+    return checkedTable()->offsetWidthForColumn(*this);
 }
 
 LayoutUnit RenderTableCol::offsetHeight() const
 {
-    return table()->offsetHeightForColumn(*this);
+    return checkedTable()->offsetHeightForColumn(*this);
 }
 
 }

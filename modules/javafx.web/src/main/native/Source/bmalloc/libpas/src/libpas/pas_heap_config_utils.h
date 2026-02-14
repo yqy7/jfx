@@ -26,6 +26,8 @@
 #ifndef PAS_HEAP_CONFIG_UTILS_H
 #define PAS_HEAP_CONFIG_UTILS_H
 
+PAS_IGNORE_WARNINGS_BEGIN("cast-align")
+
 #include "pas_basic_heap_config_root_data.h"
 #include "pas_basic_heap_page_caches.h"
 #include "pas_basic_heap_runtime_config.h"
@@ -68,6 +70,7 @@ typedef struct {
     bool check_deallocation;
     uint8_t small_segregated_min_align_shift;
     uint8_t small_segregated_sharing_shift;
+    uint8_t small_segregated_partial_view_padding;
     size_t small_segregated_page_size;
     double small_segregated_wasteage_handicap;
     pas_segregated_deallocation_logging_mode small_exclusive_segregated_logging_mode;
@@ -84,6 +87,7 @@ typedef struct {
     bool use_medium_segregated;
     uint8_t medium_segregated_min_align_shift;
     uint8_t medium_segregated_sharing_shift;
+    uint8_t medium_segregated_partial_view_padding;
     double medium_segregated_wasteage_handicap;
     pas_segregated_deallocation_logging_mode medium_exclusive_segregated_logging_mode;
     pas_segregated_deallocation_logging_mode medium_shared_segregated_logging_mode;
@@ -92,6 +96,7 @@ typedef struct {
     bool use_marge_bitfit;
     uint8_t marge_bitfit_min_align_shift;
     size_t marge_bitfit_page_size;
+    bool pgm_enabled;
 } pas_basic_heap_config_arguments;
 
 #define PAS_BASIC_HEAP_CONFIG_SEGREGATED_HEAP_FIELDS(name, ...) \
@@ -101,6 +106,7 @@ typedef struct {
             .heap_config_ptr = &name ## _heap_config, \
             .page_config_ptr = &name ## _heap_config.small_segregated_config.base, \
             .page_config_kind = pas_page_config_kind_segregated, \
+            .page_config_size_category = pas_page_config_size_category_small, \
             .min_align_shift = \
                 ((pas_basic_heap_config_arguments){__VA_ARGS__}).small_segregated_min_align_shift, \
             .page_size = \
@@ -123,6 +129,8 @@ typedef struct {
             ((pas_basic_heap_config_arguments){__VA_ARGS__}).small_segregated_wasteage_handicap, \
         .sharing_shift = \
             ((pas_basic_heap_config_arguments){__VA_ARGS__}).small_segregated_sharing_shift, \
+        .partial_view_padding = \
+            ((pas_basic_heap_config_arguments){__VA_ARGS__}).small_segregated_partial_view_padding, \
         .num_alloc_bits = PAS_BASIC_SEGREGATED_NUM_ALLOC_BITS( \
             ((pas_basic_heap_config_arguments){__VA_ARGS__}).small_segregated_min_align_shift, \
             ((pas_basic_heap_config_arguments){__VA_ARGS__}).small_segregated_page_size), \
@@ -167,6 +175,7 @@ typedef struct {
             .heap_config_ptr = &name ## _heap_config, \
             .page_config_ptr = &name ## _heap_config.medium_segregated_config.base, \
             .page_config_kind = pas_page_config_kind_segregated, \
+            .page_config_size_category = pas_page_config_size_category_medium, \
             .min_align_shift = \
                 ((pas_basic_heap_config_arguments){__VA_ARGS__}).medium_segregated_min_align_shift, \
             .page_size = \
@@ -188,6 +197,8 @@ typedef struct {
             ((pas_basic_heap_config_arguments){__VA_ARGS__}).medium_segregated_wasteage_handicap, \
         .sharing_shift = \
             ((pas_basic_heap_config_arguments){__VA_ARGS__}).medium_segregated_sharing_shift, \
+        .partial_view_padding = \
+            ((pas_basic_heap_config_arguments){__VA_ARGS__}).medium_segregated_partial_view_padding, \
         .num_alloc_bits = PAS_BASIC_SEGREGATED_NUM_ALLOC_BITS( \
             ((pas_basic_heap_config_arguments){__VA_ARGS__}).medium_segregated_min_align_shift, \
             ((pas_basic_heap_config_arguments){__VA_ARGS__}).medium_page_size), \
@@ -219,6 +230,7 @@ typedef struct {
             .heap_config_ptr = &name ## _heap_config, \
             .page_config_ptr = &name ## _heap_config.small_bitfit_config.base, \
             .page_config_kind = pas_page_config_kind_bitfit, \
+            .page_config_size_category = pas_page_config_size_category_small, \
             .min_align_shift = \
                 ((pas_basic_heap_config_arguments){__VA_ARGS__}).small_bitfit_min_align_shift, \
             .page_size = \
@@ -260,15 +272,17 @@ typedef struct {
             .heap_config_ptr = &name ## _heap_config, \
             .page_config_ptr = &name ## _heap_config.medium_bitfit_config.base, \
             .page_config_kind = pas_page_config_kind_bitfit, \
+            .page_config_size_category = pas_page_config_size_category_medium, \
             .min_align_shift = \
                 ((pas_basic_heap_config_arguments){__VA_ARGS__}).medium_bitfit_min_align_shift, \
             .page_size = \
                 ((pas_basic_heap_config_arguments){__VA_ARGS__}).medium_page_size, \
             .granule_size = \
                 ((pas_basic_heap_config_arguments){__VA_ARGS__}).granule_size, \
-            .max_object_size = PAS_MAX_BITFIT_OBJECT_SIZE( \
+            .max_object_size = PAS_MAX_BITFIT_OBJECT_SIZE_WITH_MAX_BITS( \
                 ((pas_basic_heap_config_arguments){__VA_ARGS__}).medium_page_size, \
-                ((pas_basic_heap_config_arguments){__VA_ARGS__}).medium_bitfit_min_align_shift), \
+                ((pas_basic_heap_config_arguments){__VA_ARGS__}).medium_bitfit_min_align_shift, \
+                PAS_BITFIT_MAX_FREE_MAX_VALID_MEDIUM), \
             .page_header_for_boundary = name ## _medium_bitfit_page_header_for_boundary, \
             .boundary_for_page_header = name ## _medium_bitfit_boundary_for_page_header, \
             .page_header_for_boundary_remote = name ## _medium_bitfit_page_header_for_boundary_remote, \
@@ -290,6 +304,7 @@ typedef struct {
             .heap_config_ptr = &name ## _heap_config, \
             .page_config_ptr = &name ## _heap_config.marge_bitfit_config.base, \
             .page_config_kind = pas_page_config_kind_bitfit, \
+            .page_config_size_category = pas_page_config_size_category_marge, \
             .min_align_shift = \
                 ((pas_basic_heap_config_arguments){__VA_ARGS__}).marge_bitfit_min_align_shift, \
             .page_size = \
@@ -340,7 +355,8 @@ typedef struct {
         .for_each_shared_page_directory_remote = \
             pas_heap_config_utils_for_each_shared_page_directory_remote, \
         .dump_shared_page_directory_arg = pas_shared_page_directory_by_size_dump_directory_arg, \
-        PAS_HEAP_CONFIG_SPECIALIZATIONS(name ## _heap_config) \
+        PAS_HEAP_CONFIG_SPECIALIZATIONS(name ## _heap_config), \
+        .pgm_enabled = true \
     })
 
 #define PAS_BASIC_HEAP_CONFIG_SEGREGATED_HEAP_DECLARATIONS(name, upcase_name) \
@@ -419,25 +435,25 @@ typedef struct {
     \
     PAS_BASIC_SEGREGATED_PAGE_CONFIG_DECLARATIONS( \
         name ## _small_segregated, (upcase_name ## _HEAP_CONFIG).small_segregated_config, \
-        .header_placement_mode = pas_page_header_at_head_of_page, \
-        .header_table = NULL); \
+        pas_page_header_at_head_of_page, \
+        NULL); \
     PAS_BASIC_SEGREGATED_PAGE_CONFIG_DECLARATIONS( \
         name ## _medium_segregated, (upcase_name ## _HEAP_CONFIG).medium_segregated_config, \
-        .header_placement_mode = pas_page_header_in_table, \
-        .header_table = &name ## _medium_page_header_table); \
+        pas_page_header_in_table, \
+        &name ## _medium_page_header_table); \
     \
     PAS_BASIC_BITFIT_PAGE_CONFIG_DECLARATIONS( \
         name ## _small_bitfit, (upcase_name ## _HEAP_CONFIG).small_bitfit_config, \
-        .header_placement_mode = pas_page_header_at_head_of_page, \
-        .header_table = NULL); \
+        pas_page_header_at_head_of_page, \
+        NULL); \
     PAS_BASIC_BITFIT_PAGE_CONFIG_DECLARATIONS( \
         name ## _medium_bitfit, (upcase_name ## _HEAP_CONFIG).medium_bitfit_config, \
-        .header_placement_mode = pas_page_header_in_table, \
-        .header_table = &name ## _medium_page_header_table); \
+        pas_page_header_in_table, \
+        &name ## _medium_page_header_table); \
     PAS_BASIC_BITFIT_PAGE_CONFIG_DECLARATIONS( \
         name ## _marge_bitfit, (upcase_name ## _HEAP_CONFIG).marge_bitfit_config, \
-        .header_placement_mode = pas_page_header_in_table, \
-        .header_table = &name ## _marge_page_header_table); \
+        pas_page_header_in_table, \
+        &name ## _marge_page_header_table); \
     \
     struct pas_dummy
 
@@ -446,10 +462,12 @@ typedef struct {
         size_t size, \
         pas_alignment alignment, \
         pas_large_heap* large_heap, \
-        pas_heap_config* config); \
+        const pas_heap_config* config); \
     PAS_HEAP_CONFIG_SPECIALIZATION_DECLARATIONS(name ## _heap_config); \
     PAS_BASIC_HEAP_CONFIG_SEGREGATED_HEAP_DECLARATIONS(name, upcase_name)
 
 PAS_END_EXTERN_C;
+
+PAS_IGNORE_WARNINGS_END
 
 #endif /* PAS_HEAP_CONFIG_UTILS_H */

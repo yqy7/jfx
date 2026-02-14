@@ -35,11 +35,12 @@
 #include "ContextDestructionObserver.h"
 #include "DOMHighResTimeStamp.h"
 #include "EventTarget.h"
-#include "ExceptionOr.h"
+#include "EventTargetInterfaces.h"
 #include "ReducedResolutionSeconds.h"
 #include "ScriptExecutionContext.h"
 #include "Timer.h"
-#include <variant>
+#include <memory>
+#include <wtf/ContinuousTime.h>
 #include <wtf/ListHashSet.h>
 
 namespace JSC {
@@ -52,6 +53,7 @@ class CachedResource;
 class Document;
 class DocumentLoadTiming;
 class DocumentLoader;
+class EventCounts;
 class NetworkLoadMetrics;
 class PerformanceUserTiming;
 class PerformanceEntry;
@@ -65,11 +67,13 @@ class PerformanceTiming;
 class ResourceResponse;
 class ResourceTiming;
 class ScriptExecutionContext;
+enum class EventType : uint16_t;
 struct PerformanceMarkOptions;
 struct PerformanceMeasureOptions;
+template<typename> class ExceptionOr;
 
-class Performance final : public RefCounted<Performance>, public ContextDestructionObserver, public EventTargetWithInlineData {
-    WTF_MAKE_ISO_ALLOCATED(Performance);
+class Performance final : public RefCounted<Performance>, public ContextDestructionObserver, public EventTarget {
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(Performance);
 public:
     static Ref<Performance> create(ScriptExecutionContext* context, MonotonicTime timeOrigin) { return adoptRef(*new Performance(context, timeOrigin)); }
     ~Performance();
@@ -80,11 +84,16 @@ public:
 
     PerformanceNavigation* navigation();
     PerformanceTiming* timing();
+    EventCounts* eventCounts();
 
-    Vector<RefPtr<PerformanceEntry>> getEntries() const;
-    Vector<RefPtr<PerformanceEntry>> getEntriesByType(const String& entryType) const;
-    Vector<RefPtr<PerformanceEntry>> getEntriesByName(const String& name, const String& entryType) const;
-    void appendBufferedEntriesByType(const String& entryType, Vector<RefPtr<PerformanceEntry>>&, PerformanceObserver&) const;
+    unsigned interactionCount() { return 0; }
+
+    Vector<Ref<PerformanceEntry>> getEntries() const;
+    Vector<Ref<PerformanceEntry>> getEntriesByType(const String& entryType) const;
+    Vector<Ref<PerformanceEntry>> getEntriesByName(const String& name, const String& entryType) const;
+    void appendBufferedEntriesByType(const String& entryType, Vector<Ref<PerformanceEntry>>&, PerformanceObserver&) const;
+
+    void countEvent(EventType);
 
     void clearResourceTimings();
     void setResourceTimingBufferSize(unsigned);
@@ -92,7 +101,7 @@ public:
     ExceptionOr<Ref<PerformanceMark>> mark(JSC::JSGlobalObject&, const String& markName, std::optional<PerformanceMarkOptions>&&);
     void clearMarks(const String& markName);
 
-    using StartOrMeasureOptions = std::variant<String, PerformanceMeasureOptions>;
+    using StartOrMeasureOptions = Variant<String, PerformanceMeasureOptions>;
     ExceptionOr<Ref<PerformanceMeasure>> measure(JSC::JSGlobalObject&, const String& measureName, std::optional<StartOrMeasureOptions>&&, const String& endMark);
     void clearMeasures(const String& measureName);
 
@@ -107,11 +116,13 @@ public:
     void unregisterPerformanceObserver(PerformanceObserver&);
 
     static void allowHighPrecisionTime();
+    static Seconds timeResolution();
     static Seconds reduceTimeResolution(Seconds);
 
     DOMHighResTimeStamp relativeTimeFromTimeOriginInReducedResolution(MonotonicTime) const;
+    MonotonicTime monotonicTimeFromRelativeTime(DOMHighResTimeStamp) const;
 
-    ScriptExecutionContext* scriptExecutionContext() const final { return ContextDestructionObserver::scriptExecutionContext(); }
+    ScriptExecutionContext* scriptExecutionContext() const final;
 
     using RefCounted::ref;
     using RefCounted::deref;
@@ -125,7 +136,7 @@ private:
 
     void contextDestroyed() override;
 
-    EventTargetInterface eventTargetInterface() const final { return PerformanceEventTargetInterfaceType; }
+    enum EventTargetInterfaceType eventTargetInterface() const final { return EventTargetInterfaceType::Performance; }
 
     void refEventTarget() final { ref(); }
     void derefEventTarget() final { deref(); }
@@ -136,15 +147,16 @@ private:
     void queueEntry(PerformanceEntry&);
     void scheduleTaskIfNeeded();
 
+    const std::unique_ptr<EventCounts> m_eventCounts;
     mutable RefPtr<PerformanceNavigation> m_navigation;
     mutable RefPtr<PerformanceTiming> m_timing;
 
-    // https://w3c.github.io/resource-timing/#extensions-performance-interface recommends size of 150.
-    Vector<RefPtr<PerformanceEntry>> m_resourceTimingBuffer;
-    unsigned m_resourceTimingBufferSize { 150 };
+    // https://w3c.github.io/resource-timing/#sec-extensions-performance-interface recommends initial buffer size of 250.
+    Vector<Ref<PerformanceEntry>> m_resourceTimingBuffer;
+    unsigned m_resourceTimingBufferSize { 250 };
 
     Timer m_resourceTimingBufferFullTimer;
-    Vector<RefPtr<PerformanceEntry>> m_backupResourceTimingBuffer;
+    Vector<Ref<PerformanceEntry>> m_backupResourceTimingBuffer;
 
     // https://w3c.github.io/resource-timing/#dfn-resource-timing-buffer-full-flag
     bool m_resourceTimingBufferFullFlag { false };
@@ -152,6 +164,7 @@ private:
     bool m_hasScheduledTimingBufferDeliveryTask { false };
 
     MonotonicTime m_timeOrigin;
+    UNUSED_MEMBER_VARIABLE ContinuousTime m_continuousTimeOrigin;
 
     RefPtr<PerformanceNavigationTiming> m_navigationTiming;
     RefPtr<PerformancePaintTiming> m_firstContentfulPaint;

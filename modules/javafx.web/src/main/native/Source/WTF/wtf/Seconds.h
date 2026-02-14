@@ -32,6 +32,8 @@
 namespace WTF {
 
 class ApproximateTime;
+class ContinuousApproximateTime;
+class ContinuousTime;
 class MonotonicTime;
 class PrintStream;
 class TextStream;
@@ -39,7 +41,7 @@ class TimeWithDynamicClockType;
 class WallTime;
 
 class Seconds final {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(Seconds);
 public:
     constexpr Seconds() { }
 
@@ -57,11 +59,11 @@ public:
     constexpr double nanoseconds() const { return microseconds() * 1000; }
 
     // Keep in mind that Seconds is held in double. If the value is not in range of 53bit integer, the result may not be precise.
-    template<typename T> T minutesAs() const { static_assert(std::is_integral<T>::value, ""); return clampToAccepting64<T>(minutes()); }
-    template<typename T> T secondsAs() const { static_assert(std::is_integral<T>::value, ""); return clampToAccepting64<T>(seconds()); }
-    template<typename T> T millisecondsAs() const { static_assert(std::is_integral<T>::value, ""); return clampToAccepting64<T>(milliseconds()); }
-    template<typename T> T microsecondsAs() const { static_assert(std::is_integral<T>::value, ""); return clampToAccepting64<T>(microseconds()); }
-    template<typename T> T nanosecondsAs() const { static_assert(std::is_integral<T>::value, ""); return clampToAccepting64<T>(nanoseconds()); }
+    template<typename T> T minutesAs() const { static_assert(std::is_integral<T>::value); return clampToAccepting64<T>(minutes()); }
+    template<typename T> T secondsAs() const { static_assert(std::is_integral<T>::value); return clampToAccepting64<T>(seconds()); }
+    template<typename T> T millisecondsAs() const { static_assert(std::is_integral<T>::value); return clampToAccepting64<T>(milliseconds()); }
+    template<typename T> T microsecondsAs() const { static_assert(std::is_integral<T>::value); return clampToAccepting64<T>(microseconds()); }
+    template<typename T> T nanosecondsAs() const { static_assert(std::is_integral<T>::value); return clampToAccepting64<T>(nanoseconds()); }
 
     static constexpr Seconds fromMinutes(double minutes)
     {
@@ -97,6 +99,15 @@ public:
     {
         return Seconds(std::numeric_limits<double>::quiet_NaN());
     }
+
+    static constexpr Seconds highTimePrecision()
+    {
+        return Seconds::fromMicroseconds(20);
+    }
+
+    bool isNaN() const { return std::isnan(m_value); }
+    bool isInfinity() const { return std::isinf(m_value); }
+    bool isFinite() const { return std::isfinite(m_value); }
 
     explicit constexpr operator bool() const { return !!m_value; }
 
@@ -181,42 +192,18 @@ public:
     WTF_EXPORT_PRIVATE WallTime operator+(WallTime) const;
     WTF_EXPORT_PRIVATE MonotonicTime operator+(MonotonicTime) const;
     WTF_EXPORT_PRIVATE ApproximateTime operator+(ApproximateTime) const;
+    WTF_EXPORT_PRIVATE ContinuousTime operator+(ContinuousTime) const;
+    WTF_EXPORT_PRIVATE ContinuousApproximateTime operator+(ContinuousApproximateTime) const;
     WTF_EXPORT_PRIVATE TimeWithDynamicClockType operator+(const TimeWithDynamicClockType&) const;
 
     WTF_EXPORT_PRIVATE WallTime operator-(WallTime) const;
     WTF_EXPORT_PRIVATE MonotonicTime operator-(MonotonicTime) const;
     WTF_EXPORT_PRIVATE ApproximateTime operator-(ApproximateTime) const;
+    WTF_EXPORT_PRIVATE ContinuousTime operator-(ContinuousTime) const;
+    WTF_EXPORT_PRIVATE ContinuousApproximateTime operator-(ContinuousApproximateTime) const;
     WTF_EXPORT_PRIVATE TimeWithDynamicClockType operator-(const TimeWithDynamicClockType&) const;
 
-    constexpr bool operator==(Seconds other) const
-    {
-        return m_value == other.m_value;
-    }
-
-    constexpr bool operator!=(Seconds other) const
-    {
-        return m_value != other.m_value;
-    }
-
-    constexpr bool operator<(Seconds other) const
-    {
-        return m_value < other.m_value;
-    }
-
-    constexpr bool operator>(Seconds other) const
-    {
-        return m_value > other.m_value;
-    }
-
-    constexpr bool operator<=(Seconds other) const
-    {
-        return m_value <= other.m_value;
-    }
-
-    constexpr bool operator>=(Seconds other) const
-    {
-        return m_value >= other.m_value;
-    }
+    friend constexpr auto operator<=>(Seconds, Seconds) = default;
 
     WTF_EXPORT_PRIVATE void dump(PrintStream&) const;
 
@@ -225,34 +212,11 @@ public:
         return *this;
     }
 
-    template<class Encoder>
-    void encode(Encoder& encoder) const
+    constexpr Seconds reduceTimeResolution(Seconds resolution)
     {
-        encoder << m_value;
+        double reduced = std::floor(seconds() / resolution.seconds()) * resolution.seconds();
+        return Seconds(reduced);
     }
-
-    template<class Decoder>
-    static std::optional<Seconds> decode(Decoder& decoder)
-    {
-        std::optional<double> seconds;
-        decoder >> seconds;
-        if (!seconds)
-            return std::nullopt;
-        return Seconds(*seconds);
-    }
-
-    template<class Decoder>
-    static WARN_UNUSED_RETURN bool decode(Decoder& decoder, Seconds& seconds)
-    {
-        double value;
-        if (!decoder.decode(value))
-            return false;
-
-        seconds = Seconds(value);
-        return true;
-    }
-
-    struct MarkableTraits;
 
 private:
     double m_value { 0 };
@@ -260,10 +224,11 @@ private:
 
 WTF_EXPORT_PRIVATE void sleep(Seconds);
 
-struct Seconds::MarkableTraits {
+template<>
+struct MarkableTraits<Seconds> {
     static bool isEmptyValue(Seconds seconds)
     {
-        return std::isnan(seconds.value());
+        return seconds.isNaN();
     }
 
     static constexpr Seconds emptyValue()
@@ -274,62 +239,62 @@ struct Seconds::MarkableTraits {
 
 inline namespace seconds_literals {
 
-constexpr Seconds operator"" _min(long double minutes)
+constexpr Seconds operator""_min(long double minutes)
 {
     return Seconds::fromMinutes(minutes);
 }
 
-constexpr Seconds operator"" _h(long double hours)
+constexpr Seconds operator""_h(long double hours)
 {
     return Seconds::fromHours(hours);
 }
 
-constexpr Seconds operator"" _s(long double seconds)
+constexpr Seconds operator""_s(long double seconds)
 {
     return Seconds(seconds);
 }
 
-constexpr Seconds operator"" _ms(long double milliseconds)
+constexpr Seconds operator""_ms(long double milliseconds)
 {
     return Seconds::fromMilliseconds(milliseconds);
 }
 
-constexpr Seconds operator"" _us(long double microseconds)
+constexpr Seconds operator""_us(long double microseconds)
 {
     return Seconds::fromMicroseconds(microseconds);
 }
 
-constexpr Seconds operator"" _ns(long double nanoseconds)
+constexpr Seconds operator""_ns(long double nanoseconds)
 {
     return Seconds::fromNanoseconds(nanoseconds);
 }
 
-constexpr Seconds operator"" _min(unsigned long long minutes)
+constexpr Seconds operator""_min(unsigned long long minutes)
 {
     return Seconds::fromMinutes(minutes);
 }
 
-constexpr Seconds operator"" _h(unsigned long long hours)
+constexpr Seconds operator""_h(unsigned long long hours)
 {
     return Seconds::fromHours(hours);
 }
 
-constexpr Seconds operator"" _s(unsigned long long seconds)
+constexpr Seconds operator""_s(unsigned long long seconds)
 {
     return Seconds(seconds);
 }
 
-constexpr Seconds operator"" _ms(unsigned long long milliseconds)
+constexpr Seconds operator""_ms(unsigned long long milliseconds)
 {
     return Seconds::fromMilliseconds(milliseconds);
 }
 
-constexpr Seconds operator"" _us(unsigned long long microseconds)
+constexpr Seconds operator""_us(unsigned long long microseconds)
 {
     return Seconds::fromMicroseconds(microseconds);
 }
 
-constexpr Seconds operator"" _ns(unsigned long long nanoseconds)
+constexpr Seconds operator""_ns(unsigned long long nanoseconds)
 {
     return Seconds::fromNanoseconds(nanoseconds);
 }
@@ -351,25 +316,6 @@ WTF_EXPORT_PRIVATE TextStream& operator<<(TextStream&, Seconds);
 } // namespace WTF
 
 using WTF::sleep;
-
-namespace std {
-
-inline bool isnan(WTF::Seconds seconds)
-{
-    return std::isnan(seconds.value());
-}
-
-inline bool isinf(WTF::Seconds seconds)
-{
-    return std::isinf(seconds.value());
-}
-
-inline bool isfinite(WTF::Seconds seconds)
-{
-    return std::isfinite(seconds.value());
-}
-
-} // namespace std
 
 using namespace WTF::seconds_literals;
 using WTF::Seconds;

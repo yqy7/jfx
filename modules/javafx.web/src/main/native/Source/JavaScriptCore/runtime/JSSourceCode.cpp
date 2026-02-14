@@ -27,10 +27,11 @@
 #include "JSSourceCode.h"
 
 #include "JSCellInlines.h"
+#include "StructureInlines.h"
 
 namespace JSC {
 
-const ClassInfo JSSourceCode::s_info = { "JSSourceCode", nullptr, nullptr, nullptr, CREATE_METHOD_TABLE(JSSourceCode) };
+const ClassInfo JSSourceCode::s_info = { "JSSourceCode"_s, nullptr, nullptr, nullptr, CREATE_METHOD_TABLE(JSSourceCode) };
 
 void JSSourceCode::destroy(JSCell* cell)
 {

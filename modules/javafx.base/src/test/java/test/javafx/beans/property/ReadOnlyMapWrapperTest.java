@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,8 +31,8 @@ import test.javafx.beans.value.ChangeListenerMock;
 import javafx.beans.value.ObservableObjectValueStub;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableMap;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import javafx.beans.property.MapProperty;
@@ -40,7 +40,7 @@ import javafx.beans.property.ReadOnlyMapProperty;
 import javafx.beans.property.ReadOnlyMapWrapper;
 import javafx.beans.property.SimpleMapProperty;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class ReadOnlyMapWrapperTest {
 
@@ -56,14 +56,14 @@ public class ReadOnlyMapWrapperTest {
     private ChangeListenerMock<Object> internalChangeListener;
     private ChangeListenerMock<Object> publicChangeListener;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         property = new ReadOnlyMapWrapperMock();
         readOnlyProperty = property.getReadOnlyProperty();
         internalInvalidationListener = new InvalidationListenerMock();
         publicInvalidationListener = new InvalidationListenerMock();
-        internalChangeListener = new ChangeListenerMock<Object>(UNDEFINED);
-        publicChangeListener = new ChangeListenerMock<Object>(UNDEFINED);
+        internalChangeListener = new ChangeListenerMock<>(UNDEFINED);
+        publicChangeListener = new ChangeListenerMock<>(UNDEFINED);
     }
 
     private void attachInvalidationListeners() {
@@ -89,30 +89,30 @@ public class ReadOnlyMapWrapperTest {
 
     @Test
     public void testConstructor_NoArguments() {
-        final ReadOnlyMapWrapper<Object, Object> p1 = new ReadOnlyMapWrapper<Object, Object>();
+        final ReadOnlyMapWrapper<Object, Object> p1 = new ReadOnlyMapWrapper<>();
         assertEquals(DEFAULT, p1.get());
-        assertEquals((Object)DEFAULT, p1.getValue());
+        assertEquals(DEFAULT, p1.getValue());
         assertFalse(property.isBound());
         assertEquals(null, p1.getBean());
         assertEquals("", p1.getName());
         final ReadOnlyMapProperty<Object, Object> r1 = p1.getReadOnlyProperty();
         assertEquals(DEFAULT, r1.get());
-        assertEquals((Object)DEFAULT, r1.getValue());
+        assertEquals(DEFAULT, r1.getValue());
         assertEquals(null, r1.getBean());
         assertEquals("", r1.getName());
     }
 
     @Test
     public void testConstructor_InitialValue() {
-        final ReadOnlyMapWrapper<Object, Object> p1 = new ReadOnlyMapWrapper<Object, Object>(VALUE_1);
+        final ReadOnlyMapWrapper<Object, Object> p1 = new ReadOnlyMapWrapper<>(VALUE_1);
         assertEquals(VALUE_1, p1.get());
-        assertEquals((Object)VALUE_1, p1.getValue());
+        assertEquals(VALUE_1, p1.getValue());
         assertFalse(property.isBound());
         assertEquals(null, p1.getBean());
         assertEquals("", p1.getName());
         final ReadOnlyMapProperty<Object, Object> r1 = p1.getReadOnlyProperty();
         assertEquals(VALUE_1, r1.get());
-        assertEquals((Object)VALUE_1, r1.getValue());
+        assertEquals(VALUE_1, r1.getValue());
         assertEquals(null, r1.getBean());
         assertEquals("", r1.getName());
     }
@@ -121,15 +121,15 @@ public class ReadOnlyMapWrapperTest {
     public void testConstructor_Bean_Name() {
         final Object bean = new Object();
         final String name = "My name";
-        final ReadOnlyMapWrapper<Object, Object> p1 = new ReadOnlyMapWrapper<Object, Object>(bean, name);
+        final ReadOnlyMapWrapper<Object, Object> p1 = new ReadOnlyMapWrapper<>(bean, name);
         assertEquals(DEFAULT, p1.get());
-        assertEquals((Object)DEFAULT, p1.getValue());
+        assertEquals(DEFAULT, p1.getValue());
         assertFalse(property.isBound());
         assertEquals(bean, p1.getBean());
         assertEquals(name, p1.getName());
         final ReadOnlyMapProperty<Object, Object> r1 = p1.getReadOnlyProperty();
         assertEquals(DEFAULT, r1.get());
-        assertEquals((Object)DEFAULT, r1.getValue());
+        assertEquals(DEFAULT, r1.getValue());
         assertEquals(bean, r1.getBean());
         assertEquals(name, r1.getName());
     }
@@ -138,15 +138,15 @@ public class ReadOnlyMapWrapperTest {
     public void testConstructor_Bean_Name_InitialValue() {
         final Object bean = new Object();
         final String name = "My name";
-        final ReadOnlyMapWrapper<Object, Object> p1 = new ReadOnlyMapWrapper<Object, Object>(bean, name, VALUE_1);
+        final ReadOnlyMapWrapper<Object, Object> p1 = new ReadOnlyMapWrapper<>(bean, name, VALUE_1);
         assertEquals(VALUE_1, p1.get());
-        assertEquals((Object)VALUE_1, p1.getValue());
+        assertEquals(VALUE_1, p1.getValue());
         assertFalse(property.isBound());
         assertEquals(bean, p1.getBean());
         assertEquals(name, p1.getName());
         final ReadOnlyMapProperty<Object, Object> r1 = p1.getReadOnlyProperty();
         assertEquals(VALUE_1, r1.get());
-        assertEquals((Object)VALUE_1, r1.getValue());
+        assertEquals(VALUE_1, r1.getValue());
         assertEquals(bean, r1.getBean());
         assertEquals(name, r1.getName());
     }
@@ -319,17 +319,20 @@ public class ReadOnlyMapWrapperTest {
         publicChangeListener.check(readOnlyProperty, VALUE_2, VALUE_1, 2);
     }
 
-    @Test(expected=RuntimeException.class)
+    @Test
     public void testMapBoundValue() {
-        final MapProperty<Object, Object> v = new SimpleMapProperty<Object, Object>(VALUE_1);
-        property.bind(v);
-        property.set(VALUE_1);
+        assertThrows(RuntimeException.class, () -> {
+            final MapProperty<Object, Object> v = new SimpleMapProperty<>(VALUE_1);
+            property.bind(v);
+            property.set(VALUE_1);
+        });
     }
+
 
     @Test
     public void testLazyBind_primitive() {
         attachInvalidationListeners();
-        final ObservableObjectValueStub<ObservableMap<Object, Object>> v = new ObservableObjectValueStub<ObservableMap<Object, Object>>(VALUE_1);
+        final ObservableObjectValueStub<ObservableMap<Object, Object>> v = new ObservableObjectValueStub<>(VALUE_1);
 
         property.bind(v);
         assertEquals(VALUE_1, property.get());
@@ -369,7 +372,7 @@ public class ReadOnlyMapWrapperTest {
     @Test
     public void testInternalEagerBind_primitive() {
         attachInternalChangeListener();
-        final ObservableObjectValueStub<ObservableMap<Object, Object>> v = new ObservableObjectValueStub<ObservableMap<Object, Object>>(VALUE_1);
+        final ObservableObjectValueStub<ObservableMap<Object, Object>> v = new ObservableObjectValueStub<>(VALUE_1);
 
         property.bind(v);
         assertEquals(VALUE_1, property.get());
@@ -405,7 +408,7 @@ public class ReadOnlyMapWrapperTest {
     @Test
     public void testPublicEagerBind_primitive() {
         attachPublicChangeListener();
-        final ObservableObjectValueStub<ObservableMap<Object, Object>> v = new ObservableObjectValueStub<ObservableMap<Object, Object>>(VALUE_1);
+        final ObservableObjectValueStub<ObservableMap<Object, Object>> v = new ObservableObjectValueStub<>(VALUE_1);
 
         property.bind(v);
         assertEquals(VALUE_1, property.get());
@@ -441,7 +444,7 @@ public class ReadOnlyMapWrapperTest {
     @Test
     public void testLazyBind_generic() {
         attachInvalidationListeners();
-        final ObservableObjectValueStub<ObservableMap<Object, Object>> v = new ObservableObjectValueStub<ObservableMap<Object, Object>>(VALUE_1);
+        final ObservableObjectValueStub<ObservableMap<Object, Object>> v = new ObservableObjectValueStub<>(VALUE_1);
 
         property.bind(v);
         assertEquals(VALUE_1, property.get());
@@ -481,7 +484,7 @@ public class ReadOnlyMapWrapperTest {
     @Test
     public void testInternalEagerBind_generic() {
         attachInternalChangeListener();
-        final ObservableObjectValueStub<ObservableMap<Object, Object>> v = new ObservableObjectValueStub<ObservableMap<Object, Object>>(VALUE_1);
+        final ObservableObjectValueStub<ObservableMap<Object, Object>> v = new ObservableObjectValueStub<>(VALUE_1);
 
         property.bind(v);
         assertEquals(VALUE_1, property.get());
@@ -517,7 +520,7 @@ public class ReadOnlyMapWrapperTest {
     @Test
     public void testPublicEagerBind_generic() {
         attachPublicChangeListener();
-        final ObservableObjectValueStub<ObservableMap<Object, Object>> v = new ObservableObjectValueStub<ObservableMap<Object, Object>>(VALUE_1);
+        final ObservableObjectValueStub<ObservableMap<Object, Object>> v = new ObservableObjectValueStub<>(VALUE_1);
 
         property.bind(v);
         assertEquals(VALUE_1, property.get());
@@ -550,16 +553,19 @@ public class ReadOnlyMapWrapperTest {
         publicChangeListener.check(readOnlyProperty, VALUE_2, VALUE_1, 1);
     }
 
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testBindToNull() {
-        property.bind(null);
+        assertThrows(NullPointerException.class, () -> {
+            property.bind(null);
+        });
     }
+
 
     @Test
     public void testRebind() {
         attachInvalidationListeners();
-        final MapProperty<Object, Object> v1 = new SimpleMapProperty<Object, Object>(VALUE_1);
-        final MapProperty<Object, Object> v2 = new SimpleMapProperty<Object, Object>(VALUE_2);
+        final MapProperty<Object, Object> v1 = new SimpleMapProperty<>(VALUE_1);
+        final MapProperty<Object, Object> v2 = new SimpleMapProperty<>(VALUE_2);
         property.bind(v1);
         property.get();
         readOnlyProperty.get();
@@ -605,7 +611,7 @@ public class ReadOnlyMapWrapperTest {
     @Test
     public void testUnbind() {
         attachInvalidationListeners();
-        final MapProperty<Object, Object> v = new SimpleMapProperty<Object, Object>(VALUE_1);
+        final MapProperty<Object, Object> v = new SimpleMapProperty<>(VALUE_1);
         property.bind(v);
         property.unbind();
         assertEquals(VALUE_1, property.get());
@@ -634,7 +640,7 @@ public class ReadOnlyMapWrapperTest {
 
     @Test
     public void testAddingListenerWillAlwaysReceiveInvalidationEvent() {
-        final MapProperty<Object, Object> v = new SimpleMapProperty<Object, Object>(VALUE_1);
+        final MapProperty<Object, Object> v = new SimpleMapProperty<>(VALUE_1);
         final InvalidationListenerMock internalListener2 = new InvalidationListenerMock();
         final InvalidationListenerMock internalListener3 = new InvalidationListenerMock();
         final InvalidationListenerMock publicListener2 = new InvalidationListenerMock();
@@ -688,15 +694,15 @@ public class ReadOnlyMapWrapperTest {
         internalChangeListener.check(null, UNDEFINED, UNDEFINED, 0);
 
         // no read only property created => no-op
-        final ReadOnlyMapWrapper<Object, Object> v1 = new ReadOnlyMapWrapper<Object, Object>();
+        final ReadOnlyMapWrapper<Object, Object> v1 = new ReadOnlyMapWrapper<>();
         v1.removeListener(internalInvalidationListener);
         v1.removeListener(internalChangeListener);
     }
 
     @Test
     public void testNoReadOnlyPropertyCreated() {
-        final MapProperty<Object, Object> v1 = new SimpleMapProperty<Object, Object>(VALUE_1);
-        final ReadOnlyMapWrapper<Object, Object> p1 = new ReadOnlyMapWrapper<Object, Object>();
+        final MapProperty<Object, Object> v1 = new SimpleMapProperty<>(VALUE_1);
+        final ReadOnlyMapWrapper<Object, Object> p1 = new ReadOnlyMapWrapper<>();
 
         p1.set(VALUE_1);
         p1.bind(v1);
@@ -707,7 +713,7 @@ public class ReadOnlyMapWrapperTest {
 
     @Test
     public void testToString() {
-        final MapProperty<Object, Object> v1 = new SimpleMapProperty<Object, Object>(VALUE_1);
+        final MapProperty<Object, Object> v1 = new SimpleMapProperty<>(VALUE_1);
 
         property.set(VALUE_1);
         assertEquals("MapProperty [value: " + VALUE_1 + "]", property.toString());
@@ -728,15 +734,15 @@ public class ReadOnlyMapWrapperTest {
 
         final Object bean = new Object();
         final String name = "My name";
-        final ReadOnlyMapWrapper<Object, Object> v2 = new ReadOnlyMapWrapper<Object, Object>(bean, name);
+        final ReadOnlyMapWrapper<Object, Object> v2 = new ReadOnlyMapWrapper<>(bean, name);
         assertEquals("MapProperty [bean: " + bean.toString() + ", name: My name, value: " + DEFAULT + "]", v2.toString());
         assertEquals("ReadOnlyMapProperty [bean: " + bean.toString() + ", name: My name, value: " + DEFAULT + "]", v2.getReadOnlyProperty().toString());
 
-        final ReadOnlyMapWrapper<Object, Object> v3 = new ReadOnlyMapWrapper<Object, Object>(bean, "");
+        final ReadOnlyMapWrapper<Object, Object> v3 = new ReadOnlyMapWrapper<>(bean, "");
         assertEquals("MapProperty [bean: " + bean.toString() + ", value: " + DEFAULT + "]", v3.toString());
         assertEquals("ReadOnlyMapProperty [bean: " + bean.toString() + ", value: " + DEFAULT + "]", v3.getReadOnlyProperty().toString());
 
-        final ReadOnlyMapWrapper<Object, Object> v4 = new ReadOnlyMapWrapper<Object, Object>(null, name);
+        final ReadOnlyMapWrapper<Object, Object> v4 = new ReadOnlyMapWrapper<>(null, name);
         assertEquals("MapProperty [name: My name, value: " + DEFAULT + "]", v4.toString());
         assertEquals("ReadOnlyMapProperty [name: My name, value: " + DEFAULT + "]", v4.getReadOnlyProperty().toString());
     }

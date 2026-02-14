@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,14 +26,18 @@
 package test.javafx.concurrent;
 
 import javafx.concurrent.Task;
+import javafx.concurrent.Worker;
 import test.javafx.concurrent.mocks.EpicFailTask;
 import test.javafx.concurrent.mocks.InfiniteTask;
 import test.javafx.concurrent.mocks.RunAwayTask;
 import test.javafx.concurrent.mocks.SimpleTask;
-import org.junit.Before;
-import org.junit.Test;
 
-import static org.junit.Assert.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests what happens to a Task if it is canceled in each of the various
@@ -47,7 +51,8 @@ public class TaskCancelTest {
      */
     private InfiniteTask task;
 
-    @Before public void setup() {
+    @BeforeEach
+    public void setup() {
         task = new InfiniteTask();
     }
 
@@ -55,9 +60,10 @@ public class TaskCancelTest {
      * Since the task begins in the ready state, I can just cancel it and
      * see what happens.
      */
-    @Test public void cancellingA_READY_TaskShouldChangeStateTo_CANCELLED() {
+    @Test
+    public void cancellingA_READY_TaskShouldChangeStateTo_CANCELLED() {
         assertTrue(task.cancel());
-        assertEquals(Task.State.CANCELLED, task.getState());
+        assertEquals(Worker.State.CANCELLED, task.getState());
         assertTrue(task.isDone());
     }
 
@@ -66,10 +72,11 @@ public class TaskCancelTest {
      * (it just changes the Task state correctly). So put it in the
      * Scheduled state and then cancel it and see what happens.
      */
-    @Test public void cancellingA_SCHEDULED_TaskShouldChangeStateTo_CANCELLED() {
+    @Test
+    public void cancellingA_SCHEDULED_TaskShouldChangeStateTo_CANCELLED() {
         task.simulateSchedule();
         assertTrue(task.cancel());
-        assertEquals(Task.State.CANCELLED, task.getState());
+        assertEquals(Worker.State.CANCELLED, task.getState());
         assertTrue(task.isDone());
     }
 
@@ -83,14 +90,15 @@ public class TaskCancelTest {
      *
      * @throws Exception shouldn't throw anything unless th.join fails
      */
-    @Test public void cancellingA_RUNNING_TaskShouldChangeStateTo_CANCELLED() throws Exception {
+    @Test
+    public void cancellingA_RUNNING_TaskShouldChangeStateTo_CANCELLED() throws Exception {
         Thread th = new Thread(task);
         th.start();
         task.runningSemaphore.acquire();
         assertTrue(task.cancel());
         th.join();
 
-        assertEquals(Task.State.CANCELLED, task.getState());
+        assertEquals(Worker.State.CANCELLED, task.getState());
         // TODO why is this commented out?
 //        assertNull(task.getException());
         assertNull(task.getValue());
@@ -101,11 +109,12 @@ public class TaskCancelTest {
      * In this case I don't want to use the infinite task, so I'll just
      * use a SimpleTask instead
      */
-    @Test public void cancellingA_SUCCEEDED_TaskShouldNotChangeTo_CANCELLED() {
+    @Test
+    public void cancellingA_SUCCEEDED_TaskShouldNotChangeTo_CANCELLED() {
         Task t = new SimpleTask();
         t.run();
         assertFalse(t.cancel());
-        assertEquals(Task.State.SUCCEEDED, t.getState());
+        assertEquals(Worker.State.SUCCEEDED, t.getState());
         assertTrue(t.isDone());
     }
 
@@ -113,19 +122,22 @@ public class TaskCancelTest {
      * Although I could end up using the infinite task for this one, I'm going
      * to go ahead and reuse the epic fail task instead
      */
-    @Test public void cancellingA_FAILED_TaskShouldNotChangeTo_CANCELLED() {
+    @Test
+    public void cancellingA_FAILED_TaskShouldNotChangeTo_CANCELLED() {
         Task t = new EpicFailTask();
         t.run();
         assertFalse(t.cancel());
-        assertEquals(Task.State.FAILED, t.getState());
+        assertEquals(Worker.State.FAILED, t.getState());
         assertTrue(t.isDone());
     }
 
     /**
      *
      */
-    @Test public void aFreeRunningCancelledTaskReturnValueShouldBeIgnored() throws Exception {
+    @Test
+    public void aFreeRunningCancelledTaskReturnValueShouldBeIgnored() throws Exception {
         RunAwayTask runAway = new RunAwayTask() {
+                @Override
                 protected void loop(int count) throws Exception {
                 }
         };
@@ -136,7 +148,7 @@ public class TaskCancelTest {
         runAway.stopLooping.set(true);
         th.join();
 
-        assertEquals(Task.State.CANCELLED, runAway.getState());
+        assertEquals(Worker.State.CANCELLED, runAway.getState());
         // TODO why is this commented out?
 //        assertNull(task.getException());
         assertNull(runAway.getValue());

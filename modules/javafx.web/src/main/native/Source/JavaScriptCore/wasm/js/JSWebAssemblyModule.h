@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,8 +30,8 @@
 #include "CallLinkInfo.h"
 #include "JSDestructibleObject.h"
 #include "JSObject.h"
-#include "WasmMemoryMode.h"
-#include "WasmOps.h"
+#include "MemoryMode.h"
+#include "WasmFormat.h"
 #include <wtf/Bag.h>
 #include <wtf/Expected.h>
 #include <wtf/Forward.h>
@@ -44,17 +44,15 @@ namespace Wasm {
 class Module;
 struct ModuleInformation;
 class Plan;
-enum class BindingFailure;
 }
 
 class JSWebAssemblyMemory;
-class OptimizingCallLinkInfo;
 class SymbolTable;
 
 class JSWebAssemblyModule final : public JSNonFinalObject {
 public:
     using Base = JSNonFinalObject;
-    static constexpr bool needsDestruction = true;
+    static constexpr DestructionMode needsDestruction = NeedsDestruction;
     static void destroy(JSCell*);
 
     template<typename CellType, SubspaceAccess mode>
@@ -65,30 +63,23 @@ public:
 
     DECLARE_EXPORT_INFO;
 
-    JS_EXPORT_PRIVATE static JSWebAssemblyModule* createStub(VM&, JSGlobalObject*, Structure*, Expected<RefPtr<Wasm::Module>, String>&&);
+    DECLARE_VISIT_CHILDREN;
+
+    JS_EXPORT_PRIVATE static JSWebAssemblyModule* create(VM&, Structure*, Ref<Wasm::Module>&&);
     static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
     const Wasm::ModuleInformation& moduleInformation() const;
     SymbolTable* exportSymbolTable() const;
-    Wasm::SignatureIndex signatureIndexFromFunctionIndexSpace(unsigned functionIndexSpace) const;
-
-    Expected<void, Wasm::BindingFailure> generateWasmToJSStubs(VM&);
-    MacroAssemblerCodePtr<WasmEntryPtrTag> wasmToEmbedderStub(size_t importFunctionNum) { return m_wasmToJSExitStubs[importFunctionNum].code(); }
-
-    void clearJSCallICs(VM&);
-    void finalizeUnconditionally(VM&);
+    Wasm::TypeIndex typeIndexFromFunctionIndexSpace(Wasm::FunctionSpaceIndex functionIndexSpace) const;
 
     JS_EXPORT_PRIVATE Wasm::Module& module();
 
 private:
     JSWebAssemblyModule(VM&, Structure*, Ref<Wasm::Module>&&);
     void finishCreation(VM&);
-    DECLARE_VISIT_CHILDREN;
 
-    Ref<Wasm::Module> m_module;
+    const Ref<Wasm::Module> m_module;
     WriteBarrier<SymbolTable> m_exportSymbolTable;
-    FixedVector<MacroAssemblerCodeRef<WasmEntryPtrTag>> m_wasmToJSExitStubs;
-    Bag<OptimizingCallLinkInfo> m_callLinkInfos;
 };
 
 } // namespace JSC

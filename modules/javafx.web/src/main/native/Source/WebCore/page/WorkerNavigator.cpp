@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,7 +27,21 @@
 #include "config.h"
 #include "WorkerNavigator.h"
 
+#include "Chrome.h"
+#include "GPU.h"
+#include "JSDOMPromiseDeferred.h"
+#include "Page.h"
+#include "PushEvent.h"
+#include "ServiceWorkerGlobalScope.h"
+#include "WorkerBadgeProxy.h"
+#include "WorkerGlobalScope.h"
+#include "WorkerThread.h"
+#include <wtf/TZoneMallocInlines.h>
+#include "NavigatorUAData.h"
+
 namespace WebCore {
+
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(WorkerNavigator);
 
 WorkerNavigator::WorkerNavigator(ScriptExecutionContext& context, const String& userAgent, bool isOnline)
     : NavigatorBase(&context)
@@ -35,6 +49,8 @@ WorkerNavigator::WorkerNavigator(ScriptExecutionContext& context, const String& 
     , m_isOnline(isOnline)
 {
 }
+
+WorkerNavigator::~WorkerNavigator() = default;
 
 const String& WorkerNavigator::userAgent() const
 {
@@ -48,8 +64,67 @@ bool WorkerNavigator::onLine() const
 
 GPU* WorkerNavigator::gpu()
 {
-    // FIXME: https://bugs.webkit.org/show_bug.cgi?id=233622 Implement this.
+#if HAVE(WEBGPU_IMPLEMENTATION)
+    if (!m_gpuForWebGPU) {
+        Ref context = downcast<WorkerGlobalScope>(*this->scriptExecutionContext());
+        if (!context->graphicsClient())
     return nullptr;
+
+        RefPtr gpu = context->graphicsClient()->createGPUForWebGPU();
+            if (!gpu)
+                return nullptr;
+
+            m_gpuForWebGPU = GPU::create(*gpu);
+        }
+
+    return m_gpuForWebGPU.get();
+#else
+    return nullptr;
+#endif
 }
+
+void WorkerNavigator::setAppBadge(std::optional<unsigned long long> badge, Ref<DeferredPromise>&& promise)
+{
+#if ENABLE(DECLARATIVE_WEB_PUSH)
+    if (RefPtr context = dynamicDowncast<ServiceWorkerGlobalScope>(scriptExecutionContext())) {
+        if (RefPtr declarativePushEvent = context->declarativePushEvent()) {
+            declarativePushEvent->setUpdatedAppBadge(WTFMove(badge));
+            return;
+        }
+    }
+#endif // ENABLE(DECLARATIVE_WEB_PUSH)
+
+    RefPtr scope = downcast<WorkerGlobalScope>(scriptExecutionContext());
+    if (!scope) {
+        promise->reject(ExceptionCode::InvalidStateError);
+        return;
+    }
+
+    if (auto* workerBadgeProxy = scope->thread().workerBadgeProxy())
+        workerBadgeProxy->setAppBadge(badge);
+    promise->resolve();
+}
+
+void WorkerNavigator::clearAppBadge(Ref<DeferredPromise>&& promise)
+{
+    setAppBadge(0, WTFMove(promise));
+}
+
+void WorkerNavigator::initializeNavigatorUAData() const
+{
+    if (m_navigatorUAData)
+        return;
+
+    // FIXME(296489): populate the data structure
+    return;
+}
+
+NavigatorUAData& WorkerNavigator::userAgentData() const
+{
+    if (!m_navigatorUAData)
+        initializeNavigatorUAData();
+
+    return *m_navigatorUAData;
+};
 
 } // namespace WebCore

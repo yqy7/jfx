@@ -20,18 +20,23 @@
 
 #pragma once
 
-#include "ExceptionOr.h"
 #include "SVGPropertyTraits.h"
+#include <wtf/TZoneMalloc.h>
+
+namespace IPC {
+template<typename T, typename> struct ArgumentCoder;
+}
 
 namespace WebCore {
 
 class AffineTransform;
 class FloatRect;
+template<typename> class ExceptionOr;
 
 class SVGPreserveAspectRatioValue {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(SVGPreserveAspectRatioValue);
 public:
-    enum SVGPreserveAspectRatioType {
+    enum SVGPreserveAspectRatioType : uint8_t {
         SVG_PRESERVEASPECTRATIO_UNKNOWN = 0,
         SVG_PRESERVEASPECTRATIO_NONE = 1,
         SVG_PRESERVEASPECTRATIO_XMINYMIN = 2,
@@ -45,7 +50,7 @@ public:
         SVG_PRESERVEASPECTRATIO_XMAXYMAX = 10
     };
 
-    enum SVGMeetOrSliceType {
+    enum SVGMeetOrSliceType : uint8_t {
         SVG_MEETORSLICE_UNKNOWN = 0,
         SVG_MEETORSLICE_MEET = 1,
         SVG_MEETORSLICE_SLICE = 2
@@ -54,6 +59,8 @@ public:
     SVGPreserveAspectRatioValue() = default;
     SVGPreserveAspectRatioValue(StringView);
     WEBCORE_EXPORT SVGPreserveAspectRatioValue(SVGPreserveAspectRatioType, SVGMeetOrSliceType);
+
+    bool operator==(const SVGPreserveAspectRatioValue&) const = default;
 
     ExceptionOr<void> setAlign(unsigned short);
     unsigned short align() const { return m_align; }
@@ -67,16 +74,14 @@ public:
 
     bool parse(StringView);
     bool parse(StringParsingBuffer<LChar>&, bool validate);
-    bool parse(StringParsingBuffer<UChar>&, bool validate);
+    bool parse(StringParsingBuffer<char16_t>&, bool validate);
 
     String valueAsString() const;
 
-    template<class Encoder> void encode(Encoder&) const;
-    template<class Decoder> static std::optional<SVGPreserveAspectRatioValue> decode(Decoder&);
-
 private:
-    SVGPreserveAspectRatioType m_align { SVG_PRESERVEASPECTRATIO_XMIDYMID };
-    SVGMeetOrSliceType m_meetOrSlice { SVG_MEETORSLICE_MEET };
+    friend struct IPC::ArgumentCoder<SVGPreserveAspectRatioValue, void>;
+    SVGPreserveAspectRatioType m_align { SVGPreserveAspectRatioValue::SVG_PRESERVEASPECTRATIO_XMIDYMID };
+    SVGMeetOrSliceType m_meetOrSlice { SVGPreserveAspectRatioValue::SVG_MEETORSLICE_MEET };
 
     template<typename CharacterType> bool parseInternal(StringParsingBuffer<CharacterType>&, bool validate);
 };
@@ -88,59 +93,4 @@ template<> struct SVGPropertyTraits<SVGPreserveAspectRatioValue> {
     static String toString(const SVGPreserveAspectRatioValue& type) { return type.valueAsString(); }
 };
 
-template<class Encoder>
-void SVGPreserveAspectRatioValue::encode(Encoder& encoder) const
-{
-    encoder << m_align;
-    encoder << m_meetOrSlice;
-}
-
-template<class Decoder>
-std::optional<SVGPreserveAspectRatioValue> SVGPreserveAspectRatioValue::decode(Decoder& decoder)
-{
-    std::optional<SVGPreserveAspectRatioType> align;
-    decoder >> align;
-    if (!align)
-        return std::nullopt;
-
-    std::optional<SVGMeetOrSliceType> meetOrSlice;
-    decoder >> meetOrSlice;
-    if (!meetOrSlice)
-        return std::nullopt;
-
-    return SVGPreserveAspectRatioValue(*align, *meetOrSlice);
-}
-
 } // namespace WebCore
-
-namespace WTF {
-
-template<> struct EnumTraits<WebCore::SVGPreserveAspectRatioValue::SVGPreserveAspectRatioType> {
-    using values = EnumValues<
-        WebCore::SVGPreserveAspectRatioValue::SVGPreserveAspectRatioType,
-
-        WebCore::SVGPreserveAspectRatioValue::SVG_PRESERVEASPECTRATIO_UNKNOWN,
-        WebCore::SVGPreserveAspectRatioValue::SVG_PRESERVEASPECTRATIO_NONE,
-        WebCore::SVGPreserveAspectRatioValue::SVG_PRESERVEASPECTRATIO_XMINYMIN,
-        WebCore::SVGPreserveAspectRatioValue::SVG_PRESERVEASPECTRATIO_XMIDYMIN,
-        WebCore::SVGPreserveAspectRatioValue::SVG_PRESERVEASPECTRATIO_XMAXYMIN,
-        WebCore::SVGPreserveAspectRatioValue::SVG_PRESERVEASPECTRATIO_XMINYMID,
-        WebCore::SVGPreserveAspectRatioValue::SVG_PRESERVEASPECTRATIO_XMIDYMID,
-        WebCore::SVGPreserveAspectRatioValue::SVG_PRESERVEASPECTRATIO_XMAXYMID,
-        WebCore::SVGPreserveAspectRatioValue::SVG_PRESERVEASPECTRATIO_XMINYMAX,
-        WebCore::SVGPreserveAspectRatioValue::SVG_PRESERVEASPECTRATIO_XMIDYMAX,
-        WebCore::SVGPreserveAspectRatioValue::SVG_PRESERVEASPECTRATIO_XMAXYMAX
-    >;
-};
-
-template<> struct EnumTraits<WebCore::SVGPreserveAspectRatioValue::SVGMeetOrSliceType> {
-    using values = EnumValues<
-        WebCore::SVGPreserveAspectRatioValue::SVGMeetOrSliceType,
-
-        WebCore::SVGPreserveAspectRatioValue::SVG_MEETORSLICE_UNKNOWN,
-        WebCore::SVGPreserveAspectRatioValue::SVG_MEETORSLICE_MEET,
-        WebCore::SVGPreserveAspectRatioValue::SVG_MEETORSLICE_SLICE
-    >;
-};
-
-} // namespace WTF

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,7 +32,6 @@
 #include "DocumentLoader.h"
 #include "EventNames.h"
 #include "FrameLoader.h"
-#include "FrameLoaderClient.h"
 #include "HTMLBodyElement.h"
 #include "HTMLHeadElement.h"
 #include "HTMLHtmlElement.h"
@@ -41,13 +40,16 @@
 #include "HTMLNames.h"
 #include "HTMLSourceElement.h"
 #include "HTMLStyleElement.h"
+#include "LocalFrame.h"
+#include "LocalFrameLoaderClient.h"
 #include "RawDataDocumentParser.h"
-#include <wtf/IsoMallocInlines.h>
+#include "UserScriptTypes.h"
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(ModelDocument);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(ModelDocument);
 
 using namespace HTMLNames;
 
@@ -67,10 +69,10 @@ private:
 
     void createDocumentStructure();
 
-    void appendBytes(DocumentWriter&, const uint8_t*, size_t) final;
+    void appendBytes(DocumentWriter&, std::span<const uint8_t>) final;
     void finish() final;
 
-    WeakPtr<HTMLModelElement> m_modelElement;
+    WeakPtr<HTMLModelElement, WeakPtrImplWithEventTargetData> m_modelElement;
     String m_outgoingReferrer;
 };
 
@@ -81,7 +83,6 @@ void ModelDocumentParser::createDocumentStructure()
     auto rootElement = HTMLHtmlElement::create(document);
     document.appendChild(rootElement);
     document.setCSSTarget(rootElement.ptr());
-    rootElement->insertedByParser();
 
     if (document.frame())
         document.frame()->injectUserScripts(UserScriptInjectionTime::DocumentStart);
@@ -90,8 +91,8 @@ void ModelDocumentParser::createDocumentStructure()
     rootElement->appendChild(headElement);
 
     auto metaElement = HTMLMetaElement::create(document);
-    metaElement->setAttributeWithoutSynchronization(nameAttr, AtomString("viewport", AtomString::ConstructFromLiteral));
-    metaElement->setAttributeWithoutSynchronization(contentAttr, AtomString("width=device-width,initial-scale=1", AtomString::ConstructFromLiteral));
+    metaElement->setAttributeWithoutSynchronization(nameAttr, "viewport"_s);
+    metaElement->setAttributeWithoutSynchronization(contentAttr, "width=device-width,initial-scale=1"_s);
     headElement->appendChild(metaElement);
 
     auto styleElement = HTMLStyleElement::create(document);
@@ -109,9 +110,9 @@ void ModelDocumentParser::createDocumentStructure()
     modelElement->setAttributeWithoutSynchronization(interactiveAttr, emptyAtom());
 
     auto sourceElement = HTMLSourceElement::create(HTMLNames::sourceTag, document);
-    sourceElement->setAttributeWithoutSynchronization(srcAttr, document.url().string());
+    sourceElement->setAttributeWithoutSynchronization(srcAttr, AtomString { document.url().string() });
     if (RefPtr loader = document.loader())
-        sourceElement->setAttributeWithoutSynchronization(typeAttr, loader->responseMIMEType());
+        sourceElement->setAttributeWithoutSynchronization(typeAttr, AtomString { loader->responseMIMEType() });
 
     modelElement->appendChild(sourceElement);
 
@@ -126,7 +127,7 @@ void ModelDocumentParser::createDocumentStructure()
     frame->loader().setOutgoingReferrer(document.completeURL(m_outgoingReferrer));
 }
 
-void ModelDocumentParser::appendBytes(DocumentWriter&, const uint8_t*, size_t)
+void ModelDocumentParser::appendBytes(DocumentWriter&, std::span<const uint8_t>)
 {
     if (!m_modelElement)
         createDocumentStructure();
@@ -137,7 +138,7 @@ void ModelDocumentParser::finish()
     document()->finishedParsing();
 }
 
-ModelDocument::ModelDocument(Frame* frame, const Settings& settings, const URL& url)
+ModelDocument::ModelDocument(LocalFrame* frame, const Settings& settings, const URL& url)
     : HTMLDocument(frame, settings, url, { }, { DocumentClass::Model })
 {
     if (frame)

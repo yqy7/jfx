@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,17 +32,16 @@ import javafx.beans.value.ObservableValue;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableMap;
 import javafx.collections.MapChangeListener;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
-import java.util.HashMap;
 import javafx.beans.property.MapProperty;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyIntegerProperty;
 import javafx.beans.property.SimpleMapProperty;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class MapPropertyTest {
 
@@ -55,8 +54,8 @@ public class MapPropertyTest {
 
     @Test
     public void testBindBidirectional() {
-        final MapProperty<Object, Object> p1 = new SimpleMapProperty<Object, Object>(VALUE_2);
-        final MapProperty<Object, Object> p2 = new SimpleMapProperty<Object, Object>(VALUE_1);
+        final MapProperty<Object, Object> p1 = new SimpleMapProperty<>(VALUE_2);
+        final MapProperty<Object, Object> p2 = new SimpleMapProperty<>(VALUE_1);
 
         p1.bindBidirectional(p2);
         assertEquals(VALUE_1, p1.get());

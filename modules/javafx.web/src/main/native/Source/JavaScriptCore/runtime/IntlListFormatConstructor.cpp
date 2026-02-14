@@ -42,7 +42,7 @@ static JSC_DECLARE_HOST_FUNCTION(intlListFormatConstructorSupportedLocalesOf);
 
 namespace JSC {
 
-const ClassInfo IntlListFormatConstructor::s_info = { "Function", &Base::s_info, &listFormatConstructorTable, nullptr, CREATE_METHOD_TABLE(IntlListFormatConstructor) };
+const ClassInfo IntlListFormatConstructor::s_info = { "Function"_s, &Base::s_info, &listFormatConstructorTable, nullptr, CREATE_METHOD_TABLE(IntlListFormatConstructor) };
 
 /* Source for IntlListFormatConstructor.lut.h
 @begin listFormatConstructorTable
@@ -101,7 +101,7 @@ JSC_DEFINE_HOST_FUNCTION(callIntlListFormat, (JSGlobalObject* globalObject, Call
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "ListFormat"));
+    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "ListFormat"_s));
 }
 
 JSC_DEFINE_HOST_FUNCTION(intlListFormatConstructorSupportedLocalesOf, (JSGlobalObject* globalObject, CallFrame* callFrame))

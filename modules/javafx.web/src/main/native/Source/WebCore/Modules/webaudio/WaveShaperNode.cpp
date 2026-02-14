@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011, Google Inc. All rights reserved.
+ * Copyright (C) 2011 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,22 +28,25 @@
 #if ENABLE(WEB_AUDIO)
 
 #include "AudioContext.h"
+#include "ExceptionCode.h"
+#include "ExceptionOr.h"
 #include <JavaScriptCore/JSCInlines.h>
 #include <JavaScriptCore/TypedArrayInlines.h>
-#include <wtf/IsoMallocInlines.h>
+#include <JavaScriptCore/TypedArrays.h>
 #include <wtf/MainThread.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(WaveShaperNode);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(WaveShaperNode);
 
 ExceptionOr<Ref<WaveShaperNode>> WaveShaperNode::create(BaseAudioContext& context, const WaveShaperOptions& options)
 {
     RefPtr<Float32Array> curve;
     if (options.curve) {
-        curve = Float32Array::tryCreate(options.curve->data(), options.curve->size());
+        curve = Float32Array::tryCreate(options.curve->span());
         if (!curve)
-            return Exception { InvalidStateError, "Invalid curve parameter" };
+            return Exception { ExceptionCode::InvalidStateError, "Invalid curve parameter"_s };
     }
 
     auto node = adoptRef(*new WaveShaperNode(context));
@@ -76,7 +79,7 @@ ExceptionOr<void> WaveShaperNode::setCurveForBindings(RefPtr<Float32Array>&& cur
     ASSERT(isMainThread());
     DEBUG_LOG(LOGIDENTIFIER);
     if (curve && curve->length() < 2)
-        return Exception { InvalidStateError, "Length of curve array cannot be less than 2" };
+        return Exception { ExceptionCode::InvalidStateError, "Length of curve array cannot be less than 2"_s };
 
     if (curve) {
         // The specification states that we should maintain an internal copy of the curve so that
@@ -89,10 +92,16 @@ ExceptionOr<void> WaveShaperNode::setCurveForBindings(RefPtr<Float32Array>&& cur
     return { };
 }
 
-Float32Array* WaveShaperNode::curveForBindings()
+RefPtr<Float32Array> WaveShaperNode::curveForBindings()
 {
     ASSERT(isMainThread());
-    return waveShaperProcessor()->curveForBindings();
+    RefPtr curve = waveShaperProcessor()->curveForBindings();
+    if (!curve)
+        return nullptr;
+
+    // Make a clone of our internal array so that JS cannot modify our internal array
+    // on the main thread while the audio thread is using it for rendering.
+    return Float32Array::create(curve->data(), curve->length());
 }
 
 static inline WaveShaperProcessor::OverSampleType processorType(OverSampleType type)
@@ -140,7 +149,7 @@ bool WaveShaperNode::propagatesSilence() const
         return false;
 
     Locker locker { AdoptLock, waveShaperProcessor()->processLock() };
-    auto curve = waveShaperProcessor()->curve();
+    RefPtr curve = waveShaperProcessor()->curve();
     return !curve || !curve->length();
 }
 

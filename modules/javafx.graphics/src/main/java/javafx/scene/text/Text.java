@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,44 +25,13 @@
 
 package javafx.scene.text;
 
-import javafx.css.converter.BooleanConverter;
-import javafx.css.converter.EnumConverter;
-import javafx.css.converter.SizeConverter;
-import com.sun.javafx.geom.BaseBounds;
-import com.sun.javafx.geom.Path2D;
-import com.sun.javafx.geom.RectBounds;
-import com.sun.javafx.geom.TransformedShape;
-import com.sun.javafx.geom.transform.BaseTransform;
-import com.sun.javafx.scene.DirtyBits;
-import com.sun.javafx.scene.NodeHelper;
-import com.sun.javafx.scene.shape.ShapeHelper;
-import com.sun.javafx.scene.shape.TextHelper;
-import com.sun.javafx.scene.text.GlyphList;
-import com.sun.javafx.scene.text.TextLayout;
-import com.sun.javafx.scene.text.TextLayoutFactory;
-import com.sun.javafx.scene.text.TextLine;
-import com.sun.javafx.scene.text.TextSpan;
-import com.sun.javafx.sg.prism.NGNode;
-import com.sun.javafx.sg.prism.NGShape;
-import com.sun.javafx.sg.prism.NGText;
-import com.sun.javafx.scene.text.FontHelper;
-import com.sun.javafx.tk.Toolkit;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import javafx.beans.DefaultProperty;
 import javafx.beans.InvalidationListener;
 import javafx.beans.binding.DoubleBinding;
 import javafx.beans.binding.ObjectBinding;
-import javafx.scene.AccessibleAttribute;
-import javafx.scene.AccessibleRole;
-import javafx.scene.paint.Color;
-import javafx.scene.paint.Paint;
-import javafx.scene.shape.LineTo;
-import javafx.scene.shape.MoveTo;
-import javafx.scene.shape.PathElement;
-import javafx.scene.shape.Shape;
-import javafx.scene.shape.StrokeType;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.DoubleProperty;
 import javafx.beans.property.DoublePropertyBase;
@@ -85,12 +54,46 @@ import javafx.css.StyleableDoubleProperty;
 import javafx.css.StyleableIntegerProperty;
 import javafx.css.StyleableObjectProperty;
 import javafx.css.StyleableProperty;
+import javafx.css.converter.BooleanConverter;
+import javafx.css.converter.EnumConverter;
+import javafx.css.converter.SizeConverter;
 import javafx.geometry.BoundingBox;
 import javafx.geometry.Bounds;
 import javafx.geometry.NodeOrientation;
 import javafx.geometry.Point2D;
 import javafx.geometry.VPos;
+import javafx.scene.AccessibleAttribute;
+import javafx.scene.AccessibleRole;
 import javafx.scene.Node;
+import javafx.scene.layout.Region;
+import javafx.scene.paint.Color;
+import javafx.scene.paint.Paint;
+import javafx.scene.shape.LineTo;
+import javafx.scene.shape.MoveTo;
+import javafx.scene.shape.PathElement;
+import javafx.scene.shape.Shape;
+import javafx.scene.shape.StrokeType;
+import com.sun.javafx.geom.BaseBounds;
+import com.sun.javafx.geom.Path2D;
+import com.sun.javafx.geom.RectBounds;
+import com.sun.javafx.geom.TransformedShape;
+import com.sun.javafx.geom.transform.BaseTransform;
+import com.sun.javafx.scene.DirtyBits;
+import com.sun.javafx.scene.NodeHelper;
+import com.sun.javafx.scene.shape.ShapeHelper;
+import com.sun.javafx.scene.shape.TextHelper;
+import com.sun.javafx.scene.text.FontHelper;
+import com.sun.javafx.scene.text.GlyphList;
+import com.sun.javafx.scene.text.TextLayout;
+import com.sun.javafx.scene.text.TextLayoutFactory;
+import com.sun.javafx.scene.text.TextLine;
+import com.sun.javafx.scene.text.TextSpan;
+import com.sun.javafx.sg.prism.NGNode;
+import com.sun.javafx.sg.prism.NGShape;
+import com.sun.javafx.sg.prism.NGText;
+import com.sun.javafx.text.PrismLayoutInfo;
+import com.sun.javafx.text.TextUtils;
+import com.sun.javafx.tk.Toolkit;
 
 /**
  * The {@code Text} class defines a node that displays a text.
@@ -125,7 +128,7 @@ text.setText("The quick brown fox jumps over the lazy dog");
  * @since JavaFX 2.0
  */
 @DefaultProperty("text")
-public class Text extends Shape {
+public non-sealed class Text extends Shape {
     static {
         TextHelper.setTextAccessor(new TextHelper.TextAccessor() {
             @Override
@@ -162,6 +165,11 @@ public class Text extends Shape {
             @Override
             public com.sun.javafx.geom.Shape doConfigShape(Shape shape) {
                 return ((Text) shape).doConfigShape();
+            }
+
+            @Override
+            public float getVisualWidth(Text t) {
+                return t.getVisualBounds().getWidth();
             }
         });
     }
@@ -272,13 +280,26 @@ public class Text extends Shape {
     TextSpan getTextSpan() {
         if (textSpan == null) {
             textSpan = new TextSpan() {
-                @Override public String getText() {
+                @Override
+                public String getText() {
                     return getTextInternal();
                 }
-                @Override public Object getFont() {
+
+                @Override
+                public Object getFont() {
                     return getFontInternal();
                 }
-                @Override public RectBounds getBounds() {
+
+                @Override
+                public RectBounds getBounds() {
+                    return null;
+                }
+
+                @Override
+                public Region getLayoutRootRegion() {
+                    if (getParent() instanceof TextFlow f) {
+                        return f;
+                    }
                     return null;
                 }
             };
@@ -308,7 +329,7 @@ public class Text extends Shape {
             } else {
                 layout.setDirection(TextLayout.DIRECTION_LTR);
             }
-            layout.setTabSize(getTabSize());
+            layout.setTabAdvancePolicy(getTabSize(), null);
         }
         return layout;
     }
@@ -356,7 +377,7 @@ public class Text extends Shape {
     BaseBounds getSpanBounds() {
         if (spanBoundsInvalid) {
             GlyphList[] runs = getRuns();
-            if (runs.length != 0) {
+            if (runs != null && runs.length != 0) {
                 float left = Float.POSITIVE_INFINITY;
                 float top = Float.POSITIVE_INFINITY;
                 float right = 0;
@@ -1011,7 +1032,7 @@ public class Text extends Shape {
     }
 
     /**
-     * Maps local point to index in the content.
+     * Maps local point to {@link HitInfo} in the content.
      *
      * @param point the specified point to be tested
      * @return a {@code HitInfo} representing the character index found
@@ -1020,20 +1041,42 @@ public class Text extends Shape {
     public final HitInfo hitTest(Point2D point) {
         if (point == null) return null;
         TextLayout layout = getTextLayout();
+
         double x = point.getX() - getX();
         double y = point.getY() - getY() + getYRendering();
-        TextLayout.Hit layoutHit = layout.getHitInfo((float)x, (float)y);
-        return new HitInfo(layoutHit.getCharIndex(), layoutHit.getInsertionIndex(),
-                           layoutHit.isLeading(), getText());
+
+        int textRunStart = findFirstRunStart();
+
+        double px = x;
+        double py = y;
+
+        if (isSpan()) {
+            Point2D pPoint = localToParent(point);
+            px = pPoint.getX();
+            py = pPoint.getY();
+        }
+        TextLayout.Hit h = layout.getHitInfo((float)px, (float)py);
+        return new HitInfo(h.getCharIndex() - textRunStart, h.getInsertionIndex() - textRunStart, h.isLeading());
     }
 
-    private PathElement[] getRange(int start, int end, int type) {
+    private int findFirstRunStart() {
+        int start = Integer.MAX_VALUE;
+        for (GlyphList r: getRuns()) {
+            int runStart = r.getStart();
+            if (runStart < start) {
+                start = runStart;
+            }
+        }
+        return start;
+    }
+
+    private PathElement[] getRange(int start, int end, int type, double lineSpacing) {
         int length = getTextInternal().length();
         if (0 <= start && start < end  && end <= length) {
             TextLayout layout = getTextLayout();
-            float x = (float)getX();
-            float y = (float)getY() - getYRendering();
-            return layout.getRange(start, end, type, x, y);
+            double dx = getX();
+            double dy = getY() - getYRendering();
+            return TextUtils.getRange(layout, start, end, type, dx, dy, lineSpacing);
         }
         return EMPTY_PATH_ELEMENT_ARRAY;
     }
@@ -1048,9 +1091,10 @@ public class Text extends Shape {
      */
     public final PathElement[] caretShape(int charIndex, boolean caretBias) {
         if (0 <= charIndex && charIndex <= getTextInternal().length()) {
-            float x = (float)getX();
-            float y = (float)getY() - getYRendering();
-            return getTextLayout().getCaretShape(charIndex, caretBias, x, y);
+            double dx = getX();
+            double dy = getY() - getYRendering();
+            TextLayout.CaretGeometry g = getTextLayout().getCaretGeometry(charIndex, caretBias);
+            return TextUtils.getCaretPathElements(g, dx, dy);
         } else {
             return null;
         }
@@ -1058,14 +1102,31 @@ public class Text extends Shape {
 
     /**
      * Returns the shape for the range of the text in local coordinates.
+     * The returned value does not include line spacing.
      *
      * @param start the beginning character index for the range
      * @param end the end character index (non-inclusive) for the range
      * @return an array of {@code PathElement} which can be used to create a {@code Shape}
      * @since 9
+     * @see #getRangeShape(int, int, boolean)
      */
     public final PathElement[] rangeShape(int start, int end) {
-        return getRange(start, end, TextLayout.TYPE_TEXT);
+        return getRange(start, end, TextLayout.TYPE_TEXT, 0.0);
+    }
+
+    /**
+     * Returns the shape for the range of the text in local coordinates,
+     * with or without line spacing.
+     *
+     * @param start the beginning character index for the range
+     * @param end the end character index (non-inclusive) for the range
+     * @param includeLineSpacing whether the shapes include line spacing
+     * @return an array of {@code PathElement} which can be used to create a {@code Shape}
+     * @since 25
+     */
+    public final PathElement[] getRangeShape(int start, int end, boolean includeLineSpacing) {
+        double lineSpacing = includeLineSpacing ? getLineSpacing() : 0.0;
+        return getRange(start, end, TextLayout.TYPE_TEXT, lineSpacing);
     }
 
     /**
@@ -1077,7 +1138,19 @@ public class Text extends Shape {
      * @since 9
      */
     public final PathElement[] underlineShape(int start, int end) {
-        return getRange(start, end, TextLayout.TYPE_UNDERLINE);
+        return getRange(start, end, TextLayout.TYPE_UNDERLINE, 0.0);
+    }
+
+    /**
+     * Returns the shape for the strike-through in local coordinates.
+     *
+     * @param start the beginning character index for the range
+     * @param end the end character index (non-inclusive) for the range
+     * @return an array of {@code PathElement} which can be used to create a {@code Shape}
+     * @since 25
+     */
+    public final PathElement[] getStrikeThroughShape(int start, int end) {
+        return getRange(start, end, TextLayout.TYPE_STRIKETHROUGH, 0.0);
     }
 
     private float getYAdjustment(BaseBounds bounds) {
@@ -1305,7 +1378,7 @@ public class Text extends Shape {
     private static class StyleableProperties {
 
         private static final CssMetaData<Text,Font> FONT =
-            new FontCssMetaData<Text>("-fx-font", Font.getDefault()) {
+            new FontCssMetaData<>("-fx-font", Font.getDefault()) {
 
             @Override
             public boolean isSettable(Text node) {
@@ -1319,7 +1392,7 @@ public class Text extends Shape {
         };
 
         private static final CssMetaData<Text,Boolean> UNDERLINE =
-            new CssMetaData<Text,Boolean>("-fx-underline",
+            new CssMetaData<>("-fx-underline",
                 BooleanConverter.getInstance(), Boolean.FALSE) {
 
             @Override
@@ -1336,7 +1409,7 @@ public class Text extends Shape {
         };
 
         private static final CssMetaData<Text,Boolean> STRIKETHROUGH =
-            new CssMetaData<Text,Boolean>("-fx-strikethrough",
+            new CssMetaData<>("-fx-strikethrough",
                 BooleanConverter.getInstance(), Boolean.FALSE) {
 
             @Override
@@ -1354,8 +1427,8 @@ public class Text extends Shape {
 
         private static final
             CssMetaData<Text,TextAlignment> TEXT_ALIGNMENT =
-                new CssMetaData<Text,TextAlignment>("-fx-text-alignment",
-                new EnumConverter<TextAlignment>(TextAlignment.class),
+                new CssMetaData<>("-fx-text-alignment",
+                new EnumConverter<>(TextAlignment.class),
                 TextAlignment.LEFT) {
 
             @Override
@@ -1372,8 +1445,8 @@ public class Text extends Shape {
         };
 
         private static final CssMetaData<Text,VPos> TEXT_ORIGIN =
-                new CssMetaData<Text,VPos>("-fx-text-origin",
-                new EnumConverter<VPos>(VPos.class),
+                new CssMetaData<>("-fx-text-origin",
+                new EnumConverter<>(VPos.class),
                 VPos.BASELINE) {
 
             @Override
@@ -1391,9 +1464,9 @@ public class Text extends Shape {
 
         private static final CssMetaData<Text,FontSmoothingType>
             FONT_SMOOTHING_TYPE =
-            new CssMetaData<Text,FontSmoothingType>(
+            new CssMetaData<>(
                 "-fx-font-smoothing-type",
-                new EnumConverter<FontSmoothingType>(FontSmoothingType.class),
+                new EnumConverter<>(FontSmoothingType.class),
                 FontSmoothingType.GRAY) {
 
             @Override
@@ -1412,7 +1485,7 @@ public class Text extends Shape {
 
         private static final
             CssMetaData<Text,Number> LINE_SPACING =
-                new CssMetaData<Text,Number>("-fx-line-spacing",
+                new CssMetaData<>("-fx-line-spacing",
                 SizeConverter.getInstance(), 0) {
 
             @Override
@@ -1430,9 +1503,9 @@ public class Text extends Shape {
 
         private static final CssMetaData<Text, TextBoundsType>
             BOUNDS_TYPE =
-            new CssMetaData<Text,TextBoundsType>(
+            new CssMetaData<>(
                 "-fx-bounds-type",
-                new EnumConverter<TextBoundsType>(TextBoundsType.class),
+                new EnumConverter<>(TextBoundsType.class),
                 DEFAULT_BOUNDS_TYPE) {
 
             @Override
@@ -1447,7 +1520,7 @@ public class Text extends Shape {
         };
 
         private static final CssMetaData<Text, Number> TAB_SIZE =
-                new CssMetaData<Text,Number>("-fx-tab-size",
+                new CssMetaData<>("-fx-tab-size",
                 SizeConverter.getInstance(), TextLayout.DEFAULT_TAB_SIZE) {
 
             @Override
@@ -1466,7 +1539,7 @@ public class Text extends Shape {
     private final static List<CssMetaData<? extends Styleable, ?>> STYLEABLES;
         static {
             final List<CssMetaData<? extends Styleable, ?>> styleables =
-                new ArrayList<CssMetaData<? extends Styleable, ?>>(Shape.getClassCssMetaData());
+                new ArrayList<>(Shape.getClassCssMetaData());
             styleables.add(FONT);
             styleables.add(UNDERLINE);
             styleables.add(STRIKETHROUGH);
@@ -1502,7 +1575,6 @@ public class Text extends Shape {
         return getClassCssMetaData();
     }
 
-    @SuppressWarnings("deprecation")
     private void updatePGText() {
         final NGText peer = NodeHelper.getPeer(this);
         if (NodeHelper.isDirty(this, DirtyBits.TEXT_ATTRS)) {
@@ -1735,15 +1807,15 @@ public class Text extends Shape {
 
         final ReadOnlyObjectProperty<PathElement[]> selectionShapeProperty() {
             if (selectionShape == null) {
-                selectionBinding = new ObjectBinding<PathElement[]>() {
+                selectionBinding = new ObjectBinding<>() {
                     {bind(selectionStartProperty(), selectionEndProperty());}
                     @Override protected PathElement[] computeValue() {
                         int start = getSelectionStart();
                         int end = getSelectionEnd();
-                        return getRange(start, end, TextLayout.TYPE_TEXT);
+                        return getRange(start, end, TextLayout.TYPE_TEXT, 0.0);
                     }
               };
-              selectionShape = new SimpleObjectProperty<PathElement[]>(Text.this, "selectionShape");
+              selectionShape = new SimpleObjectProperty<>(Text.this, "selectionShape");
               selectionShape.bind(selectionBinding);
             }
             return selectionShape;
@@ -1812,22 +1884,22 @@ public class Text extends Shape {
 
         final ReadOnlyObjectProperty<PathElement[]> caretShapeProperty() {
             if (caretShape == null) {
-                caretBinding = new ObjectBinding<PathElement[]>() {
-                    {bind(caretPositionProperty(), caretBiasProperty());}
-                    @Override protected PathElement[] computeValue() {
+                caretBinding = new ObjectBinding<>() {
+                    {
+                        bind(caretPositionProperty(), caretBiasProperty());
+                    }
+
+                    @Override
+                    protected PathElement[] computeValue() {
                         int pos = getCaretPosition();
-                        int length = getTextInternal().length();
-                        if (0 <= pos && pos <= length) {
-                            boolean bias = isCaretBias();
-                            float x = (float)getX();
-                            float y = (float)getY() - getYRendering();
-                            TextLayout layout = getTextLayout();
-                            return layout.getCaretShape(pos, bias, x, y);
+                        PathElement[] pe = caretShape(pos, isCaretBias());
+                        if (pe == null) {
+                            return EMPTY_PATH_ELEMENT_ARRAY;
                         }
-                        return EMPTY_PATH_ELEMENT_ARRAY;
+                        return pe;
                     }
                 };
-                caretShape = new SimpleObjectProperty<PathElement[]>(Text.this, "caretShape");
+                caretShape = new SimpleObjectProperty<>(Text.this, "caretShape");
                 caretShape.bind(caretBinding);
             }
             return caretShape;
@@ -1884,7 +1956,7 @@ public class Text extends Shape {
                     @Override protected void invalidated() {
                         if (!isSpan()) {
                             TextLayout layout = getTextLayout();
-                            if (layout.setTabSize(get())) {
+                            if (layout.setTabAdvancePolicy(getTabSize(), null)) {
                                 needsTextLayout();
                             }
                             NodeHelper.markDirty(Text.this, DirtyBits.TEXT_ATTRS);
@@ -2042,5 +2114,35 @@ public class Text extends Shape {
             }
             default: return super.queryAccessibleAttribute(attribute, parameters);
         }
+    }
+
+    /**
+     * Returns a copy of the of the text layout geometry for this node. This copy is a snapshot
+     * of the text layout at the time the method is called.
+     * <p>
+     * While there is no general guarantee that successive invocations of this method return the same instance,
+     * it is safe to either cache this object or call this method each time, since the information obtained from
+     * this lightweight object remains valid until the next layout cycle.
+     *
+     * @return a copy of the layout information
+     * @since 25
+     */
+    public final LayoutInfo getLayoutInfo() {
+        return new PrismLayoutInfo(getTextLayout()) {
+            @Override
+            public double lineSpacing() {
+                return getLineSpacing();
+            }
+
+            @Override
+            protected double dx() {
+                return getLayoutBounds().getMinX();
+            }
+
+            @Override
+            protected double dy() {
+                return getLayoutBounds().getMinY();
+            }
+        };
     }
 }

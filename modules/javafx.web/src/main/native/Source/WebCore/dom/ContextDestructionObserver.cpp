@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,7 +32,6 @@
 namespace WebCore {
 
 ContextDestructionObserver::ContextDestructionObserver(ScriptExecutionContext* scriptExecutionContext)
-    : m_scriptExecutionContext(nullptr)
 {
     observeContext(scriptExecutionContext);
 }
@@ -49,7 +48,7 @@ void ContextDestructionObserver::observeContext(ScriptExecutionContext* scriptEx
         m_scriptExecutionContext->willDestroyDestructionObserver(*this);
     }
 
-    m_scriptExecutionContext = scriptExecutionContext;
+    m_scriptExecutionContext = WeakPtr { scriptExecutionContext, EnableWeakPtrThreadingAssertions::No };
 
     if (m_scriptExecutionContext) {
         ASSERT(m_scriptExecutionContext->isContextThread());

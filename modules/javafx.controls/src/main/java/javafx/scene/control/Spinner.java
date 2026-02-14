@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,6 +34,8 @@ import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.ObservableValue;
 import javafx.beans.value.WritableValue;
 import javafx.collections.MapChangeListener;
 import javafx.collections.ObservableList;
@@ -51,7 +53,6 @@ import java.time.temporal.TemporalUnit;
 import javafx.css.CssMetaData;
 import javafx.css.converter.DurationConverter;
 import javafx.css.Styleable;
-import javafx.css.StyleableObjectProperty;
 import javafx.css.StyleableProperty;
 import javafx.css.SimpleStyleableObjectProperty;
 
@@ -152,7 +153,7 @@ public class Spinner<T> extends Control {
 
         value.addListener((o, oldValue, newValue) -> setText(newValue));
 
-        // Fix for RT-29885
+        // Fix for JDK-8115009
         getProperties().addListener((MapChangeListener<Object, Object>) change -> {
             if (change.wasAdded()) {
                 if (change.getKey() == "FOCUSED") {
@@ -161,11 +162,15 @@ public class Spinner<T> extends Control {
                 }
             }
         });
-        // End of fix for RT-29885
+        // End of fix for JDK-8115009
 
         focusedProperty().addListener(o -> {
             if (!isFocused()) {
-                commitValue();
+                try {
+                    commitValue();
+                } catch (Exception e) {
+                    cancelEdit();
+                }
             }
         });
     }
@@ -352,7 +357,7 @@ public class Spinner<T> extends Control {
      * @param items A list of items that will be stepped through in the Spinner.
      */
     public Spinner(@NamedArg("items") ObservableList<T> items) {
-        this(new SpinnerValueFactory.ListSpinnerValueFactory<T>(items));
+        this(new SpinnerValueFactory.ListSpinnerValueFactory<>(items));
     }
 
     /**
@@ -506,7 +511,7 @@ public class Spinner<T> extends Control {
      * spinner.getValueFactory().setValue(newValue);
      * }</pre>
      */
-    private ReadOnlyObjectWrapper<T> value = new ReadOnlyObjectWrapper<T>(this, "value");
+    private ReadOnlyObjectWrapper<T> value = new ReadOnlyObjectWrapper<>(this, "value");
     public final T getValue() {
         return value.get();
     }
@@ -514,7 +519,11 @@ public class Spinner<T> extends Control {
         return value;
     }
 
-
+    private final ChangeListener<StringConverter> converterListener = new ChangeListener<StringConverter>() {
+        @Override public void changed(ObservableValue<? extends StringConverter> observable, StringConverter oldValue, StringConverter newRate) {
+            setText(valueProperty().getValue());
+        }
+    };
     // --- valueFactory
     /**
      * The value factory is the model behind the JavaFX Spinner control - without
@@ -533,16 +542,23 @@ public class Spinner<T> extends Control {
      * </ul>
      */
     private ObjectProperty<SpinnerValueFactory<T>> valueFactory =
-            new SimpleObjectProperty<SpinnerValueFactory<T>>(this, "valueFactory") {
+            new SimpleObjectProperty<>(this, "valueFactory") {
+                private SpinnerValueFactory oldFactory;
                 @Override protected void invalidated() {
                     value.unbind();
+                    if(oldFactory != null) {
+                        oldFactory.converterProperty().removeListener(converterListener);
+                    }
 
                     SpinnerValueFactory<T> newFactory = get();
                     if (newFactory != null) {
                         // this binding is what ensures the Spinner.valueProperty()
                         // properly represents the value in the value factory
                         value.bind(newFactory.valueProperty());
+                        // Listener to update the spinner editor when converter is changed.
+                        newFactory.converterProperty().addListener(converterListener);
                     }
+                    oldFactory = newFactory;
                 }
             };
     public final void setValueFactory(SpinnerValueFactory<T> value) {
@@ -680,7 +696,7 @@ public class Spinner<T> extends Control {
      **************************************************************************/
 
     private static final CssMetaData<Spinner<?>,Duration> INITIAL_DELAY =
-                                    new CssMetaData<Spinner<?>,Duration>("-fx-initial-delay",
+                                    new CssMetaData<>("-fx-initial-delay",
                                         DurationConverter.getInstance(), new Duration(300)) {
 
         @Override
@@ -695,7 +711,7 @@ public class Spinner<T> extends Control {
     };
 
     private static final CssMetaData<Spinner<?>,Duration> REPEAT_DELAY =
-                                   new CssMetaData<Spinner<?>,Duration>("-fx-repeat-delay",
+                                   new CssMetaData<>("-fx-repeat-delay",
                                         DurationConverter.getInstance(), new Duration(60)) {
 
         @Override
@@ -757,7 +773,7 @@ public class Spinner<T> extends Control {
             }
         }
 
-        notifyAccessibleAttributeChanged(AccessibleAttribute.TEXT);
+        notifyAccessibleAttributeChanged(AccessibleAttribute.VALUE_STRING);
         if (text == null) {
             if (value == null) {
                 getEditor().clear();
@@ -774,40 +790,39 @@ public class Spinner<T> extends Control {
      * Convenience method to support wrapping values around their min / max
      * constraints. Used by the SpinnerValueFactory implementations when
      * the Spinner wrapAround property is true.
+     *
+     * This method accepts negative values, wrapping around in the other direction.
      */
     static int wrapValue(int value, int min, int max) {
-        if (max == 0) {
-            throw new RuntimeException();
+        int span = max - min + 1;
+
+        if (value < 0) {
+            value = max + value % span + 1;
         }
 
-        int r = value % max;
-        if (r > min && max < min) {
-            r = r + max - min;
-        } else if (r < min && max > min) {
-            r = r + max - min;
-        }
-        return r;
+        return min + (value - min) % span;
     }
 
     /*
      * Convenience method to support wrapping values around their min / max
      * constraints. Used by the SpinnerValueFactory implementations when
      * the Spinner wrapAround property is true.
+     *
+     * This method accepts negative values, wrapping around in the other direction.
      */
-    static BigDecimal wrapValue(BigDecimal value, BigDecimal min, BigDecimal max) {
-        if (max.doubleValue() == 0) {
-            throw new RuntimeException();
+    static BigDecimal wrapValue(BigDecimal currentValue, BigDecimal newValue, BigDecimal min, BigDecimal max) {
+        if (newValue.compareTo(min) >= 0 && newValue.compareTo(max) <= 0) {
+            return newValue;
         }
 
-        // note that this wrap method differs from the others where we take the
-        // difference - in this approach we wrap to the min or max - it feels better
-        // to go from 1 to 0, rather than 1 to 0.05 (where max is 1 and step is 0.05).
-        if (value.compareTo(min) < 0) {
-            return max;
-        } else if (value.compareTo(max) > 0) {
-            return min;
+        BigDecimal span = max.subtract(min);
+        BigDecimal remainder = newValue.remainder(span);
+
+        if (remainder.compareTo(BigDecimal.ZERO) == 0) {
+            return newValue.compareTo(currentValue) >= 0 ? max : min;
         }
-        return value;
+
+        return newValue.compareTo(max) > 0 ? min.add(remainder) : max.add(remainder);
     }
 
 
@@ -822,7 +837,7 @@ public class Spinner<T> extends Control {
     @Override
     public Object queryAccessibleAttribute(AccessibleAttribute attribute, Object... parameters) {
         switch (attribute) {
-            case TEXT: {
+            case VALUE_STRING: {
                 T value = getValue();
                 SpinnerValueFactory<T> factory = getValueFactory();
                 if (factory != null) {
@@ -833,6 +848,15 @@ public class Spinner<T> extends Control {
                 }
                 return value != null ? value.toString() : "";
             }
+
+            case TEXT: {
+                String accText = getAccessibleText();
+                return (accText != null) ? accText : "";
+            }
+
+            case EDITABLE:
+                return isEditable();
+
             default: return super.queryAccessibleAttribute(attribute, parameters);
         }
     }

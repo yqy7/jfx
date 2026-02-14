@@ -36,7 +36,7 @@
 
 PAS_BEGIN_EXTERN_C;
 
-pas_heap_config pas_utility_heap_config = PAS_UTILITY_HEAP_CONFIG;
+const pas_heap_config pas_utility_heap_config = PAS_UTILITY_HEAP_CONFIG;
 
 PAS_SEGREGATED_PAGE_CONFIG_SPECIALIZATION_DEFINITIONS(
     pas_utility_heap_page_config, PAS_UTILITY_HEAP_CONFIG.small_segregated_config);
@@ -83,7 +83,7 @@ void pas_utility_heap_config_dump_shared_page_directory_arg(
 {
     PAS_UNUSED_PARAM(stream);
     PAS_UNUSED_PARAM(directory);
-    PAS_ASSERT(!"Should not be reached");
+    PAS_ASSERT_NOT_REACHED();
 }
 
 PAS_END_EXTERN_C;

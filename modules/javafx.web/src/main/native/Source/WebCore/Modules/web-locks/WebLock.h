@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021, Apple Inc. All rights reserved.
+ * Copyright (C) 2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,6 +35,8 @@ namespace WebCore {
 class WebLock : public RefCounted<WebLock> {
 public:
     static Ref<WebLock> create(WebLockIdentifier, const String& name, WebLockMode);
+
+    static constexpr unsigned maxNameLength = { 1024 };
 
     WebLockIdentifier identifier() const { return m_identifier; }
     const String& name() const { return m_name; }

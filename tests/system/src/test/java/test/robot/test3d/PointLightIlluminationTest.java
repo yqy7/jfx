@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,12 +25,8 @@
 
 package test.robot.test3d;
 
-import static org.junit.Assume.assumeTrue;
-
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import java.util.concurrent.TimeUnit;
 import javafx.application.ConditionalFeature;
 import javafx.application.Platform;
 import javafx.scene.Group;
@@ -42,6 +38,9 @@ import javafx.scene.paint.Color;
 import javafx.scene.paint.PhongMaterial;
 import javafx.scene.shape.Sphere;
 import javafx.stage.Stage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import test.robot.testharness.VisualTestBase;
 
 /**
@@ -53,6 +52,7 @@ import test.robot.testharness.VisualTestBase;
  * the pixel scale factor, but it simply creates a test scene containing a sphere and a perspective
  * camera. Some pixels of the scene will be tested if they have got the expected color and brightness.
  */
+@Timeout(value=15000, unit=TimeUnit.MILLISECONDS)
 public class PointLightIlluminationTest extends VisualTestBase {
 
     private static final int    SCENE_WIDTH_HEIGHT = 100;
@@ -66,9 +66,12 @@ public class PointLightIlluminationTest extends VisualTestBase {
     private static final double COLOR_TOLERANCE    = 0.07;
     private static volatile Scene testScene = null;
 
-    @Before
-    public void setupEach() {
+    @BeforeEach
+    @Override
+    public void doSetup() {
         assumeTrue(Platform.isSupported(ConditionalFeature.SCENE3D));
+        super.doSetup();
+
         // Use the same test scene for all tests
         if (testScene == null) {
             runAndWait(() -> {
@@ -79,10 +82,12 @@ public class PointLightIlluminationTest extends VisualTestBase {
             });
             // Ensure that the scene is really displayed, before the tests begin
             waitFirstFrame();
+            // The same stage can be used for all the illumination tests by this class
+            clearStages = false;
         }
     }
 
-    @Test(timeout = 15000)
+    @Test
     public void sceneBackgroundColorShouldBeBlue() {
         runAndWait(() -> {
             assertColorEquals(
@@ -92,7 +97,7 @@ public class PointLightIlluminationTest extends VisualTestBase {
         });
     }
 
-    @Test(timeout = 15000)
+    @Test
     public void sphereUpperLeftPixelColorShouldBeDarkRed() {
         runAndWait(() -> {
             Color color = getColor(testScene, LEFT_CORNER_X, UPPER_CORNER_Y);
@@ -100,7 +105,7 @@ public class PointLightIlluminationTest extends VisualTestBase {
         });
     }
 
-    @Test(timeout = 15000)
+    @Test
     public void sphereUpperRightPixelColorShouldBeDarkRed() {
         runAndWait(() -> {
             Color color = getColor(testScene, RIGHT_CORNER_X, UPPER_CORNER_Y);
@@ -108,7 +113,7 @@ public class PointLightIlluminationTest extends VisualTestBase {
         });
     }
 
-    @Test(timeout = 15000)
+    @Test
     public void sphereLowerRightPixelColorShouldBeDarkRed() {
         runAndWait(() -> {
             Color color = getColor(testScene, RIGHT_CORNER_X, LOWER_CORNER_Y);
@@ -116,7 +121,7 @@ public class PointLightIlluminationTest extends VisualTestBase {
         });
     }
 
-    @Test(timeout = 15000)
+    @Test
     public void sphereLowerLeftPixelColorShouldBeDarkRed() {
         runAndWait(() -> {
             Color color = getColor(testScene, LEFT_CORNER_X, LOWER_CORNER_Y);
@@ -124,22 +129,12 @@ public class PointLightIlluminationTest extends VisualTestBase {
         });
     }
 
-    @Test(timeout = 15000)
+    @Test
     public void sphereCenterPixelColorShouldBeRed() {
         runAndWait(() -> {
             Color color = getColor(testScene, SCENE_WIDTH_HEIGHT / 2, SCENE_WIDTH_HEIGHT / 2);
             assertColorEquals(Color.RED, color, COLOR_TOLERANCE);
         });
-    }
-
-    /**
-     * This method is overridden and doing nothing, so that the test stage and scene
-     * will not be hidden (which is the default behavior in the super class). The same
-     * scene can be used for all the illumination tests by this class.
-     */
-    @Override
-    @After
-    public void doTeardown() {
     }
 
     /**

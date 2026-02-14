@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,13 @@
 
 package test.renderlock;
 
-import com.sun.javafx.PlatformUtil;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static test.util.Util.TIMEOUT;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -43,14 +49,10 @@ import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.stage.Stage;
 import javafx.util.Duration;
-import junit.framework.AssertionFailedError;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import com.sun.javafx.PlatformUtil;
 import test.util.Util;
-
-import static org.junit.Assert.*;
-import static org.junit.Assume.*;
-import static test.util.Util.TIMEOUT;
 
 /**
  * Common base class for testing snapshot.
@@ -101,26 +103,23 @@ public class RenderLockCommon {
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void doSetupOnce() throws Exception {
         // These tests are only valid on Windows and Mac.
         // On Linux the closing of the window does not trigger a
         // focusLost event with the lock held
         assumeTrue(PlatformUtil.isMac() || PlatformUtil.isWindows());
 
-        // Start the Application
-        new Thread(() -> Application.launch(MyApp.class, (String[])null)).start();
-
-        if (!launchLatch.await(TIMEOUT, TimeUnit.MILLISECONDS)) {
-            fail("Timeout waiting for Application to launch");
-        }
-
+        Util.launch(launchLatch, MyApp.class);
         assertEquals(0, launchLatch.getCount());
     }
 
-    @AfterClass
+    @AfterAll
     public static void doTeardownOnce() {
-        Platform.exit();
+        // see doSetupOnce() assumeTrue condition
+        if (myApp != null) {
+            Util.shutdown();
+        }
     }
 
     // ========================== TEST CASES ==========================

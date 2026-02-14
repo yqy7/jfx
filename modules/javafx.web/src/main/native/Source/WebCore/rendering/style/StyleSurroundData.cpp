@@ -22,19 +22,41 @@
 #include "config.h"
 #include "StyleSurroundData.h"
 
+#include "RenderStyleDifference.h"
+#include <wtf/NeverDestroyed.h>
+
 namespace WebCore {
+
+using namespace CSS::Literals;
 
 DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(StyleSurroundData);
 
 StyleSurroundData::StyleSurroundData()
-    : margin(LengthType::Fixed)
-    , padding(LengthType::Fixed)
+    : hasExplicitlySetBorderBottomLeftRadius(false)
+    , hasExplicitlySetBorderBottomRightRadius(false)
+    , hasExplicitlySetBorderTopLeftRadius(false)
+    , hasExplicitlySetBorderTopRightRadius(false)
+    , hasExplicitlySetPaddingBottom(false)
+    , hasExplicitlySetPaddingLeft(false)
+    , hasExplicitlySetPaddingRight(false)
+    , hasExplicitlySetPaddingTop(false)
+    , inset(CSS::Keyword::Auto { })
+    , margin(0_css_px)
+    , padding(0_css_px)
 {
 }
 
 inline StyleSurroundData::StyleSurroundData(const StyleSurroundData& o)
     : RefCounted<StyleSurroundData>()
-    , offset(o.offset)
+    , hasExplicitlySetBorderBottomLeftRadius(o.hasExplicitlySetBorderBottomLeftRadius)
+    , hasExplicitlySetBorderBottomRightRadius(o.hasExplicitlySetBorderBottomRightRadius)
+    , hasExplicitlySetBorderTopLeftRadius(o.hasExplicitlySetBorderTopLeftRadius)
+    , hasExplicitlySetBorderTopRightRadius(o.hasExplicitlySetBorderTopRightRadius)
+    , hasExplicitlySetPaddingBottom(o.hasExplicitlySetPaddingBottom)
+    , hasExplicitlySetPaddingLeft(o.hasExplicitlySetPaddingLeft)
+    , hasExplicitlySetPaddingRight(o.hasExplicitlySetPaddingRight)
+    , hasExplicitlySetPaddingTop(o.hasExplicitlySetPaddingTop)
+    , inset(o.inset)
     , margin(o.margin)
     , padding(o.padding)
     , border(o.border)
@@ -48,7 +70,38 @@ Ref<StyleSurroundData> StyleSurroundData::copy() const
 
 bool StyleSurroundData::operator==(const StyleSurroundData& o) const
 {
-    return offset == o.offset && margin == o.margin && padding == o.padding && border == o.border;
+    return inset == o.inset
+        && margin == o.margin
+        && padding == o.padding
+        && border == o.border
+        && hasExplicitlySetBorderBottomLeftRadius == o.hasExplicitlySetBorderBottomLeftRadius
+        && hasExplicitlySetBorderBottomRightRadius == o.hasExplicitlySetBorderBottomRightRadius
+        && hasExplicitlySetBorderTopLeftRadius == o.hasExplicitlySetBorderTopLeftRadius
+        && hasExplicitlySetBorderTopRightRadius == o.hasExplicitlySetBorderTopRightRadius
+        && hasExplicitlySetPaddingBottom == o.hasExplicitlySetPaddingBottom
+        && hasExplicitlySetPaddingLeft == o.hasExplicitlySetPaddingLeft
+        && hasExplicitlySetPaddingRight == o.hasExplicitlySetPaddingRight
+        && hasExplicitlySetPaddingTop == o.hasExplicitlySetPaddingTop;
 }
+
+#if !LOG_DISABLED
+void StyleSurroundData::dumpDifferences(TextStream& ts, const StyleSurroundData& other) const
+{
+    LOG_IF_DIFFERENT(hasExplicitlySetBorderBottomLeftRadius);
+    LOG_IF_DIFFERENT(hasExplicitlySetBorderBottomRightRadius);
+    LOG_IF_DIFFERENT(hasExplicitlySetBorderTopLeftRadius);
+    LOG_IF_DIFFERENT(hasExplicitlySetBorderTopRightRadius);
+
+    LOG_IF_DIFFERENT(hasExplicitlySetPaddingBottom);
+    LOG_IF_DIFFERENT(hasExplicitlySetPaddingLeft);
+    LOG_IF_DIFFERENT(hasExplicitlySetPaddingRight);
+    LOG_IF_DIFFERENT(hasExplicitlySetPaddingTop);
+
+    LOG_IF_DIFFERENT(inset);
+    LOG_IF_DIFFERENT(margin);
+    LOG_IF_DIFFERENT(padding);
+    LOG_IF_DIFFERENT(border);
+}
+#endif
 
 } // namespace WebCore

@@ -30,13 +30,22 @@
 #include <wtf/WeakPtr.h>
 
 namespace WTF {
+template<typename> class Observer;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<typename Out, typename... In> struct IsDeprecatedWeakRefSmartPointerException<WTF::Observer<Out(In...)>> : std::true_type { };
+}
+
+namespace WTF {
 
 template<typename> class Observer;
 
 template <typename Out, typename... In>
 class Observer<Out(In...)> : public CanMakeWeakPtr<Observer<Out(In...)>> {
     WTF_MAKE_NONCOPYABLE(Observer);
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(Observer);
 public:
     Observer(Function<Out(In...)>&& callback)
         : m_callback(WTFMove(callback))

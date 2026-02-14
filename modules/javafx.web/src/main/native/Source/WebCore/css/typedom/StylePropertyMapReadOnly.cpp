@@ -30,43 +30,54 @@
 #include "config.h"
 #include "StylePropertyMapReadOnly.h"
 
-#if ENABLE(CSS_TYPED_OM)
-
 #include "CSSCustomPropertyValue.h"
 #include "CSSImageValue.h"
 #include "CSSPrimitiveValue.h"
+#include "CSSProperty.h"
+#include "CSSPropertyNames.h"
 #include "CSSStyleImageValue.h"
 #include "CSSStyleValueFactory.h"
 #include "CSSUnitValue.h"
 #include "CSSUnparsedValue.h"
+#include "CSSValueList.h"
 #include "Document.h"
+#include "ExceptionOr.h"
 
 namespace WebCore {
 
-RefPtr<CSSStyleValue> StylePropertyMapReadOnly::reifyValue(CSSValue* value, Document& document, Element*)
+RefPtr<CSSStyleValue> StylePropertyMapReadOnly::reifyValue(Document& document, RefPtr<CSSValue>&& value, std::optional<CSSPropertyID> propertyID)
 {
     if (!value)
         return nullptr;
-    auto result = CSSStyleValueFactory::reifyValue(*value, &document);
+    auto result = CSSStyleValueFactory::reifyValue(document, value.releaseNonNull(), propertyID);
     return (result.hasException() ? nullptr : RefPtr<CSSStyleValue> { result.releaseReturnValue() });
 }
 
-RefPtr<CSSStyleValue> StylePropertyMapReadOnly::customPropertyValueOrDefault(const String& name, Document& document, CSSValue* inputValue, Element* element)
+Vector<RefPtr<CSSStyleValue>> StylePropertyMapReadOnly::reifyValueToVector(Document& document, RefPtr<CSSValue>&& value, std::optional<CSSPropertyID> propertyID)
 {
-    if (!inputValue) {
-        auto* registered = document.getCSSRegisteredCustomPropertySet().get(name);
+    if (!value)
+        return { };
 
-        if (registered && registered->initialValue()) {
-            auto value = registered->initialValueCopy();
-            return StylePropertyMapReadOnly::reifyValue(value.get(), document, element);
-        }
-
-        return nullptr;
+    if (RefPtr valueList = dynamicDowncast<CSSValueList>(*value); valueList && (propertyID && CSSProperty::isListValuedProperty(*propertyID))) {
+    return WTF::map(*valueList, [&](auto& item) {
+            return StylePropertyMapReadOnly::reifyValue(document, Ref { const_cast<CSSValue&>(item) }, propertyID);
+    });
     }
 
-    return StylePropertyMapReadOnly::reifyValue(inputValue, document, element);
+    return { StylePropertyMapReadOnly::reifyValue(document, WTFMove(value), propertyID) };
+}
+
+StylePropertyMapReadOnly::Iterator::Iterator(StylePropertyMapReadOnly& map, ScriptExecutionContext* context)
+    : m_values(map.entries(context))
+{
+}
+
+std::optional<StylePropertyMapReadOnly::StylePropertyMapEntry> StylePropertyMapReadOnly::Iterator::next()
+{
+    if (m_index >= m_values.size())
+        return std::nullopt;
+
+    return m_values[m_index++];
 }
 
 } // namespace WebCore
-
-#endif

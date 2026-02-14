@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,7 @@
  */
 package test.javafx.stage;
 
-import com.sun.javafx.PlatformUtil;
+import java.util.concurrent.CountDownLatch;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.scene.Group;
@@ -32,20 +32,14 @@ import javafx.scene.Scene;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.stage.WindowEvent;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import test.util.Util;
 
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-import static org.junit.Assert.fail;
-import static org.junit.Assume.*;
-
 public class MaximizeUndecorated {
-    static CountDownLatch startupLatch;
+    static CountDownLatch startupLatch = new CountDownLatch(1);
     static Stage stage;
     static final int POS = 500;
 
@@ -64,32 +58,21 @@ public class MaximizeUndecorated {
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() {
-        startupLatch = new CountDownLatch(1);
-        new Thread(() -> Application.launch(TestApp.class, (String[]) null)).start();
-        try {
-            if (!startupLatch.await(15, TimeUnit.SECONDS)) {
-                fail("Timeout waiting for FX runtime to start");
-            }
-        } catch (InterruptedException ex) {
-            fail("Unexpected exception: " + ex);
-        }
+        Util.launch(startupLatch, TestApp.class);
+    }
+
+    @AfterAll
+    public static void teardown() {
+        Util.shutdown();
     }
 
     @Test
     public void testMaximize() throws Exception {
-        // temporary until JDK-8255835 is fixed
-        assumeTrue(!PlatformUtil.isMac());
         Util.sleep(200);
 
         boolean movedToTopCorner = stage.getY() != POS && stage.getX() != POS;
-        Assert.assertTrue("Stage has moved to desktop top corner", movedToTopCorner);
-    }
-
-    @AfterClass
-    public static void teardown() {
-        Platform.runLater(stage::hide);
-        Platform.exit();
+        Assertions.assertTrue(movedToTopCorner, "Stage has moved to desktop top corner");
     }
 }

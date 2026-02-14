@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -60,14 +60,9 @@ import com.sun.javafx.logging.PlatformLogger;
  * {@link javafx.application.ConditionalFeature#SCENE3D ConditionalFeature.SCENE3D}
  * for more information.
  *
- * <p>
- * An application should not extend the Shape3D class directly. Doing so may lead to
- * an UnsupportedOperationException being thrown.
- * </p>
- *
  * @since JavaFX 8.0
  */
-public abstract class Shape3D extends Node {
+public abstract sealed class Shape3D extends Node permits Box, Cylinder, MeshView, Sphere {
     static {
         // This is used by classes in different packages to get access to
         // private and package private methods.
@@ -143,7 +138,7 @@ public abstract class Shape3D extends Node {
 
     public final ObjectProperty<Material> materialProperty() {
         if (material == null) {
-            material = new SimpleObjectProperty<Material>(Shape3D.this,
+            material = new SimpleObjectProperty<>(Shape3D.this,
                     "material") {
 
                 private Material old = null;
@@ -193,7 +188,7 @@ public abstract class Shape3D extends Node {
 
     public final ObjectProperty<DrawMode> drawModeProperty() {
         if (drawMode == null) {
-            drawMode = new SimpleObjectProperty<DrawMode>(Shape3D.this,
+            drawMode = new SimpleObjectProperty<>(Shape3D.this,
                     "drawMode", DrawMode.FILL) {
 
                 @Override
@@ -222,7 +217,7 @@ public abstract class Shape3D extends Node {
 
     public final ObjectProperty<CullFace> cullFaceProperty() {
         if (cullFace == null) {
-            cullFace = new SimpleObjectProperty<CullFace>(Shape3D.this,
+            cullFace = new SimpleObjectProperty<>(Shape3D.this,
                     "cullFace", CullFace.BACK) {
 
                 @Override

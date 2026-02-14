@@ -3,7 +3,7 @@
  * Copyright (C) 2009 Dirk Schulze <krit@webkit.org>
  * Copyright (C) Research In Motion Limited 2010. All rights reserved.
  * Copyright (C) 2012 University of Szeged
- * Copyright (C) 2015-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2023 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -34,31 +34,64 @@
 
 namespace WebCore {
 
+FilterEffect::FilterEffect(Type type, DestinationColorSpace colorSpace, std::optional<RenderingResourceIdentifier> renderingResourceIdentifier)
+    : FilterFunction(type, renderingResourceIdentifier)
+    , m_operatingColorSpace(colorSpace)
+{
+}
+
+bool FilterEffect::operator==(const FilterEffect& other) const
+{
+    if (filterType() != other.filterType())
+        return false;
+    return m_operatingColorSpace == other.m_operatingColorSpace;
+}
+
 FilterImageVector FilterEffect::takeImageInputs(FilterImageVector& stack) const
 {
     unsigned inputsSize = numberOfImageInputs();
-    ASSERT(stack.size() >= inputsSize);
-    if (!inputsSize)
+
+    if (stack.size() < inputsSize) {
+        LOG_WITH_STREAM(Filters, stream
+            << "FilterEffect " << filterName() << " " << this << " takeImageInputs(): " << *this
+            << "Not enough inputs. Needed "
+            << inputsSize
+            << ", stack size "
+            << stack.size());
         return { };
+    }
 
-    Vector<Ref<FilterImage>> inputs;
-    inputs.reserveInitialCapacity(inputsSize);
-
-    for (; inputsSize; --inputsSize)
-        inputs.uncheckedAppend(stack.takeLast());
-
-    return inputs;
+    size_t index = stack.size();
+    FilterImageVector result(inputsSize, [&](size_t) -> Ref<FilterImage>&& {
+        return WTFMove(stack[--index]);
+    });
+    stack.shrink(stack.size() - inputsSize);
+    return result;
 }
 
-FloatRect FilterEffect::calculatePrimitiveSubregion(const Filter& filter, const FilterImageVector& inputs, const std::optional<FilterEffectGeometry>& geometry) const
+static Vector<FloatRect> inputPrimitiveSubregions(std::span<const Ref<FilterImage>> inputs)
+{
+    return WTF::map(inputs, [](auto& input) {
+        return input->primitiveSubregion();
+    });
+}
+
+static Vector<FloatRect> inputImageRects(std::span<const Ref<FilterImage>> inputs)
+{
+    return WTF::map(inputs, [] (auto& input) {
+        return input->imageRect();
+    });
+}
+
+FloatRect FilterEffect::calculatePrimitiveSubregion(const Filter& filter, std::span<const FloatRect> inputPrimitiveSubregions, const std::optional<FilterEffectGeometry>& geometry) const
 {
     // This function implements https://www.w3.org/TR/filter-effects-1/#FilterPrimitiveSubRegion.
     FloatRect primitiveSubregion;
 
     // If there is no input effects, take the effect boundaries as unite rect. Don't use the input's subregion for FETile.
-    if (!inputs.isEmpty() && filterType() != FilterEffect::Type::FETile) {
-        for (auto& input : inputs)
-            primitiveSubregion.unite(input->primitiveSubregion());
+    if (!inputPrimitiveSubregions.empty() && filterType() != FilterEffect::Type::FETile) {
+        for (auto& inputPrimitiveSubregion : inputPrimitiveSubregions)
+            primitiveSubregion.unite(inputPrimitiveSubregion);
     } else
         primitiveSubregion = filter.filterRegion();
 
@@ -77,28 +110,34 @@ FloatRect FilterEffect::calculatePrimitiveSubregion(const Filter& filter, const 
     return primitiveSubregion;
 }
 
-FloatRect FilterEffect::calculateImageRect(const Filter& filter, const FilterImageVector& inputs, const FloatRect& primitiveSubregion) const
+FloatRect FilterEffect::calculateImageRect(const Filter& filter, std::span<const FloatRect> inputImageRects, const FloatRect& primitiveSubregion) const
 {
+    if (inputImageRects.empty())
+        return filter.maxEffectRect(primitiveSubregion);
+
     FloatRect imageRect;
-    for (auto& input : inputs)
-        imageRect.unite(input->imageRect());
+    for (auto& inputImageRect : inputImageRects)
+        imageRect.unite(inputImageRect);
+
     return filter.clipToMaxEffectRect(imageRect, primitiveSubregion);
 }
 
 std::unique_ptr<FilterEffectApplier> FilterEffect::createApplier(const Filter& filter) const
 {
-    if (filter.renderingMode() == RenderingMode::Accelerated)
+    if (filter.filterRenderingModes().contains(FilterRenderingMode::Accelerated))
         return createAcceleratedApplier();
+
+    ASSERT(filter.filterRenderingModes() == FilterRenderingMode::Software);
     return createSoftwareApplier();
 }
 
-void FilterEffect::transformInputsColorSpace(const FilterImageVector& inputs) const
+void FilterEffect::transformInputsColorSpace(std::span<const Ref<FilterImage>> inputs) const
 {
     for (auto& input : inputs)
         input->transformToColorSpace(operatingColorSpace());
 }
 
-void FilterEffect::correctPremultipliedInputs(const FilterImageVector& inputs) const
+void FilterEffect::correctPremultipliedInputs(std::span<const Ref<FilterImage>> inputs) const
 {
     // Correct any invalid pixels, if necessary, in the result of a filter operation.
     // This method is used to ensure valid pixel values on filter inputs and the final result.
@@ -109,37 +148,41 @@ void FilterEffect::correctPremultipliedInputs(const FilterImageVector& inputs) c
 
 RefPtr<FilterImage> FilterEffect::apply(const Filter& filter, FilterImage& input, FilterResults& results)
 {
-    return apply(filter, FilterImageVector { Ref { input } }, results);
+    Ref protectedInput { input };
+    return apply(filter, singleElementSpan(protectedInput), results);
 }
 
-RefPtr<FilterImage> FilterEffect::apply(const Filter& filter, const FilterImageVector& inputs, FilterResults& results, const std::optional<FilterEffectGeometry>& geometry)
+RefPtr<FilterImage> FilterEffect::apply(const Filter& filter, std::span<const Ref<FilterImage>> inputs, FilterResults& results, const std::optional<FilterEffectGeometry>& geometry)
 {
-    ASSERT(inputs.size() == numberOfImageInputs());
+    if (inputs.size() != numberOfImageInputs())
+        return nullptr;
 
-    if (auto result = results.effectResult(*this))
+    if (RefPtr result = results.effectResult(*this))
         return result;
 
-    auto primitiveSubregion = calculatePrimitiveSubregion(filter, inputs, geometry);
-    auto imageRect = calculateImageRect(filter, inputs, primitiveSubregion);
+    auto primitiveSubregion = calculatePrimitiveSubregion(filter, inputPrimitiveSubregions(inputs), geometry);
+    auto imageRect = calculateImageRect(filter, inputImageRects(inputs), primitiveSubregion);
     auto absoluteImageRect = enclosingIntRect(filter.scaledByFilterScale(imageRect));
 
-    if (absoluteImageRect.isEmpty() || ImageBuffer::sizeNeedsClamping(absoluteImageRect.size()))
+    if (absoluteImageRect.isEmpty() || ImageBuffer::sizeNeedsClamping(absoluteImageRect.size())) {
+        LOG_WITH_STREAM(Filters, stream << "FilterEffect " << filterName() << " " << this << " apply(): " << *this << " absoluteImageRect " << absoluteImageRect << " is empty or needs clamping; bailing.");
+        return nullptr;
+    }
+
+    auto applier = createApplier(filter);
+    if (!applier)
         return nullptr;
 
     auto isAlphaImage = resultIsAlphaImage(inputs);
     auto isValidPremultiplied = resultIsValidPremultiplied();
     auto imageColorSpace = resultColorSpace(inputs);
 
-    auto applier = createApplier(filter);
-    if (!applier)
-        return nullptr;
-
-    auto result = FilterImage::create(primitiveSubregion, imageRect, absoluteImageRect, isAlphaImage, isValidPremultiplied, filter.renderingMode(), imageColorSpace);
+    auto result = FilterImage::create(primitiveSubregion, imageRect, absoluteImageRect, isAlphaImage, isValidPremultiplied, filter.renderingMode(), imageColorSpace, results.allocator());
     if (!result)
         return nullptr;
 
     LOG_WITH_STREAM(Filters, stream
-        << "FilterEffect " << filterName() << " " << this << " apply():"
+        << "FilterEffect " << filterName() << " " << this << " apply(): " << *this
         << "\n  filterPrimitiveSubregion " << primitiveSubregion
         << "\n  absolutePaintRect " << absoluteImageRect
         << "\n  maxEffectRect " << filter.maxEffectRect(primitiveSubregion)
@@ -156,6 +199,22 @@ RefPtr<FilterImage> FilterEffect::apply(const Filter& filter, const FilterImageV
     return result;
 }
 
+FilterStyleVector FilterEffect::createFilterStyles(GraphicsContext& context, const Filter& filter, const FilterStyle& input) const
+{
+    return { createFilterStyle(context, filter, input) };
+}
+
+FilterStyle FilterEffect::createFilterStyle(GraphicsContext& context, const Filter& filter, const FilterStyle& input, const std::optional<FilterEffectGeometry>& geometry) const
+{
+    ASSERT(supportedFilterRenderingModes().contains(FilterRenderingMode::GraphicsContext));
+
+    auto primitiveSubregion = calculatePrimitiveSubregion(filter, { &input.primitiveSubregion, 1 }, geometry);
+    auto imageRect = calculateImageRect(filter, { &input.imageRect, 1 }, primitiveSubregion);
+
+    auto style = createGraphicsStyle(context, filter);
+    return FilterStyle { style, primitiveSubregion, imageRect };
+}
+
 TextStream& FilterEffect::externalRepresentation(TextStream& ts, FilterRepresentation representation) const
 {
     // FIXME: We should dump the subRegions of the filter primitives here later. This isn't
@@ -163,8 +222,8 @@ TextStream& FilterEffect::externalRepresentation(TextStream& ts, FilterRepresent
 
     if (representation == FilterRepresentation::Debugging) {
         TextStream::IndentScope indentScope(ts);
-        ts.dumpProperty("operating colorspace", operatingColorSpace());
-        ts << "\n" << indent;
+        ts.dumpProperty("operating colorspace"_s, operatingColorSpace());
+        ts << '\n' << indent;
     }
     return ts;
 }

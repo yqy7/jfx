@@ -32,7 +32,9 @@
 
 #include "ActiveDOMObject.h"
 #include "CDMInstanceSession.h"
+#include "ContextDestructionObserverInlines.h"
 #include "EventTarget.h"
+#include "EventTargetInterfaces.h"
 #include "IDLTypes.h"
 #include "MediaKeyMessageType.h"
 #include "MediaKeySessionType.h"
@@ -57,20 +59,20 @@ class CDM;
 class DeferredPromise;
 class MediaKeyStatusMap;
 class MediaKeys;
-class FragmentedSharedBuffer;
+class SharedBuffer;
 
 template<typename IDLType> class DOMPromiseProxy;
 
-class MediaKeySession final : public RefCounted<MediaKeySession>, public EventTargetWithInlineData, public ActiveDOMObject, public CDMInstanceSessionClient {
-    WTF_MAKE_ISO_ALLOCATED(MediaKeySession);
+class MediaKeySession final : public RefCounted<MediaKeySession>, public EventTarget, public ActiveDOMObject, public CDMInstanceSessionClient {
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED_EXPORT(MediaKeySession, WEBCORE_EXPORT);
 public:
-    static Ref<MediaKeySession> create(Document&, WeakPtr<MediaKeys>&&, MediaKeySessionType, bool useDistinctiveIdentifier, Ref<CDM>&&, Ref<CDMInstanceSession>&&);
-    virtual ~MediaKeySession();
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
 
-    using CDMInstanceSessionClient::weakPtrFactory;
-    using WeakValueType = CDMInstanceSessionClient::WeakValueType;
-    using RefCounted<MediaKeySession>::ref;
-    using RefCounted<MediaKeySession>::deref;
+    static Ref<MediaKeySession> create(Document&, WeakPtr<MediaKeys>&&, MediaKeySessionType, bool useDistinctiveIdentifier, Ref<CDM>&&, Ref<CDMInstanceSession>&&);
+    WEBCORE_EXPORT virtual ~MediaKeySession();
+
+    USING_CAN_MAKE_WEAKPTR(CDMInstanceSessionClient);
 
     bool isClosed() const { return m_closed; }
 
@@ -87,32 +89,33 @@ public:
     using ClosedPromise = DOMPromiseProxy<IDLUndefined>;
     ClosedPromise& closed() { return m_closedPromise.get(); }
 
-    const Vector<std::pair<Ref<FragmentedSharedBuffer>, MediaKeyStatus>>& statuses() const { return m_statuses; }
+    const Vector<std::pair<Ref<SharedBuffer>, MediaKeyStatus>>& statuses() const { return m_statuses; }
 
     unsigned internalInstanceSessionObjectRefCount() const { return m_instanceSession->refCount(); }
 
 private:
     MediaKeySession(Document&, WeakPtr<MediaKeys>&&, MediaKeySessionType, bool useDistinctiveIdentifier, Ref<CDM>&&, Ref<CDMInstanceSession>&&);
-    void enqueueMessage(MediaKeyMessageType, const FragmentedSharedBuffer&);
+    void enqueueMessage(MediaKeyMessageType, const SharedBuffer&);
     void updateExpiration(double);
     void sessionClosed();
     String mediaKeysStorageDirectory() const;
+    CDMKeyGroupingStrategy keyGroupingStrategy() const;
 
     // CDMInstanceSessionClient
     void updateKeyStatuses(CDMInstanceSessionClient::KeyStatusVector&&) override;
-    void sendMessage(CDMMessageType, Ref<FragmentedSharedBuffer>&& message) final;
+    void sendMessage(CDMMessageType, Ref<SharedBuffer>&& message) final;
     void sessionIdChanged(const String&) final;
     PlatformDisplayID displayID() final;
 
     // EventTarget
-    EventTargetInterface eventTargetInterface() const override { return MediaKeySessionEventTargetInterfaceType; }
+    enum EventTargetInterfaceType eventTargetInterface() const override { return EventTargetInterfaceType::MediaKeySession; }
     ScriptExecutionContext* scriptExecutionContext() const override { return ActiveDOMObject::scriptExecutionContext(); }
     void refEventTarget() override { ref(); }
     void derefEventTarget() override { deref(); }
 
     // ActiveDOMObject
-    const char* activeDOMObjectName() const final;
     bool virtualHasPendingActivity() const final;
+    void stop() final;
 
     // DisplayChangedObserver
     void displayChanged(PlatformDisplayID);
@@ -120,30 +123,30 @@ private:
 #if !RELEASE_LOG_DISABLED
     // LoggerHelper
     const Logger& logger() const { return m_logger; }
-    const char* logClassName() const { return "MediaKeySession"; }
+    ASCIILiteral logClassName() const { return "MediaKeySession"_s; }
     WTFLogChannel& logChannel() const;
-    const void* logIdentifier() const { return m_logIdentifier; }
+    uint64_t logIdentifier() const { return m_logIdentifier; }
 
-    Ref<Logger> m_logger;
-    const void* m_logIdentifier;
+    const Ref<const Logger> m_logger;
+    const uint64_t m_logIdentifier;
 #endif
 
     WeakPtr<MediaKeys> m_keys;
     String m_sessionId;
     double m_expiration;
-    UniqueRef<ClosedPromise> m_closedPromise;
-    Ref<MediaKeyStatusMap> m_keyStatuses;
+    const UniqueRef<ClosedPromise> m_closedPromise;
+    const Ref<MediaKeyStatusMap> m_keyStatuses;
     bool m_closed { false };
     bool m_uninitialized { true };
     bool m_callable { false };
     bool m_useDistinctiveIdentifier;
     MediaKeySessionType m_sessionType;
-    Ref<CDM> m_implementation;
-    Ref<CDMInstanceSession> m_instanceSession;
-    Vector<Ref<FragmentedSharedBuffer>> m_recordOfKeyUsage;
+    const Ref<CDM> m_implementation;
+    const Ref<CDMInstanceSession> m_instanceSession;
+    Vector<Ref<SharedBuffer>> m_recordOfKeyUsage;
     double m_firstDecryptTime { 0 };
     double m_latestDecryptTime { 0 };
-    Vector<std::pair<Ref<FragmentedSharedBuffer>, MediaKeyStatus>> m_statuses;
+    Vector<std::pair<Ref<SharedBuffer>, MediaKeyStatus>> m_statuses;
 
     using DisplayChangedObserver = Observer<void(PlatformDisplayID)>;
     DisplayChangedObserver m_displayChangedObserver;

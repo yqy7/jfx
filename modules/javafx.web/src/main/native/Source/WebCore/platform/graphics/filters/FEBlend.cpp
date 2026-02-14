@@ -27,7 +27,7 @@
 #include "FEBlend.h"
 
 #if !PLATFORM(JAVA) || HAVE(ARM_NEON_INTRINSICS)
-#include "FEBlendNEON.h"
+#include "FEBlendNeonApplier.h"
 #endif
 #include "FEBlendSoftwareApplier.h"
 #include "ImageBuffer.h"
@@ -35,15 +35,20 @@
 
 namespace WebCore {
 
-Ref<FEBlend> FEBlend::create(BlendMode mode)
+Ref<FEBlend> FEBlend::create(BlendMode mode, DestinationColorSpace colorSpace)
 {
-    return adoptRef(*new FEBlend(mode));
+    return adoptRef(*new FEBlend(mode, colorSpace));
 }
 
-FEBlend::FEBlend(BlendMode mode)
-    : FilterEffect(FilterEffect::Type::FEBlend)
+FEBlend::FEBlend(BlendMode mode, DestinationColorSpace colorSpace)
+    : FilterEffect(FilterEffect::Type::FEBlend, colorSpace)
     , m_mode(mode)
 {
+}
+
+bool FEBlend::operator==(const FEBlend& other) const
+{
+    return FilterEffect::operator==(other) && m_mode == other.m_mode;
 }
 
 bool FEBlend::setBlendMode(BlendMode mode)
@@ -56,17 +61,21 @@ bool FEBlend::setBlendMode(BlendMode mode)
 
 std::unique_ptr<FilterEffectApplier> FEBlend::createSoftwareApplier() const
 {
+#if HAVE(ARM_NEON_INTRINSICS)
+    return FilterEffectApplier::create<FEBlendNeonApplier>(*this);
+#else
     return FilterEffectApplier::create<FEBlendSoftwareApplier>(*this);
+#endif
 }
 
 TextStream& FEBlend::externalRepresentation(TextStream& ts, FilterRepresentation representation) const
 {
-    ts << indent << "[feBlend";
+    ts << indent << "[feBlend"_s;
     FilterEffect::externalRepresentation(ts, representation);
 
-    ts << " mode=\"" << (m_mode == BlendMode::Normal ? "normal" : compositeOperatorName(CompositeOperator::SourceOver, m_mode));
+    ts << " mode=\"" << (m_mode == BlendMode::Normal ? "normal"_s : compositeOperatorName(CompositeOperator::SourceOver, m_mode));
 
-    ts << "\"]\n";
+    ts << "\"]\n"_s;
     return ts;
 }
 

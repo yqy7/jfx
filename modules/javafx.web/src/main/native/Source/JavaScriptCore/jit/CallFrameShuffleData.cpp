@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,19 +28,23 @@
 
 #if ENABLE(JIT)
 
+#include "BaselineJITRegisters.h"
 #include "BytecodeStructs.h"
 #include "CodeBlock.h"
 #include "RegisterAtOffsetList.h"
+#include <wtf/TZoneMallocInlines.h>
 
 namespace JSC {
 
+WTF_MAKE_TZONE_ALLOCATED_IMPL(CallFrameShuffleData);
+
 void CallFrameShuffleData::setupCalleeSaveRegisters(const RegisterAtOffsetList* registerSaveLocations)
 {
-    RegisterSet calleeSaveRegisters { RegisterSet::vmCalleeSaveRegisters() };
+    auto calleeSaveRegisters = RegisterSetBuilder::vmCalleeSaveRegisters();
 
-    for (size_t i = 0; i < registerSaveLocations->size(); ++i) {
+    for (size_t i = 0; i < registerSaveLocations->registerCount(); ++i) {
         RegisterAtOffset entry { registerSaveLocations->at(i) };
-        if (!calleeSaveRegisters.get(entry.reg()))
+        if (!calleeSaveRegisters.contains(entry.reg(), IgnoreVectors))
             continue;
 
         int saveSlotIndexInCPURegisters = entry.offsetAsIndex();
@@ -51,20 +55,25 @@ void CallFrameShuffleData::setupCalleeSaveRegisters(const RegisterAtOffsetList* 
         registers[entry.reg()]
             = ValueRecovery::displacedInJSStack(saveSlot, DataFormatJS);
 #elif USE(JSVALUE32_64)
-        // On 32-bit architectures, 2 callee saved registers may be packed into the same slot
-        static_assert(!PayloadOffset || !TagOffset);
-        static_assert(PayloadOffset == 4 || TagOffset == 4);
-        bool inTag = (saveSlotIndexInCPURegisters & 1) == !!TagOffset;
-        if (saveSlotIndexInCPURegisters < 0)
-            saveSlotIndexInCPURegisters -= 1; // Round towards -inf
-        VirtualRegister saveSlot { saveSlotIndexInCPURegisters / 2 };
-        registers[entry.reg()]
-            = ValueRecovery::calleeSaveRegDisplacedInJSStack(saveSlot, inTag);
+        // On 32-bit architectures, 2 callee saved GPRs may be packed into the same slot
+        if (entry.reg().isGPR()) {
+            static_assert(!PayloadOffset || !TagOffset);
+            static_assert(PayloadOffset == 4 || TagOffset == 4);
+            bool inTag = (saveSlotIndexInCPURegisters & 1) == !!TagOffset;
+            if (saveSlotIndexInCPURegisters < 0)
+                saveSlotIndexInCPURegisters -= 1; // Round towards -inf
+            VirtualRegister saveSlot { saveSlotIndexInCPURegisters / 2 };
+            registers[entry.reg()] = ValueRecovery::calleeSaveGPRDisplacedInJSStack(saveSlot, inTag);
+        } else {
+            ASSERT(!(saveSlotIndexInCPURegisters & 1)); // Should be at an even offset
+            VirtualRegister saveSlot { saveSlotIndexInCPURegisters / 2 };
+            registers[entry.reg()] = ValueRecovery::displacedInJSStack(saveSlot, DataFormatDouble);
+        }
 #endif
     }
 
     for (Reg reg = Reg::first(); reg <= Reg::last(); reg = reg.next()) {
-        if (!calleeSaveRegisters.get(reg))
+        if (!calleeSaveRegisters.contains(reg, IgnoreVectors))
             continue;
 
         if (registers[reg])
@@ -73,7 +82,7 @@ void CallFrameShuffleData::setupCalleeSaveRegisters(const RegisterAtOffsetList* 
 #if USE(JSVALUE64)
         registers[reg] = ValueRecovery::inRegister(reg, DataFormatJS);
 #elif USE(JSVALUE32_64)
-        registers[reg] = ValueRecovery::inRegister(reg, DataFormatInt32);
+        registers[reg] = ValueRecovery::inRegister(reg, reg.isGPR() ? DataFormatInt32 : DataFormatDouble);
 #endif
     }
 }
@@ -87,7 +96,7 @@ CallFrameShuffleData CallFrameShuffleData::createForBaselineOrLLIntTailCall(cons
     shuffleData.numberTagRegister = GPRInfo::numberTagRegister;
 #endif
     shuffleData.numLocals = bytecode.m_argv - sizeof(CallerFrameAndPC) / sizeof(Register);
-    shuffleData.args.resize(bytecode.m_argc);
+    shuffleData.args.grow(bytecode.m_argc);
     for (unsigned i = 0; i < bytecode.m_argc; ++i) {
         shuffleData.args[i] =
             ValueRecovery::displacedInJSStack(
@@ -95,9 +104,9 @@ CallFrameShuffleData CallFrameShuffleData::createForBaselineOrLLIntTailCall(cons
                 DataFormatJS);
     }
 #if USE(JSVALUE64)
-    shuffleData.callee = ValueRecovery::inGPR(BaselineCallRegisters::calleeJSR.payloadGPR(), DataFormatJS);
+    shuffleData.callee = ValueRecovery::inGPR(BaselineJITRegisters::Call::calleeJSR.payloadGPR(), DataFormatJS);
 #elif USE(JSVALUE32_64)
-    shuffleData.callee = ValueRecovery::inPair(BaselineCallRegisters::calleeJSR.tagGPR(), BaselineCallRegisters::calleeJSR.payloadGPR());
+    shuffleData.callee = ValueRecovery::inPair(BaselineJITRegisters::Call::calleeJSR.tagGPR(), BaselineJITRegisters::Call::calleeJSR.payloadGPR());
 #endif
     shuffleData.setupCalleeSaveRegisters(&RegisterAtOffsetList::llintBaselineCalleeSaveRegisters());
     shuffleData.shrinkToFit();

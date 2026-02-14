@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -80,6 +80,7 @@ import java.util.List;
  * {@link javafx.scene.control.ListView}, {@link javafx.scene.control.TreeView},
  * {@link javafx.scene.control.TableView}, and {@link javafx.scene.control.TreeTableView}.
  *
+ * @param <T> The type of the item contained within the virtual flow cells
  * @since 9
  */
 public class VirtualFlow<T extends IndexedCell> extends Region {
@@ -104,7 +105,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
     /**
      * Indicates that this is a newly created cell and we need call processCSS for it.
      *
-     * See RT-23616 for more details.
+     * See JDK-8102238 for more details.
      */
     private static final String NEW_CELL = "newcell";
 
@@ -116,6 +117,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
      * x new cells that are not yet available into the calculations
      */
     private static final int DEFAULT_IMPROVEMENT = 2;
+    private final Rectangle clipRect;
 
 
 
@@ -182,7 +184,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
      * <p>
      * This is package private ONLY FOR TESTING
      */
-    final ArrayLinkedList<T> cells = new ArrayLinkedList<T>();
+    final ArrayLinkedList<T> cells = new ArrayLinkedList<>();
 
     /**
      * A structure containing cells that can be reused later. These are cells
@@ -191,7 +193,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
      * <p>
      * This is package private ONLY FOR TESTING
      */
-    final ArrayLinkedList<T> pile = new ArrayLinkedList<T>();
+    final ArrayLinkedList<T> pile = new ArrayLinkedList<>();
 
     /**
      * A special cell used to accumulate bounds, such that we reduce object
@@ -329,15 +331,21 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
         sheetChildren = sheet.getChildren();
 
         // --- clipView
-        clipView = new ClippedContainer(this);
-        clipView.setNode(sheet);
+        clipView = new ClippedContainer(sheet);
         getChildren().add(clipView);
+
+        // clipping
+        clipRect = new Rectangle();
+        clipRect.setSmooth(false);
+        clipRect.widthProperty().bind(clipView.widthProperty());
+        clipRect.heightProperty().bind(clipView.heightProperty());
+
+        clipView.setClip(clipRect);
 
         // --- accumCellParent
         accumCellParent = new Group();
         accumCellParent.setVisible(false);
         getChildren().add(accumCellParent);
-
 
         /*
         ** don't allow the ScrollBar to handle the ScrollEvent,
@@ -467,7 +475,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
                     // We check here to see if the current focus owner is within
                     // this VirtualFlow, and if so we back-off from requesting
                     // focus back to the VirtualFlow itself. This is particularly
-                    // relevant given the bug identified in RT-32869. In this
+                    // relevant given the bug identified in JDK-8119995. In this
                     // particular case TextInputControl was clearing selection
                     // when the focus on the TextField changed, meaning that the
                     // right-click context menu was not showing the correct
@@ -602,12 +610,12 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
 //        vbar.addChangedListener(ScrollBar.VALUE, listenerY);
 
         ChangeListener<Number> listenerY = (ov, t, t1) -> {
-            clipView.setClipY(isVertical() ? 0 : vbar.getValue());
+            setClipLayoutY(isVertical() ? 0 : vbar.getValue());
         };
         vbar.valueProperty().addListener(listenerY);
 
         super.heightProperty().addListener((observable, oldHeight, newHeight) -> {
-            // Fix for RT-8480, where the VirtualFlow does not show its content
+            // Fix for JDK-8109812, where the VirtualFlow does not show its content
             // after changing size to 0 and back.
             if (oldHeight.doubleValue() == 0 && newHeight.doubleValue() > 0) {
                 recreateCells();
@@ -804,6 +812,9 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
         if (vertical == null) {
             vertical = new BooleanPropertyBase(true) {
                 @Override protected void invalidated() {
+                    resetIndex(cells);
+                    resetIndex(pile);
+
                     pile.clear();
                     sheetChildren.clear();
                     cells.clear();
@@ -855,11 +866,19 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
         private int oldCount = 0;
 
         @Override protected void invalidated() {
+            int oldIndex = computeCurrentIndex(oldCount);
+            double oldOffset = computeViewportOffset(getPosition(), oldCount);
             int cellCount = get();
+            if (oldIndex > cellCount) {
+                oldIndex = cellCount;
+            }
             resetSizeEstimates();
-            recalculateEstimatedSize();
+            getOrCreateCellSize(oldIndex);
+            recalculateAndImproveEstimatedSize(DEFAULT_IMPROVEMENT, oldIndex, oldOffset);
 
             boolean countChanged = oldCount != cellCount;
+            double boff = computeBaseOffset(oldIndex);
+            absoluteOffset = boff + oldOffset;
             oldCount = cellCount;
 
             // ensure that the virtual scrollbar adjusts in size based on the current
@@ -878,7 +897,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
             // scroll bars would erroneously reset as well. So I do not reset
             // the maxPrefBreadth here.
 
-            // Fix for RT-12512, RT-14301 and RT-14864.
+            // Fix for JDK-8111753, JDK-8113660 and JDK-8114287.
             // Without this, the VirtualFlow length-wise scrollbar would not change
             // as expected. This would leave items unable to be shown, as they
             // would exist outside of the visible area, even when the scrollbar
@@ -979,7 +998,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
      */
     public final ObjectProperty<Callback<VirtualFlow<T>, T>> cellFactoryProperty() {
         if (cellFactory == null) {
-            cellFactory = new SimpleObjectProperty<Callback<VirtualFlow<T>, T>>(this, "cellFactory") {
+            cellFactory = new SimpleObjectProperty<>(this, "cellFactory") {
                 @Override protected void invalidated() {
                     if (get() != null) {
                         setNeedsLayout(true);
@@ -1017,9 +1036,9 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
 // Note: This block is commented as it was relaying on a bad assumption on how
 //       layout request was handled in parent class that is now fixed.
 //
-//        // isNeedsLayout() is commented out due to RT-21417. This does not
+//        // isNeedsLayout() is commented out due to JDK-8126753. This does not
 //        // appear to impact performance (indeed, it may help), and resolves the
-//        // issue identified in RT-21417.
+//        // issue identified in JDK-8126753.
 //        setNeedsLayout(true);
 
         // The fix is to prograte this layout request to its parent class.
@@ -1062,10 +1081,11 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
             lastWidth = -1;
             lastHeight = -1;
             releaseCell(accumCell);
-            sheet.getChildren().clear();
-            for (int i = 0, max = cells.size(); i < max; i++) {
-                cells.get(i).updateIndex(-1);
-            }
+            sheetChildren.clear();
+
+            resetIndex(cells);
+            resetIndex(pile);
+
             cells.clear();
             pile.clear();
             releaseAllPrivateCells();
@@ -1073,9 +1093,9 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
             lastWidth = -1;
             lastHeight = -1;
             releaseCell(accumCell);
-            for (int i = 0, max = cells.size(); i < max; i++) {
-                cells.get(i).updateIndex(-1);
-            }
+
+            resetIndex(cells);
+
             addAllToPile();
             releaseAllPrivateCells();
         } else if (needsReconfigureCells) {
@@ -1113,11 +1133,18 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
 
         if (needsCellsLayout) {
             for (int i = 0, max = cells.size(); i < max; i++) {
-                Cell<?> cell = cells.get(i);
+                T cell = cells.get(i);
                 if (cell != null) {
                     cell.requestLayout();
                 }
             }
+
+            // Also request layout for cells in the pile. As soon as those are reused (and therefore added),
+            // they will do their layout.
+            for (T cell : pile) {
+                cell.requestLayout();
+            }
+
             needsCellsLayout = false;
             // yes, we return here - if needsCellsLayout was set to true, we
             // only did it to do the above - not rerun the entire layout.
@@ -1157,7 +1184,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
 
         if (!cellNeedsLayout) {
             for (int i = 0; i < cells.size(); i++) {
-                Cell<?> cell = cells.get(i);
+                T cell = cells.get(i);
                 cellNeedsLayout = cell.isNeedsLayout();
                 if (cellNeedsLayout) break;
             }
@@ -1336,6 +1363,18 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
         cleanPile();
     }
 
+    /**
+     * Resets the index to -1 to all cells.
+     * This is to properly clean them up and ensure that no listeners are called because they retain their old index.
+     *
+     * @param cells the cells
+     */
+    private void resetIndex(ArrayLinkedList<T> cells) {
+        for (T cell : cells) {
+            cell.updateIndex(-1);
+        }
+    }
+
     /** {@inheritDoc} */
     @Override protected void setWidth(double value) {
         if (value != lastWidth) {
@@ -1365,7 +1404,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
      */
     protected T getAvailableCell(int prefIndex) {
         T cell = null;
-        // Fix for RT-12822. We try to retrieve the cell from the pile rather
+        // Fix for JDK-8112018. We try to retrieve the cell from the pile rather
         // than just grab a random cell from the pile (or create another cell).
         for (int i = 0, max = pile.size(); i < max; i++) {
             T _cell = pile.get(i);
@@ -1603,6 +1642,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
      * @return the number of pixels actually moved
      */
     public double scrollPixels(final double delta) {
+        int oldIndex = computeCurrentIndex();
         // Short cut this method for cases where nothing should be done
         if (delta == 0) return 0;
 
@@ -1613,6 +1653,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
         double pos = getPosition();
         if (pos == 0.0f && delta < 0) return 0;
         if (pos == 1.0f && delta > 0) return 0;
+        getCellSizesInExpectedViewport(oldIndex);
         recalculateEstimatedSize();
         double answer = adjustByPixelAmount(delta);
         if (pos == getPosition()) {
@@ -1641,7 +1682,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
                 positionCell(cell, getCellPosition(cell) - delta);
             }
 
-            // Fix for RT-32908
+            // Fix for JDK-8120237
             T firstCell = cells.getFirst();
             double layoutY = firstCell == null ? 0 : getCellPosition(firstCell);
             for (int i = 0; i < cells.size(); i++) {
@@ -1655,15 +1696,16 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
 
                 layoutY += getCellLength(cell);
             }
-            // end of fix for RT-32908
+            // end of fix for JDK-8120237
             cull();
             firstCell = cells.getFirst();
 
             // Add any necessary leading cells
             if (firstCell != null) {
-                int firstIndex = getCellIndex(firstCell);
-                double prevIndexSize = getCellLength(firstIndex - 1);
-                addLeadingCells(firstIndex - 1, getCellPosition(firstCell) - prevIndexSize);
+                // NOTE: The index might be -1, but the call to addLeadingCells() is still required.
+                int previousIndex = getCellIndex(firstCell) - 1;
+                double prevIndexSize = getCellLength(previousIndex);
+                addLeadingCells(previousIndex, getCellPosition(firstCell) - prevIndexSize);
             } else {
                 int currentIndex = computeCurrentIndex();
 
@@ -1713,7 +1755,6 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
 
         // Finally, update the scroll bars
         updateScrollBarsAndCells(false);
-        lastPosition = getPosition();
 
         // notify
         return answer;
@@ -1805,7 +1846,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
 
         // make sure the cell is sized correctly. This is important for both
         // general layout of cells in a VirtualFlow, but also in cases such as
-        // RT-34333, where the sizes were being reported incorrectly to the
+        // JDK-8122624, where the sizes were being reported incorrectly to the
         // ComboBox popup.
         if ((cell.isNeedsLayout() && cell.getScene() != null) || cell.getProperties().containsKey(NEW_CELL)) {
             cell.applyCss();
@@ -1882,7 +1923,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
     private final void setViewportBreadth(double value) {
         this.viewportBreadth = value;
     }
-    private final double getViewportBreadth() {
+    final double getViewportBreadth() {
         return viewportBreadth;
     }
 
@@ -1890,7 +1931,6 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
      * The length of the viewport portion of the VirtualFlow as computed
      * during the layout pass. In a vertical flow this would be the same as the
      * clip view height. In a horizontal flow this is the clip view width.
-     * The access on this variable is package ONLY FOR TESTING.
      */
     private double viewportLength;
     void setViewportLength(double value) {
@@ -1901,7 +1941,15 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
         this.absoluteOffset = getPosition() * (estimatedSize - viewportLength);
         recalculateEstimatedSize();
     }
-    double getViewportLength() {
+
+    /**
+     * Returns the length of the viewport portion of the {@code VirtualFlow} as computed during the layout pass.
+     * For a vertical flow this is based on the height and for a horizontal flow on the width of the clip view.
+     *
+     * @return the viewport length in pixels
+     * @since 23
+     */
+    public double getViewportLength() {
         return viewportLength;
     }
 
@@ -1946,7 +1994,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
     /**
      * Gets the breadth of a specific cell
      */
-    double getCellBreadth(Cell cell) {
+    double getCellBreadth(T cell) {
         return isVertical() ?
                 cell.prefWidth(-1)
                 : cell.prefHeight(-1);
@@ -1986,15 +2034,12 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
     protected void resizeCell(T cell) {
         if (cell == null) return;
 
+        double size = Math.max(getMaxPrefBreadth(), getViewportBreadth());
         if (isVertical()) {
-            double width = Math.max(getMaxPrefBreadth(), getViewportBreadth());
-            cell.resize(width, fixedCellSizeEnabled ? getFixedCellSize() : Utils.boundedSize(cell.prefHeight(width), cell.minHeight(width), cell.maxHeight(width)));
+            cell.resize(size, fixedCellSizeEnabled ? getFixedCellSize() : Utils.boundedSize(cell.prefHeight(size), cell.minHeight(size), cell.maxHeight(size)));
         } else {
-            double height = Math.max(getMaxPrefBreadth(), getViewportBreadth());
-            cell.resize(fixedCellSizeEnabled ? getFixedCellSize() : Utils.boundedSize(cell.prefWidth(height), cell.minWidth(height), cell.maxWidth(height)), height);
+            cell.resize(fixedCellSizeEnabled ? getFixedCellSize() : Utils.boundedSize(cell.prefWidth(size), cell.minWidth(size), cell.maxWidth(size)), size);
         }
-        // when a cell is resized, our estimate needs to be updated.
-        recalculateAndImproveEstimatedSize(0);
     }
 
     /**
@@ -2031,7 +2076,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
             final double cellEnd = cellStart + getCellLength(cell);
 
             // we use the magic +2 to allow for a little bit of fuzziness,
-            // this is to help in situations such as RT-34407
+            // this is to help in situations such as JDK-8097503
             if (cellEnd <= (max + 2)) {
                 return cell;
             }
@@ -2164,13 +2209,13 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
 
         final double viewportLength = getViewportLength();
 
-        // Fix for RT-37421, which was a regression caused by RT-36556
+        // Fix for JDK-8095487, which was a regression caused by JDK-8095592
         if (offset < 0 && !fillEmptyCells) {
             return false;
         }
 
         //
-        // RT-36507: viewportLength gives the maximum number of
+        // JDK-8093564: viewportLength gives the maximum number of
         // additional cells that should ever be able to fit in the viewport if
         // every cell had a height of 1. If index ever exceeds this count,
         // then offset is not incrementing fast enough, or at all, which means
@@ -2181,7 +2226,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
             if (index >= cellCount) {
                 if (offset < viewportLength) filledWithNonEmpty = false;
                 if (! fillEmptyCells) return filledWithNonEmpty;
-                // RT-36507 - return if we've exceeded the maximum
+                // JDK-8093564 - return if we've exceeded the maximum
                 if (index > maxCellCount) {
                     final PlatformLogger logger = Logging.getControlsLogger();
                     if (logger.isLoggable(PlatformLogger.Level.INFO)) {
@@ -2313,23 +2358,33 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
     /**
      * Make sure the sizes of the cells that are likely to be visible are known.
      * When updates to the cell size estimates are occurring, we don't want the current
-     * visible content to be modified.
+     * visible content to be modified. The existing offset and index are respected.
      * @param index the index of the cell that should be positioned at the top of
      * the viewport in the next layout cycle.
      */
     void getCellSizesInExpectedViewport(int index) {
-        double estlength = getOrCreateCellSize(index);
+        double oldOffset = computeViewportOffset(getPosition());
+        int oldIndex = computeCurrentIndex();
+        double cellLength = getOrCreateCellSize(index);
+        if (index > 0) {
+            getOrCreateCellSize(index - 1);
+        }
+        if (index < getCellCount() - 1) {
+            getOrCreateCellSize(index + 1);
+        }
+        double estlength = cellLength;
         int i = index;
         while ((estlength < viewportLength) && (++i < getCellCount())) {
             estlength = estlength + getOrCreateCellSize(i);
         }
+        estlength = cellLength;
         if (estlength < viewportLength) {
             int j = index;
             while ((estlength < viewportLength) && (j-- > 0)) {
                 estlength = estlength + getOrCreateCellSize(j);
             }
         }
-        recalculateEstimatedSize();
+        recalculateAndImproveEstimatedSize(0, oldIndex, oldOffset);
     }
 
     private void startSBReleasedAnimation() {
@@ -2363,15 +2418,15 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
     void updateHbar() {
         if (! isVisible() || getScene() == null) return;
         // Bring the clipView.clipX back to 0 if control is vertical or
-        // the hbar isn't visible (fix for RT-11666)
+        // the hbar isn't visible (fix for JDK-8112383)
         if (isVertical()) {
             if (needBreadthBar) {
-                clipView.setClipX(hbar.getValue());
+                setClipLayoutX(hbar.getValue());
             } else {
                 // all cells are now less than the width of the flow,
                 // so we should shift the hbar/clip such that
                 // everything is visible in the viewport.
-                clipView.setClipX(0);
+                setClipLayoutX(0);
                 hbar.setValue(0);
             }
         }
@@ -2607,7 +2662,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
 
             lengthBar.setMax(1);
             if (numCellsVisibleOnScreen == 0 && cellCount == 1) {
-                // special case to help resolve RT-17701 and the case where we have
+                // special case to help resolve JDK-8128348 and the case where we have
                 // only a single row and it is bigger than the viewport
                 lengthBar.setVisibleAmount(flowLength / sumCellLength);
             } else {
@@ -2616,13 +2671,13 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
         }
 
         if (lengthBar.isVisible()) {
-            // Fix for RT-11873. If this isn't here, we can have a situation where
+            // Fix for JDK-8112227. If this isn't here, we can have a situation where
             // the scrollbar scrolls endlessly. This is possible when the cell
             // count grows as the user hits the maximal position on the scrollbar
             // (i.e. the list size dynamically grows as the user needs more).
             //
-            // This code was commented out to resolve RT-14477 after testing
-            // whether RT-11873 can be recreated. It could not, and therefore
+            // This code was commented out to resolve JDK-8114498 after testing
+            // whether JDK-8112227 can be recreated. It could not, and therefore
             // for now this code will remained uncommented until it is deleted
             // following further testing.
 //            if (lengthBar.getValue() == 1.0 && lastCellCount != cellCount) {
@@ -2680,18 +2735,11 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
      * offset.
      */
     private void fitCells() {
-        double size = Math.max(getMaxPrefBreadth(), getViewportBreadth());
-        boolean isVertical = isVertical();
-
         // Note: Do not optimise this loop by pre-calculating the cells size and
-        // storing that into a int value - this can lead to RT-32828
+        // storing that into a int value - this can lead to JDK-8123184
         for (int i = 0; i < cells.size(); i++) {
-            Cell<?> cell = cells.get(i);
-            if (isVertical) {
-                cell.resize(size, cell.prefHeight(size));
-            } else {
-                cell.resize(cell.prefWidth(size), size);
-            }
+            T cell = cells.get(i);
+            resizeCell(cell);
         }
     }
 
@@ -2802,7 +2850,12 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
             cell.setVisible(false);
         }
 
-        // Fix for RT-35876: Rather than have the cells do weird things with
+        // Remove all cells that are in the pile and therefore not relevant anymore.
+        if (sheetChildren.size() != cells.size()) {
+            sheetChildren.removeAll(pile);
+        }
+
+        // Fix for JDK-8095710: Rather than have the cells do weird things with
         // focus (in particular, have focus jump between cells), we return focus
         // to the VirtualFlow itself.
         if (wasFocusOwner) {
@@ -2810,7 +2863,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
         }
     }
 
-    private boolean doesCellContainFocus(Cell<?> c) {
+    private boolean doesCellContainFocus(T c) {
         Scene scene = c.getScene();
         final Node focusOwner = scene == null ? null : scene.getFocusOwner();
 
@@ -2880,15 +2933,19 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
      * performance.
      */
     private double computeViewportOffset(double position) {
+        return computeViewportOffset(position, getCellCount());
+    }
+
+    private double computeViewportOffset(double position, int localCellCount) {
         double p = com.sun.javafx.util.Utils.clamp(0, position, 1);
         double bound = 0d;
-        double estSize = estimatedSize / getCellCount();
+        double estSize = estimatedSize / localCellCount;
         double maxOff = estimatedSize - getViewportLength();
         if ((maxOff > 0) && (absoluteOffset > maxOff)) {
             return maxOff - absoluteOffset;
         }
 
-        for (int i = 0; i < getCellCount(); i++) {
+        for (int i = 0; i < localCellCount; i++) {
             double h = getCellSize(i);
             if (h < 0) h = estSize;
             if (bound + h > absoluteOffset) {
@@ -2919,6 +2976,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
         }
 
     }
+
     /**
      * Adjust the position based on a delta of pixels. If negative, then the
      * position will be adjusted negatively. If positive, then the position will
@@ -2966,9 +3024,28 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
 
     }
 
-    private int computeCurrentIndex() {
-        double total = 0;
+    private double computeBaseOffset(int index) {
+        double baseOffset = 0d;
         int currentCellCount = getCellCount();
+        double estSize = estimatedSize / currentCellCount;
+        for (int i = 0; i < index; i++) {
+            double nextSize = getCellSize(i);
+            if (nextSize < 0) nextSize = estSize;
+            baseOffset += nextSize;
+        }
+        return baseOffset;
+    }
+
+    /**
+     * Compute the index of the first visible cell
+     * This has package access ONLY FOR TESTING.
+     */
+    int computeCurrentIndex() {
+        return computeCurrentIndex(getCellCount());
+    }
+
+    private int computeCurrentIndex(int currentCellCount) {
+        double total = 0;
         double estSize = estimatedSize / currentCellCount;
         for (int i = 0; i < currentCellCount; i++) {
             double nextSize = getCellSize(i);
@@ -3037,12 +3114,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
                 doRelease = true;
             }
 
-            // if we have a valid cell, we can populate the cache
-            if (isVertical()) {
-                answer = cell.getLayoutBounds().getHeight();
-            } else {
-                answer = cell.getLayoutBounds().getWidth();
-            }
+            answer = getCellLength(cell);
             itemSizeCache.set(idx, answer);
 
             if (doRelease) { // we need to release the accumcell
@@ -3055,19 +3127,31 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
     /**
      * Update the size of a specific cell.
      * If this cell was already in the cache, its old value is replaced by the
-     * new size.
-     * @param cell
+     * new size. The total size of the flow will be recalculated, respecting the
+     * current index and offset.
+     * If the specific cell is the "current" cell (which is the first cell that is
+     * at least partially visible), the offset used for the viewport needs to be
+     * recalculated in case the new size is different from the cached size. This way,
+     * we keep the end of the current cell (and start of the cell at current + 1)
+     * constant. An exception to this is when the current cell starts at offset 0,
+     * in which case we keep the (0) offset as is.
+     * @param cell the cell which size has to be calculated
      */
     void updateCellSize(T cell) {
         int cellIndex = cell.getIndex();
+
         if (itemSizeCache.size() > cellIndex) {
-        if (isVertical()) {
-            double newh = cell.getLayoutBounds().getHeight();
-            itemSizeCache.set(cellIndex, newh);
-          } else {
-            double newh = cell.getLayoutBounds().getWidth();
-            itemSizeCache.set(cellIndex, newh);
-          }
+            Double oldSize = itemSizeCache.get(cellIndex);
+            double newSize = getCellLength(cell);
+            itemSizeCache.set(cellIndex, newSize);
+            if ((oldSize != null) && !oldSize.equals(newSize)) {
+                int currentIndex = computeCurrentIndex();
+                double oldOffset = computeViewportOffset(getPosition());
+                if ((cellIndex == currentIndex) && (oldOffset != 0)) {
+                    oldOffset = oldOffset + newSize - oldSize;
+                }
+                recalculateAndImproveEstimatedSize(0, currentIndex, oldOffset);
+            }
         }
     }
 
@@ -3082,6 +3166,16 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
     private boolean recalculating = false;
 
     private void recalculateAndImproveEstimatedSize(int improve) {
+        recalculateAndImproveEstimatedSize(improve, -1, computeViewportOffset(getPosition()));
+    }
+
+    /**
+     * Recalculate the estimated size. If an oldIndex different from  -1 is supplied, that value will
+     * be respected:
+     * at the end of this calculation, we make sure that if the current index is calculated, it will
+     * be the same as the old index. If the oldIndex is -1, there is no guarantee about the new index.
+     */
+    private void recalculateAndImproveEstimatedSize(int improve, int oldIndex, double oldOffset) {
         if (recalculating) return;
         recalculating = true;
         try {
@@ -3089,8 +3183,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
             int cacheCount = itemSizeCache.size();
             boolean keepRatio = ((cacheCount > 0) && !Double.isInfinite(this.absoluteOffset));
 
-            int oldIndex = computeCurrentIndex();
-            double oldOffset = computeViewportOffset(getPosition());
+            if (oldIndex < 0) oldIndex = computeCurrentIndex();
             int added = 0;
             while ((itemCount > itemSizeCache.size()) && (added < improve)) {
                 getOrCreateCellSize(itemSizeCache.size());
@@ -3131,6 +3224,18 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
         this.estimatedSize = 1d;
     }
 
+    private void setClipLayoutX(double x) {
+        double snappedX = snapPositionX(x);
+        clipView.setLayoutX(-snappedX);
+        clipRect.setLayoutX(snappedX);
+    }
+
+    private void setClipLayoutY(double y) {
+        double snappedY = snapPositionY(y);
+        clipView.setLayoutY(-snappedY);
+        clipRect.setLayoutY(snappedY);
+    }
+
 //    /**
 //     * Adjust the position based on a chunk of pixels. The position is based
 //     * on the start of the scrollbar position.
@@ -3156,49 +3261,10 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
      */
     static class ClippedContainer extends Region {
 
-        /**
-         * The Node which is embedded within this {@code ClipView}.
-         */
-        private Node node;
-        public Node getNode() { return this.node; }
-        public void setNode(Node n) {
-            this.node = n;
-
-            getChildren().clear();
-            getChildren().add(node);
-        }
-
-        public void setClipX(double clipX) {
-            setLayoutX(-clipX);
-            clipRect.setLayoutX(clipX);
-        }
-
-        public void setClipY(double clipY) {
-            setLayoutY(-clipY);
-            clipRect.setLayoutY(clipY);
-        }
-
-        private final Rectangle clipRect;
-
-        public ClippedContainer(final VirtualFlow<?> flow) {
-            if (flow == null) {
-                throw new IllegalArgumentException("VirtualFlow can not be null");
-            }
-
+        public ClippedContainer(Node node) {
             getStyleClass().add("clipped-container");
 
-            // clipping
-            clipRect = new Rectangle();
-            clipRect.setSmooth(false);
-            setClip(clipRect);
-            // --- clipping
-
-            super.widthProperty().addListener(valueModel -> {
-                clipRect.setWidth(getWidth());
-            });
-            super.heightProperty().addListener(valueModel -> {
-                clipRect.setHeight(getHeight());
-            });
+            getChildren().setAll(node);
         }
     }
 
@@ -3232,21 +3298,24 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
         private int lastIndex = -1;
 
         public ArrayLinkedList() {
-            array = new ArrayList<T>(50);
+            array = new ArrayList<>(50);
 
             for (int i = 0; i < 50; i++) {
                 array.add(null);
             }
         }
 
+        @Override
         public T getFirst() {
             return firstIndex == -1 ? null : array.get(firstIndex);
         }
 
+        @Override
         public T getLast() {
             return lastIndex == -1 ? null : array.get(lastIndex);
         }
 
+        @Override
         public void addFirst(T cell) {
             // if firstIndex == -1 then that means this is the first item in the
             // list and we need to initialize firstIndex and lastIndex
@@ -3265,6 +3334,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
             }
         }
 
+        @Override
         public void addLast(T cell) {
 
             // if lastIndex == -1 then that means this is the first item in the
@@ -3281,17 +3351,20 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
             }
         }
 
+        @Override
         public int size() {
             return firstIndex == -1 ? 0 : lastIndex - firstIndex + 1;
         }
 
+        @Override
         public boolean isEmpty() {
             return firstIndex == -1;
         }
 
+        @Override
         public T get(int index) {
             if (index > (lastIndex - firstIndex) || index < 0) {
-                // Commented out exception due to RT-29111
+                // Commented out exception due to JDK-8124175
                 // throw new java.lang.ArrayIndexOutOfBoundsException();
                 return null;
             }
@@ -3299,6 +3372,7 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
             return array.get(firstIndex + index);
         }
 
+        @Override
         public void clear() {
             for (int i = 0; i < array.size(); i++) {
                 array.set(i, null);
@@ -3307,16 +3381,19 @@ public class VirtualFlow<T extends IndexedCell> extends Region {
             firstIndex = lastIndex = -1;
         }
 
+        @Override
         public T removeFirst() {
             if (isEmpty()) return null;
             return remove(0);
         }
 
+        @Override
         public T removeLast() {
             if (isEmpty()) return null;
             return remove(lastIndex - firstIndex);
         }
 
+        @Override
         public T remove(int index) {
             if (index > lastIndex - firstIndex || index < 0) {
                 throw new ArrayIndexOutOfBoundsException();

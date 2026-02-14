@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,7 +36,8 @@ namespace JSC {
 class JSWebAssemblyException final : public JSNonFinalObject {
 public:
     using Base = JSNonFinalObject;
-    static constexpr bool needsDestruction = true;
+    static constexpr DestructionMode needsDestruction = NeedsDestruction;
+    using Payload = FixedVector<uint64_t>;
 
     static void destroy(JSCell*);
 
@@ -47,14 +49,11 @@ public:
 
     DECLARE_EXPORT_INFO;
 
-    static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
-    {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ErrorInstanceType, StructureFlags), info());
-    }
+    static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
-    static JSWebAssemblyException* create(VM& vm, Structure* structure, const Wasm::Tag& tag, FixedVector<uint64_t>&& payload)
+    static JSWebAssemblyException* create(VM& vm, Structure* structure, Ref<const Wasm::Tag>&& tag, FixedVector<uint64_t>&& payload)
     {
-        JSWebAssemblyException* exception = new (NotNull, allocateCell<JSWebAssemblyException>(vm)) JSWebAssemblyException(vm, structure, tag, WTFMove(payload));
+        JSWebAssemblyException* exception = new (NotNull, allocateCell<JSWebAssemblyException>(vm)) JSWebAssemblyException(vm, structure, WTFMove(tag), WTFMove(payload));
         exception->finishCreation(vm);
         return exception;
     }
@@ -65,13 +64,15 @@ public:
     const FixedVector<uint64_t>& payload() const { return m_payload; }
     JSValue getArg(JSGlobalObject*, unsigned) const;
 
+    static constexpr ptrdiff_t offsetOfPayload() { return OBJECT_OFFSETOF(JSWebAssemblyException, m_payload); }
+
 protected:
-    JSWebAssemblyException(VM&, Structure*, const Wasm::Tag&, FixedVector<uint64_t>&&);
+    JSWebAssemblyException(VM&, Structure*, Ref<const Wasm::Tag>&&, FixedVector<uint64_t>&&);
 
     void finishCreation(VM&);
 
     Ref<const Wasm::Tag> m_tag;
-    FixedVector<uint64_t> m_payload;
+    Payload m_payload;
 };
 
 } // namespace JSC

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,6 +31,8 @@
 #include "InspectorDebuggerAgent.h"
 #include "InspectorScriptProfilerAgent.h"
 #include "ScriptArguments.h"
+#include <wtf/TZoneMallocInlines.h>
+#include <wtf/text/MakeString.h>
 
 namespace Inspector {
 
@@ -41,6 +43,8 @@ static bool sLogToSystemConsole = true;
 #else
 static bool sLogToSystemConsole = false;
 #endif
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(JSGlobalObjectConsoleClient);
 
 bool JSGlobalObjectConsoleClient::logToSystemConsole()
 {
@@ -63,7 +67,7 @@ void JSGlobalObjectConsoleClient::messageWithTypeAndLevel(MessageType type, Mess
     if (JSGlobalObjectConsoleClient::logToSystemConsole())
         ConsoleClient::printConsoleMessageWithArguments(MessageSource::ConsoleAPI, type, level, globalObject, arguments.copyRef());
 
-    if (LIKELY(!m_consoleAgent->developerExtrasEnabled()))
+    if (!m_consoleAgent->developerExtrasEnabled()) [[likely]]
         return;
 
     String message;
@@ -78,7 +82,7 @@ void JSGlobalObjectConsoleClient::messageWithTypeAndLevel(MessageType type, Mess
 
 void JSGlobalObjectConsoleClient::count(JSGlobalObject* globalObject, const String& label)
 {
-    if (LIKELY(!m_consoleAgent->developerExtrasEnabled()))
+    if (!m_consoleAgent->developerExtrasEnabled()) [[likely]]
         return;
 
     m_consoleAgent->count(globalObject, label);
@@ -86,7 +90,7 @@ void JSGlobalObjectConsoleClient::count(JSGlobalObject* globalObject, const Stri
 
 void JSGlobalObjectConsoleClient::countReset(JSGlobalObject* globalObject, const String& label)
 {
-    if (LIKELY(!m_consoleAgent->developerExtrasEnabled()))
+    if (!m_consoleAgent->developerExtrasEnabled()) [[likely]]
         return;
 
     m_consoleAgent->countReset(globalObject, label);
@@ -94,7 +98,7 @@ void JSGlobalObjectConsoleClient::countReset(JSGlobalObject* globalObject, const
 
 void JSGlobalObjectConsoleClient::profile(JSC::JSGlobalObject*, const String& title)
 {
-    if (LIKELY(!m_consoleAgent->enabled()))
+    if (!m_consoleAgent->enabled()) [[likely]]
         return;
 
     // Allow duplicate unnamed profiles. Disallow duplicate named profiles.
@@ -102,7 +106,7 @@ void JSGlobalObjectConsoleClient::profile(JSC::JSGlobalObject*, const String& ti
         for (auto& existingTitle : m_profiles) {
             if (existingTitle == title) {
                 // FIXME: Send an enum to the frontend for localization?
-                String warning = title.isEmpty() ? "Unnamed Profile already exists"_s : makeString("Profile \"", ScriptArguments::truncateStringForConsoleMessage(title), "\" already exists");
+                String warning = title.isEmpty() ? "Unnamed Profile already exists"_s : makeString("Profile \""_s, ScriptArguments::truncateStringForConsoleMessage(title), "\" already exists"_s);
                 m_consoleAgent->addMessageToConsole(makeUnique<ConsoleMessage>(MessageSource::ConsoleAPI, MessageType::Profile, MessageLevel::Warning, warning));
                 return;
             }
@@ -115,14 +119,14 @@ void JSGlobalObjectConsoleClient::profile(JSC::JSGlobalObject*, const String& ti
 
 void JSGlobalObjectConsoleClient::profileEnd(JSC::JSGlobalObject*, const String& title)
 {
-    if (LIKELY(!m_consoleAgent->enabled()))
+    if (!m_consoleAgent->enabled()) [[likely]]
         return;
 
     // Stop profiles in reverse order. If the title is empty, then stop the last profile.
     // Otherwise, match the title of the profile to stop.
     for (ptrdiff_t i = m_profiles.size() - 1; i >= 0; --i) {
         if (title.isEmpty() || m_profiles[i] == title) {
-            m_profiles.remove(i);
+            m_profiles.removeAt(i);
             if (m_profiles.isEmpty())
                 stopConsoleProfile();
             return;
@@ -130,7 +134,7 @@ void JSGlobalObjectConsoleClient::profileEnd(JSC::JSGlobalObject*, const String&
     }
 
     // FIXME: Send an enum to the frontend for localization?
-    String warning = title.isEmpty() ? "No profiles exist"_s : makeString("Profile \"", title, "\" does not exist");
+    String warning = title.isEmpty() ? "No profiles exist"_s : makeString("Profile \""_s, title, "\" does not exist"_s);
     m_consoleAgent->addMessageToConsole(makeUnique<ConsoleMessage>(MessageSource::ConsoleAPI, MessageType::ProfileEnd, MessageLevel::Warning, warning));
 }
 
@@ -156,7 +160,7 @@ void JSGlobalObjectConsoleClient::stopConsoleProfile()
 
 void JSGlobalObjectConsoleClient::takeHeapSnapshot(JSC::JSGlobalObject*, const String& title)
 {
-    if (LIKELY(!m_consoleAgent->developerExtrasEnabled()))
+    if (!m_consoleAgent->developerExtrasEnabled()) [[likely]]
         return;
 
     m_consoleAgent->takeHeapSnapshot(title);
@@ -164,7 +168,7 @@ void JSGlobalObjectConsoleClient::takeHeapSnapshot(JSC::JSGlobalObject*, const S
 
 void JSGlobalObjectConsoleClient::time(JSGlobalObject* globalObject, const String& label)
 {
-    if (LIKELY(!m_consoleAgent->developerExtrasEnabled()))
+    if (!m_consoleAgent->developerExtrasEnabled()) [[likely]]
         return;
 
     m_consoleAgent->startTiming(globalObject, label);
@@ -172,7 +176,7 @@ void JSGlobalObjectConsoleClient::time(JSGlobalObject* globalObject, const Strin
 
 void JSGlobalObjectConsoleClient::timeLog(JSGlobalObject* globalObject, const String& label, Ref<ScriptArguments>&& arguments)
 {
-    if (LIKELY(!m_consoleAgent->developerExtrasEnabled()))
+    if (!m_consoleAgent->developerExtrasEnabled()) [[likely]]
         return;
 
     m_consoleAgent->logTiming(globalObject, label, WTFMove(arguments));
@@ -180,7 +184,7 @@ void JSGlobalObjectConsoleClient::timeLog(JSGlobalObject* globalObject, const St
 
 void JSGlobalObjectConsoleClient::timeEnd(JSGlobalObject* globalObject, const String& label)
 {
-    if (LIKELY(!m_consoleAgent->developerExtrasEnabled()))
+    if (!m_consoleAgent->developerExtrasEnabled()) [[likely]]
         return;
 
     m_consoleAgent->stopTiming(globalObject, label);
@@ -188,7 +192,7 @@ void JSGlobalObjectConsoleClient::timeEnd(JSGlobalObject* globalObject, const St
 
 void JSGlobalObjectConsoleClient::timeStamp(JSGlobalObject*, Ref<ScriptArguments>&&)
 {
-    if (LIKELY(!m_consoleAgent->developerExtrasEnabled()))
+    if (!m_consoleAgent->developerExtrasEnabled()) [[likely]]
         return;
 
     warnUnimplemented("console.timeStamp"_s);
@@ -196,7 +200,7 @@ void JSGlobalObjectConsoleClient::timeStamp(JSGlobalObject*, Ref<ScriptArguments
 
 void JSGlobalObjectConsoleClient::record(JSGlobalObject*, Ref<ScriptArguments>&&)
 {
-    if (LIKELY(!m_consoleAgent->developerExtrasEnabled()))
+    if (!m_consoleAgent->developerExtrasEnabled()) [[likely]]
         return;
 
     warnUnimplemented("console.record"_s);
@@ -204,7 +208,7 @@ void JSGlobalObjectConsoleClient::record(JSGlobalObject*, Ref<ScriptArguments>&&
 
 void JSGlobalObjectConsoleClient::recordEnd(JSGlobalObject*, Ref<ScriptArguments>&&)
 {
-    if (LIKELY(!m_consoleAgent->developerExtrasEnabled()))
+    if (!m_consoleAgent->developerExtrasEnabled()) [[likely]]
         return;
 
     warnUnimplemented("console.recordEnd"_s);
@@ -212,7 +216,7 @@ void JSGlobalObjectConsoleClient::recordEnd(JSGlobalObject*, Ref<ScriptArguments
 
 void JSGlobalObjectConsoleClient::screenshot(JSGlobalObject*, Ref<ScriptArguments>&&)
 {
-    if (LIKELY(!m_consoleAgent->developerExtrasEnabled()))
+    if (!m_consoleAgent->developerExtrasEnabled()) [[likely]]
         return;
 
     warnUnimplemented("console.screenshot"_s);
@@ -220,7 +224,7 @@ void JSGlobalObjectConsoleClient::screenshot(JSGlobalObject*, Ref<ScriptArgument
 
 void JSGlobalObjectConsoleClient::warnUnimplemented(const String& method)
 {
-    String message = method + " is currently ignored in JavaScript context inspection.";
+    auto message = makeString(method, " is currently ignored in JavaScript context inspection."_s);
     m_consoleAgent->addMessageToConsole(makeUnique<ConsoleMessage>(MessageSource::ConsoleAPI, MessageType::Log, MessageLevel::Warning, message));
 }
 

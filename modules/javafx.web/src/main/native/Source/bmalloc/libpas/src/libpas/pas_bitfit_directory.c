@@ -41,10 +41,10 @@
 #include "pas_stream.h"
 
 void pas_bitfit_directory_construct(pas_bitfit_directory* directory,
-                                    pas_bitfit_page_config* config,
+                                    const pas_bitfit_page_config* config,
                                     pas_segregated_heap* heap)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_BITFIT_HEAPS);
 
     /* NOTE - this works even if the config is disabled, and produces a directory that is empty and
        does nothing. This makes sense because it makes it easy to iterate over the directories in a heap
@@ -103,9 +103,9 @@ pas_bitfit_view_and_index
 pas_bitfit_directory_get_first_free_view(pas_bitfit_directory* directory,
                                          unsigned start_index,
                                          unsigned size,
-                                         pas_bitfit_page_config* page_config)
+                                         const pas_bitfit_page_config* page_config)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_BITFIT_HEAPS);
 
     PAS_ASSERT(page_config->base.is_enabled);
 
@@ -376,11 +376,11 @@ pas_page_sharing_pool_take_result pas_bitfit_directory_take_last_empty(
     pas_deferred_decommit_log* decommit_log,
     pas_lock_hold_mode heap_lock_hold_mode)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_BITFIT_HEAPS);
 
     pas_versioned_field last_empty_plus_one_value;
     size_t index;
-    pas_bitfit_page_config* page_config;
+    const pas_bitfit_page_config* page_config;
     size_t num_granules;
 
     last_empty_plus_one_value = pas_versioned_field_read(&directory->last_empty_plus_one);

@@ -24,8 +24,10 @@
  */
 
 #include "config.h"
+#if PLATFORM(JAVA)
 #include "SocketProvider.h"
-
+#include "WebTransportSession.h"
+#include <wtf/CompletionHandler.h>
 #include "SocketStreamHandleImpl.h"
 #include "ThreadableWebSocketChannel.h"
 
@@ -48,5 +50,11 @@ RefPtr<ThreadableWebSocketChannel> SocketProvider::createWebSocketChannel(Docume
 {
     return nullptr;
 }
-
+#if PLATFORM(JAVA)
+Ref<WebCore::WebTransportSessionPromise> SocketProvider::initializeWebTransportSession(WebCore::ScriptExecutionContext&, WebCore::WebTransportSessionClient&, const URL&)
+{
+    return WebCore::WebTransportSessionPromise::createAndReject();
 }
+#endif
+}
+#endif

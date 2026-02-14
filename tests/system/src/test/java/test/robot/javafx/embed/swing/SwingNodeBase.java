@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,31 +25,26 @@
 
 package test.robot.javafx.embed.swing;
 
-import javafx.application.Application;
-import javafx.application.Platform;
-import javafx.embed.swing.SwingNode;
-import javafx.scene.Scene;
-import javafx.scene.layout.VBox;
-import javafx.stage.Stage;
-import junit.framework.AssertionFailedError;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import test.util.Util;
-
-import javax.swing.JDialog;
-import javax.swing.JOptionPane;
-import javax.swing.JPanel;
-import javax.swing.SwingUtilities;
 import java.awt.AWTException;
 import java.awt.Frame;
 import java.awt.Robot;
 import java.awt.event.InputEvent;
 import java.lang.reflect.InvocationTargetException;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-import static test.util.Util.TIMEOUT;
+import javax.swing.JDialog;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
+import javafx.application.Application;
+import javafx.application.Platform;
+import javafx.embed.swing.SwingNode;
+import javafx.scene.Scene;
+import javafx.scene.layout.VBox;
+import javafx.stage.Stage;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import test.util.Util;
 
 public class SwingNodeBase {
     public static final int BASE_LOCATION = 200;
@@ -58,6 +53,7 @@ public class SwingNodeBase {
     public static final int LONG_WAIT_TIME = 2500;
 
     protected static Robot robot;
+    protected static boolean doShutdown = true;
 
     // Used to launch the application before running any test
     private static final CountDownLatch launchLatch = new CountDownLatch(1);
@@ -65,23 +61,13 @@ public class SwingNodeBase {
     // Singleton Application instance
     static MyApp myApp;
 
-    @BeforeClass
+    @BeforeAll
     public static void setupOnce() throws AWTException, InvocationTargetException, InterruptedException {
         robot = new Robot();
         robot.setAutoDelay(100);
 
         // Start the Application
-        new Thread(() -> Application.launch(MyApp.class, (String[])null)).start();
-
-        try {
-            if (!launchLatch.await(TIMEOUT, TimeUnit.MILLISECONDS)) {
-                throw new AssertionFailedError("Timeout waiting for Application to launch");
-            }
-        } catch (InterruptedException ex) {
-            AssertionFailedError err = new AssertionFailedError("Unexpected exception");
-            err.initCause(ex);
-            throw err;
-        }
+        Util.launch(launchLatch, MyApp.class);
 
         CountDownLatch paintLatch = new CountDownLatch(1);
         SwingUtilities.invokeAndWait(()->{
@@ -91,11 +77,11 @@ public class SwingNodeBase {
         paintLatch.countDown();
     }
 
-    @AfterClass
+    @AfterAll
     public static void teardownOnce() {
-        Platform.runLater(() -> {
-            Platform.exit();
-        });
+        if (doShutdown) {
+            Util.shutdown();
+        }
     }
 
     public static void runWaitSleep(Runnable run) {
@@ -212,14 +198,22 @@ public class SwingNodeBase {
             robot.mouseMove(clickLoc, clickLoc);
             robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
             robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
+
+            // Emulating mouse clicks on XWayland with XTEST does not currently affect the Wayland compositor,
+            // so trying to click on the window title or window body will not bring the window to the front.
+            if (Util.isOnWayland()) {
+                runWaitSleep(() -> myApp.stage.toFront());
+            }
         }
 
         if (above) {
-            Assert.assertEquals("JDialog is not above JavaFX stage",
-                    java.awt.Color.BLUE, robot.getPixelColor(checkLoc, checkLoc));
+            Assertions.assertEquals(
+                java.awt.Color.BLUE, robot.getPixelColor(checkLoc, checkLoc),
+                "JDialog is not above JavaFX stage");
         } else {
-            Assert.assertFalse("JDialog is above JavaFX stage",
-                    java.awt.Color.BLUE.equals(robot.getPixelColor(checkLoc, checkLoc)));
+            Assertions.assertFalse(
+                java.awt.Color.BLUE.equals(robot.getPixelColor(checkLoc, checkLoc)),
+                "JDialog is above JavaFX stage");
         }
     }
 }

@@ -25,9 +25,12 @@
 
 #pragma once
 
+#include <ranges>
 #include <wtf/BitVector.h>
 #include <wtf/IndexSparseSet.h>
 #include <wtf/StdLibExtras.h>
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 namespace WTF {
 
@@ -53,7 +56,7 @@ public:
 
     // This calculator has to be run in reverse.
     class LocalCalc {
-        WTF_MAKE_FAST_ALLOCATED;
+        WTF_DEPRECATED_MAKE_FAST_ALLOCATED(LocalCalc);
     public:
         LocalCalc(Liveness& liveness, typename CFG::Node block)
             : m_liveness(liveness)
@@ -67,7 +70,7 @@ public:
         }
 
         class Iterable {
-            WTF_MAKE_FAST_ALLOCATED;
+            WTF_DEPRECATED_MAKE_FAST_ALLOCATED(Iterable);
         public:
             Iterable(Liveness& liveness)
                 : m_liveness(liveness)
@@ -75,7 +78,7 @@ public:
             }
 
             class iterator {
-                WTF_MAKE_FAST_ALLOCATED;
+                WTF_DEPRECATED_MAKE_FAST_ALLOCATED(iterator);
             public:
                 iterator(Adapter& adapter, Workset::const_iterator sparceSetIterator)
                     : m_adapter(adapter)
@@ -95,7 +98,6 @@ public:
                 }
 
                 bool operator==(const iterator& other) const { return m_sparceSetIterator == other.m_sparceSetIterator; }
-                bool operator!=(const iterator& other) const { return m_sparceSetIterator != other.m_sparceSetIterator; }
 
             private:
                 Adapter& m_adapter;
@@ -159,7 +161,7 @@ public:
 
     template<typename UnderlyingIterable>
     class Iterable {
-        WTF_MAKE_FAST_ALLOCATED;
+        WTF_DEPRECATED_MAKE_FAST_ALLOCATED(Iterable);
     public:
         Iterable(Liveness& liveness, const UnderlyingIterable& iterable)
             : m_liveness(liveness)
@@ -168,7 +170,7 @@ public:
         }
 
         class iterator {
-            WTF_MAKE_FAST_ALLOCATED;
+            WTF_DEPRECATED_MAKE_FAST_ALLOCATED(iterator);
         public:
             iterator()
                 : m_liveness(nullptr)
@@ -197,11 +199,6 @@ public:
             {
                 ASSERT(m_liveness == other.m_liveness);
                 return m_iter == other.m_iter;
-            }
-
-            bool operator!=(const iterator& other) const
-            {
-                return !(*this == other);
             }
 
         private:
@@ -235,7 +232,7 @@ public:
     Workset& workset() { return m_workset; }
 
     class LiveAtHead {
-        WTF_MAKE_FAST_ALLOCATED;
+        WTF_DEPRECATED_MAKE_FAST_ALLOCATED(LiveAtHead);
     public:
         LiveAtHead(Liveness& liveness)
             : m_liveness(liveness)
@@ -279,7 +276,7 @@ protected:
                     liveAtTail.append(index);
                 });
 
-            std::sort(liveAtTail.begin(), liveAtTail.end());
+            std::ranges::sort(liveAtTail);
             removeRepeatedElements(liveAtTail);
         }
 
@@ -329,9 +326,8 @@ protected:
                 if (m_workset.isEmpty())
                     continue;
 
-                liveAtHead.reserveCapacity(liveAtHead.size() + m_workset.size());
-                for (unsigned newValue : m_workset)
-                    liveAtHead.uncheckedAppend(newValue);
+                liveAtHead.appendRange(m_workset.begin(), m_workset.end());
+
 
                 m_workset.sort();
 
@@ -346,7 +342,7 @@ protected:
                             liveAtTail.begin(), liveAtTail.end(),
                             m_workset.begin(), m_workset.end(),
                             mergeBuffer.begin());
-                        mergeBuffer.resize(iter - mergeBuffer.begin());
+                        mergeBuffer.shrink(iter - mergeBuffer.begin());
 
                         if (mergeBuffer.size() == liveAtTail.size())
                             continue;
@@ -374,3 +370,4 @@ private:
 
 } // namespace WTF
 
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

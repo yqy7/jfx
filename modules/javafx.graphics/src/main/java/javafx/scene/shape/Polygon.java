@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -57,7 +57,7 @@ polygon.getPoints().addAll(new Double[]{
 </PRE>
  * @since JavaFX 2.0
  */
-public  class Polygon extends Shape {
+public non-sealed class Polygon extends Shape {
     static {
         PolygonHelper.setPolygonAccessor(new PolygonHelper.PolygonAccessor() {
             @Override
@@ -113,7 +113,7 @@ public  class Polygon extends Shape {
      *
      * @defaultValue empty
      */
-    private final ObservableList<Double> points = new TrackableObservableList<Double>() {
+    private final ObservableList<Double> points = new TrackableObservableList<>() {
         @Override
         protected void onChanged(Change<Double> c) {
             NodeHelper.markDirty(Polygon.this, DirtyBits.NODE_GEOMETRY);

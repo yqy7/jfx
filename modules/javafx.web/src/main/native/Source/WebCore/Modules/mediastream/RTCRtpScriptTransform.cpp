@@ -30,28 +30,29 @@
 
 #include "ErrorEvent.h"
 #include "EventNames.h"
+#include "ExceptionOr.h"
 #include "JSDOMGlobalObject.h"
 #include "MessageChannel.h"
 #include "RTCRtpScriptTransformer.h"
 #include "RTCRtpTransformBackend.h"
 #include "Worker.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(RTCRtpScriptTransform);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(RTCRtpScriptTransform);
 
 ExceptionOr<Ref<RTCRtpScriptTransform>> RTCRtpScriptTransform::create(JSC::JSGlobalObject& state, Worker& worker, JSC::JSValue options, Vector<JSC::Strong<JSC::JSObject>>&& transfer)
 {
     if (!worker.scriptExecutionContext())
-        return Exception { InvalidStateError, "Worker frame is detached"_s };
+        return Exception { ExceptionCode::InvalidStateError, "Worker frame is detached"_s };
 
-    auto* context = JSC::jsCast<JSDOMGlobalObject*>(&state)->scriptExecutionContext();
+    RefPtr context = JSC::jsCast<JSDOMGlobalObject*>(&state)->scriptExecutionContext();
     if (!context)
-        return Exception { InvalidStateError, "Invalid context"_s };
+        return Exception { ExceptionCode::InvalidStateError, "Invalid context"_s };
 
-    Vector<RefPtr<MessagePort>> transferredPorts;
+    Vector<Ref<MessagePort>> transferredPorts;
     auto serializedOptions = SerializedScriptValue::create(state, options, WTFMove(transfer), transferredPorts);
     if (serializedOptions.hasException())
         return serializedOptions.releaseException();
@@ -114,7 +115,7 @@ void RTCRtpScriptTransform::initializeTransformer(RTCRtpTransformBackend& backen
 {
     m_isAttached = true;
     if (!setupTransformer(backend))
-        m_backend = &backend;
+        m_backend = backend;
 }
 
 bool RTCRtpScriptTransform::setupTransformer(Ref<RTCRtpTransformBackend>&& backend)
@@ -132,8 +133,6 @@ bool RTCRtpScriptTransform::setupTransformer(Ref<RTCRtpTransformBackend>&& backe
 
 void RTCRtpScriptTransform::clear(RTCRtpScriptTransformer::ClearCallback clearCallback)
 {
-    m_isAttached = false;
-
     Locker locker { m_transformerLock };
     m_isTransformerInitialized = false;
     m_worker->postTaskToWorkerGlobalScope([transformer = WTFMove(m_transformer), clearCallback](auto&) mutable {

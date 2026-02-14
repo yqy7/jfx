@@ -30,19 +30,26 @@
 
 #include "ContextMenu.h"
 #include "ContextMenuProvider.h"
-#include "ExceptionOr.h"
+#include "InspectorFrontendClient.h"
+#include <JavaScriptCore/JSCJSValue.h>
 #include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
+class CanvasPath;
+class CanvasRenderingContext2D;
 class DOMWrapperWorld;
+class DeferredPromise;
 class Event;
+class File;
 class FrontendMenuProvider;
 class HTMLIFrameElement;
-class InspectorFrontendClient;
+class OffscreenCanvasRenderingContext2D;
 class Page;
+class Path2D;
+template<typename> class ExceptionOr;
 
 class InspectorFrontendHost : public RefCounted<InspectorFrontendHost> {
 public:
@@ -92,7 +99,6 @@ public:
 
     String platform() const;
     String platformVersionName() const;
-    String port() const;
 
     struct DebuggableInfo {
         String debuggableType;
@@ -105,11 +111,20 @@ public:
 
     void copyText(const String& text);
     void killText(const String& text, bool shouldPrependToKillRing, bool shouldStartNewSequence);
+
     void openURLExternally(const String& url);
-    bool canSave();
-    void save(const String& url, const String& content, bool base64Encoded, bool forceSaveAs);
-    void append(const String& url, const String& content);
-    void close(const String& url);
+    void revealFileExternally(const String& path);
+
+    using SaveMode = InspectorFrontendClient::SaveMode;
+    using SaveData = InspectorFrontendClient::SaveData;
+    bool canSave(SaveMode);
+    void save(Vector<SaveData>&&, bool forceSaveAs);
+
+    bool canLoad();
+    void load(const String& path, Ref<DeferredPromise>&&);
+
+    bool canPickColorFromScreen();
+    void pickColorFromScreen(Ref<DeferredPromise>&&);
 
     struct ContextMenuItem {
         String type;
@@ -125,13 +140,14 @@ public:
     void dispatchEventAsContextMenuEvent(Event&);
 
     bool isUnderTest();
-    bool isExperimentalBuild();
     void unbufferedLog(const String& message);
 
     void beep();
     void inspectInspector();
     bool isBeingInspected();
     void setAllowsInspectingInspector(bool);
+
+    bool engineeringSettingsAllowed();
 
     bool supportsDiagnosticLogging();
 #if ENABLE(INSPECTOR_TELEMETRY)
@@ -148,6 +164,22 @@ public:
     ExceptionOr<JSC::JSValue> evaluateScriptInExtensionTab(HTMLIFrameElement& extensionFrame, const String& scriptSource);
 #endif
 
+    // IDL extensions.
+
+    String getPath(const File&) const;
+
+    float getCurrentX(const CanvasRenderingContext2D&) const;
+    float getCurrentY(const CanvasRenderingContext2D&) const;
+    Ref<Path2D> getPath(const CanvasRenderingContext2D&) const;
+    void setPath(CanvasRenderingContext2D&, Path2D&) const;
+
+#if ENABLE(OFFSCREEN_CANVAS)
+    float getCurrentX(const OffscreenCanvasRenderingContext2D&) const;
+    float getCurrentY(const OffscreenCanvasRenderingContext2D&) const;
+    Ref<Path2D> getPath(const OffscreenCanvasRenderingContext2D&) const;
+    void setPath(OffscreenCanvasRenderingContext2D&, Path2D&) const;
+#endif
+
 private:
 #if ENABLE(CONTEXT_MENUS)
     friend class FrontendMenuProvider;
@@ -155,7 +187,7 @@ private:
     WEBCORE_EXPORT InspectorFrontendHost(InspectorFrontendClient*, Page* frontendPage);
 
     InspectorFrontendClient* m_client;
-    Page* m_frontendPage;
+    WeakPtr<Page> m_frontendPage;
 #if ENABLE(CONTEXT_MENUS)
     FrontendMenuProvider* m_menuProvider;
 #endif

@@ -633,13 +633,13 @@ CString disassembleOpcode(uint32_t *pc)
 
 } // namespace RISCV64Disassembler
 
-bool tryToDisassemble(const MacroAssemblerCodePtr<DisassemblyPtrTag>& codePtr, size_t size, const char* prefix, PrintStream& out)
+bool tryToDisassemble(const CodePtr<DisassemblyPtrTag>& codePtr, size_t size, void*, void*, const char* prefix, PrintStream& out)
 {
-    uint32_t* currentPC = codePtr.untaggedExecutableAddress<uint32_t*>();
+    uint32_t* currentPC = codePtr.untaggedPtr<uint32_t*>();
     size_t byteCount = size;
 
     while (byteCount) {
-        out.printf("%s%#16llx: <%08x> %s\n", prefix, static_cast<unsigned long long>(bitwise_cast<uintptr_t>(currentPC)), *currentPC,
+        out.printf("%s%#16llx: <%08x> %s\n", prefix, static_cast<unsigned long long>(std::bit_cast<uintptr_t>(currentPC)), *currentPC,
             RISCV64Disassembler::disassembleOpcode(currentPC).data());
 
         ++currentPC;

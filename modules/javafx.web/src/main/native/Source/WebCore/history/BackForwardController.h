@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,9 +25,14 @@
 
 #pragma once
 
-#include <wtf/Noncopyable.h>
+#include "BackForwardFrameItemIdentifier.h"
+#include "FrameIdentifier.h"
+#include <wtf/CheckedPtr.h>
 #include <wtf/Forward.h>
+#include <wtf/Noncopyable.h>
 #include <wtf/RefPtr.h>
+#include <wtf/TZoneMalloc.h>
+#include <wtf/WeakRef.h>
 
 namespace WebCore {
 
@@ -35,8 +40,10 @@ class BackForwardClient;
 class HistoryItem;
 class Page;
 
-class BackForwardController {
-    WTF_MAKE_NONCOPYABLE(BackForwardController); WTF_MAKE_FAST_ALLOCATED;
+class BackForwardController final : public CanMakeCheckedPtr<BackForwardController> {
+    WTF_MAKE_TZONE_ALLOCATED(BackForwardController);
+    WTF_MAKE_NONCOPYABLE(BackForwardController);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(BackForwardController);
 public:
     BackForwardController(Page&, Ref<BackForwardClient>&&);
     ~BackForwardController();
@@ -51,23 +58,30 @@ public:
     WEBCORE_EXPORT bool goForward();
 
     void addItem(Ref<HistoryItem>&&);
+    void setChildItem(BackForwardFrameItemIdentifier, Ref<HistoryItem>&&);
     void setCurrentItem(HistoryItem&);
 
     unsigned count() const;
     WEBCORE_EXPORT unsigned backCount() const;
     WEBCORE_EXPORT unsigned forwardCount() const;
 
-    WEBCORE_EXPORT RefPtr<HistoryItem> itemAtIndex(int);
+    WEBCORE_EXPORT RefPtr<HistoryItem> itemAtIndex(int, std::optional<FrameIdentifier> = std::nullopt);
+    bool containsItem(const HistoryItem&) const;
 
     void close();
 
-    WEBCORE_EXPORT RefPtr<HistoryItem> backItem();
-    WEBCORE_EXPORT RefPtr<HistoryItem> currentItem();
-    WEBCORE_EXPORT RefPtr<HistoryItem> forwardItem();
+    WEBCORE_EXPORT RefPtr<HistoryItem> backItem(std::optional<FrameIdentifier> = std::nullopt);
+    WEBCORE_EXPORT RefPtr<HistoryItem> currentItem(std::optional<FrameIdentifier> = std::nullopt);
+    WEBCORE_EXPORT RefPtr<HistoryItem> forwardItem(std::optional<FrameIdentifier> = std::nullopt);
+
+    Vector<Ref<HistoryItem>> allItems();
+    Vector<Ref<HistoryItem>> itemsForFrame(FrameIdentifier);
 
 private:
-    Page& m_page;
-    Ref<BackForwardClient> m_client;
+    Ref<Page> protectedPage() const;
+
+    WeakRef<Page> m_page;
+    const Ref<BackForwardClient> m_client;
 };
 
 } // namespace WebCore

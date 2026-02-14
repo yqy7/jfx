@@ -30,11 +30,11 @@
 
 #include "AudioNodeInput.h"
 #include "AudioNodeOutput.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(AudioBasicInspectorNode);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(AudioBasicInspectorNode);
 
 AudioBasicInspectorNode::AudioBasicInspectorNode(BaseAudioContext& context, NodeType type)
     : AudioNode(context, type)
@@ -49,7 +49,7 @@ void AudioBasicInspectorNode::pullInputs(size_t framesToProcess)
 {
     // Render input stream - try to render directly into output bus for pass-through processing where process() doesn't need to do anything...
     auto* output = this->output(0);
-    input(0)->pull(output ? output->bus() : nullptr, framesToProcess);
+    input(0)->pull(output ? &output->bus() : nullptr, framesToProcess);
 }
 
 void AudioBasicInspectorNode::checkNumberOfChannelsForInput(AudioNodeInput* input)

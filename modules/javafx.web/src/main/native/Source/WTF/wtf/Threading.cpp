@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2020 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,11 +29,13 @@
 #include <cstring>
 #include <wtf/DateMath.h>
 #include <wtf/Gigacage.h>
+#include <wtf/NeverDestroyed.h>
 #include <wtf/PrintStream.h>
-#include <wtf/RandomNumberSeed.h>
+#include <wtf/RunLoop.h>
 #include <wtf/ThreadGroup.h>
 #include <wtf/ThreadingPrimitives.h>
 #include <wtf/WTFConfig.h>
+#include <wtf/text/AtomString.h>
 #include <wtf/threads/Signals.h>
 
 #if HAVE(QOS_CLASSES)
@@ -47,13 +49,25 @@
 #include <wtf/linux/RealTimeThreads.h>
 #endif
 
+#if PLATFORM(COCOA)
+#include <wtf/cocoa/Entitlements.h>
+#include <wtf/darwin/LibraryPathDiagnostics.h>
+#endif
+
 #if !USE(SYSTEM_MALLOC)
 #include <bmalloc/BPlatform.h>
 #if BENABLE(LIBPAS)
 #define USE_LIBPAS_THREAD_SUSPEND_LOCK 1
 #include <bmalloc/pas_thread_suspend_lock.h>
 #endif
+#if USE(TZONE_MALLOC)
+#if BUSE(TZONE)
+#include <bmalloc/TZoneHeapManager.h>
+#else
+#error USE(TZONE_MALLOC) requires BUSE(TZONE)
 #endif
+#endif // USE(TZONE_MALLOC)
+#endif // !USE(SYSTEM_MALLOC)
 
 namespace WTF {
 
@@ -103,11 +117,17 @@ static std::optional<size_t> stackSize(ThreadType threadType)
 #if PLATFORM(PLAYSTATION)
     if (threadType == ThreadType::JavaScript)
         return 512 * KB;
-#elif OS(DARWIN) && ASAN_ENABLED
+#elif OS(DARWIN) && (ASAN_ENABLED || ASSERT_ENABLED)
     if (threadType == ThreadType::Compiler)
-        return 1 * MB; // ASan needs more stack space (especially on Debug builds).
-#elif PLATFORM(JAVA) && OS(WINDOWS) && USE(JSVALUE32_64)
-    return 1 * MB;
+        return 1 * MB; // ASan / Debug build needs more stack space.
+#elif OS(WINDOWS)
+    // WebGL conformance tests need more stack space <https://webkit.org/b/261297>
+    if (threadType == ThreadType::Graphics)
+#if defined(NDEBUG)
+        return 2 * MB;
+#else
+        return 4 * MB;
+#endif
 #else
     UNUSED_PARAM(threadType);
 #endif
@@ -124,11 +144,20 @@ static std::optional<size_t> stackSize(ThreadType threadType)
 #endif
 }
 
-std::atomic<uint32_t> Thread::s_uid { 0 };
+std::atomic<uint32_t> ThreadLike::s_uid;
+
+uint32_t ThreadLike::currentSequence()
+{
+#if PLATFORM(COCOA)
+    if (uint32_t uid = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(dispatch_get_specific(&s_uid))))
+        return uid;
+#endif
+    return Thread::currentSingleton().uid();
+}
 
 struct Thread::NewThreadContext : public ThreadSafeRefCounted<NewThreadContext> {
 public:
-    NewThreadContext(const char* name, Function<void()>&& entryPoint, Ref<Thread>&& thread)
+    NewThreadContext(ASCIILiteral name, Function<void()>&& entryPoint, Ref<Thread>&& thread)
         : name(name)
         , entryPoint(WTFMove(entryPoint))
         , thread(WTFMove(thread))
@@ -137,7 +166,7 @@ public:
 
     enum class Stage { Start, EstablishedHandle, Initialized };
     Stage stage { Stage::Start };
-    const char* name;
+    ASCIILiteral name;
     Function<void()> entryPoint;
     Ref<Thread> thread;
     Mutex mutex;
@@ -170,7 +199,7 @@ const char* Thread::normalizeThreadName(const char* threadName)
     // This name can be com.apple.WebKit.ProcessLauncher or com.apple.CoreIPC.ReceiveQueue.
     // We are using those names for the thread name, but both are longer than the limit of
     // the platform thread name length, 32 for Windows and 16 for Linux.
-    StringView result(threadName);
+    auto result = StringView::fromLatin1(threadName);
     size_t size = result.reverseFind('.');
     if (size != notFound)
         result = result.substring(size + 1);
@@ -184,8 +213,8 @@ const char* Thread::normalizeThreadName(const char* threadName)
     if (result.length() > kLinuxThreadNameLimit)
         result = result.right(kLinuxThreadNameLimit);
 #endif
-    ASSERT(result.characters8()[result.length()] == '\0');
-    return reinterpret_cast<const char*>(result.characters8());
+    auto characters = result.span8();
+    return byteCast<char>(characters.data());
 #endif
 }
 
@@ -225,9 +254,11 @@ void Thread::entryPoint(NewThreadContext* newThreadContext)
 
         Thread::initializeCurrentThreadInternal(context->name);
         function = WTFMove(context->entryPoint);
-        context->thread->initializeInThread();
 
-        Thread::initializeTLS(WTFMove(context->thread));
+        Ref thread = WTFMove(context->thread);
+        thread->initializeInThread();
+
+        Thread::initializeTLS(WTFMove(thread));
 
 #if !HAVE(STACK_BOUNDS_FOR_NEW_THREAD)
         // Ack completion of initialization to the creating thread.
@@ -236,11 +267,11 @@ void Thread::entryPoint(NewThreadContext* newThreadContext)
 #endif
     }
 
-    ASSERT(!Thread::current().stack().isEmpty());
+    ASSERT(!Thread::currentSingleton().stack().isEmpty());
     function();
 }
 
-Ref<Thread> Thread::create(const char* name, Function<void()>&& entryPoint, ThreadType threadType, QOS qos)
+Ref<Thread> Thread::create(ASCIILiteral name, Function<void()>&& entryPoint, ThreadType threadType, QOS qos, SchedulingPolicy schedulingPolicy)
 {
     WTF::initialize();
     Ref<Thread> thread = adoptRef(*new Thread());
@@ -253,7 +284,7 @@ Ref<Thread> Thread::create(const char* name, Function<void()>&& entryPoint, Thre
     context->ref();
     {
         MutexLocker locker(context->mutex);
-        bool success = thread->establishHandle(context.ptr(), stackSize(threadType), qos);
+        bool success = thread->establishHandle(context.ptr(), stackSize(threadType), qos, schedulingPolicy);
         RELEASE_ASSERT(success);
         context->stage = NewThreadContext::Stage::EstablishedHandle;
 
@@ -279,6 +310,8 @@ Ref<Thread> Thread::create(const char* name, Function<void()>&& entryPoint, Thre
     }
 
     ASSERT(!thread->stack().isEmpty());
+
+    thread->m_isRealtime = schedulingPolicy == SchedulingPolicy::Realtime;
     return thread;
 }
 
@@ -361,7 +394,7 @@ unsigned Thread::numberOfThreadGroups()
 
 bool Thread::exchangeIsCompilationThread(bool newValue)
 {
-    auto& thread = Thread::current();
+    auto& thread = Thread::currentSingleton();
     bool oldValue = thread.m_isCompilationThread;
     thread.m_isCompilationThread = newValue;
     return oldValue;
@@ -369,12 +402,19 @@ bool Thread::exchangeIsCompilationThread(bool newValue)
 
 void Thread::registerGCThread(GCThreadType gcThreadType)
 {
-    Thread::current().m_gcThreadType = static_cast<unsigned>(gcThreadType);
+    Thread::currentSingleton().m_gcThreadType = static_cast<unsigned>(gcThreadType);
 }
 
 bool Thread::mayBeGCThread()
 {
-    return Thread::current().gcThreadType() != GCThreadType::None;
+    // TODO: FIX THIS
+    return Thread::currentSingleton().gcThreadType() != GCThreadType::None || Thread::currentSingleton().m_isCompilationThread;
+}
+
+void Thread::registerJSThread(Thread& thread)
+{
+    ASSERT(&thread == &Thread::currentSingleton());
+    thread.m_isJSThread = true;
 }
 
 void Thread::setCurrentThreadIsUserInteractive(int relativePriority)
@@ -387,7 +427,7 @@ void Thread::setCurrentThreadIsUserInteractive(int relativePriority)
     // We don't allow to make the main thread real time. This is used by secondary processes to match the
     // UI process, but in linux the UI process is not real time.
     if (!isMainThread())
-        RealTimeThreads::singleton().registerThread(current());
+        RealTimeThreads::singleton().registerThread(currentSingleton());
     UNUSED_PARAM(relativePriority);
 #else
     UNUSED_PARAM(relativePriority);
@@ -403,6 +443,43 @@ void Thread::setCurrentThreadIsUserInitiated(int relativePriority)
 #else
     UNUSED_PARAM(relativePriority);
 #endif
+}
+
+#if HAVE(QOS_CLASSES)
+static Thread::QOS toQOS(qos_class_t qosClass)
+{
+    switch (qosClass) {
+    case QOS_CLASS_USER_INTERACTIVE:
+        return Thread::QOS::UserInteractive;
+    case QOS_CLASS_USER_INITIATED:
+        return Thread::QOS::UserInitiated;
+    case QOS_CLASS_UTILITY:
+        return Thread::QOS::Utility;
+    case QOS_CLASS_BACKGROUND:
+        return Thread::QOS::Background;
+    case QOS_CLASS_UNSPECIFIED:
+    case QOS_CLASS_DEFAULT:
+    default:
+        return Thread::QOS::Default;
+    }
+}
+#endif
+
+auto Thread::currentThreadQOS() -> QOS
+{
+#if HAVE(QOS_CLASSES)
+    qos_class_t qos = QOS_CLASS_DEFAULT;
+    int relativePriority;
+    pthread_get_qos_class_np(pthread_self(), &qos, &relativePriority);
+    return toQOS(qos);
+#else
+    return QOS::Default;
+#endif
+}
+
+bool Thread::currentThreadIsRealtime()
+{
+    return Thread::currentSingleton().m_isRealtime;
 }
 
 #if HAVE(QOS_CLASSES)
@@ -431,32 +508,44 @@ void Thread::dump(PrintStream& out) const
 ThreadSpecificKey Thread::s_key = InvalidThreadSpecificKey;
 #endif
 
+#if USE(TZONE_MALLOC)
+#if PLATFORM(COCOA)
+static bool hasDisableTZoneEntitlement()
+{
+    return processHasEntitlement("webkit.tzone.disable"_s);
+}
+#endif
+#endif
+
 void initialize()
 {
     static std::once_flag onceKey;
     std::call_once(onceKey, [] {
+#if ENABLE(CONJECTURE_ASSERT)
+        wtfConjectureAssertIsEnabled = !!getenv("ENABLE_WEBKIT_CONJECTURE_ASSERT");
+#endif
         setPermissionsOfConfigPage();
+        Config::initialize();
+#if USE(TZONE_MALLOC)
+#if PLATFORM(COCOA)
+        bmalloc::api::TZoneHeapManager::setHasDisableTZoneEntitlementCallback(hasDisableTZoneEntitlement);
+#endif
+        bmalloc::api::TZoneHeapManager::ensureSingleton(); // Force initialization.
+#endif
         Gigacage::ensureGigacage();
         Config::AssertNotFrozenScope assertScope;
-        initializeRandomNumberGenerator();
 #if !HAVE(FAST_TLS) && !OS(WINDOWS)
         Thread::initializeTLSKey();
 #endif
         initializeDates();
         Thread::initializePlatformThreading();
-#if USE(PTHREADS) && HAVE(MACHINE_CONTEXT)
-        SignalHandlers::initialize();
+#if PLATFORM(COCOA)
+        initializeLibraryPathDiagnostics();
+#endif
+#if USE(WINDOWS_EVENT_LOOP)
+        RunLoop::registerRunLoopMessageWindowClass();
 #endif
     });
-}
-
-// This is a compatibility hack to prevent linkage errors when launching older
-// versions of Safari. initialize() used to be named initializeThreading(), and
-// Safari.framework used to call it directly from NotificationAgentMain.
-WTF_EXPORT_PRIVATE void initializeThreading();
-void initializeThreading()
-{
-    initialize();
 }
 
 } // namespace WTF

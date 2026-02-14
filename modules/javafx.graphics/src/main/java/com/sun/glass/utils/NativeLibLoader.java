@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,32 +24,33 @@
  */
 package com.sun.glass.utils;
 
+import com.sun.javafx.PlatformUtil;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.net.URI;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.AccessController;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.PrivilegedAction;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 
 public class NativeLibLoader {
 
-    private static final HashSet<String> loaded = new HashSet<String>();
+    private static final HashSet<String> loaded = new HashSet<>();
 
     public static synchronized void loadLibrary(String libname) {
         if (!loaded.contains(libname)) {
-            @SuppressWarnings("removal")
-            StackWalker walker = AccessController.doPrivileged((PrivilegedAction<StackWalker>) () ->
-            StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE));
+            StackWalker walker = StackWalker.
+                getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
             Class caller = walker.getCallerClass();
             loadLibraryInternal(libname, null, caller);
             loaded.add(libname);
@@ -58,9 +59,8 @@ public class NativeLibLoader {
 
     public static synchronized void loadLibrary(String libname, List<String> dependencies) {
         if (!loaded.contains(libname)) {
-            @SuppressWarnings("removal")
-            StackWalker walker = AccessController.doPrivileged((PrivilegedAction<StackWalker>) () ->
-            StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE));
+            StackWalker walker = StackWalker.
+                getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
             Class caller = walker.getCallerClass();
             loadLibraryInternal(libname, dependencies, caller);
             loaded.add(libname);
@@ -74,11 +74,7 @@ public class NativeLibLoader {
     private static String libSuffix = "";
 
     static {
-        @SuppressWarnings("removal")
-        var dummy = AccessController.doPrivileged((PrivilegedAction<Object>) () -> {
-            verbose = Boolean.getBoolean("javafx.verbose");
-            return null;
-        });
+        verbose = Boolean.getBoolean("javafx.verbose");
     }
 
     private static String[] initializePath(String propname) {
@@ -173,8 +169,7 @@ public class NativeLibLoader {
                 //is recognized by existence of JNI_OnLoad_libraryname() C function.
                 //If libraryname contains hyphen, it needs to be translated
                 //to underscore to form valid C function indentifier.
-                if ("ios".equals(System.getProperty("os.name").toLowerCase(Locale.ROOT))
-                        && libraryName.contains("-")) {
+                if (PlatformUtil.isIOS() && libraryName.contains("-")) {
                     libraryName = libraryName.replace("-", "_");
                     try {
                         System.loadLibrary(libraryName);
@@ -234,6 +229,8 @@ public class NativeLibLoader {
 
     private static String cacheLibrary(InputStream is, String name, Class caller) throws IOException {
         String jfxVersion = System.getProperty("javafx.runtime.version", "versionless");
+        // This fixes an issue with windows - ":" is not allowed for file on Windows.
+        jfxVersion = jfxVersion.replace(":", "-");
         String userCache = System.getProperty("javafx.cachedir", "");
         String arch = System.getProperty("os.arch");
         if (userCache.isEmpty()) {
@@ -300,7 +297,22 @@ public class NativeLibLoader {
         }
         if (write) {
             Path path = f.toPath();
-            Files.copy(is, path);
+            File lockFile = new File(cacheDir, ".lock");
+            try (RandomAccessFile randomAccessFile = new RandomAccessFile(lockFile, "rw");
+                 FileChannel fileChannel = randomAccessFile.getChannel();
+                 FileLock fileLock = fileChannel.lock()) {
+                try {
+                    if (!Files.exists(path)) {
+                        Files.copy(is, path);
+                    }
+                } finally {
+                    if (fileLock != null) {
+                        fileLock.release();
+                    }
+                }
+            } catch (IOException ex) {
+                throw new IOException("Error copying library " + path + " to cache: " + ex.getMessage(), ex);
+            }
         }
 
         String fp = f.getAbsolutePath();
@@ -336,13 +348,12 @@ public class NativeLibLoader {
         }
 
         // Set the native directory based on the OS
-        String osName = System.getProperty("os.name");
         String relativeDir = null;
-        if (osName.startsWith("Windows")) {
+        if (PlatformUtil.isWindows()) {
             relativeDir = "bin/javafx";
-        } else if (osName.startsWith("Mac")) {
+        } else if (PlatformUtil.isMac()) {
             relativeDir = "lib";
-        } else if (osName.startsWith("Linux")) {
+        } else if (PlatformUtil.isLinux()) {
             relativeDir = "lib";
         }
 
@@ -357,13 +368,12 @@ public class NativeLibLoader {
         int lastIndexOfSlash = Math.max(tmpStr.lastIndexOf('/'), tmpStr.lastIndexOf('\\'));
 
         // Set the native directory based on the OS
-        String osName = System.getProperty("os.name");
         String relativeDir = null;
-        if (osName.startsWith("Windows")) {
+        if (PlatformUtil.isWindows()) {
             relativeDir = "../bin";
-        } else if (osName.startsWith("Mac")) {
+        } else if (PlatformUtil.isMac()) {
             relativeDir = ".";
-        } else if (osName.startsWith("Linux")) {
+        } else if (PlatformUtil.isLinux()) {
             relativeDir = ".";
         }
 
@@ -394,14 +404,13 @@ public class NativeLibLoader {
                 }
 
                 // Set the lib prefix and suffix based on the OS
-                String osName = System.getProperty("os.name");
-                if (osName.startsWith("Windows")) {
+                if (PlatformUtil.isWindows()) {
                     libPrefix = "";
                     libSuffix = ".dll";
-                } else if (osName.startsWith("Mac")) {
+                } else if (PlatformUtil.isMac()) {
                     libPrefix = "lib";
                     libSuffix = ".dylib";
-                } else if (osName.startsWith("Linux")) {
+                } else if (PlatformUtil.isLinux()) {
                     libPrefix = "lib";
                     libSuffix = ".so";
                 }

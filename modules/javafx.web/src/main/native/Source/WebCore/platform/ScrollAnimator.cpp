@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2014-2015 Apple Inc.  All rights reserved.
- * Copyright (c) 2010, Google Inc. All rights reserved.
+ * Copyright (c) 2010 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -41,8 +41,11 @@
 #include "ScrollbarsController.h"
 #include "ScrollingEffectsController.h"
 #include <algorithm>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(ScrollAnimator);
 
 #if !PLATFORM(IOS_FAMILY) && !PLATFORM(MAC)
 std::unique_ptr<ScrollAnimator> ScrollAnimator::create(ScrollableArea& scrollableArea)
@@ -54,7 +57,7 @@ std::unique_ptr<ScrollAnimator> ScrollAnimator::create(ScrollableArea& scrollabl
 ScrollAnimator::ScrollAnimator(ScrollableArea& scrollableArea)
     : m_scrollableArea(scrollableArea)
     , m_scrollController(*this)
-    , m_keyboardScrollingAnimator(makeUnique<KeyboardScrollingAnimator>(*this, m_scrollController))
+    , m_keyboardScrollingAnimator(makeUniqueRef<KeyboardScrollingAnimator>(scrollableArea))
 {
 }
 
@@ -89,7 +92,9 @@ bool ScrollAnimator::singleAxisScroll(ScrollEventAxis axis, float scrollDelta, O
         if (m_scrollController.retargetAnimatedScrollBy(delta))
             return true;
 
-        m_scrollableArea.scrollToPositionWithAnimation(m_currentPosition + delta);
+        auto options = ScrollPositionChangeOptions::createProgrammatic();
+        options.originalScrollDelta = delta;
+        m_scrollableArea.scrollToPositionWithAnimation(m_currentPosition + delta, options);
         return true;
     }
 
@@ -109,6 +114,7 @@ bool ScrollAnimator::scrollToPositionWithoutAnimation(const FloatPoint& position
     m_scrollController.stopAnimatedScroll();
 
     setCurrentPosition(adjustedPosition, NotifyScrollableArea::Yes);
+    scrollableArea().scrollDidEnd();
     return true;
 }
 
@@ -160,6 +166,10 @@ void ScrollAnimator::resnapAfterLayout()
 
 bool ScrollAnimator::handleWheelEvent(const PlatformWheelEvent& wheelEvent)
 {
+#if !PLATFORM(MAC)
+    m_scrollController.updateGestureInProgressState(wheelEvent);
+#endif
+
     if (processWheelEventForScrollSnap(wheelEvent))
         return false;
 
@@ -225,6 +235,12 @@ bool ScrollAnimator::handleTouchEvent(const PlatformTouchEvent&)
 }
 #endif
 
+static void notifyScrollAnchoringControllerOfScroll(ScrollableArea& scrollableArea)
+{
+    scrollableArea.invalidateScrollAnchoringElement();
+    scrollableArea.updateScrollAnchoringElement();
+}
+
 void ScrollAnimator::setCurrentPosition(const FloatPoint& position, NotifyScrollableArea notify)
 {
     // FIXME: An early return here if the position is not changing triggers test failures because of adjustForIOSCaretWhenScrolling()
@@ -234,6 +250,8 @@ void ScrollAnimator::setCurrentPosition(const FloatPoint& position, NotifyScroll
 
     if (notify == NotifyScrollableArea::Yes)
         notifyPositionChanged(delta);
+    else
+        notifyScrollAnchoringControllerOfScroll(m_scrollableArea);
 
     updateActiveScrollSnapIndexForOffset();
 }
@@ -283,6 +301,8 @@ void ScrollAnimator::willStartAnimatedScroll()
 void ScrollAnimator::didStopAnimatedScroll()
 {
     m_scrollableArea.setScrollAnimationStatus(ScrollAnimationStatus::NotAnimating);
+    m_scrollableArea.animatedScrollDidEnd();
+    m_scrollableArea.scrollDidEnd();
 }
 
 #if HAVE(RUBBER_BANDING)
@@ -351,7 +371,7 @@ float ScrollAnimator::pageScaleFactor() const
 
 std::unique_ptr<ScrollingEffectsControllerTimer> ScrollAnimator::createTimer(Function<void()>&& function)
 {
-    return makeUnique<ScrollingEffectsControllerTimer>(RunLoop::current(), [function = WTFMove(function), weakScrollableArea = WeakPtr { m_scrollableArea }] {
+    return makeUnique<ScrollingEffectsControllerTimer>(RunLoop::currentSingleton(), [function = WTFMove(function), weakScrollableArea = WeakPtr { m_scrollableArea }] {
         if (!weakScrollableArea)
             return;
         function();
@@ -371,7 +391,7 @@ void ScrollAnimator::stopAnimationCallback(ScrollingEffectsController&)
     m_scrollAnimationScheduled = false;
 }
 
-void ScrollAnimator::deferWheelEventTestCompletionForReason(WheelEventTestMonitor::ScrollableAreaIdentifier identifier, WheelEventTestMonitor::DeferReason reason) const
+void ScrollAnimator::deferWheelEventTestCompletionForReason(ScrollingNodeID identifier, WheelEventTestMonitor::DeferReason reason) const
 {
     if (!m_wheelEventTestMonitor)
         return;
@@ -379,7 +399,7 @@ void ScrollAnimator::deferWheelEventTestCompletionForReason(WheelEventTestMonito
     m_wheelEventTestMonitor->deferForReason(identifier, reason);
 }
 
-void ScrollAnimator::removeWheelEventTestCompletionDeferralForReason(WheelEventTestMonitor::ScrollableAreaIdentifier identifier, WheelEventTestMonitor::DeferReason reason) const
+void ScrollAnimator::removeWheelEventTestCompletionDeferralForReason(ScrollingNodeID identifier, WheelEventTestMonitor::DeferReason reason) const
 {
     if (!m_wheelEventTestMonitor)
         return;
@@ -387,7 +407,7 @@ void ScrollAnimator::removeWheelEventTestCompletionDeferralForReason(WheelEventT
     m_wheelEventTestMonitor->removeDeferralForReason(identifier, reason);
 }
 
-#if PLATFORM(GTK) || USE(NICOSIA)
+#if USE(COORDINATED_GRAPHICS)
 bool ScrollAnimator::scrollAnimationEnabled() const
 {
     return m_scrollableArea.scrollAnimatorEnabled();
@@ -440,5 +460,11 @@ ScrollAnimationStatus ScrollAnimator::serviceScrollAnimation(MonotonicTime time)
         m_scrollController.animationCallback(time);
     return m_scrollAnimationScheduled ? ScrollAnimationStatus::Animating : ScrollAnimationStatus::NotAnimating;
 }
+
+ScrollingNodeID ScrollAnimator::scrollingNodeIDForTesting() const
+{
+    return m_scrollableArea.scrollingNodeIDForTesting();
+}
+
 
 } // namespace WebCore

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,8 +27,9 @@ package javafx.scene.control;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
-import java.util.WeakHashMap;
+import java.util.Map;
 
 import javafx.beans.DefaultProperty;
 import javafx.beans.property.DoubleProperty;
@@ -188,7 +189,7 @@ public class SplitPane extends Control {
         // makes it look to css like the user set the value and css will not
         // override. Initializing focusTraversable by calling applyStyle with a
         // null StyleOrigin ensures that css will be able to override the value.
-        ((StyleableProperty<Boolean>)(WritableValue<Boolean>)focusTraversableProperty()).applyStyle(null, Boolean.FALSE);
+        ((StyleableProperty<Boolean>)focusTraversableProperty()).applyStyle(null, Boolean.FALSE);
 
         getItems().addListener(new ListChangeListener<Node>() {
             @Override public void onChanged(Change<? extends Node> c) {
@@ -257,7 +258,7 @@ public class SplitPane extends Control {
      */
     public final void setOrientation(Orientation value) {
         orientationProperty().set(value);
-    };
+    }
 
     /**
      * The orientation for the SplitPane.
@@ -312,7 +313,7 @@ public class SplitPane extends Control {
     private final ObservableList<Divider> unmodifiableDividers = FXCollections.unmodifiableObservableList(dividers);
 
     // Cache the divider positions if the items have not been created.
-    private final WeakHashMap<Integer, Double> dividerCache = new WeakHashMap<Integer, Double>();
+    private final Map<Integer, Double> dividerCache = new HashMap<>();
 
     /* *************************************************************************
      *                                                                         *
@@ -400,8 +401,8 @@ public class SplitPane extends Control {
 
     private static class StyleableProperties {
         private static final CssMetaData<SplitPane,Orientation> ORIENTATION =
-            new CssMetaData<SplitPane,Orientation>("-fx-orientation",
-                new EnumConverter<Orientation>(Orientation.class),
+            new CssMetaData<>("-fx-orientation",
+                new EnumConverter<>(Orientation.class),
                 Orientation.HORIZONTAL) {
 
             @Override
@@ -424,7 +425,7 @@ public class SplitPane extends Control {
         private static final List<CssMetaData<? extends Styleable, ?>> STYLEABLES;
         static {
             final List<CssMetaData<? extends Styleable, ?>> styleables =
-                new ArrayList<CssMetaData<? extends Styleable, ?>>(Control.getClassCssMetaData());
+                new ArrayList<>(Control.getClassCssMetaData());
             styleables.add(ORIENTATION);
             STYLEABLES = Collections.unmodifiableList(styleables);
         }

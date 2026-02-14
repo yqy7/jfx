@@ -38,10 +38,14 @@ class ErrorCallback : public RefCounted<ErrorCallback>, public ActiveDOMCallback
 public:
     using ActiveDOMCallback::ActiveDOMCallback;
 
-    virtual CallbackResult<void> handleEvent(DOMException&) = 0;
+    virtual CallbackResult<void> invoke(DOMException&) = 0;
+    virtual CallbackResult<void> invokeRethrowingException(DOMException&) = 0;
 
     // Helper to post callback task.
     void scheduleCallback(ScriptExecutionContext&, Ref<DOMException>&&);
+
+private:
+    virtual bool hasCallback() const = 0;
 };
 
 } // namespace WebCore

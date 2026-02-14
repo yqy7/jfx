@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -63,20 +63,19 @@ public final class MouseDragEvent extends MouseEvent{
      * Common supertype for all mouse event types.
      */
     public static final EventType<MouseDragEvent> ANY =
-            new EventType<MouseDragEvent>(MouseEvent.ANY, "MOUSE-DRAG");
+            new EventType<>(MouseEvent.ANY, "MOUSE-DRAG");
 
     /**
-     * This event occurs when the gesture progresses within this node.
+     * This event occurs when the gesture progresses within a node.
      */
     public static final EventType<MouseDragEvent> MOUSE_DRAG_OVER =
-            new EventType<MouseDragEvent>(MouseDragEvent.ANY, "MOUSE-DRAG_OVER");
+            new EventType<>(MouseDragEvent.ANY, "MOUSE-DRAG_OVER");
 
     /**
-     * This event occurs when the gesture ends (by releasing mouse button)
-     * on this node.
+     * This event occurs when the gesture is released over a node (by releasing the mouse button).
      */
     public static final EventType<MouseDragEvent> MOUSE_DRAG_RELEASED =
-            new EventType<MouseDragEvent>(MouseDragEvent.ANY, "MOUSE-DRAG_RELEASED");
+            new EventType<>(MouseDragEvent.ANY, "MOUSE-DRAG_RELEASED");
 
     /**
      * This event occurs when the gesture enters a node. It's the bubbling variant,
@@ -89,7 +88,7 @@ public final class MouseDragEvent extends MouseEvent{
      * which is similar
      */
     public static final EventType<MouseDragEvent> MOUSE_DRAG_ENTERED_TARGET =
-            new EventType<MouseDragEvent>(MouseDragEvent.ANY, "MOUSE-DRAG_ENTERED_TARGET");
+            new EventType<>(MouseDragEvent.ANY, "MOUSE-DRAG_ENTERED_TARGET");
 
     /**
      * This event occurs when the gesture enters a node. This event type is
@@ -100,7 +99,7 @@ public final class MouseDragEvent extends MouseEvent{
      * which is similar
      */
     public static final EventType<MouseDragEvent> MOUSE_DRAG_ENTERED =
-            new EventType<MouseDragEvent>(MouseDragEvent.MOUSE_DRAG_ENTERED_TARGET,
+            new EventType<>(MouseDragEvent.MOUSE_DRAG_ENTERED_TARGET,
                     "MOUSE-DRAG_ENTERED");
 
     /**
@@ -114,7 +113,7 @@ public final class MouseDragEvent extends MouseEvent{
      * which is similar
      */
     public static final EventType<MouseDragEvent> MOUSE_DRAG_EXITED_TARGET =
-            new EventType<MouseDragEvent>(MouseDragEvent.ANY, "MOUSE-DRAG_EXITED_TARGET");
+            new EventType<>(MouseDragEvent.ANY, "MOUSE-DRAG_EXITED_TARGET");
 
     /**
      * This event occurs when the gesture exits a node. This event type is
@@ -125,8 +124,17 @@ public final class MouseDragEvent extends MouseEvent{
      * which is similar
      */
     public static final EventType<MouseDragEvent> MOUSE_DRAG_EXITED =
-            new EventType<MouseDragEvent>(MouseDragEvent.MOUSE_DRAG_EXITED_TARGET,
+            new EventType<>(MouseDragEvent.MOUSE_DRAG_EXITED_TARGET,
                     "MOUSE-DRAG_EXITED");
+
+    /**
+     * This event occurs when the gesture ends. It is delivered exactly once to the gesture source, and is always the
+     * last event in the full press-drag-release process. It is delivered even when the mouse is outside the window.
+     *
+     * @since 26
+     */
+    public static final EventType<MouseDragEvent> MOUSE_DRAG_DONE =
+            new EventType<>(MouseDragEvent.ANY, "MOUSE-DRAG_DONE");
 
     /**
      * Constructs new MouseDragEvent event.

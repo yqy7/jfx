@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,7 +29,7 @@
 #include "CodeBlock.h"
 #include "DebuggerPrimitives.h"
 #include "JSCellInlines.h"
-#include <wtf/text/StringConcatenateNumbers.h>
+#include <wtf/text/MakeString.h>
 
 namespace JSC {
 
@@ -45,8 +45,22 @@ StackFrame::StackFrame(VM& vm, JSCell* owner, JSCell* callee, CodeBlock* codeBlo
 {
 }
 
+StackFrame::StackFrame(VM& vm, JSCell* owner, CodeBlock* codeBlock, BytecodeIndex bytecodeIndex)
+    : m_codeBlock(vm, owner, codeBlock)
+    , m_bytecodeIndex(bytecodeIndex)
+{
+}
+
 StackFrame::StackFrame(Wasm::IndexOrName indexOrName)
     : m_wasmFunctionIndexOrName(indexOrName)
+    , m_wasmFunctionIndex(0)
+    , m_isWasmFrame(true)
+{
+}
+
+StackFrame::StackFrame(Wasm::IndexOrName indexOrName, size_t functionIndex)
+    : m_wasmFunctionIndexOrName(indexOrName)
+    , m_wasmFunctionIndex(functionIndex)
     , m_isWasmFrame(true)
 {
 }
@@ -58,25 +72,50 @@ SourceID StackFrame::sourceID() const
     return m_codeBlock->ownerExecutable()->sourceID();
 }
 
-String StackFrame::sourceURL() const
+static String processSourceURL(VM& vm, const JSC::StackFrame& frame, const String& sourceURL)
 {
-    if (m_isWasmFrame)
-        return "[wasm code]"_s;
-
-    if (!m_codeBlock) {
-        return "[native code]"_s;
+    if (vm.clientData && (!protocolIsInHTTPFamily(sourceURL) && !protocolIs(sourceURL, "blob"_s))) {
+        String overrideURL = vm.clientData->overrideSourceURL(frame, sourceURL);
+        if (!overrideURL.isNull())
+            return overrideURL;
     }
 
-    String sourceURL = m_codeBlock->ownerExecutable()->sourceURL();
     if (!sourceURL.isNull())
         return sourceURL;
     return emptyString();
 }
 
-String StackFrame::functionName(VM& vm) const
+String StackFrame::sourceURL(VM& vm) const
 {
     if (m_isWasmFrame)
-        return makeString(m_wasmFunctionIndexOrName);
+        return makeString(m_wasmFunctionIndexOrName.moduleName(), ":wasm-function["_s, m_wasmFunctionIndex, ']');
+
+    if (!m_codeBlock)
+        return "[native code]"_s;
+
+    return processSourceURL(vm, *this, m_codeBlock->ownerExecutable()->sourceURL());
+}
+
+String StackFrame::sourceURLStripped(VM& vm) const
+{
+    if (m_isWasmFrame)
+        return makeString(m_wasmFunctionIndexOrName.moduleName(), ":wasm-function["_s, m_wasmFunctionIndex, ']');
+
+    if (!m_codeBlock)
+        return "[native code]"_s;
+
+    return processSourceURL(vm, *this, m_codeBlock->ownerExecutable()->sourceURLStripped());
+}
+
+String StackFrame::functionName(VM& vm) const
+{
+    if (m_isWasmFrame) {
+        if (m_wasmFunctionIndexOrName.isEmpty() || !m_wasmFunctionIndexOrName.nameSection())
+            return "wasm-stub"_s;
+        if (m_wasmFunctionIndexOrName.isIndex())
+            return WTF::toString(m_wasmFunctionIndexOrName.index());
+        return WTF::toString(m_wasmFunctionIndexOrName.name()->span());
+    }
 
     if (m_codeBlock) {
         switch (m_codeBlock->codeType()) {
@@ -92,44 +131,47 @@ String StackFrame::functionName(VM& vm) const
             ASSERT_NOT_REACHED();
         }
     }
+
     String name;
     if (m_callee) {
         if (m_callee->isObject())
             name = getCalculatedDisplayName(vm, jsCast<JSObject*>(m_callee.get())).impl();
+
+        return name.isNull() ? emptyString() : name;
     }
+
+    if (m_codeBlock) {
+        if (auto* executable = jsDynamicCast<FunctionExecutable*>(m_codeBlock->ownerExecutable()))
+            name = executable->ecmaName().impl();
+    }
+
     return name.isNull() ? emptyString() : name;
 }
 
-void StackFrame::computeLineAndColumn(unsigned& line, unsigned& column) const
+LineColumn StackFrame::computeLineAndColumn() const
 {
-    if (!m_codeBlock) {
-        line = 0;
-        column = 0;
-        return;
-    }
+    if (!m_codeBlock)
+        return { };
 
-    int divot = 0;
-    int unusedStartOffset = 0;
-    int unusedEndOffset = 0;
-    m_codeBlock->expressionRangeForBytecodeIndex(m_bytecodeIndex, divot, unusedStartOffset, unusedEndOffset, line, column);
+    auto lineColumn = m_codeBlock->lineColumnForBytecodeIndex(m_bytecodeIndex);
 
     ScriptExecutable* executable = m_codeBlock->ownerExecutable();
     if (std::optional<int> overrideLineNumber = executable->overrideLineNumber(m_codeBlock->vm()))
-        line = overrideLineNumber.value();
+        lineColumn.line = overrideLineNumber.value();
+
+    return lineColumn;
 }
 
 String StackFrame::toString(VM& vm) const
 {
     String functionName = this->functionName(vm);
-    String sourceURL = this->sourceURL();
+    String sourceURL = this->sourceURLStripped(vm);
 
     if (sourceURL.isEmpty() || !hasLineAndColumnInfo())
         return makeString(functionName, '@', sourceURL);
 
-    unsigned line;
-    unsigned column;
-    computeLineAndColumn(line, column);
-    return makeString(functionName, '@', sourceURL, ':', line, ':', column);
+    auto lineColumn = computeLineAndColumn();
+    return makeString(functionName, '@', sourceURL, ':', lineColumn.line, ':', lineColumn.column);
 }
 
 } // namespace JSC

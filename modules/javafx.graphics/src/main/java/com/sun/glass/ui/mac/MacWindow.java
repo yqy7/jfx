@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,14 +26,14 @@ package com.sun.glass.ui.mac;
 
 import com.sun.glass.events.WindowEvent;
 import com.sun.glass.ui.Cursor;
+import com.sun.glass.ui.HeaderButtonMetrics;
 import com.sun.glass.ui.Pixels;
 import com.sun.glass.ui.Screen;
 import com.sun.glass.ui.View;
 import com.sun.glass.ui.Window;
-import com.sun.glass.ui.Window.State;
+import javafx.geometry.Dimension2D;
+import javafx.scene.layout.HeaderBar;
 import java.nio.ByteBuffer;
-
-import java.util.Map;
 
 /**
  * MacOSX platform implementation class for Window.
@@ -47,6 +47,10 @@ final class MacWindow extends Window {
 
     protected MacWindow(Window owner, Screen screen, int styleMask) {
         super(owner, screen, styleMask);
+
+        if (isExtendedWindow()) {
+            prefHeaderButtonHeightProperty().subscribe(this::onPrefHeaderButtonHeightChanged);
+        }
     }
 
     @Override native protected long _createWindow(long ownerPtr, long screenPtr, int mask);
@@ -55,6 +59,8 @@ final class MacWindow extends Window {
     @Override native protected boolean _setMenubar(long ptr, long menubarPtr);
     @Override native protected boolean _minimize(long ptr, boolean minimize);
     @Override native protected boolean _maximize(long ptr, boolean maximize, boolean wasMaximized);
+    // empty - not needed by this implementation
+    @Override protected void _updateViewSize(long ptr) {}
     @Override protected void _setBounds(long ptr,
                                         int x, int y, boolean xSet, boolean ySet,
                                         int w, int h, int cw, int ch,
@@ -107,11 +113,15 @@ final class MacWindow extends Window {
 
     private native void _setIcon(long ptr, Object iconBuffer, int width, int height);
 
+    @Override
+    public void setDarkFrame(boolean value) {
+        _setDarkFrame(getRawHandle(), value);
+    }
+
+    private native void _setDarkFrame(long ptr, boolean value);
+
     @Override native protected void _toFront(long ptr);
     @Override native protected void _toBack(long ptr);
-    @Override native protected void _enterModal(long ptr);
-    @Override native protected void _enterModalWithWindow(long dialog, long window);
-    @Override native protected void _exitModal(long ptr);
 
     @Override native protected boolean _grabFocus(long ptr);
     @Override native protected void _ungrabFocus(long ptr);
@@ -150,6 +160,65 @@ final class MacWindow extends Window {
     @Override
     protected void _releaseInput(long ptr) {
         throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    public void performWindowDrag() {
+        _performWindowDrag(getRawHandle());
+    }
+
+    public void performTitleBarDoubleClickAction() {
+        _performTitleBarDoubleClickAction(getRawHandle());
+    }
+
+    private native void _performWindowDrag(long ptr);
+
+    private native void _performTitleBarDoubleClickAction(long ptr);
+
+    private native boolean _isRightToLeftLayoutDirection();
+
+    private native void _setWindowButtonStyle(long ptr, int toolbarStyle, boolean buttonsVisible);
+
+    private void onPrefHeaderButtonHeightChanged(Number height) {
+        double h = height != null ? height.doubleValue() : HeaderBar.USE_DEFAULT_SIZE;
+        var toolbarStyle = NSWindowToolbarStyle.ofHeight(h);
+        _setWindowButtonStyle(getRawHandle(), toolbarStyle.style, h != 0);
+        updateHeaderButtonMetrics(toolbarStyle, h);
+    }
+
+    private void updateHeaderButtonMetrics(NSWindowToolbarStyle toolbarStyle, double prefButtonHeight) {
+        double minHeight = NSWindowToolbarStyle.SMALL.size.getHeight();
+        var empty = new Dimension2D(0, 0);
+        var size = isUtilityWindow() ? toolbarStyle.utilitySize : toolbarStyle.size;
+
+        HeaderButtonMetrics metrics = prefButtonHeight != 0
+            ? _isRightToLeftLayoutDirection()
+                ? new HeaderButtonMetrics(empty, size, minHeight)
+                : new HeaderButtonMetrics(size, empty, minHeight)
+            : new HeaderButtonMetrics(empty, empty, minHeight);
+
+        headerButtonMetrics.set(metrics);
+    }
+
+    private enum NSWindowToolbarStyle {
+        SMALL(68, 28, 1), // NSWindowToolbarStyleExpanded
+        MEDIUM(78, 38, 4), // NSWindowToolbarStyleUnifiedCompact
+        LARGE(90, 52, 3); // NSWindowToolbarStyleUnified
+
+        NSWindowToolbarStyle(double width, double height, int style) {
+            this.size = new Dimension2D(width, height);
+            this.utilitySize = new Dimension2D(height, height); // width intentionally set to height
+            this.style = style;
+        }
+
+        final Dimension2D size;
+        final Dimension2D utilitySize;
+        final int style;
+
+        static NSWindowToolbarStyle ofHeight(double height) {
+            if (height >= LARGE.size.getHeight()) return LARGE;
+            if (height >= MEDIUM.size.getHeight()) return MEDIUM;
+            return SMALL;
+        }
     }
 }
 

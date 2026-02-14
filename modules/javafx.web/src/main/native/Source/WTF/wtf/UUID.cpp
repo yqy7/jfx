@@ -35,6 +35,11 @@
 #include <wtf/ASCIICType.h>
 #include <wtf/CryptographicallyRandomNumber.h>
 #include <wtf/HexNumber.h>
+#include <wtf/Lock.h>
+#include <wtf/NeverDestroyed.h>
+#include <wtf/SHA1.h>
+#include <wtf/WeakRandom.h>
+#include <wtf/text/MakeString.h>
 #include <wtf/text/StringToIntegerConversion.h>
 
 #if OS(DARWIN)
@@ -43,42 +48,74 @@
 
 namespace WTF {
 
-UUID::UUID()
+static ALWAYS_INLINE UInt128 convertRandomUInt128ToUUIDVersion4(UInt128 buffer)
 {
-    static_assert(sizeof(m_data) == 16);
-    auto* data = reinterpret_cast<unsigned char*>(&m_data);
-
-    cryptographicallyRandomValues(data, 16);
-
     // By default, we generate a v4 UUID value, as per https://datatracker.ietf.org/doc/html/rfc4122#section-4.4.
-    auto high = static_cast<uint64_t>((m_data >> 64) & 0xffffffffffff0fff) | 0x4000;
-    auto low = static_cast<uint64_t>(m_data & 0x3fffffffffffffff) | 0x8000000000000000;
+    auto high = static_cast<uint64_t>((buffer >> 64) & 0xffffffffffff0fff) | 0x4000;
+    auto low = static_cast<uint64_t>(buffer & 0x3fffffffffffffff) | 0x8000000000000000;
 
-    m_data = (static_cast<UInt128>(high) << 64) | low;
+    return (static_cast<UInt128>(high) << 64) | low;
 }
 
-unsigned UUID::hash() const
+static UInt128 generateCryptographicallyRandomUUIDVersion4()
 {
-    return StringHasher::hashMemory(reinterpret_cast<const unsigned char*>(&m_data), 16);
+    UInt128 buffer { };
+    static_assert(sizeof(buffer) == 16);
+    cryptographicallyRandomValues(asMutableByteSpan(buffer));
+    return convertRandomUInt128ToUUIDVersion4(buffer);
+}
+
+UInt128 UUID::generateWeakRandomUUIDVersion4()
+{
+    static Lock lock;
+    UInt128 buffer { 0 };
+    {
+        Locker locker { lock };
+        static std::optional<WeakRandom> weakRandom;
+        if (!weakRandom)
+            weakRandom.emplace();
+        buffer = static_cast<UInt128>(weakRandom->getUint64()) << 64 | weakRandom->getUint64();
+    }
+    return convertRandomUInt128ToUUIDVersion4(buffer);
+}
+
+UUID UUID::createVersion5(const SHA1::Digest& digest)
+{
+    // https://datatracker.ietf.org/doc/html/rfc4122#section-4.3
+    UInt128 buffer { 0 };
+    for (unsigned i = 0; i < 16; ++i)
+        buffer |= (static_cast<UInt128>(digest[i]) << ((16 - 1 - i) * 8));
+
+    auto high = static_cast<uint64_t>((buffer >> 64) & 0xffffffffffff0fff) | 0x5000;
+    auto low = static_cast<uint64_t>(buffer & 0x3fffffffffffffff) | 0x8000000000000000;
+
+    return UUID { (static_cast<UInt128>(high) << 64) | low };
+}
+
+UUID UUID::createVersion5(UUID namespaceID, std::span<const uint8_t> name)
+{
+    std::array<uint8_t, 16> buffer { };
+    UInt128 data = namespaceID.data();
+    for (unsigned i = 0; i < buffer.size(); ++i)
+        buffer[i] = static_cast<uint8_t>(data >> ((buffer.size() - 1 - i) * 8));
+
+    SHA1 sha1;
+    sha1.addBytes(buffer);
+    sha1.addBytes(name);
+    SHA1::Digest digest { };
+    sha1.computeHash(digest);
+
+    return createVersion5(digest);
+}
+
+UUID::UUID()
+    : m_data(generateCryptographicallyRandomUUIDVersion4())
+{
 }
 
 String UUID::toString() const
 {
-    auto high = static_cast<uint64_t>(m_data >> 64);
-    auto low = static_cast<uint64_t>(m_data & 0xffffffffffffffff);
-
-    // Format as Version 4 UUID.
-    return makeString(
-        hex(high >> 32, 8, Lowercase),
-        '-',
-        hex((high >> 16) & 0xffff, 4, Lowercase),
-        '-',
-        hex(high & 0xffff, 4, Lowercase),
-        '-',
-        hex(low >> 48, 4, Lowercase),
-        '-',
-        hex(low & 0xffffffffffff, 12, Lowercase)
-    );
+    return makeString(*this);
 }
 
 std::optional<UUID> UUID::parse(StringView value)
@@ -94,7 +131,7 @@ std::optional<UUID> UUID::parse(StringView value)
     if (value[0] == '+' || value[9] == '+'  || value[19] == '+' || value[24] == '+')
         return { };
 
-    auto firstValue = parseInteger<uint64_t>(value.substring(0, 8), 16);
+    auto firstValue = parseInteger<uint64_t>(value.left(8), 16);
     if (!firstValue)
         return { };
 
@@ -118,7 +155,7 @@ std::optional<UUID> UUID::parse(StringView value)
     uint64_t low = (*fourthValue << 48) | *fifthValue;
 
     auto result = (static_cast<UInt128>(high) << 64) | low;
-    if (result == deletedValue)
+    if (result == deletedValue || result == emptyValue)
         return { };
 
     return UUID(result);
@@ -144,7 +181,12 @@ std::optional<UUID> UUID::parseVersion4(StringView value)
 
 String createVersion4UUIDString()
 {
-    return UUID::createVersion4().toString();
+    return makeString(UUID::createVersion4());
+}
+
+String createVersion4UUIDStringWeak()
+{
+    return makeString(UUID::createVersion4Weak());
 }
 
 String bootSessionUUIDString()
@@ -154,11 +196,11 @@ String bootSessionUUIDString()
     static std::once_flag onceKey;
     std::call_once(onceKey, [] {
         constexpr size_t maxUUIDLength = 37;
-        char uuid[maxUUIDLength];
+        std::array<char, maxUUIDLength> uuid;
         size_t uuidLength = maxUUIDLength;
-        if (sysctlbyname("kern.bootsessionuuid", uuid, &uuidLength, nullptr, 0))
+        if (sysctlbyname("kern.bootsessionuuid", uuid.data(), &uuidLength, nullptr, 0))
             return;
-        bootSessionUUID.construct(static_cast<const char*>(uuid), uuidLength - 1);
+        bootSessionUUID.construct(std::span<const char> { uuid }.first(uuidLength - 1));
     });
     return bootSessionUUID;
 #else

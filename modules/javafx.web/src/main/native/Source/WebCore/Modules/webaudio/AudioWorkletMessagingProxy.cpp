@@ -36,10 +36,11 @@
 #include "BaseAudioContext.h"
 #include "CacheStorageConnection.h"
 #include "Document.h"
-#include "Frame.h"
-#include "LibWebRTCProvider.h"
+#include "DocumentInlines.h"
+#include "LocalFrame.h"
 #include "Page.h"
 #include "Settings.h"
+#include "WebRTCProvider.h"
 #include "WorkletParameters.h"
 #include "WorkletPendingTasks.h"
 
@@ -47,22 +48,27 @@ namespace WebCore {
 
 static WorkletParameters generateWorkletParameters(AudioWorklet& worklet)
 {
-    auto* document = worklet.document();
+    RefPtr document = worklet.document();
     auto jsRuntimeFlags = document->settings().javaScriptRuntimeFlags();
+    RELEASE_ASSERT(document->sessionID());
 
     return {
         document->url(),
         jsRuntimeFlags,
         worklet.audioContext() ? worklet.audioContext()->sampleRate() : 0.0f,
         worklet.identifier(),
+        *document->sessionID(),
         document->settingsValues(),
-        worklet.audioContext() ? !worklet.audioContext()->isOfflineContext() : false
+        document->referrerPolicy(),
+        worklet.audioContext() ? !worklet.audioContext()->isOfflineContext() : false,
+        document->advancedPrivacyProtections(),
+        document->noiseInjectionHashSalt()
     };
 }
 
 AudioWorkletMessagingProxy::AudioWorkletMessagingProxy(AudioWorklet& worklet)
     : m_worklet(worklet)
-    , m_document(*worklet.document())
+    , m_documentIdentifier(worklet.document()->identifier())
     , m_workletThread(AudioWorkletThread::create(*this, generateWorkletParameters(worklet)))
 {
     ASSERT(isMainThread());
@@ -73,6 +79,7 @@ AudioWorkletMessagingProxy::AudioWorkletMessagingProxy(AudioWorklet& worklet)
 AudioWorkletMessagingProxy::~AudioWorkletMessagingProxy()
 {
     m_workletThread->stop();
+    m_workletThread->clearProxies();
 }
 
 bool AudioWorkletMessagingProxy::postTaskForModeToWorkletGlobalScope(ScriptExecutionContext::Task&& task, const String& mode)
@@ -90,26 +97,30 @@ RefPtr<CacheStorageConnection> AudioWorkletMessagingProxy::createCacheStorageCon
 RefPtr<RTCDataChannelRemoteHandlerConnection> AudioWorkletMessagingProxy::createRTCDataChannelRemoteHandlerConnection()
 {
     ASSERT(isMainThread());
-    if (!m_document->page())
+    RefPtr worklet = m_worklet.get();
+    if (!worklet)
         return nullptr;
-    return m_document->page()->libWebRTCProvider().createRTCDataChannelRemoteHandlerConnection();
+    RefPtr document = worklet->document();
+    if (!document || !document->page())
+        return nullptr;
+    return document->page()->webRTCProvider().createRTCDataChannelRemoteHandlerConnection();
+}
+
+ScriptExecutionContextIdentifier AudioWorkletMessagingProxy::loaderContextIdentifier() const
+{
+    return m_documentIdentifier;
 }
 
 void AudioWorkletMessagingProxy::postTaskToLoader(ScriptExecutionContext::Task&& task)
 {
-    m_document->postTask(WTFMove(task));
-}
-
-bool AudioWorkletMessagingProxy::postTaskForModeToWorkerOrWorkletGlobalScope(ScriptExecutionContext::Task&& task, const String& mode)
-{
-    return postTaskForModeToWorkletGlobalScope(WTFMove(task), mode);
+    ScriptExecutionContext::postTaskTo(m_documentIdentifier, WTFMove(task));
 }
 
 void AudioWorkletMessagingProxy::postTaskToAudioWorklet(Function<void(AudioWorklet&)>&& task)
 {
-    m_document->postTask([this, protectedThis = Ref { *this }, task = WTFMove(task)](ScriptExecutionContext&) {
-        if (m_worklet)
-            task(*m_worklet);
+    ScriptExecutionContext::postTaskTo(m_documentIdentifier, [protectedThis = Ref { *this }, task = WTFMove(task)](ScriptExecutionContext&) {
+        if (protectedThis->m_worklet)
+            task(*protectedThis->m_worklet);
     });
 }
 

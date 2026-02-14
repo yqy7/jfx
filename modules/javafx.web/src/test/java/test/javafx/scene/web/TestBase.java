@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,8 @@
 
 package test.javafx.scene.web;
 
+import static org.junit.jupiter.api.Assertions.fail;
+
 import java.awt.Color;
 import java.io.File;
 import java.util.concurrent.Callable;
@@ -43,7 +45,7 @@ import com.sun.javafx.application.PlatformImpl;
 import java.util.concurrent.ExecutionException;
 import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebView;
-import org.junit.BeforeClass;
+import org.junit.jupiter.api.BeforeAll;
 import org.w3c.dom.Document;
 
 public class TestBase implements ChangeListener, InvalidationListener {
@@ -53,7 +55,7 @@ public class TestBase implements ChangeListener, InvalidationListener {
 
     private static WebView view;
 
-    @BeforeClass
+    @BeforeAll
     public static void setupOnce() {
         final CountDownLatch startupLatch = new CountDownLatch(1);
 
@@ -63,7 +65,9 @@ public class TestBase implements ChangeListener, InvalidationListener {
 
         try {
             startupLatch.await();
-        } catch (InterruptedException ex) {}
+        } catch (InterruptedException ex) {
+            fail(ex);
+        }
     }
 
     public TestBase() {
@@ -168,7 +172,7 @@ public class TestBase implements ChangeListener, InvalidationListener {
      * Executes a job on FX thread, and waits until it is complete.
      */
     protected void submit(Runnable job) {
-        final FutureTask<Void> future = new FutureTask<Void>(job, null);
+        final FutureTask<Void> future = new FutureTask<>(job, null);
         Platform.runLater(future);
         try {
             // block until job is complete
@@ -192,7 +196,7 @@ public class TestBase implements ChangeListener, InvalidationListener {
      * Executes a job on FX thread, waits until completion, and returns its result.
      */
     protected <T> T submit(Callable<T> job) {
-        final FutureTask<T> future = new FutureTask<T>(job);
+        final FutureTask<T> future = new FutureTask<>(job);
         Platform.runLater(future);
         try {
             return future.get();
@@ -220,7 +224,7 @@ public class TestBase implements ChangeListener, InvalidationListener {
     private class LoadFinishedListener implements ChangeListener<Boolean> {
         @Override
         public void changed(ObservableValue<? extends Boolean> observable,
-                Boolean oldValue, Boolean newValue) {
+                            Boolean oldValue, Boolean newValue) {
             if (! newValue) {
                 TestBase.this.notify(LOCK);
             }

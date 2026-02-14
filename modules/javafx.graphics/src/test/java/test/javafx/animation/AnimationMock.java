@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,7 +28,7 @@ package test.javafx.animation;
 import javafx.util.Duration;
 import com.sun.scenario.animation.AbstractPrimaryTimer;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class AnimationMock extends AnimationImpl {
 
@@ -38,7 +38,7 @@ public class AnimationMock extends AnimationImpl {
     public static final boolean DEFAULT_AUTOREVERSE = false;
     private long lastTimePulse;
 
-    public enum Command {PLAY, JUMP, NONE};
+    public enum Command {PLAY, JUMP, NONE}
 
     private Command lastCommand = Command.NONE;
     private long lastCurrentTicks = -1;

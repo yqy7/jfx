@@ -30,9 +30,12 @@
 #include "LayoutRect.h"
 #include <algorithm>
 #include <wtf/CheckedArithmetic.h>
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/TextStream.h>
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(IntRect);
 
 IntRect::IntRect(const FloatRect& r)
     : m_location(clampToInteger(r.x()), clampToInteger(r.y()))
@@ -158,12 +161,24 @@ bool IntRect::isValid() const
     return !max.hasOverflowed();
 }
 
+IntRect IntRect::toRectWithExtentsClippedToNumericLimits() const
+{
+    using T = int32_t;
+    IntRect clippedRect { *this };
+    constexpr auto max = std::numeric_limits<T>::max();
+    if (sumOverflows<T>(x(), width()))
+        clippedRect.setWidth(max - x());
+    if (sumOverflows<T>(y(), height()))
+        clippedRect.setHeight(max - y());
+    return clippedRect;
+}
+
 TextStream& operator<<(TextStream& ts, const IntRect& r)
 {
     if (ts.hasFormattingFlag(TextStream::Formatting::SVGStyleRect))
-        return ts << "at (" << r.x() << "," << r.y() << ") size " << r.width() << "x" << r.height();
+        return ts << "at ("_s << r.x() << ',' << r.y() << ") size "_s << r.width() << 'x' << r.height();
 
-    return ts << r.location() << " " << r.size();
+    return ts << r.location() << ' ' << r.size();
 }
 
 } // namespace WebCore

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,6 @@ import com.sun.javafx.scene.NodeHelper;
 import com.sun.javafx.scene.SceneHelper;
 import test.com.sun.javafx.test.MouseEventGenerator;
 import javafx.event.Event;
-import javafx.event.EventHandler;
 import javafx.event.EventType;
 import javafx.geometry.Point2D;
 import javafx.geometry.Point3D;
@@ -57,8 +56,12 @@ import javafx.scene.shape.Sphere;
 import javafx.scene.shape.TriangleMesh;
 import javafx.scene.transform.Rotate;
 import javafx.stage.Stage;
-import static org.junit.Assert.*;
-import org.junit.Test;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 public class Mouse3DTest {
 
@@ -67,9 +70,9 @@ public class Mouse3DTest {
     private static final double PERSPECTIVE_CAMERA_Y = 400;
     private static final double PERSPECTIVE_CAMERA_Z = -1492.820323027551;
 
-    private EventHolder<MouseEvent> me = new EventHolder<MouseEvent>();
-    private EventHolder<MouseEvent> pme = new EventHolder<MouseEvent>();
-    private EventHolder<MouseEvent> sme = new EventHolder<MouseEvent>();
+    private EventHolder<MouseEvent> me = new EventHolder<>();
+    private EventHolder<MouseEvent> pme = new EventHolder<>();
+    private EventHolder<MouseEvent> sme = new EventHolder<>();
 
     /***************** pick ray ********************/
     // We use moving camera for the picking tests, so test pick ray sanity first
@@ -2280,9 +2283,9 @@ public class Mouse3DTest {
 
     @Test
     public void shouldReportCorrectPickResultForFullPDR() {
-        EventHolder<MouseDragEvent> smde = new EventHolder<MouseDragEvent>();
-        EventHolder<MouseDragEvent> tmde = new EventHolder<MouseDragEvent>();
-        EventHolder<MouseDragEvent> tmde2 = new EventHolder<MouseDragEvent>();
+        EventHolder<MouseDragEvent> smde = new EventHolder<>();
+        EventHolder<MouseDragEvent> tmde = new EventHolder<>();
+        EventHolder<MouseDragEvent> tmde2 = new EventHolder<>();
 
         MouseEventGenerator g = new MouseEventGenerator();
         final Box b1 = box().handleFullPDR(MouseDragEvent.MOUSE_DRAG_EXITED, smde);

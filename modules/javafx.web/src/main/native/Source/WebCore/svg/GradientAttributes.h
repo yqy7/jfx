@@ -36,7 +36,7 @@ struct GradientAttributes {
 
     SVGSpreadMethodType spreadMethod() const { return static_cast<SVGSpreadMethodType>(m_spreadMethod); }
     SVGUnitTypes::SVGUnitType gradientUnits() const { return static_cast<SVGUnitTypes::SVGUnitType>(m_gradientUnits); }
-    AffineTransform gradientTransform() const { return m_gradientTransform; }
+    const AffineTransform& gradientTransform() const { return m_gradientTransform; }
     const GradientColorStops& stops() const { return m_stops; }
 
     void setSpreadMethod(SVGSpreadMethodType value)
@@ -87,6 +87,6 @@ struct SameSizeAsGradientAttributes {
     unsigned c : 7;
 };
 
-COMPILE_ASSERT(sizeof(GradientAttributes) == sizeof(SameSizeAsGradientAttributes), GradientAttributes_size_guard);
+static_assert(sizeof(GradientAttributes) == sizeof(SameSizeAsGradientAttributes));
 
 } // namespace WebCore

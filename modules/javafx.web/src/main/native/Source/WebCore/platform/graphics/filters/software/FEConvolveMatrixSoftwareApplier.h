@@ -26,27 +26,29 @@
 #include "FilterEffectApplier.h"
 #include "IntPoint.h"
 #include "IntSize.h"
+#include "PixelBuffer.h"
 #include <JavaScriptCore/TypedArrayAdaptersForwardDeclarations.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/Vector.h>
 
 namespace WebCore {
 
 class FEConvolveMatrix;
-enum class EdgeModeType;
+enum class EdgeModeType : uint8_t;
 
 class FEConvolveMatrixSoftwareApplier final : public FilterEffectConcreteApplier<FEConvolveMatrix> {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(FEConvolveMatrixSoftwareApplier);
     using Base = FilterEffectConcreteApplier<FEConvolveMatrix>;
 
 public:
-    using Base::Base;
+    FEConvolveMatrixSoftwareApplier(const FEConvolveMatrix& effect);
 
 private:
-    bool apply(const Filter&, const FilterImageVector& inputs, FilterImage& result) const final;
+    bool apply(const Filter&, std::span<const Ref<FilterImage>> inputs, FilterImage& result) const final;
 
     struct PaintingData {
-        const Uint8ClampedArray& srcPixelArray;
-        Uint8ClampedArray& dstPixelArray;
+        const PixelBuffer& sourcePixelBuffer;
+        PixelBuffer& destinationPixelBuffer;
         int width;
         int height;
 
@@ -60,13 +62,13 @@ private:
     };
 
     static inline uint8_t clampRGBAValue(float channel, uint8_t max = 255);
-    static inline void setDestinationPixels(const Uint8ClampedArray& sourcePixels, Uint8ClampedArray& destPixels, int& pixel, float* totals, float divisor, float bias, bool preserveAlphaValues);
+    static inline void setDestinationPixels(const PixelBuffer& sourcePixelBuffer, PixelBuffer& destinationPixelBuffer, int& pixel, std::span<float> totals, float divisor, float bias, bool preserveAlphaValues);
 
     static inline int getPixelValue(const PaintingData&, int x, int y);
 
     static inline void setInteriorPixels(PaintingData&, int clipRight, int clipBottom, int yStart, int yEnd);
     static inline void setOuterPixels(PaintingData&, int x1, int y1, int x2, int y2);
-
+    static void setInteriorPixels(PaintingData&, int clipRight, int clipBottom);
     void applyPlatform(PaintingData&) const;
 };
 

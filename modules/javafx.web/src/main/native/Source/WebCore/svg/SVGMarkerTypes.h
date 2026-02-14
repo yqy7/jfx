@@ -25,15 +25,16 @@
 
 #pragma once
 
+#include "CommonAtomStrings.h"
 #include "SVGAngleValue.h"
 #include "SVGPropertyTraits.h"
 
 namespace WebCore {
 
-enum SVGMarkerUnitsType {
-    SVGMarkerUnitsUnknown = 0,
-    SVGMarkerUnitsUserSpaceOnUse,
-    SVGMarkerUnitsStrokeWidth
+enum class SVGMarkerUnitsType : uint8_t {
+    Unknown = 0,
+    UserSpaceOnUse,
+    StrokeWidth,
 };
 
 enum SVGMarkerOrientType {
@@ -48,15 +49,15 @@ enum SVGMarkerOrientType {
 
 template<>
 struct SVGPropertyTraits<SVGMarkerUnitsType> {
-    static unsigned highestEnumValue() { return SVGMarkerUnitsStrokeWidth; }
+    static unsigned highestEnumValue() { return std::underlying_type_t<SVGMarkerUnitsType>(SVGMarkerUnitsType::StrokeWidth); }
     static String toString(SVGMarkerUnitsType type)
     {
         switch (type) {
-        case SVGMarkerUnitsUnknown:
+        case SVGMarkerUnitsType::Unknown:
             return emptyString();
-        case SVGMarkerUnitsUserSpaceOnUse:
+        case SVGMarkerUnitsType::UserSpaceOnUse:
             return "userSpaceOnUse"_s;
-        case SVGMarkerUnitsStrokeWidth:
+        case SVGMarkerUnitsType::StrokeWidth:
             return "strokeWidth"_s;
         }
 
@@ -65,21 +66,16 @@ struct SVGPropertyTraits<SVGMarkerUnitsType> {
     }
     static SVGMarkerUnitsType fromString(const String& value)
     {
-        if (value == "userSpaceOnUse")
-            return SVGMarkerUnitsUserSpaceOnUse;
-        if (value == "strokeWidth")
-            return SVGMarkerUnitsStrokeWidth;
-        return SVGMarkerUnitsUnknown;
+        if (value == "userSpaceOnUse"_s)
+            return SVGMarkerUnitsType::UserSpaceOnUse;
+        if (value == "strokeWidth"_s)
+            return SVGMarkerUnitsType::StrokeWidth;
+        return SVGMarkerUnitsType::Unknown;
     }
 };
 
 template<>
 struct SVGPropertyTraits<SVGMarkerOrientType> {
-    static const String autoString()
-    {
-        static const NeverDestroyed<String> autoString = MAKE_STATIC_STRING_IMPL("auto");
-        return autoString;
-    }
     static const String autoStartReverseString()
     {
         static const NeverDestroyed<String> autoStartReverseString = MAKE_STATIC_STRING_IMPL("auto-start-reverse");
@@ -88,7 +84,7 @@ struct SVGPropertyTraits<SVGMarkerOrientType> {
     static unsigned highestEnumValue() { return SVGMarkerOrientAngle; }
     static SVGMarkerOrientType fromString(const String& string)
     {
-        if (string == autoString())
+        if (string == autoAtom())
             return SVGMarkerOrientAuto;
         if (string == autoStartReverseString())
             return SVGMarkerOrientAutoStartReverse;
@@ -97,7 +93,7 @@ struct SVGPropertyTraits<SVGMarkerOrientType> {
     static String toString(SVGMarkerOrientType type)
     {
         if (type == SVGMarkerOrientAuto)
-            return autoString();
+            return autoAtom();
         if (type == SVGMarkerOrientAutoStartReverse)
             return autoStartReverseString();
         return emptyString();

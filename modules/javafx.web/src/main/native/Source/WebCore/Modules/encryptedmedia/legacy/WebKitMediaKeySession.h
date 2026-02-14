@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,22 +28,27 @@
 #if ENABLE(LEGACY_ENCRYPTED_MEDIA)
 
 #include "ActiveDOMObject.h"
+#include "ContextDestructionObserverInlines.h"
 #include "EventTarget.h"
-#include "ExceptionOr.h"
+#include "EventTargetInterfaces.h"
 #include "LegacyCDMSession.h"
 #include "Timer.h"
+#include "WebKitMediaKeys.h"
 #include <JavaScriptCore/Forward.h>
 #include <wtf/Deque.h>
 
 namespace WebCore {
 
 class WebKitMediaKeyError;
-class WebKitMediaKeys;
+template<typename> class ExceptionOr;
 
-class WebKitMediaKeySession final : public RefCounted<WebKitMediaKeySession>, public EventTargetWithInlineData, public ActiveDOMObject, private LegacyCDMSessionClient {
-    WTF_MAKE_ISO_ALLOCATED(WebKitMediaKeySession);
+class WebKitMediaKeySession final : public RefCounted<WebKitMediaKeySession>, public EventTarget, public ActiveDOMObject, private LegacyCDMSessionClient {
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(WebKitMediaKeySession);
 public:
-    static Ref<WebKitMediaKeySession> create(ScriptExecutionContext&, WebKitMediaKeys&, const String& keySystem);
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
+
+    static Ref<WebKitMediaKeySession> create(Document&, WebKitMediaKeys&, const String& keySystem);
     ~WebKitMediaKeySession();
 
     WebKitMediaKeyError* error() { return m_error.get(); }
@@ -56,37 +61,45 @@ public:
 
     void detachKeys() { m_keys = nullptr; }
 
-    void generateKeyRequest(const String& mimeType, Ref<Uint8Array>&& initData);
+    void generateKeyRequest(const String& mimeType, Ref<Uint8Array>&& initData, const String& mediaKeysHashSalt);
     RefPtr<ArrayBuffer> cachedKeyForKeyId(const String& keyId) const;
 
-    using RefCounted::ref;
-    using RefCounted::deref;
-
 private:
-    WebKitMediaKeySession(ScriptExecutionContext&, WebKitMediaKeys&, const String& keySystem);
+    WebKitMediaKeySession(Document&, WebKitMediaKeys&, const String& keySystem);
     void keyRequestTimerFired();
     void addKeyTimerFired();
 
     void sendMessage(Uint8Array*, String destinationURL) final;
     void sendError(MediaKeyErrorCode, uint32_t systemCode) final;
     String mediaKeysStorageDirectory() const final;
+    String mediaKeysHashSalt() const final { return m_mediaKeysHashSalt; }
 
     void refEventTarget() final { ref(); }
     void derefEventTarget() final { deref(); }
 
     // ActiveDOMObject.
     void stop() final;
-    const char* activeDOMObjectName() const final;
     bool virtualHasPendingActivity() const final;
 
-    EventTargetInterface eventTargetInterface() const final { return WebKitMediaKeySessionEventTargetInterfaceType; }
+    enum EventTargetInterfaceType eventTargetInterface() const final { return EventTargetInterfaceType::WebKitMediaKeySession; }
     ScriptExecutionContext* scriptExecutionContext() const final { return ActiveDOMObject::scriptExecutionContext(); }
 
-    WebKitMediaKeys* m_keys;
+#if !RELEASE_LOG_DISABLED
+    const Logger& logger() const final { return m_logger; }
+    uint64_t logIdentifier() const final { return m_logIdentifier; }
+    ASCIILiteral logClassName() const { return "WebKitMediaKeySession"_s; }
+    WTFLogChannel& logChannel() const;
+
+    const Ref<const Logger> m_logger;
+    const uint64_t m_logIdentifier;
+#endif
+
+    CheckedPtr<WebKitMediaKeys> m_keys;
     String m_keySystem;
     String m_sessionId;
+    String m_mediaKeysHashSalt;
     RefPtr<WebKitMediaKeyError> m_error;
-    std::unique_ptr<LegacyCDMSession> m_session;
+    RefPtr<LegacyCDMSession> m_session;
 
     struct PendingKeyRequest {
         String mimeType;

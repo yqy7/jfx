@@ -30,41 +30,63 @@
 #include "FEGaussianBlurSoftwareApplier.h"
 //#endif
 #include "Filter.h"
+#include <numbers>
 #include <wtf/text/TextStream.h>
+
+#if USE(SKIA)
+#include "FEGaussianBlurSkiaApplier.h"
+#endif
 
 namespace WebCore {
 
-Ref<FEGaussianBlur> FEGaussianBlur::create(float x, float y, EdgeModeType edgeMode)
+Ref<FEGaussianBlur> FEGaussianBlur::create(float x, float y, EdgeModeType edgeMode, DestinationColorSpace colorSpace)
 {
-    return adoptRef(*new FEGaussianBlur(x, y, edgeMode));
+    return adoptRef(*new FEGaussianBlur(x, y, edgeMode, colorSpace));
 }
 
-FEGaussianBlur::FEGaussianBlur(float x, float y, EdgeModeType edgeMode)
-    : FilterEffect(FilterEffect::Type::FEGaussianBlur)
+FEGaussianBlur::FEGaussianBlur(float x, float y, EdgeModeType edgeMode, DestinationColorSpace colorSpace)
+    : FilterEffect(FilterEffect::Type::FEGaussianBlur, colorSpace)
     , m_stdX(x)
     , m_stdY(y)
     , m_edgeMode(edgeMode)
 {
 }
 
-void FEGaussianBlur::setStdDeviationX(float x)
+bool FEGaussianBlur::operator==(const FEGaussianBlur& other) const
 {
-    m_stdX = x;
+    return FilterEffect::operator==(other)
+        && m_stdX == other.m_stdX
+        && m_stdY == other.m_stdY
+        && m_edgeMode == other.m_edgeMode;
 }
 
-void FEGaussianBlur::setStdDeviationY(float y)
+bool FEGaussianBlur::setStdDeviationX(float stdX)
 {
-    m_stdY = y;
+    if (m_stdX == stdX)
+        return false;
+    m_stdX = stdX;
+    return true;
 }
 
-void FEGaussianBlur::setEdgeMode(EdgeModeType edgeMode)
+bool FEGaussianBlur::setStdDeviationY(float stdY)
 {
+    if (m_stdY == stdY)
+        return false;
+    m_stdY = stdY;
+    return true;
+}
+
+bool FEGaussianBlur::setEdgeMode(EdgeModeType edgeMode)
+{
+    if (m_edgeMode == edgeMode)
+        return false;
     m_edgeMode = edgeMode;
+    return true;
 }
 
 static inline float gaussianKernelFactor()
 {
-    return 3 / 4.f * sqrtf(2 * piFloat);
+    return 3 / 4.f * sqrtf(2 * std::numbers::pi_v<float>);
 }
 
 static int clampedToKernelSize(float value)
@@ -105,9 +127,9 @@ IntSize FEGaussianBlur::calculateOutsetSize(FloatSize stdDeviation)
     return { 3 * kernelSize.width() / 2, 3 * kernelSize.height() / 2 };
 }
 
-FloatRect FEGaussianBlur::calculateImageRect(const Filter& filter, const FilterImageVector& inputs, const FloatRect& primitiveSubregion) const
+FloatRect FEGaussianBlur::calculateImageRect(const Filter& filter, std::span<const FloatRect> inputImageRects, const FloatRect& primitiveSubregion) const
 {
-    auto imageRect = inputs[0]->imageRect();
+    auto imageRect = inputImageRects[0];
 
     // Edge modes other than 'none' do not inflate the affected paint rect.
     if (m_edgeMode != EdgeModeType::None)
@@ -122,30 +144,64 @@ FloatRect FEGaussianBlur::calculateImageRect(const Filter& filter, const FilterI
     return filter.clipToMaxEffectRect(imageRect, primitiveSubregion);
 }
 
-IntOutsets FEGaussianBlur::outsets(const Filter& filter) const
+IntOutsets FEGaussianBlur::calculateOutsets(const FloatSize& stdDeviation)
 {
-    IntSize outsetSize = calculateOutsetSize(filter.resolvedSize({ m_stdX, m_stdY }));
+    IntSize outsetSize = calculateOutsetSize(stdDeviation);
     return { outsetSize.height(), outsetSize.width(), outsetSize.height(), outsetSize.width() };
 }
 
-bool FEGaussianBlur::resultIsAlphaImage(const FilterImageVector& inputs) const
+bool FEGaussianBlur::resultIsAlphaImage(std::span<const Ref<FilterImage>> inputs) const
 {
     return inputs[0]->isAlphaImage();
 }
 
+OptionSet<FilterRenderingMode> FEGaussianBlur::supportedFilterRenderingModes() const
+{
+    OptionSet<FilterRenderingMode> modes = FilterRenderingMode::Software;
+#if USE(SKIA)
+    if (m_edgeMode == EdgeModeType::None)
+        modes.add(FilterRenderingMode::Accelerated);
+#endif
+    // FIXME: Ensure the correctness of the CG GaussianBlur filter (http://webkit.org/b/243816).
+#if 0 && HAVE(CGSTYLE_COLORMATRIX_BLUR)
+    if (m_stdX == m_stdY)
+        modes.add(FilterRenderingMode::GraphicsContext);
+#endif
+    return modes;
+}
+
+std::unique_ptr<FilterEffectApplier> FEGaussianBlur::createAcceleratedApplier() const
+{
+#if USE(SKIA)
+    return FilterEffectApplier::create<FEGaussianBlurSkiaApplier>(*this);
+#else
+    return nullptr;
+#endif
+}
+
 std::unique_ptr<FilterEffectApplier> FEGaussianBlur::createSoftwareApplier() const
 {
+#if USE(SKIA)
+    if (m_edgeMode == EdgeModeType::None)
+        return FilterEffectApplier::create<FEGaussianBlurSkiaApplier>(*this);
+#endif
     return FilterEffectApplier::create<FEGaussianBlurSoftwareApplier>(*this);
+}
+
+std::optional<GraphicsStyle> FEGaussianBlur::createGraphicsStyle(GraphicsContext&, const Filter& filter) const
+{
+    auto radius = calculateUnscaledKernelSize(filter.resolvedSize({ m_stdX, m_stdY }));
+    return GraphicsGaussianBlur { radius };
 }
 
 TextStream& FEGaussianBlur::externalRepresentation(TextStream& ts, FilterRepresentation representation) const
 {
-    ts << indent << "[feGaussianBlur";
+    ts << indent << "[feGaussianBlur"_s;
     FilterEffect::externalRepresentation(ts, representation);
 
-    ts << " stdDeviation=\"" << m_stdX << ", " << m_stdY << "\"";
+    ts << " stdDeviation=\""_s << m_stdX << ", "_s << m_stdY << '"';
 
-    ts << "]\n";
+    ts << "]\n"_s;
     return ts;
 }
 

@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2010 Google Inc. All rights reserved.
- * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2010-2014 Google Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -52,11 +52,11 @@
 #include "ConvolverNode.h"
 #include "DelayNode.h"
 #include "DelayOptions.h"
-#include "Document.h"
+#include "DocumentInlines.h"
 #include "DynamicsCompressorNode.h"
 #include "EventNames.h"
+#include "EventTargetInterfaces.h"
 #include "FFTFrame.h"
-#include "Frame.h"
 #include "FrameLoader.h"
 #include "GainNode.h"
 #include "HRTFDatabaseLoader.h"
@@ -65,25 +65,31 @@
 #include "IIRFilterOptions.h"
 #include "JSAudioBuffer.h"
 #include "JSDOMPromiseDeferred.h"
+#include "LocalFrame.h"
 #include "Logging.h"
+#include "MediaSessionManagerInterface.h"
 #include "NetworkingContext.h"
+#include "OriginAccessPatterns.h"
 #include "OscillatorNode.h"
 #include "Page.h"
 #include "PannerNode.h"
 #include "PeriodicWave.h"
 #include "PeriodicWaveOptions.h"
+#include "PlatformMediaSessionManager.h"
 #include "ScriptController.h"
 #include "ScriptProcessorNode.h"
+#include "ScriptTrackingPrivacyCategory.h"
 #include "StereoPannerNode.h"
 #include "StereoPannerOptions.h"
 #include "WaveShaperNode.h"
 #include <JavaScriptCore/ArrayBuffer.h>
 #include <JavaScriptCore/ScriptCallStack.h>
 #include <wtf/Atomics.h>
-#include <wtf/IsoMallocInlines.h>
 #include <wtf/MainThread.h>
+#include <wtf/NativePromise.h>
 #include <wtf/Ref.h>
 #include <wtf/Scope.h>
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/WTFString.h>
 
 #if DEBUG_AUDIONODE_REFERENCES
@@ -96,7 +102,7 @@
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(BaseAudioContext);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(BaseAudioContext);
 
 bool BaseAudioContext::isSupportedSampleRate(float sampleRate)
 {
@@ -117,6 +123,17 @@ static HashSet<uint64_t>& liveAudioContexts()
     return contexts;
 }
 
+static OptionSet<NoiseInjectionPolicy> effectiveNoiseInjectionPolicies(Document& document)
+{
+    OptionSet<NoiseInjectionPolicy> policies;
+    auto documentPolicies = document.noiseInjectionPolicies();
+    if (documentPolicies.contains(NoiseInjectionPolicy::Minimal))
+        policies.add(NoiseInjectionPolicy::Minimal);
+    if (documentPolicies.contains(NoiseInjectionPolicy::Enhanced) && document.requiresScriptTrackingPrivacyProtection(ScriptTrackingPrivacyCategory::Audio))
+        policies.add(NoiseInjectionPolicy::Enhanced);
+    return policies;
+}
+
 BaseAudioContext::BaseAudioContext(Document& document)
     : ActiveDOMObject(document)
 #if !RELEASE_LOG_DISABLED
@@ -126,6 +143,7 @@ BaseAudioContext::BaseAudioContext(Document& document)
     , m_contextID(generateContextID())
     , m_worklet(AudioWorklet::create(*this))
     , m_listener(AudioListener::create(*this))
+    , m_noiseInjectionPolicies(effectiveNoiseInjectionPolicies(document))
 {
     liveAudioContexts().add(m_contextID);
 
@@ -165,7 +183,7 @@ void BaseAudioContext::lazyInitialize()
     if (m_isAudioThreadFinished)
         return;
 
-    destination().initialize();
+    protectedDestination()->initialize();
 
     m_isInitialized = true;
 }
@@ -176,8 +194,8 @@ void BaseAudioContext::clear()
 
     // Audio thread is dead. Nobody will schedule node deletion action. Let's do it ourselves.
     do {
-        deleteMarkedNodes();
         m_nodesToDelete = std::exchange(m_nodesMarkedForDeletion, { });
+        deleteMarkedNodes();
     } while (!m_nodesToDelete.isEmpty());
 }
 
@@ -191,7 +209,7 @@ void BaseAudioContext::uninitialize()
         return;
 
     // This stops the audio thread and all audio rendering.
-    destination().uninitialize();
+    protectedDestination()->uninitialize();
 
     // Don't allow the context to initialize a second time after it's already been explicitly uninitialized.
     m_isAudioThreadFinished = true;
@@ -227,6 +245,8 @@ void BaseAudioContext::setState(State state)
     if (m_state != state) {
         m_state = state;
         queueTaskToDispatchEvent(*this, TaskSource::MediaElement, Event::create(eventNames().statechangeEvent, Event::CanBubble::Yes, Event::IsCancelable::No));
+        if (RefPtr manager = mediaSessionManager())
+            manager->updateNowPlayingInfoIfNecessary();
     }
 
     size_t stateIndex = static_cast<size_t>(state);
@@ -254,7 +274,7 @@ void BaseAudioContext::stop()
     m_isStopScheduled = true;
 
     ASSERT(document());
-    document()->updateIsPlayingMedia();
+    protectedDocument()->updateIsPlayingMedia();
 
     uninitialize();
     clear();
@@ -265,13 +285,18 @@ Document* BaseAudioContext::document() const
     return downcast<Document>(scriptExecutionContext());
 }
 
+RefPtr<Document> BaseAudioContext::protectedDocument() const
+{
+    return document();
+}
+
 bool BaseAudioContext::wouldTaintOrigin(const URL& url) const
 {
     if (url.protocolIsData())
         return false;
 
-    if (auto* document = this->document())
-        return !document->securityOrigin().canRequest(url);
+    if (RefPtr document = this->document())
+        return !document->protectedSecurityOrigin()->canRequest(url, OriginAccessPatternsForWebProcess::singleton());
 
     return false;
 }
@@ -281,30 +306,35 @@ ExceptionOr<Ref<AudioBuffer>> BaseAudioContext::createBuffer(unsigned numberOfCh
     return AudioBuffer::create(AudioBufferOptions {numberOfChannels, length, sampleRate});
 }
 
-void BaseAudioContext::decodeAudioData(Ref<ArrayBuffer>&& audioData, RefPtr<AudioBufferCallback>&& successCallback, RefPtr<AudioBufferCallback>&& errorCallback, std::optional<Ref<DeferredPromise>>&& promise)
+void BaseAudioContext::decodeAudioData(Ref<ArrayBuffer>&& audioData, RefPtr<AudioBufferCallback>&& successCallback, RefPtr<AudioBufferCallback>&& errorCallback, Ref<DeferredPromise>&& promise)
 {
-    if (promise && (!document() || !document()->isFullyActive())) {
-        promise.value()->reject(Exception { InvalidStateError, "Document is not fully active"_s });
+    RefPtr document = this->document();
+    if (!document || !document->isFullyActive()) {
+        promise->reject(Exception { ExceptionCode::InvalidStateError, "Document is not fully active"_s });
         return;
     }
 
     if (!m_audioDecoder)
         m_audioDecoder = makeUnique<AsyncAudioDecoder>();
 
-    m_audioDecoder->decodeAsync(WTFMove(audioData), sampleRate(), [this, activity = makePendingActivity(*this), successCallback = WTFMove(successCallback), errorCallback = WTFMove(errorCallback), promise = WTFMove(promise)](ExceptionOr<Ref<AudioBuffer>>&& result) mutable {
-        queueTaskKeepingObjectAlive(*this, TaskSource::InternalAsyncTask, [successCallback = WTFMove(successCallback), errorCallback = WTFMove(errorCallback), promise = WTFMove(promise), result = WTFMove(result)]() mutable {
-            if (result.hasException()) {
-                if (promise)
-                    promise.value()->reject(result.releaseException());
+    audioData->pin();
+
+    auto p = m_audioDecoder->decodeAsync(audioData.copyRef(), sampleRate());
+    p->whenSettled(RunLoop::currentSingleton(), [audioData = WTFMove(audioData), activity = makePendingActivity(*this), successCallback = WTFMove(successCallback), errorCallback = WTFMove(errorCallback), promise = WTFMove(promise)] (DecodingTaskPromise::Result&& result) mutable {
+        activity->object().queueTaskKeepingObjectAlive(activity->object(), TaskSource::InternalAsyncTask, [audioData = WTFMove(audioData), successCallback = WTFMove(successCallback), errorCallback = WTFMove(errorCallback), promise = WTFMove(promise), result = WTFMove(result)](auto&) mutable {
+
+            audioData->unpin();
+
+            if (!result) {
+                promise->reject(WTFMove(result.error()));
                 if (errorCallback)
-                    errorCallback->handleEvent(nullptr);
+                    errorCallback->invoke(nullptr);
                 return;
             }
-            auto audioBuffer = result.releaseReturnValue();
-            if (promise)
-                promise.value()->resolve<IDLInterface<AudioBuffer>>(audioBuffer.get());
+            auto audioBuffer = WTFMove(result.value());
+            promise->resolve<IDLInterface<AudioBuffer>>(audioBuffer.get());
             if (successCallback)
-                successCallback->handleEvent(audioBuffer.ptr());
+                successCallback->invoke(audioBuffer.ptr());
         });
     });
 }
@@ -334,7 +364,7 @@ ExceptionOr<Ref<ScriptProcessorNode>> BaseAudioContext::createScriptProcessor(si
     case 0:
 #if USE(AUDIO_SESSION)
         // Pick a value between 256 (2^8) and 16384 (2^14), based on the buffer size of the current AudioSession:
-        bufferSize = 1 << std::max<size_t>(8, std::min<size_t>(14, std::log2(AudioSession::sharedSession().bufferSize())));
+        bufferSize = 1 << std::max<size_t>(8, std::min<size_t>(14, std::log2(AudioSession::singleton().bufferSize())));
 #else
         bufferSize = 2048;
 #endif
@@ -348,7 +378,7 @@ ExceptionOr<Ref<ScriptProcessorNode>> BaseAudioContext::createScriptProcessor(si
     case 16384:
         break;
     default:
-        return Exception { IndexSizeError, "Unsupported buffer size for ScriptProcessorNode"_s };
+        return Exception { ExceptionCode::IndexSizeError, "Unsupported buffer size for ScriptProcessorNode"_s };
     }
 
     // An IndexSizeError exception must be thrown if bufferSize or numberOfInputChannels or numberOfOutputChannels
@@ -356,19 +386,19 @@ ExceptionOr<Ref<ScriptProcessorNode>> BaseAudioContext::createScriptProcessor(si
     // In this case an IndexSizeError must be thrown.
 
     if (!numberOfInputChannels && !numberOfOutputChannels)
-        return Exception { IndexSizeError, "numberOfInputChannels and numberOfOutputChannels cannot both be 0"_s };
+        return Exception { ExceptionCode::IndexSizeError, "numberOfInputChannels and numberOfOutputChannels cannot both be 0"_s };
 
     // This parameter [numberOfInputChannels] determines the number of channels for this node's input. Values of
     // up to 32 must be supported. A NotSupportedError must be thrown if the number of channels is not supported.
 
     if (numberOfInputChannels > maxNumberOfChannels)
-        return Exception { IndexSizeError, "numberOfInputChannels exceeds maximum number of channels"_s };
+        return Exception { ExceptionCode::IndexSizeError, "numberOfInputChannels exceeds maximum number of channels"_s };
 
     // This parameter [numberOfOutputChannels] determines the number of channels for this node's output. Values of
     // up to 32 must be supported. A NotSupportedError must be thrown if the number of channels is not supported.
 
     if (numberOfOutputChannels > maxNumberOfChannels)
-        return Exception { IndexSizeError, "numberOfOutputChannels exceeds maximum number of channels"_s };
+        return Exception { ExceptionCode::IndexSizeError, "numberOfOutputChannels exceeds maximum number of channels"_s };
 
     return ScriptProcessorNode::create(*this, bufferSize, numberOfInputChannels, numberOfOutputChannels);
 }
@@ -646,7 +676,7 @@ void BaseAudioContext::updateTailProcessingNodes()
         // for disableOutputsForFinishedTailProcessingNodes() to process later on the main thread.
         ASSERT(!m_finishedTailProcessingNodes.contains(node));
         m_finishedTailProcessingNodes.append(WTFMove(node));
-        m_tailProcessingNodes.remove(i - 1);
+        m_tailProcessingNodes.removeAt(i - 1);
     }
 
     if (m_finishedTailProcessingNodes.isEmpty() || m_disableOutputsForTailProcessingScheduled)
@@ -704,6 +734,15 @@ void BaseAudioContext::markForDeletion(AudioNode& node)
     // gets a chance to schedule the deletion work, updateAutomaticPullNodes() also gets a chance to
     // modify m_renderingAutomaticPullNodes.
     removeAutomaticPullNode(node);
+}
+
+void BaseAudioContext::unmarkForDeletion(AudioNode& node)
+{
+    ASSERT(isGraphOwner());
+    ASSERT_WITH_MESSAGE(node.nodeType() != AudioNode::NodeTypeDestination, "Destination node is owned by the BaseAudioContext");
+
+    m_nodesToDelete.removeFirst(&node);
+    m_nodesMarkedForDeletion.removeFirst(&node);
 }
 
 void BaseAudioContext::scheduleNodeDeletion()
@@ -775,9 +814,9 @@ void BaseAudioContext::removeMarkedSummingJunction(AudioSummingJunction* summing
     m_dirtySummingJunctions.remove(summingJunction);
 }
 
-EventTargetInterface BaseAudioContext::eventTargetInterface() const
+enum EventTargetInterfaceType BaseAudioContext::eventTargetInterface() const
 {
-    return BaseAudioContextEventTargetInterfaceType;
+    return EventTargetInterfaceType::BaseAudioContext;
 }
 
 void BaseAudioContext::markAudioNodeOutputDirty(AudioNodeOutput* output)
@@ -863,18 +902,18 @@ void BaseAudioContext::postTask(Function<void()>&& task)
 {
     ASSERT(isMainThread());
     if (!m_isStopScheduled)
-        queueTaskKeepingObjectAlive(*this, TaskSource::MediaElement, WTFMove(task));
+        queueTaskKeepingObjectAlive(*this, TaskSource::MediaElement, [task = WTFMove(task)](auto&) mutable { task(); });
 }
 
 const SecurityOrigin* BaseAudioContext::origin() const
 {
-    auto* context = scriptExecutionContext();
+    RefPtr context = scriptExecutionContext();
     return context ? context->securityOrigin() : nullptr;
 }
 
 void BaseAudioContext::addConsoleMessage(MessageSource source, MessageLevel level, const String& message)
 {
-    if (auto* context = scriptExecutionContext())
+    if (RefPtr context = scriptExecutionContext())
         context->addConsoleMessage(source, level, message);
 }
 
@@ -936,7 +975,7 @@ void BaseAudioContext::workletIsReady()
 
     // If we're already rendering when the worklet becomes ready, we need to restart
     // rendering in order to switch to the audio worklet thread.
-    destination().restartRendering();
+    protectedDestination()->restartRendering();
 }
 
 #if !RELEASE_LOG_DISABLED
@@ -945,6 +984,20 @@ WTFLogChannel& BaseAudioContext::logChannel() const
     return LogMedia;
 }
 #endif
+
+RefPtr<MediaSessionManagerInterface> BaseAudioContext::mediaSessionManager() const
+{
+    RefPtr document = this->document();
+    if (!document)
+        return nullptr;
+
+    RefPtr page = document->page();
+    if (!page)
+        return nullptr;
+
+    return &page->mediaSessionManager();
+}
+
 
 } // namespace WebCore
 

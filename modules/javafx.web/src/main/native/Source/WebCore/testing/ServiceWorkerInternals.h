@@ -25,14 +25,12 @@
 
 #pragma once
 
-#if ENABLE(SERVICE_WORKER)
-
 #include "EpochTimeStamp.h"
 #include "IDLTypes.h"
-#include "JSDOMPromiseDeferred.h"
+#include "JSDOMPromiseDeferredForward.h"
 #include "ServiceWorkerIdentifier.h"
 #include <JavaScriptCore/Forward.h>
-#include <wtf/RefCounted.h>
+#include <wtf/RefCountedAndCanMakeWeakPtr.h>
 
 namespace WebCore {
 
@@ -40,13 +38,14 @@ class FetchEvent;
 class FetchResponse;
 class PushSubscription;
 class ScriptExecutionContext;
+class ServiceWorkerGlobalScope;
 class ServiceWorkerClient;
 
 template<typename IDLType> class DOMPromiseDeferred;
 
-class WEBCORE_TESTSUPPORT_EXPORT ServiceWorkerInternals : public RefCounted<ServiceWorkerInternals>, public CanMakeWeakPtr<ServiceWorkerInternals> {
+class WEBCORE_TESTSUPPORT_EXPORT ServiceWorkerInternals : public RefCountedAndCanMakeWeakPtr<ServiceWorkerInternals> {
 public:
-    static Ref<ServiceWorkerInternals> create(ServiceWorkerIdentifier identifier) { return adoptRef(*new ServiceWorkerInternals { identifier }); }
+    static Ref<ServiceWorkerInternals> create(ServiceWorkerGlobalScope& globalScope, ServiceWorkerIdentifier identifier) { return adoptRef(*new ServiceWorkerInternals { globalScope, identifier }); }
     ~ServiceWorkerInternals();
 
     void setOnline(bool isOnline);
@@ -73,9 +72,12 @@ public:
     bool fetchEventIsSameSite(FetchEvent&);
 
     String serviceWorkerClientInternalIdentifier(const ServiceWorkerClient&);
+    void setAsInspected(bool);
+    void enableConsoleMessageReporting(ScriptExecutionContext&);
+    void logReportedConsoleMessage(ScriptExecutionContext&, const String&);
 
 private:
-    explicit ServiceWorkerInternals(ServiceWorkerIdentifier);
+    ServiceWorkerInternals(ServiceWorkerGlobalScope&, ServiceWorkerIdentifier);
 
     ServiceWorkerIdentifier m_identifier;
     RefPtr<DeferredPromise> m_lastNavigationWasAppInitiatedPromise;
@@ -84,5 +86,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif

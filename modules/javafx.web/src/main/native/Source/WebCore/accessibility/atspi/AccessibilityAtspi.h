@@ -38,15 +38,21 @@ typedef struct _GVariant GVariant;
 namespace WebCore {
 class AccessibilityObjectAtspi;
 class AccessibilityRootAtspi;
-enum class AccessibilityRole;
+enum class AccessibilityRole : uint8_t;
 
+DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(AccessibilityAtspi);
 class AccessibilityAtspi {
-    WTF_MAKE_NONCOPYABLE(AccessibilityAtspi); WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(AccessibilityAtspi, AccessibilityAtspi);
+    WTF_MAKE_NONCOPYABLE(AccessibilityAtspi);
     friend NeverDestroyed<AccessibilityAtspi>;
 public:
     WEBCORE_EXPORT static AccessibilityAtspi& singleton();
 
-    void connect(const String&);
+    // Do nothing since this is a singleton.
+    void ref() const { }
+    void deref() const { }
+
+    void connect(const String&, const String&);
 
     const char* uniqueName() const;
     GVariant* nullReference() const;
@@ -74,6 +80,8 @@ public:
 
     void valueChanged(AccessibilityObjectAtspi&, double);
 
+    void activeDescendantChanged(AccessibilityObjectAtspi&);
+
     void selectionChanged(AccessibilityObjectAtspi&);
 
     void loadEvent(AccessibilityObjectAtspi&, CString&&);
@@ -81,7 +89,7 @@ public:
     static const char* localizedRoleName(AccessibilityRole);
 
 #if ENABLE(DEVELOPER_MODE)
-    using NotificationObserverParameter = std::variant<std::nullptr_t, String, bool, unsigned, Ref<AccessibilityObjectAtspi>>;
+    using NotificationObserverParameter = Variant<std::nullptr_t, String, bool, unsigned, Ref<AccessibilityObjectAtspi>>;
     using NotificationObserver = Function<void(AccessibilityObjectAtspi&, const char*, NotificationObserverParameter)>;
     WEBCORE_EXPORT void addNotificationObserver(void*, NotificationObserver&&);
     WEBCORE_EXPORT void removeNotificationObserver(void*);
@@ -97,6 +105,7 @@ private:
     };
 
     void didConnect(GRefPtr<GDBusConnection>&&);
+    void didOwnName();
     void initializeRegistry();
     void addEventListener(const char* dbusName, const char* eventName);
     void removeEventListener(const char* dbusName, const char* eventName);
@@ -111,6 +120,8 @@ private:
     bool shouldEmitSignal(const char* interface, const char* name, const char* detail = "");
 
 #if ENABLE(DEVELOPER_MODE)
+    void notify(AccessibilityObjectAtspi&, const char*, NotificationObserverParameter) const;
+    void notifyActiveDescendantChanged(AccessibilityObjectAtspi&) const;
     void notifyStateChanged(AccessibilityObjectAtspi&, const char*, bool) const;
     void notifySelectionChanged(AccessibilityObjectAtspi&) const;
     void notifyMenuSelectionChanged(AccessibilityObjectAtspi&) const;
@@ -122,6 +133,7 @@ private:
 
     static GDBusInterfaceVTable s_cacheFunctions;
 
+    String m_busName;
     bool m_isConnecting { false };
     GRefPtr<GDBusConnection> m_connection;
     GRefPtr<GDBusProxy> m_registry;
@@ -134,8 +146,8 @@ private:
     unsigned m_cacheID { 0 };
     HashMap<String, AccessibilityObjectAtspi*> m_cache;
     ListHashSet<RefPtr<AccessibilityObjectAtspi>> m_cacheUpdateList;
-    RunLoop::Timer<AccessibilityAtspi> m_cacheUpdateTimer;
-    RunLoop::Timer<AccessibilityAtspi> m_cacheClearTimer;
+    RunLoop::Timer m_cacheUpdateTimer;
+    RunLoop::Timer m_cacheClearTimer;
 #if ENABLE(DEVELOPER_MODE)
     HashMap<void*, NotificationObserver> m_notificationObservers;
 #endif

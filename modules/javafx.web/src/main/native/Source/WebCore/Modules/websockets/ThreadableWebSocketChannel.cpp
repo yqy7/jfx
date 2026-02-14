@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2009, 2012 Google Inc.  All rights reserved.
+ * Copyright (C) 2016-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -33,80 +34,73 @@
 
 #include "ContentRuleListResults.h"
 #include "Document.h"
+#include "DocumentInlines.h"
 #include "DocumentLoader.h"
 #include "FrameLoader.h"
 #include "HTTPHeaderValues.h"
 #include "Page.h"
-#include "RuntimeEnabledFeatures.h"
+#include "Quirks.h"
 #include "ScriptExecutionContext.h"
 #include "SocketProvider.h"
 #include "ThreadableWebSocketChannelClientWrapper.h"
 #include "UserContentProvider.h"
+#if PLATFORM(JAVA)
 #include "WebSocketChannel.h"
+#endif
 #include "WebSocketChannelClient.h"
 #include "WorkerGlobalScope.h"
 #include "WorkerRunLoop.h"
 #include "WorkerThread.h"
 #include "WorkerThreadableWebSocketChannel.h"
+#include <wtf/text/MakeString.h>
 
 namespace WebCore {
 
-Ref<ThreadableWebSocketChannel> ThreadableWebSocketChannel::create(Document& document, WebSocketChannelClient& client, SocketProvider& provider)
+RefPtr<ThreadableWebSocketChannel> ThreadableWebSocketChannel::create(Document& document, WebSocketChannelClient& client, SocketProvider& provider)
 {
-#if USE(SOUP)
-    auto channel = provider.createWebSocketChannel(document, client);
-    ASSERT(channel);
-    return channel.releaseNonNull();
-#else
-
-#if HAVE(NSURLSESSION_WEBSOCKET)
-    if (RuntimeEnabledFeatures::sharedFeatures().isNSURLSessionWebSocketEnabled()) {
-        if (auto channel = provider.createWebSocketChannel(document, client))
-            return channel.releaseNonNull();
-    }
+#if !PLATFORM(JAVA)
+    return provider.createWebSocketChannel(document, client);
 #endif
-
     return WebSocketChannel::create(document, client, provider);
-#endif
 }
 
-Ref<ThreadableWebSocketChannel> ThreadableWebSocketChannel::create(ScriptExecutionContext& context, WebSocketChannelClient& client, SocketProvider& provider)
+RefPtr<ThreadableWebSocketChannel> ThreadableWebSocketChannel::create(ScriptExecutionContext& context, WebSocketChannelClient& client, SocketProvider& provider)
 {
-    if (is<WorkerGlobalScope>(context)) {
-        WorkerGlobalScope& workerGlobalScope = downcast<WorkerGlobalScope>(context);
-        WorkerRunLoop& runLoop = workerGlobalScope.thread().runLoop();
-        return WorkerThreadableWebSocketChannel::create(workerGlobalScope, client, makeString("webSocketChannelMode", runLoop.createUniqueId()), provider);
+    if (RefPtr workerGlobalScope = dynamicDowncast<WorkerGlobalScope>(context)) {
+        WorkerRunLoop& runLoop = workerGlobalScope->thread().runLoop();
+        return WorkerThreadableWebSocketChannel::create(*workerGlobalScope, client, makeString("webSocketChannelMode"_s, runLoop.createUniqueId()), provider);
     }
 
     return create(downcast<Document>(context), client, provider);
 }
 
-ThreadableWebSocketChannel::ThreadableWebSocketChannel()
-    : m_identifier(WebSocketIdentifier::generateThreadSafe())
-{
-}
+ThreadableWebSocketChannel::ThreadableWebSocketChannel() = default;
 
 std::optional<ThreadableWebSocketChannel::ValidatedURL> ThreadableWebSocketChannel::validateURL(Document& document, const URL& requestedURL)
 {
     ValidatedURL validatedURL { requestedURL, true };
-    if (auto* page = document.page()) {
+    if (RefPtr page = document.page()) {
         if (!page->allowsLoadFromURL(requestedURL, MainFrameMainResource::No))
             return { };
+
 #if ENABLE(CONTENT_EXTENSIONS)
-        if (auto* documentLoader = document.loader()) {
-            auto results = page->userContentProvider().processContentRuleListsForLoad(*page, validatedURL.url, ContentExtensions::ResourceType::WebSocket, *documentLoader);
-            if (results.summary.blockedLoad)
+        if (RefPtr documentLoader = document.loader()) {
+            auto results = page->protectedUserContentProvider()->processContentRuleListsForLoad(*page, validatedURL.url, ContentExtensions::ResourceType::WebSocket, *documentLoader);
+            if (results.shouldBlock())
                 return { };
+
             if (results.summary.madeHTTPS) {
-                ASSERT(validatedURL.url.protocolIs("ws"));
-                validatedURL.url.setProtocol("wss");
+                ASSERT(validatedURL.url.protocolIs("ws"_s));
+                validatedURL.url.setProtocol("wss"_s);
             }
+
             validatedURL.areCookiesAllowed = !results.summary.blockedCookies;
         }
 #else
         UNUSED_PARAM(document);
 #endif
     }
+
     return validatedURL;
 }
 
@@ -116,14 +110,15 @@ std::optional<ResourceRequest> ThreadableWebSocketChannel::webSocketConnectReque
     if (!validatedURL)
         return { };
 
-    ResourceRequest request { validatedURL->url };
-    request.setHTTPUserAgent(document.userAgent(validatedURL->url));
+    auto userAgent = document.userAgent(validatedURL->url);
+    ResourceRequest request { WTFMove(validatedURL->url) };
+    request.setHTTPUserAgent(userAgent);
     request.setDomainForCachePartition(document.domainForCachePartition());
     request.setAllowCookies(validatedURL->areCookiesAllowed);
     request.setFirstPartyForCookies(document.firstPartyForCookies());
     request.setHTTPHeaderField(HTTPHeaderName::Origin, document.securityOrigin().toString());
 
-    if (auto* documentLoader = document.loader())
+    if (RefPtr documentLoader = document.loader())
         request.setIsAppInitiated(documentLoader->lastNavigationWasAppInitiated());
 
     FrameLoader::addSameSiteInfoToRequestIfNeeded(request, &document);
@@ -134,6 +129,21 @@ std::optional<ResourceRequest> ThreadableWebSocketChannel::webSocketConnectReque
     // these headers.
     request.addHTTPHeaderField(HTTPHeaderName::Pragma, HTTPHeaderValues::noCache());
     request.addHTTPHeaderField(HTTPHeaderName::CacheControl, HTTPHeaderValues::noCache());
+
+    auto httpURL = request.url();
+    httpURL.setProtocol(url.protocolIs("ws"_s) ? "http"_s : "https"_s);
+    auto requestOrigin = SecurityOrigin::create(httpURL);
+    if (requestOrigin->isPotentiallyTrustworthy() && !document.quirks().shouldDisableFetchMetadata()) {
+        request.addHTTPHeaderField(HTTPHeaderName::SecFetchDest, "websocket"_s);
+        request.addHTTPHeaderField(HTTPHeaderName::SecFetchMode, "websocket"_s);
+
+        if (document.protectedSecurityOrigin()->isSameOriginAs(requestOrigin.get()))
+            request.addHTTPHeaderField(HTTPHeaderName::SecFetchSite, "same-origin"_s);
+        else if (document.protectedSecurityOrigin()->isSameSiteAs(requestOrigin))
+            request.addHTTPHeaderField(HTTPHeaderName::SecFetchSite, "same-site"_s);
+        else
+            request.addHTTPHeaderField(HTTPHeaderName::SecFetchSite, "cross-site"_s);
+    }
 
     return request;
 }

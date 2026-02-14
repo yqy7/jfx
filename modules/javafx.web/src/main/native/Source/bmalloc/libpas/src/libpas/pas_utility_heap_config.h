@@ -96,6 +96,7 @@ PAS_API void pas_utility_heap_config_dump_shared_page_directory_arg(
                 .heap_config_ptr = &pas_utility_heap_config, \
                 .page_config_ptr = &pas_utility_heap_config.small_segregated_config.base, \
                 .page_config_kind = pas_page_config_kind_segregated, \
+                .page_config_size_category = pas_page_config_size_category_small, \
                 .min_align_shift = PAS_INTERNAL_MIN_ALIGN_SHIFT, \
                 .page_size = PAS_SMALL_PAGE_DEFAULT_SIZE, \
                 .granule_size = PAS_SMALL_PAGE_DEFAULT_SIZE, \
@@ -110,6 +111,7 @@ PAS_API void pas_utility_heap_config_dump_shared_page_directory_arg(
             .kind = pas_segregated_page_config_kind_pas_utility_small, \
             .wasteage_handicap = 1., \
             .sharing_shift = PAS_SMALL_SHARING_SHIFT, \
+            .partial_view_padding = 0, \
             .num_alloc_bits = PAS_UTILITY_NUM_ALLOC_BITS, \
             .shared_payload_offset = 0, \
             .exclusive_payload_offset = PAS_UTILITY_HEAP_PAYLOAD_OFFSET, \
@@ -164,17 +166,17 @@ PAS_API void pas_utility_heap_config_dump_shared_page_directory_arg(
         PAS_HEAP_CONFIG_SPECIALIZATIONS(pas_utility_heap_config) \
     })
 
-PAS_API extern pas_heap_config pas_utility_heap_config;
+PAS_API extern const pas_heap_config pas_utility_heap_config;
 
 PAS_SEGREGATED_PAGE_CONFIG_SPECIALIZATION_DECLARATIONS(pas_utility_heap_page_config);
 PAS_HEAP_CONFIG_SPECIALIZATION_DECLARATIONS(pas_utility_heap_config);
 
-static PAS_ALWAYS_INLINE bool pas_heap_config_is_utility(pas_heap_config* config)
+static PAS_ALWAYS_INLINE bool pas_heap_config_is_utility(const pas_heap_config* config)
 {
     return config == &pas_utility_heap_config;
 }
 
-static PAS_ALWAYS_INLINE pas_lock_hold_mode pas_heap_config_heap_lock_hold_mode(pas_heap_config* config)
+static PAS_ALWAYS_INLINE pas_lock_hold_mode pas_heap_config_heap_lock_hold_mode(const pas_heap_config* config)
 {
     return pas_heap_config_is_utility(config)
         ? pas_lock_is_held

@@ -25,19 +25,11 @@
 
 #pragma once
 
-#include <wtf/RefCounted.h>
+#include <wtf/ObjectIdentifier.h>
 
 namespace JSC {
 
-class CallFrame;
-
-class Microtask : public RefCounted<Microtask> {
-public:
-    virtual ~Microtask()
-    {
-    }
-
-    virtual void run(JSGlobalObject*) = 0;
-};
+enum class MicrotaskIdentifierType { };
+using MicrotaskIdentifier = AtomicObjectIdentifier<MicrotaskIdentifierType>;
 
 } // namespace JSC

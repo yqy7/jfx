@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,18 +25,22 @@
 
 package test.com.sun.javafx.scene.transform;
 
-import test.com.sun.javafx.test.TransformHelper;
-import javafx.scene.transform.Transform;
 import com.sun.javafx.geom.transform.Affine3D;
 import com.sun.javafx.scene.transform.TransformUtils;
 import java.util.LinkedList;
 import java.util.List;
+import javafx.scene.transform.Transform;
 import javafx.scene.transform.TransformShim;
-import test.javafx.scene.transform.TransformOperationsTest;
 import javafx.scene.transform.Translate;
-import static org.junit.Assert.*;
+import test.com.sun.javafx.test.TransformHelper;
+import test.javafx.scene.transform.TransformOperationsTest;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.provider.Arguments;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 public class TransformUtilsTest {
     @Test
@@ -99,8 +103,9 @@ public class TransformUtilsTest {
 
     @Test public void testImmutableTransformState() {
         int counter = 0;
-        for (Object o : TransformOperationsTest.getParams()) {
-            Object[] arr = (Object[]) o;
+        List<Arguments> arguments = TransformOperationsTest.getParams().toList();
+        for (Arguments arg : arguments) {
+            Object[] arr = arg.get();
             if (arr[0] instanceof TransformShim.ImmutableTransformShim) {
                 TransformShim.ImmutableTransformShim t =
                         (TransformShim.ImmutableTransformShim) arr[0];
@@ -115,8 +120,9 @@ public class TransformUtilsTest {
 
     @Test public void testReusedImmutableTransform() {
         int counter = 0;
-        for (Object o : TransformOperationsTest.getParams()) {
-            Object[] arr = (Object[]) o;
+        List<Arguments> arguments = TransformOperationsTest.getParams().toList();
+        for (Arguments arg : arguments) {
+            Object[] arr = arg.get();
             if (arr[0] instanceof TransformShim.ImmutableTransformShim) {
 
                 Transform t = (Transform) arr[0];
@@ -128,8 +134,9 @@ public class TransformUtilsTest {
 
                 Transform returned = TransformUtils.immutableTransform(reuse, t);
 
-                assertSame("Checking reusing immutable transform to values of #"
-                        + counter + " of TransformOperationsTest", reuse, returned);
+                assertSame(reuse, returned,
+                        "Checking reusing immutable transform to values of #"
+                        + counter + " of TransformOperationsTest");
 
                 TransformHelper.assertStateOk(
                         "Checking reusing immutable transform to values of #"
@@ -145,8 +152,9 @@ public class TransformUtilsTest {
                 // creating new
                 Transform returned2 = TransformUtils.immutableTransform(null, t);
 
-                assertNotSame("Checking reusing immutable transform to values of #"
-                        + counter + " of TransformOperationsTest", returned2, t);
+                assertNotSame(returned2, t,
+                        "Checking reusing immutable transform to values of #"
+                        + counter + " of TransformOperationsTest");
 
                 TransformHelper.assertStateOk(
                         "Checking reusing immutable transform to values of #"
@@ -167,8 +175,9 @@ public class TransformUtilsTest {
     @Test public void testConcatenatedImmutableTransform() {
 
         List<TransformShim.ImmutableTransformShim> ts = new LinkedList<>();
-        for (Object o : TransformOperationsTest.getParams()) {
-            Object[] arr = (Object[]) o;
+        List<Arguments> arguments = TransformOperationsTest.getParams().toList();
+        for (Arguments arg : arguments) {
+            Object[] arr = arg.get();
             if (arr[0] instanceof TransformShim.ImmutableTransformShim) {
                 ts.add((TransformShim.ImmutableTransformShim) arr[0]);
             }
@@ -185,18 +194,19 @@ public class TransformUtilsTest {
                     Transform conc = TransformUtils.immutableTransform(
                             clone, t1, t2);
 
-                    assertSame("Checking state of concatenation of "
+                    assertSame(clone, conc,
+                            "Checking state of concatenation of "
                             + "transform #" + outer + " and #" + inner +
                             " reusing #" + orig +
-                            " of TransformOperationsTest", clone, conc);
+                            " of TransformOperationsTest");
                     TransformHelper.assertStateOk(
                             "Checking state of concatenation of "
                             + "transform #" + outer + " and #" + inner +
                             " reusing #" + orig +
                             " of TransformOperationsTest",
-                            (TransformShim.ImmutableTransformShim) conc,
-                                TransformShim.getImmutableState3d(conc),
-                                TransformShim.getImmutableState2d(conc));
+                            conc,
+                            TransformShim.getImmutableState3d(conc),
+                            TransformShim.getImmutableState2d(conc));
                     TransformHelper.assertMatrix(
                             "Checking state of concatenation of "
                             + "transform #" + outer + " and #" + inner +
@@ -210,17 +220,19 @@ public class TransformUtilsTest {
                 Transform conc2 = TransformUtils.immutableTransform(
                         null, t1, t2);
 
-                assertNotSame("Checking state of concatenation of "
+                assertNotSame(conc2, t1,
+                        "Checking state of concatenation of "
                         + "transform #" + outer + " and #" + inner +
-                        " of TransformOperationsTest", conc2, t1);
-                assertNotSame("Checking state of concatenation of "
+                        " of TransformOperationsTest");
+                assertNotSame(conc2, t2,
+                        "Checking state of concatenation of "
                         + "transform #" + outer + " and #" + inner +
-                        " of TransformOperationsTest", conc2, t2);
+                        " of TransformOperationsTest");
                 TransformHelper.assertStateOk(
                         "Checking state of concatenation of "
                         + "transform #" + outer + " and #" + inner +
                         " of TransformOperationsTest",
-                        (TransformShim.ImmutableTransformShim) conc2,
+                        conc2,
                         TransformShim.getImmutableState3d(conc2),
                         TransformShim.getImmutableState2d(conc2));
                 TransformHelper.assertMatrix(

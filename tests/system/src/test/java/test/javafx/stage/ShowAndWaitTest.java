@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,10 +25,16 @@
 
 package test.javafx.stage;
 
-import javafx.stage.StageShim;
-import java.util.Arrays;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import static test.util.Util.TIMEOUT;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -48,26 +54,19 @@ import javafx.stage.Stage;
 import javafx.stage.StageShim;
 import javafx.stage.Window;
 import javafx.util.Duration;
-import junit.framework.AssertionFailedError;
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-import org.junit.runners.Parameterized.Parameters;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import test.util.Util;
-
-import static org.junit.Assert.*;
-import static org.junit.Assume.*;
-import static test.util.Util.TIMEOUT;
 
 /**
  * Test program for showAndWait functionality.
  */
-@RunWith(Parameterized.class)
-public class ShowAndWaitTest {
+public final class ShowAndWaitTest {
 
     // Maximum number of stages
     private static final int MAX_STAGES = 10;
@@ -124,29 +123,15 @@ public class ShowAndWaitTest {
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void setupOnce() {
-        // Start the Application
-        new Thread(() -> Application.launch(MyApp.class, (String[])null)).start();
-
-        try {
-            if (!launchLatch.await(TIMEOUT, TimeUnit.MILLISECONDS)) {
-                throw new AssertionFailedError("Timeout waiting for Application to launch");
-            }
-        } catch (InterruptedException ex) {
-            AssertionFailedError err = new AssertionFailedError("Unexpected exception");
-            err.initCause(ex);
-            throw err;
-        }
+        Util.launch(launchLatch, MyApp.class);
     }
 
-    @AfterClass
+    @AfterAll
     public static void teardownOnce() {
-        Platform.exit();
+        Util.shutdown();
     }
-
-    // Modality of the secondary stage(s) for a particular tests
-    final Modality modality;
 
     // Set of stages being tested so that they can be hidden at the
     // end of of a failing test
@@ -156,26 +141,22 @@ public class ShowAndWaitTest {
     private Stage tmpStage1 = null;
     private Stage tmpStage2 = null;
 
-    @Parameters
-    public static Collection getParams() {
-        return Arrays.asList(new Object[][] {
-            { Modality.NONE },
-            { Modality.WINDOW_MODAL },
-            { Modality.APPLICATION_MODAL },
-        });
+    // Modality of the secondary stage(s) for a particular tests
+    private static Collection<Modality> parameters() {
+        return List.of(
+            Modality.NONE,
+            Modality.WINDOW_MODAL,
+            Modality.APPLICATION_MODAL
+        );
     }
 
-    public ShowAndWaitTest(Modality modality) {
-        this.modality = modality;
-    }
-
-    @Before
+    @BeforeEach
     public void setupEach() {
         assertNotNull(myApp);
         assertNotNull(myApp.primaryStage);
     }
 
-    @After
+    @AfterEach
     public void teardownEach() {
         for (final Stage stage : stages) {
             if (stage.isShowing()) {
@@ -200,14 +181,15 @@ public class ShowAndWaitTest {
     //
     // Consider moving to the setupOnce method.
     private static boolean test1Run = false;
-    public void ensureTest1() {
+    public void ensureTest1(Modality modality) {
         if (!test1Run) {
-            test1();
+            test1(modality);
         }
     }
 
-    @Test
-    public void test1() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void test1(Modality modality) {
         if (test1Run) {
             return;
         }
@@ -220,11 +202,9 @@ public class ShowAndWaitTest {
             assertFalse(myApp.primaryStage.isShowing());
 
             // Verify that we cannot call showAndWait on the primaryStage
-            try {
+            assertThrows(IllegalStateException.class, () -> {
                 myApp.primaryStage.showAndWait();
-                throw new AssertionFailedError("Expected IllegalStateException was not thrown");
-            } catch (IllegalStateException ex) {
-            }
+            });
 
             myApp.primaryStage.show();
         });
@@ -232,60 +212,70 @@ public class ShowAndWaitTest {
 
     // Verify that we cannot construct a stage on a thread other than
     // the FX Application thread
-    @Test (expected=IllegalStateException.class)
-    public void testConstructWrongThread() {
-        ensureTest1();
-        assertFalse(Platform.isFxApplicationThread());
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testConstructWrongThread(Modality modality) {
+        assertThrows(IllegalStateException.class, () -> {
+            ensureTest1(modality);
+            assertFalse(Platform.isFxApplicationThread());
 
-        // The following should throw IllegalStateException
-        tmpStage1 = new TestStage(modality);
-        stages.add(tmpStage1);
+            // The following should throw IllegalStateException
+            tmpStage1 = new TestStage(modality);
+            stages.add(tmpStage1);
+        });
     }
 
 
     // Verify that we cannot call showAndWait on a thread other than
     // the FX Application thread
-    @Test (expected=IllegalStateException.class)
-    public void testShowWaitWrongThread() {
-        ensureTest1();
-        assertFalse(Platform.isFxApplicationThread());
-        Util.runAndWait(() -> {
-            tmpStage1 = new TestStage(modality);
-            stages.add(tmpStage1);
-            assertFalse(StageShim.isPrimary(tmpStage1));
-            assertFalse(tmpStage1.isShowing());
-        });
-        assertNotNull(tmpStage1);
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testShowWaitWrongThread(Modality modality) {
+        assertThrows(IllegalStateException.class, () -> {
+            ensureTest1(modality);
+            assertFalse(Platform.isFxApplicationThread());
+            Util.runAndWait(() -> {
+                tmpStage1 = new TestStage(modality);
+                stages.add(tmpStage1);
+                assertFalse(StageShim.isPrimary(tmpStage1));
+                assertFalse(tmpStage1.isShowing());
+            });
+            assertNotNull(tmpStage1);
 
-        // The following should throw IllegalStateException
-        tmpStage1.showAndWait();
+            // The following should throw IllegalStateException
+            tmpStage1.showAndWait();
+        });
     }
 
     // Verify that we cannot call showAndWait on a visible stage
-    @Test (expected=IllegalStateException.class)
-    public void testVisibleThrow() {
-        ensureTest1();
-        Util.runAndWait(() -> {
-            tmpStage1 = new TestStage(modality);
-            stages.add(tmpStage1);
-            assertFalse(StageShim.isPrimary(tmpStage1));
-            assertFalse(tmpStage1.isShowing());
-            tmpStage1.show();
-            assertTrue(tmpStage1.isShowing());
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testVisibleThrow(Modality modality) {
+        assertThrows(IllegalStateException.class, () -> {
+            ensureTest1(modality);
+            Util.runAndWait(() -> {
+                tmpStage1 = new TestStage(modality);
+                stages.add(tmpStage1);
+                assertFalse(StageShim.isPrimary(tmpStage1));
+                assertFalse(tmpStage1.isShowing());
+                tmpStage1.show();
+                assertTrue(tmpStage1.isShowing());
 
-            try {
-                // The following should throw IllegalStateException
-                tmpStage1.showAndWait();
-            } finally {
-                tmpStage1.hide();
-            }
+                try {
+                    // The following should throw IllegalStateException
+                    tmpStage1.showAndWait();
+                } finally {
+                    tmpStage1.hide();
+                }
+            });
         });
     }
 
     // Verify that show returns right away; hide the stage after 500 msec
-    @Test
-    public void testNotBlocking() {
-        ensureTest1();
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testNotBlocking(Modality modality) {
+        ensureTest1(modality);
 
         final AtomicBoolean stageShowReturned = new AtomicBoolean(false);
         final AtomicBoolean hideActionReached = new AtomicBoolean(false);
@@ -318,9 +308,10 @@ public class ShowAndWaitTest {
     // Verify that the nested event loop exits immediately after
     // the event handler that calls hide returns, before running
     // the next Runnable.
-    @Test
-    public void testSingle() {
-        ensureTest1();
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testSingle(Modality modality) {
+        ensureTest1(modality);
 
         final AtomicBoolean stage1ShowReturned = new AtomicBoolean(false);
         final AtomicBoolean hide1EventReached = new AtomicBoolean(false);
@@ -362,9 +353,10 @@ public class ShowAndWaitTest {
     // the event handler that calls hide returns, before running
     // the next Runnable (called from rShow1 after showAndWait returns).
 
-    @Test
-    public void testSingle_Chained() {
-        ensureTest1();
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testSingle_Chained(Modality modality) {
+        ensureTest1(modality);
 
         final AtomicBoolean stage1ShowReturned = new AtomicBoolean(false);
         final AtomicBoolean hide1EventReached = new AtomicBoolean(false);
@@ -402,9 +394,10 @@ public class ShowAndWaitTest {
 
     // Verify two nested event loops, with the stages being hidden in the
     // reverse order that they are shown
-    @Test
-    public void testTwoNested() {
-        ensureTest1();
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testTwoNested(Modality modality) {
+        ensureTest1(modality);
 
         final AtomicBoolean stage1ShowReturned = new AtomicBoolean(false);
         final AtomicBoolean hide1EventReached = new AtomicBoolean(false);
@@ -467,9 +460,10 @@ public class ShowAndWaitTest {
 
     // Verify two nested event loops, with the stages being hidden in the
     // same order that they are shown
-    @Test
-    public void testTwoInterleaved() {
-        ensureTest1();
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testTwoInterleaved(Modality modality) {
+        ensureTest1(modality);
 
         final AtomicBoolean stage1ShowReturned = new AtomicBoolean(false);
         final AtomicBoolean hide1EventReached = new AtomicBoolean(false);
@@ -532,9 +526,10 @@ public class ShowAndWaitTest {
 
     // Verify multiple nested event loops, with the stages being hidden in the
     // reverse order that they are shown
-    @Test
-    public void testMultipleNested() {
-        ensureTest1();
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testMultipleNested(Modality modality) {
+        ensureTest1(modality);
 
         final int N = MAX_STAGES;
         final Stage[] tmpStage = new Stage[N];
@@ -597,9 +592,10 @@ public class ShowAndWaitTest {
 
     // Verify multiple nested event loops, with the stages being hidden in the
     // reverse order that they are shown
-    @Test
-    public void testMultipleInterleaved() {
-        ensureTest1();
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testMultipleInterleaved(Modality modality) {
+        ensureTest1(modality);
 
         final int N = MAX_STAGES;
         final Stage[] tmpStage = new Stage[N];
@@ -662,9 +658,10 @@ public class ShowAndWaitTest {
 
     // Verify that Stage.showAndWait throws an exception if called from an
     // animation timeline.
-    @Test
-    public void testTimeline() throws Throwable {
-        ensureTest1();
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testTimeline(Modality modality) throws Throwable {
+        ensureTest1(modality);
 
         final CountDownLatch animationDone = new CountDownLatch(1);
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
@@ -688,7 +685,7 @@ public class ShowAndWaitTest {
             animationDone.countDown();
         });
         Timeline timeline = new Timeline(kf);
-        timeline.play();
+        Platform.runLater(timeline::play);
 
         try {
             if (!animationDone.await(TIMEOUT, TimeUnit.MILLISECONDS)) {
@@ -708,9 +705,10 @@ public class ShowAndWaitTest {
 
     // Verify that Alert.showAndWait throws an exception if called from an
     // animation timeline.
-    @Test
-    public void testTimelineDialog() throws Throwable {
-        ensureTest1();
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testTimelineDialog(Modality modality) throws Throwable {
+        ensureTest1(modality);
 
         final CountDownLatch animationDone = new CountDownLatch(1);
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
@@ -738,7 +736,7 @@ public class ShowAndWaitTest {
             animationDone.countDown();
         });
         Timeline timeline = new Timeline(kf);
-        timeline.play();
+        Platform.runLater(timeline::play);
 
         try {
             if (!animationDone.await(TIMEOUT, TimeUnit.MILLISECONDS)) {
@@ -756,11 +754,12 @@ public class ShowAndWaitTest {
 
     // Verify that printing throws an exception if called from an
     // animation timeline.
-    @Test
-    public void testTimelinePrint() throws Throwable {
-        assumeNotNull(PrinterJob.createPrinterJob());
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testTimelinePrint(Modality modality) throws Throwable {
+        Assumptions.assumeTrue(PrinterJob.createPrinterJob() != null);
 
-        ensureTest1();
+        ensureTest1(modality);
 
         final CountDownLatch animationDone = new CountDownLatch(1);
         final AtomicReference<Throwable> error = new AtomicReference<>(null);
@@ -793,7 +792,7 @@ public class ShowAndWaitTest {
             animationDone.countDown();
         });
         Timeline timeline = new Timeline(kf);
-        timeline.play();
+        Platform.runLater(timeline::play);
 
         try {
             if (!animationDone.await(TIMEOUT, TimeUnit.MILLISECONDS)) {
@@ -808,5 +807,4 @@ public class ShowAndWaitTest {
             throw t;
         }
     }
-
 }

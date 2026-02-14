@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2022, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  p * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
@@ -24,40 +24,28 @@
 
 package test.robot.javafx.web;
 
-import com.sun.javafx.PlatformUtil;
-
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import java.util.concurrent.CountDownLatch;
 import javafx.application.Application;
-import javafx.application.Platform;
-import javafx.beans.value.ObservableValue;
-import javafx.concurrent.Worker.State;
 import javafx.concurrent.Worker;
+import javafx.scene.Scene;
+import javafx.scene.input.KeyCode;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.StackPane;
 import javafx.scene.robot.Robot;
-import javafx.scene.Scene;
 import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebView;
-import javafx.scene.input.KeyCode;
 import javafx.stage.Stage;
-
-import java.lang.Integer;
-import java.lang.Number;
-
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
-
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
-
+import com.sun.javafx.PlatformUtil;
 import test.util.Util;
-
-import static org.junit.Assert.*;
 
 /*
  * Tests for validating the buttons property received in "pointermove" event,
@@ -85,7 +73,7 @@ public class PointerEventTest {
     private final int DX = 125;
     private final int DY = 125;
 
-    private static CountDownLatch startupLatch;
+    private static CountDownLatch startupLatch = new CountDownLatch(2);
 
     static Document document;
     static Element element;
@@ -190,36 +178,26 @@ public class PointerEventTest {
         assertEquals((LEFT_BUTTON_DRAG | MIDDLE_BUTTON_DRAG | RIGHT_BUTTON_DRAG), result);
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() {
-        startupLatch = new CountDownLatch(2);
-        new Thread(() -> Application.launch(TestApp.class, (String[])null)).start();
-        waitForLatch(startupLatch, 15, "Timeout waiting for FX runtime to start");
+        Util.launch(startupLatch, TestApp.class);
     }
 
-    @AfterClass
+    @AfterAll
     public static void exit() {
-        Platform.runLater(() -> {
-            stage.hide();
-        });
-        Platform.exit();
+        Util.shutdown();
     }
 
-    @After
+    @BeforeEach
+    public void skipOnLinux() {
+        assumeTrue(!PlatformUtil.isLinux()); // JDK-8304923
+    }
+
+    @AfterEach
     public void resetTest() {
         Util.runAndWait(() -> {
             robot.mouseRelease(MouseButton.PRIMARY, MouseButton.MIDDLE, MouseButton.SECONDARY);
             robot.keyType(KeyCode.ESCAPE);
         });
-    }
-
-    public static void waitForLatch(CountDownLatch latch, int seconds, String msg) {
-        try {
-            if (!latch.await(seconds, TimeUnit.SECONDS)) {
-                fail(msg);
-            }
-        } catch (Exception ex) {
-            fail("Unexpected exception: " + ex);
-        }
     }
 }

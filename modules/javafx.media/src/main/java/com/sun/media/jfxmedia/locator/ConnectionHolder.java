@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -62,7 +62,7 @@ public abstract class ConnectionHolder {
         return new FileConnectionHolder(uri);
     }
 
-    static ConnectionHolder createHLSConnectionHolder(URI uri) throws IOException {
+    static ConnectionHolder createHLSConnectionHolder(URI uri) {
         return new HLSConnectionHolder(uri);
     }
 
@@ -157,6 +157,14 @@ public abstract class ConnectionHolder {
         return 0;
     }
 
+    /**
+     * Returns ConnectionHolder for additional audio stream if any.
+     * Currently used by HLS with EXT-X-MEDIA tag.
+     */
+    public ConnectionHolder getAudioStream() {
+        return null;
+    }
+
     private static class FileConnectionHolder extends ConnectionHolder {
         private RandomAccessFile file = null;
 
@@ -164,18 +172,22 @@ public abstract class ConnectionHolder {
             channel = openFile(uri);
         }
 
+        @Override
         boolean needBuffer() {
             return false;
         }
 
+        @Override
         boolean isRandomAccess() {
             return true;
         }
 
+        @Override
         boolean isSeekable() {
             return true;
         }
 
+        @Override
         public long seek(long position) {
             try {
                 ((FileChannel)channel).position(position);
@@ -185,6 +197,7 @@ public abstract class ConnectionHolder {
             }
         }
 
+        @Override
         int readBlock(long position, int size) throws IOException {
             if (null == channel) {
                 throw new ClosedChannelException();
@@ -239,25 +252,30 @@ public abstract class ConnectionHolder {
             channel = openChannel(null);
         }
 
+        @Override
         boolean needBuffer() {
             String scheme = uri.getScheme().toLowerCase();
             return ("http".equals(scheme) || "https".equals(scheme));
         }
 
+        @Override
         boolean isSeekable() {
             return (urlConnection instanceof HttpURLConnection) ||
                    (urlConnection instanceof JarURLConnection) ||
                    isJRT() || isResource();
         }
 
+        @Override
         boolean isRandomAccess() {
             return false;
         }
 
+        @Override
         int readBlock(long position, int size) throws IOException {
             throw new IOException();
         }
 
+        @Override
         public long seek(long position) {
             if (urlConnection instanceof HttpURLConnection) {
                 URLConnection tmpURLConnection = null;
@@ -364,6 +382,7 @@ public abstract class ConnectionHolder {
             // readNextBlock should never be called since we're random access
             // but just to be safe (and for unit tests...)
             channel = new ReadableByteChannel() {
+                @Override
                 public int read(ByteBuffer bb) throws IOException {
                     if (backingBuffer.remaining() <= 0) {
                         return -1; // EOS
@@ -389,10 +408,12 @@ public abstract class ConnectionHolder {
                     return actual;
                 }
 
+                @Override
                 public boolean isOpen() {
                     return true; // open 24/7/365
                 }
 
+                @Override
                 public void close() throws IOException {
                     // never closed...
                 }

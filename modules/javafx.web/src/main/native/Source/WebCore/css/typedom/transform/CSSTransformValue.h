@@ -25,8 +25,6 @@
 
 #pragma once
 
-#if ENABLE(CSS_TYPED_OM)
-
 #include "CSSStyleValue.h"
 #include <wtf/RefCounted.h>
 #include <wtf/text/WTFString.h>
@@ -34,29 +32,37 @@
 namespace WebCore {
 
 class CSSTransformComponent;
+class CSSTransformListValue;
 class DOMMatrix;
+class Document;
 template<typename> class ExceptionOr;
 
-class CSSTransformValue : public CSSStyleValue {
-    WTF_MAKE_ISO_ALLOCATED(CSSTransformValue);
+class CSSTransformValue final : public CSSStyleValue {
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(CSSTransformValue);
 public:
-    static Ref<CSSTransformValue> create(Vector<RefPtr<CSSTransformComponent>>&& transforms);
+    static ExceptionOr<Ref<CSSTransformValue>> create(Ref<const CSSTransformListValue>, Document&);
+    static ExceptionOr<Ref<CSSTransformValue>> create(Vector<Ref<CSSTransformComponent>>&&);
+
+    virtual ~CSSTransformValue();
 
     size_t length() const { return m_components.size(); }
-    ExceptionOr<RefPtr<CSSTransformComponent>> item(size_t);
-    ExceptionOr<RefPtr<CSSTransformComponent>> setItem(size_t, Ref<CSSTransformComponent>&&);
+    bool isSupportedPropertyIndex(unsigned index) const { return index < m_components.size(); }
+    RefPtr<CSSTransformComponent> item(size_t);
+    ExceptionOr<Ref<CSSTransformComponent>> setItem(size_t, Ref<CSSTransformComponent>&&);
 
     bool is2D() const;
-    void setIs2D(bool);
 
     ExceptionOr<Ref<DOMMatrix>> toMatrix();
 
     CSSStyleValueType getType() const override { return CSSStyleValueType::CSSTransformValue; }
-private:
-    CSSTransformValue(Vector<RefPtr<CSSTransformComponent>>&&);
 
-    bool m_is2D { false };
-    Vector<RefPtr<CSSTransformComponent>> m_components;
+    RefPtr<CSSValue> toCSSValue() const final;
+
+private:
+    CSSTransformValue(Vector<Ref<CSSTransformComponent>>&&);
+    void serialize(StringBuilder&, OptionSet<SerializationArguments>) const final;
+
+    Vector<Ref<CSSTransformComponent>> m_components;
 };
 
 } // namespace WebCore
@@ -64,5 +70,3 @@ private:
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::CSSTransformValue)
     static bool isType(const WebCore::CSSStyleValue& styleValue) { return styleValue.getType() == WebCore::CSSStyleValueType::CSSTransformValue; }
 SPECIALIZE_TYPE_TRAITS_END()
-
-#endif

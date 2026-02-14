@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -91,7 +91,7 @@ path.getElements().add(arcTo);
 </PRE>
  * @since JavaFX 2.0
  */
-public class Path extends Shape {
+public non-sealed class Path extends Shape {
     static {
         PathHelper.setPathAccessor(new PathHelper.PathAccessor() {
             @Override
@@ -224,7 +224,7 @@ public class Path extends Shape {
      *
      * @defaultValue empty
      */
-    private final ObservableList<PathElement> elements = new TrackableObservableList<PathElement>() {
+    private final ObservableList<PathElement> elements = new TrackableObservableList<>() {
         @Override
         protected void onChanged(Change<PathElement> c) {
             List<PathElement> list = c.getList();

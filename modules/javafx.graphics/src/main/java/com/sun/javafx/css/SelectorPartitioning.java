@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,10 +25,7 @@
 
 package com.sun.javafx.css;
 
-import javafx.css.CompoundSelector;
 import javafx.css.Selector;
-import javafx.css.SimpleSelector;
-import javafx.css.StyleClass;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -109,12 +106,12 @@ public final class SelectorPartitioning {
 
         private Partition(PartitionKey key) {
            this.key = key;
-            slots = new HashMap<PartitionKey,Slot>();
+            slots = new HashMap<>();
         }
 
         private void addSelector(Selector pair) {
             if (selectors == null) {
-                selectors = new ArrayList<Selector>();
+                selectors = new ArrayList<>();
             }
             selectors.add(pair);
         }
@@ -153,12 +150,12 @@ public final class SelectorPartitioning {
 
         private Slot(Partition partition) {
             this.partition = partition;
-            this.referents = new HashMap<PartitionKey, Slot>();
+            this.referents = new HashMap<>();
         }
 
         private void addSelector(Selector pair) {
             if (selectors == null) {
-                selectors = new ArrayList<Selector>();
+                selectors = new ArrayList<>();
             }
             selectors.add(pair);
         }
@@ -182,13 +179,13 @@ public final class SelectorPartitioning {
     }
 
     /* A Map for selectors that have an id */
-    private final Map<PartitionKey, Partition> idMap = new HashMap<PartitionKey,Partition>();
+    private final Map<PartitionKey, Partition> idMap = new HashMap<>();
 
     /* A Map for selectors that have an element type */
-    private final Map<PartitionKey, Partition> typeMap = new HashMap<PartitionKey,Partition>();
+    private final Map<PartitionKey, Partition> typeMap = new HashMap<>();
 
     /* A Map for selectors that have style classes */
-    private final Map<PartitionKey, Partition> styleClassMap = new HashMap<PartitionKey,Partition>();
+    private final Map<PartitionKey, Partition> styleClassMap = new HashMap<>();
 
     /**
      * Keep track of the order in which a selector is added to the mapping so
@@ -226,9 +223,10 @@ public final class SelectorPartitioning {
     /* Mask that indicates the selector has a styleclass part, e.g. .label */
     private static final int STYLECLASS_BIT = 1;
     /* If there is no type part, then * is the default. */
-    private static final PartitionKey WILDCARD = new PartitionKey<String>("*");
+    private static final PartitionKey WILDCARD = new PartitionKey<>("*");
 
     /* Place this selector into the partitioning map. Package accessible */
+    @SuppressWarnings("removal")
     public void partition(Selector selector) {
 
         SimpleSelector simpleSelector = null;
@@ -254,11 +252,11 @@ public final class SelectorPartitioning {
                 ? new PartitionKey(selectorType)
                 : null;
 
-        final Set<StyleClass> selectorStyleClass = simpleSelector.getStyleClassSet();
+        final Set<String> selectorStyleClass = simpleSelector.getStyleClassNames();
         final boolean hasStyleClass =
             (selectorStyleClass != null && selectorStyleClass.size() > 0);
         final PartitionKey styleClassKey = hasStyleClass
-                ? new PartitionKey<Set<StyleClass>>(selectorStyleClass)
+                ? new PartitionKey<>(selectorStyleClass)
                 : null;
 
         final int c =
@@ -304,7 +302,7 @@ public final class SelectorPartitioning {
     }
 
     /** Get the list of selectors that match this selector. Package accessible */
-    public List<Selector> match(String selectorId, String selectorType, Set<StyleClass> selectorStyleClass) {
+    public List<Selector> match(String selectorId, String selectorType, Set<String> selectorStyleClass) {
 
         final boolean hasId =
             (selectorId != null && selectorId.isEmpty() == false);
@@ -321,7 +319,7 @@ public final class SelectorPartitioning {
         final boolean hasStyleClass =
             (selectorStyleClass != null && selectorStyleClass.size() > 0);
         final PartitionKey styleClassKey = hasStyleClass
-                ? new PartitionKey<Set<StyleClass>>(selectorStyleClass)
+                ? new PartitionKey<>(selectorStyleClass)
                 : null;
 
         int c =
@@ -329,7 +327,7 @@ public final class SelectorPartitioning {
 
         Partition partition = null;
         Slot slot = null;
-        List<Selector> selectors = new ArrayList<Selector>();
+        List<Selector> selectors = new ArrayList<>();
 
         while (c != 0) {
 
@@ -354,10 +352,10 @@ public final class SelectorPartitioning {
                                     selectors.addAll(slot.selectors);
                                 }
                                 if ((c & STYLECLASS_BIT) == STYLECLASS_BIT) {
-                                    Set<StyleClass> key = (Set<StyleClass>)styleClassKey.key;
+                                    Set<String> key = (Set<String>)styleClassKey.key;
                                     for (Slot s : slot.referents.values()) {
                                         if (s.selectors == null || s.selectors.isEmpty()) continue;
-                                        Set<StyleClass> other = (Set<StyleClass>)s.partition.key.key;
+                                        Set<String> other = (Set<String>)s.partition.key.key;
                                         if (key.containsAll(other)) {
                                             selectors.addAll(s.selectors);
                                         }
@@ -396,10 +394,10 @@ public final class SelectorPartitioning {
                                 selectors.addAll(partition.selectors);
                             }
                             if ((c & STYLECLASS_BIT) == STYLECLASS_BIT) {
-                                Set<StyleClass> key = (Set<StyleClass>)styleClassKey.key;
+                                Set<String> key = (Set<String>)styleClassKey.key;
                                 for (Slot s : partition.slots.values()) {
                                     if (s.selectors == null || s.selectors.isEmpty()) continue;
-                                    Set<StyleClass> other = (Set<StyleClass>)s.partition.key.key;
+                                    Set<String> other = (Set<String>)s.partition.key.key;
                                     if (key.containsAll(other)) {
                                         selectors.addAll(s.selectors);
                                     }

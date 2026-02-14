@@ -39,7 +39,10 @@ public:
 
     ExceptionOr(Exception&&);
     ExceptionOr(ReturnType&&);
-    template<typename OtherType> ExceptionOr(const OtherType&, typename std::enable_if<std::is_scalar<OtherType>::value && std::is_convertible<OtherType, ReturnType>::value>::type* = nullptr);
+    template<typename OtherType>
+        requires std::is_scalar_v<OtherType> && std::convertible_to<OtherType, ReturnType>
+    ExceptionOr(const OtherType&);
+
 
     bool hasException() const;
     const Exception& exception() const;
@@ -90,8 +93,6 @@ private:
 #endif
 };
 
-ExceptionOr<void> isolatedCopy(ExceptionOr<void>&&);
-
 template<typename ReturnType> inline ExceptionOr<ReturnType>::ExceptionOr(Exception&& exception)
     : m_value(makeUnexpected(WTFMove(exception)))
 {
@@ -102,7 +103,10 @@ template<typename ReturnType> inline ExceptionOr<ReturnType>::ExceptionOr(Return
 {
 }
 
-template<typename ReturnType> template<typename OtherType> inline ExceptionOr<ReturnType>::ExceptionOr(const OtherType& returnValue, typename std::enable_if<std::is_scalar<OtherType>::value && std::is_convertible<OtherType, ReturnType>::value>::type*)
+template<typename ReturnType>
+template<typename OtherType>
+    requires std::is_scalar_v<OtherType> && std::convertible_to<OtherType, ReturnType>
+inline ExceptionOr<ReturnType>::ExceptionOr(const OtherType& returnValue)
     : m_value(static_cast<ReturnType>(returnValue))
 {
 }
@@ -193,13 +197,6 @@ inline Exception ExceptionOr<void>::releaseException()
     return WTFMove(m_value.error());
 }
 
-inline ExceptionOr<void> isolatedCopy(ExceptionOr<void>&& value)
-{
-    if (value.hasException())
-        return isolatedCopy(value.releaseException());
-    return { };
-}
-
 template <typename T> inline constexpr bool IsExceptionOr = WTF::IsTemplate<std::decay_t<T>, ExceptionOr>::value;
 
 template <typename T, bool isExceptionOr = IsExceptionOr<T>> struct TypeOrExceptionOrUnderlyingTypeImpl;
@@ -211,21 +208,35 @@ template <typename T> using TypeOrExceptionOrUnderlyingType = typename TypeOrExc
 
 namespace WTF {
 template<typename T> struct CrossThreadCopierBase<false, false, WebCore::ExceptionOr<T> > {
-    typedef WebCore::ExceptionOr<T> Type;
+    using Type = WebCore::ExceptionOr<T>;
+    static constexpr bool IsNeeded = true;
     static Type copy(const Type& source)
     {
         if (source.hasException())
             return crossThreadCopy(source.exception());
         return crossThreadCopy(source.returnValue());
     }
+    static Type copy(Type&& source)
+    {
+        if (source.hasException())
+            return crossThreadCopy(source.releaseException());
+        return crossThreadCopy(source.releaseReturnValue());
+    }
 };
 
 template<> struct CrossThreadCopierBase<false, false, WebCore::ExceptionOr<void> > {
-    typedef WebCore::ExceptionOr<void> Type;
+    using Type = WebCore::ExceptionOr<void>;
+    static constexpr bool IsNeeded = true;
     static Type copy(const Type& source)
     {
         if (source.hasException())
             return crossThreadCopy(source.exception());
+        return { };
+    }
+    static Type copy(Type&& source)
+    {
+        if (source.hasException())
+            return crossThreadCopy(source.releaseException());
         return { };
     }
 };

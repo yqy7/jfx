@@ -23,39 +23,47 @@
 #pragma once
 
 #include "HTMLNames.h"
-#include "InputMode.h"
 #include "StyledElement.h"
-#include "ElementInlines.h"
-
-#if ENABLE(AUTOCAPITALIZE)
-#include "Autocapitalize.h"
-#endif
 
 namespace WebCore {
 
+class ElementInternals;
+class FormListedElement;
 class FormAssociatedElement;
-class FormNamedItem;
+class HTMLButtonElement;
 class HTMLFormElement;
 class VisibleSelection;
+
+struct SRGBADescriptor;
+template<typename, typename> struct BoundedGammaEncoded;
+template<typename T> using SRGBA = BoundedGammaEncoded<T, SRGBADescriptor>;
+
 struct SimpleRange;
 struct TextRecognitionResult;
 
-enum class PageIsEditable : bool;
+enum class AutocapitalizeType : uint8_t;
 enum class EnterKeyHint : uint8_t;
+enum class InputMode : uint8_t;
+enum class PageIsEditable : bool;
+enum class ToggleState : bool;
 
 #if PLATFORM(IOS_FAMILY)
 enum class SelectionRenderingBehavior : bool;
 #endif
 
+enum class FireEvents : bool { No, Yes };
+enum class FocusPreviousElement : bool { No, Yes };
+
 class HTMLElement : public StyledElement {
-    WTF_MAKE_ISO_ALLOCATED(HTMLElement);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(HTMLElement);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(HTMLElement);
 public:
     static Ref<HTMLElement> create(const QualifiedName& tagName, Document&);
 
     WEBCORE_EXPORT String title() const final;
 
-    WEBCORE_EXPORT ExceptionOr<void> setInnerText(const String&);
-    WEBCORE_EXPORT ExceptionOr<void> setOuterText(const String&);
+    WEBCORE_EXPORT ExceptionOr<void> setInnerText(String&&);
+    WEBCORE_EXPORT ExceptionOr<void> setOuterText(String&&);
 
     virtual bool hasCustomFocusLogic() const;
     bool supportsFocus() const override;
@@ -72,6 +80,9 @@ public:
     WEBCORE_EXPORT bool spellcheck() const;
     WEBCORE_EXPORT void setSpellcheck(bool);
 
+    WEBCORE_EXPORT bool writingsuggestions() const;
+    WEBCORE_EXPORT void setWritingsuggestions(bool);
+
     WEBCORE_EXPORT bool translate() const;
     WEBCORE_EXPORT void setTranslate(bool);
 
@@ -81,26 +92,18 @@ public:
 
     String accessKeyLabel() const;
 
-    RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) override;
-    bool rendererIsEverNeeded() final;
-
-    WEBCORE_EXPORT virtual HTMLFormElement* form() const;
-
     WEBCORE_EXPORT const AtomString& dir() const;
-    WEBCORE_EXPORT void setDir(const AtomString&);
-
-    bool hasDirectionAuto() const;
-    TextDirection directionalityIfhasDirAutoAttribute(bool& isAuto) const;
 
     virtual bool isTextControlInnerTextElement() const { return false; }
     virtual bool isSearchFieldResultsButtonElement() const { return false; }
 
-    bool willRespondToMouseMoveEvents() override;
-    bool willRespondToMouseWheelEvents() override;
-    bool willRespondToMouseClickEvents() override;
+    bool willRespondToMouseMoveEvents() const override;
+    bool willRespondToMouseClickEventsWithEditability(Editability) const override;
 
+    // Represents "labelable element": https://html.spec.whatwg.org/multipage/forms.html#category-label
     virtual bool isLabelable() const { return false; }
-    virtual FormNamedItem* asFormNamedItem();
+    WEBCORE_EXPORT RefPtr<NodeList> labels();
+
     virtual FormAssociatedElement* asFormAssociatedElement();
 
     virtual bool isInteractiveContent() const { return false; }
@@ -111,12 +114,11 @@ public:
 
     // Only some element types can be disabled: https://html.spec.whatwg.org/multipage/scripting.html#concept-element-disabled
     bool canBeActuallyDisabled() const;
-    bool isActuallyDisabled() const;
+    virtual bool isActuallyDisabled() const;
 
 #if ENABLE(AUTOCAPITALIZE)
     WEBCORE_EXPORT virtual AutocapitalizeType autocapitalizeType() const;
     WEBCORE_EXPORT const AtomString& autocapitalize() const;
-    WEBCORE_EXPORT void setAutocapitalize(const AtomString& value);
 #endif
 
 #if ENABLE(AUTOCORRECT)
@@ -127,20 +129,46 @@ public:
 
     WEBCORE_EXPORT InputMode canonicalInputMode() const;
     const AtomString& inputMode() const;
-    void setInputMode(const AtomString& value);
 
     WEBCORE_EXPORT EnterKeyHint canonicalEnterKeyHint() const;
     String enterKeyHint() const;
-    void setEnterKeyHint(const String& value);
+
+    bool isHiddenUntilFound() const;
+    std::optional<Variant<bool, double, String>> hidden() const;
+    void setHidden(const std::optional<Variant<bool, double, String>>&);
 
     WEBCORE_EXPORT static bool shouldExtendSelectionToTargetNode(const Node& targetNode, const VisibleSelection& selectionBeforeUpdate);
+
+    WEBCORE_EXPORT ExceptionOr<Ref<ElementInternals>> attachInternals();
+
+    struct ShowPopoverOptions {
+        RefPtr<HTMLElement> source;
+    };
+
+    struct TogglePopoverOptions : public ShowPopoverOptions {
+        std::optional<bool> force;
+    };
+
+    void queuePopoverToggleEventTask(ToggleState oldState, ToggleState newState);
+    ExceptionOr<void> showPopover(const ShowPopoverOptions&);
+    ExceptionOr<void> showPopoverInternal(HTMLElement* = nullptr);
+    ExceptionOr<void> hidePopover();
+    ExceptionOr<void> hidePopoverInternal(FocusPreviousElement, FireEvents);
+    ExceptionOr<bool> togglePopover(std::optional<Variant<WebCore::HTMLElement::TogglePopoverOptions, bool>>);
+
+    const AtomString& popover() const;
+    void setPopover(const AtomString& value);
+    void popoverAttributeChanged(const AtomString& value);
+
+    bool isValidCommandType(const CommandType) override;
+    bool handleCommandInternal(HTMLButtonElement& invoker, const CommandType&) override;
 
 #if PLATFORM(IOS_FAMILY)
     static SelectionRenderingBehavior selectionRenderingBehavior(const Node*);
 #endif
 
 protected:
-    HTMLElement(const QualifiedName& tagName, Document&, ConstructionType);
+    HTMLElement(const QualifiedName& tagName, Document&, OptionSet<TypeFlag>);
 
     enum class AllowZeroValue : bool { No, Yes };
     void addHTMLLengthToStyle(MutableStyleProperties&, CSSPropertyID, StringView value, AllowZeroValue = AllowZeroValue::Yes);
@@ -148,34 +176,35 @@ protected:
     void addHTMLPixelsToStyle(MutableStyleProperties&, CSSPropertyID, StringView value);
     void addHTMLNumberToStyle(MutableStyleProperties&, CSSPropertyID, StringView value);
 
-    void addHTMLColorToStyle(MutableStyleProperties&, CSSPropertyID, const String& color);
+    static std::optional<SRGBA<uint8_t>> parseLegacyColorValue(StringView);
+    void addHTMLColorToStyle(MutableStyleProperties&, CSSPropertyID, const AtomString& color);
 
     void applyAspectRatioFromWidthAndHeightAttributesToStyle(StringView widthAttribute, StringView heightAttribute, MutableStyleProperties&);
+    void applyAspectRatioWithoutDimensionalRulesFromWidthAndHeightAttributesToStyle(StringView widthAttribute, StringView heightAttribute, MutableStyleProperties&);
+    void addParsedWidthAndHeightToAspectRatioList(double width, double height, MutableStyleProperties&);
+
     void applyAlignmentAttributeToStyle(const AtomString&, MutableStyleProperties&);
     void applyBorderAttributeToStyle(const AtomString&, MutableStyleProperties&);
 
     bool matchesReadWritePseudoClass() const override;
-    void parseAttribute(const QualifiedName&, const AtomString&) override;
+    void attributeChanged(const QualifiedName&, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason) override;
     Node::InsertedIntoAncestorResult insertedIntoAncestor(InsertionType , ContainerNode& parentOfInsertedTree) override;
+    void removedFromAncestor(RemovalType, ContainerNode& oldParentOfRemovedTree) override;
     bool hasPresentationalHintsForAttribute(const QualifiedName&) const override;
     void collectPresentationalHintsForAttribute(const QualifiedName&, const AtomString&, MutableStyleProperties&) override;
     unsigned parseBorderWidthAttribute(const AtomString&) const;
 
-    void childrenChanged(const ChildChange&) override;
-    void calculateAndAdjustDirectionality();
+    virtual void effectiveSpellcheckAttributeChanged(bool);
 
-    using EventHandlerNameMap = HashMap<AtomStringImpl*, AtomString>;
+    using EventHandlerNameMap = HashMap<AtomString, AtomString>;
     static const AtomString& eventNameForEventHandlerAttribute(const QualifiedName& attributeName, const EventHandlerNameMap&);
 
 private:
+    void setInvoker(HTMLElement*);
+
     String nodeName() const final;
 
     void mapLanguageAttributeToLocale(const AtomString&, MutableStyleProperties&);
-
-    void dirAttributeChanged(const AtomString&);
-    void adjustDirectionalityIfNeededAfterChildAttributeChanged(Element* child);
-    void adjustDirectionalityIfNeededAfterChildrenChanged(Element* beforeChange, ChildChange::Type);
-    TextDirection directionality(Node** strongDirectionalityTextNode= 0) const;
 
     enum class AllowPercentage : bool { No, Yes };
     enum class UseCSSPXAsUnitType : bool { No, Yes };
@@ -183,22 +212,27 @@ private:
     void addHTMLLengthToStyle(MutableStyleProperties&, CSSPropertyID, StringView value, AllowPercentage, UseCSSPXAsUnitType, IsMultiLength, AllowZeroValue = AllowZeroValue::Yes);
 };
 
-inline HTMLElement::HTMLElement(const QualifiedName& tagName, Document& document, ConstructionType type = CreateHTMLElement)
-    : StyledElement(tagName, document, type)
+inline HTMLElement::HTMLElement(const QualifiedName& tagName, Document& document, OptionSet<TypeFlag> type = { })
+    : StyledElement(tagName, document, type | TypeFlag::IsHTMLElement)
 {
     ASSERT(tagName.localName().impl());
 }
 
 inline bool Node::hasTagName(const HTMLQualifiedName& name) const
 {
-    return is<HTMLElement>(*this) && downcast<HTMLElement>(*this).hasTagName(name);
+    auto* htmlElement = dynamicDowncast<HTMLElement>(*this);
+    return htmlElement && htmlElement->hasTagName(name);
 }
 
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::HTMLElement)
     static bool isType(const WebCore::Node& node) { return node.isHTMLElement(); }
-    static bool isType(const WebCore::EventTarget& target) { return is<WebCore::Node>(target) && isType(downcast<WebCore::Node>(target)); }
+    static bool isType(const WebCore::EventTarget& target)
+    {
+        auto* node = dynamicDowncast<WebCore::Node>(target);
+        return node && isType(*node);
+    }
 SPECIALIZE_TYPE_TRAITS_END()
 
 #include "HTMLElementTypeHelpers.h"

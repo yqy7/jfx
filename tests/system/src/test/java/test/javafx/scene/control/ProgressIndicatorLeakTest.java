@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,40 +25,35 @@
 
 package test.javafx.scene.control;
 
-import javafx.application.Application;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import javafx.application.Platform;
-import javafx.scene.Node;
 import javafx.scene.Group;
+import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.skin.ProgressIndicatorSkin;
 import javafx.stage.Stage;
-import javafx.stage.WindowEvent;
-
-import java.lang.ref.WeakReference;
-import java.util.LinkedList;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
-
-import junit.framework.Assert;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import static org.junit.Assert.assertTrue;
-import static test.util.Util.TIMEOUT;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import test.util.Util;
 import test.util.memory.JMemoryBuddy;
 
 public class ProgressIndicatorLeakTest {
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() throws Exception {
         CountDownLatch startupLatch = new CountDownLatch(1);
         Platform.setImplicitExit(false);
-        Platform.startup(startupLatch::countDown);
-        Assert.assertTrue("Timeout waiting for FX runtime to start",
-                startupLatch.await(TIMEOUT, TimeUnit.MILLISECONDS));
+        Util.startup(startupLatch, startupLatch::countDown);
+    }
+
+    @AfterAll
+    public static void teardownOnce() {
+        Util.shutdown();
     }
 
     @Test
@@ -72,7 +67,7 @@ public class ProgressIndicatorLeakTest {
                 Scene scene = new Scene(indicator);
                 stage.setScene(scene);
                 indicator.setProgress(1.0);
-                Assert.assertEquals("size is wrong", 1, indicator.getChildrenUnmodifiable().size());
+                Assertions.assertEquals(1, indicator.getChildrenUnmodifiable().size(), "size is wrong");
                 Node detIndicator = indicator.getChildrenUnmodifiable().get(0);
                 indicator.setProgress(-1.0);
                 indicator.setProgress(1.0);
@@ -83,7 +78,7 @@ public class ProgressIndicatorLeakTest {
                 stage.show();
             });
             try {
-                Assert.assertTrue("Timeout waiting for setOnShown", showingLatch.await(15, TimeUnit.SECONDS));
+                Assertions.assertTrue(showingLatch.await(15, TimeUnit.SECONDS), "Timeout waiting for setOnShown");
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
@@ -109,7 +104,7 @@ public class ProgressIndicatorLeakTest {
             });
 
             try {
-                assertTrue("Timeout waiting test stage", showingLatch.await(15, TimeUnit.SECONDS));
+                Assertions.assertTrue(showingLatch.await(15, TimeUnit.SECONDS), "Timeout waiting test stage");
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
@@ -119,13 +114,6 @@ public class ProgressIndicatorLeakTest {
             });
 
             checker.assertCollectable(stage.get());
-        });
-    }
-
-    @AfterClass
-    public static void teardownOnce() {
-        Platform.runLater(() -> {
-            Platform.exit();
         });
     }
 }

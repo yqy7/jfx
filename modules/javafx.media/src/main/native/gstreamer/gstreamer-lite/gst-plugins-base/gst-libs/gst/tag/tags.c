@@ -22,7 +22,7 @@
 #include "config.h"
 #endif
 
-#include <gst/gst-i18n-plugin.h>
+#include <glib/gi18n-lib.h>
 #include <gst/base/gsttypefindhelper.h>
 #include <gst/gst.h>
 #include "tag.h"
@@ -164,6 +164,11 @@ gst_tag_register_tags_internal (gpointer unused)
   gst_tag_register_static (GST_TAG_CAPTURING_WHITE_BALANCE, GST_TAG_FLAG_META,
       G_TYPE_STRING, _("capturing white balance"),
       _("The white balance mode set when capturing an image"), NULL);
+
+  gst_tag_register_static (GST_TAG_CAPTURING_LIGHT_SOURCE, GST_TAG_FLAG_META,
+      G_TYPE_STRING, _("capturing light source"),
+      _("The light source indicates the kind of light when capturing an"
+          "image"), NULL);
 
   gst_tag_register_static (GST_TAG_CAPTURING_CONTRAST, GST_TAG_FLAG_META,
       G_TYPE_STRING, _("capturing contrast"),
@@ -330,7 +335,7 @@ gst_tag_parse_extended_comment (const gchar * ext_comment, gchar ** key,
  * are specified, the current locale will be tried. If that also doesn't work,
  * WINDOWS-1252/ISO-8859-1 is assumed (which will almost always succeed).
  *
- * Returns: a newly-allocated string in UTF-8 encoding, or NULL
+ * Returns: (nullable): a newly-allocated string in UTF-8 encoding, or NULL
  */
 gchar *
 gst_tag_freeform_string_to_utf8 (const gchar * data, gint size,
@@ -516,7 +521,7 @@ beach:
  * This function will do various checks and typefind the encoded image
  * data (we can't trust the declared mime type).
  *
- * Returns: a newly-allocated image sample for use in tag lists, or NULL
+ * Returns: (transfer full) (nullable): a newly-allocated image sample for use in tag lists, or NULL
  */
 GstSample *
 gst_tag_image_data_to_image_sample (const guint8 * image_data,
@@ -530,7 +535,8 @@ gst_tag_image_data_to_image_sample (const guint8 * image_data,
   GstStructure *image_info = NULL;
 
   g_return_val_if_fail (image_data != NULL, NULL);
-  g_return_val_if_fail (image_data_len > 0, NULL);
+  g_return_val_if_fail (image_data_len > 0
+      || image_data_len == G_MAXUINT32, NULL);
   g_return_val_if_fail (gst_tag_image_type_is_valid (image_type), NULL);
 
   GST_DEBUG ("image data len: %u bytes", image_data_len);

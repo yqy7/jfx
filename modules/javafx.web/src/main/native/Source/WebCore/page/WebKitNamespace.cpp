@@ -26,22 +26,26 @@
 #include "config.h"
 #include "WebKitNamespace.h"
 
+#include "Element.h"
 #include "FrameLoader.h"
-#include "FrameLoaderClient.h"
+#include "LocalFrame.h"
+#include "LocalFrameLoaderClient.h"
 #include "Logging.h"
+#include "WebKitNodeInfo.h"
+#include "WebKitSerializedNode.h"
 
 #define WEBKIT_NAMESPACE_RELEASE_LOG_ERROR(channel, fmt, ...) RELEASE_LOG_ERROR(channel, "%p - WebKitNamespace::" fmt, this, ##__VA_ARGS__)
 
 #if ENABLE(USER_MESSAGE_HANDLERS)
 
-#include "DOMWindow.h"
+#include "LocalDOMWindow.h"
 #include "UserMessageHandlersNamespace.h"
 
 namespace WebCore {
 
-WebKitNamespace::WebKitNamespace(DOMWindow& window, UserContentProvider& userContentProvider)
-    : DOMWindowProperty(&window)
-    , m_messageHandlerNamespace(UserMessageHandlersNamespace::create(*window.frame(), userContentProvider))
+WebKitNamespace::WebKitNamespace(LocalDOMWindow& window, UserContentProvider& userContentProvider)
+    : LocalDOMWindowProperty(&window)
+    , m_messageHandlerNamespace(UserMessageHandlersNamespace::create(*window.protectedFrame(), userContentProvider))
 {
     ASSERT(window.frame());
 }
@@ -61,6 +65,16 @@ UserMessageHandlersNamespace* WebKitNamespace::messageHandlers()
 #endif
 
     return &m_messageHandlerNamespace.get();
+}
+
+Ref<WebKitNodeInfo> WebKitNamespace::createNodeInfo(Node& node)
+{
+    return WebKitNodeInfo::create(node);
+}
+
+Ref<WebKitSerializedNode> WebKitNamespace::serializeNode(Node& node, SerializedNodeInit&& init)
+{
+    return WebKitSerializedNode::create(node, init.deep);
 }
 
 } // namespace WebCore

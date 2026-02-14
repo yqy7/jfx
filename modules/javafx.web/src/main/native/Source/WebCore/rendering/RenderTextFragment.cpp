@@ -25,17 +25,19 @@
 
 #include "RenderBlock.h"
 #include "RenderIterator.h"
+#include "RenderObjectInlines.h"
 #include "RenderMultiColumnFlow.h"
+#include "RenderStyleInlines.h"
 #include "RenderTreeBuilder.h"
 #include "Text.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(RenderTextFragment);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(RenderTextFragment);
 
 RenderTextFragment::RenderTextFragment(Text& textNode, const String& text, int startOffset, int length)
-    : RenderText(textNode, text.substring(startOffset, length))
+    : RenderText(Type::TextFragment, textNode, text.substring(startOffset, length))
     , m_start(startOffset)
     , m_end(length)
     , m_firstLetter(nullptr)
@@ -43,7 +45,7 @@ RenderTextFragment::RenderTextFragment(Text& textNode, const String& text, int s
 }
 
 RenderTextFragment::RenderTextFragment(Document& document, const String& text, int startOffset, int length)
-    : RenderText(document, text.substring(startOffset, length))
+    : RenderText(Type::TextFragment, document, text.substring(startOffset, length))
     , m_start(startOffset)
     , m_end(length)
     , m_firstLetter(nullptr)
@@ -51,7 +53,7 @@ RenderTextFragment::RenderTextFragment(Document& document, const String& text, i
 }
 
 RenderTextFragment::RenderTextFragment(Document& textNode, const String& text)
-    : RenderText(textNode, text)
+    : RenderText(Type::TextFragment, textNode, text)
     , m_start(0)
     , m_end(text.length())
     , m_contentString(text)
@@ -69,17 +71,10 @@ bool RenderTextFragment::canBeSelectionLeaf() const
     return textNode() && textNode()->hasEditableStyle();
 }
 
-void RenderTextFragment::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
+void RenderTextFragment::setTextInternal(const String& newText, bool force)
 {
-    RenderText::styleDidChange(diff, oldStyle);
+    RenderText::setTextInternal(newText, force);
 
-    if (RenderBlock* block = blockForAccompanyingFirstLetter())
-        block->mutableStyle().removeCachedPseudoStyle(PseudoId::FirstLetter);
-}
-
-void RenderTextFragment::setText(const String& newText, bool force)
-{
-    RenderText::setText(newText, force);
     m_start = 0;
     m_end = text().length();
     if (!m_firstLetter)
@@ -92,14 +87,16 @@ void RenderTextFragment::setText(const String& newText, bool force)
     ASSERT(!textNode() || textNode()->renderer() == this);
 }
 
-UChar RenderTextFragment::previousCharacter() const
+Vector<char16_t> RenderTextFragment::previousCharacter() const
 {
     if (start()) {
         String original = textNode() ? textNode()->data() : contentString();
-        if (!original.isNull() && start() <= original.length())
-            return original[start() - 1];
+        if (!original.isNull() && start() <= original.length()) {
+            Vector<char16_t> previous;
+            previous.append(original[start() - 1]);
+            return previous;
+        }
     }
-
     return RenderText::previousCharacter();
 }
 

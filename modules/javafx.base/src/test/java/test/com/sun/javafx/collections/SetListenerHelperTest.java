@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,16 +34,14 @@ import javafx.collections.FXCollections;
 import test.javafx.collections.MockSetObserver;
 import javafx.collections.ObservableSet;
 import javafx.collections.SetChangeListener;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.BitSet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class SetListenerHelperTest {
 
@@ -56,7 +54,7 @@ public class SetListenerHelperTest {
     private ObservableSet<Object> set;
     private SetChangeListener.Change<Object> change;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         invalidationListenerMock = new InvalidationListenerMock[] {
                 new InvalidationListenerMock(),
@@ -65,14 +63,14 @@ public class SetListenerHelperTest {
                 new InvalidationListenerMock()
         };
         changeListenerMock = new MockSetObserver[] {
-                new MockSetObserver<Object>(),
-                new MockSetObserver<Object>(),
-                new MockSetObserver<Object>(),
-                new MockSetObserver<Object>()
+                new MockSetObserver<>(),
+                new MockSetObserver<>(),
+                new MockSetObserver<>(),
+                new MockSetObserver<>()
         };
         helper = null;
         set = FXCollections.observableSet();
-        change = new SetExpressionHelper.SimpleChange<Object>(set).setRemoved(new Object());
+        change = new SetExpressionHelper.SimpleChange<>(set).setRemoved(new Object());
     }
 
     private void resetAllListeners() {
@@ -84,25 +82,37 @@ public class SetListenerHelperTest {
         }
     }
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void testAddInvalidationListener_Null() {
-        SetListenerHelper.addListener(helper, (InvalidationListener)null);
+        assertThrows(NullPointerException.class, () -> {
+            SetListenerHelper.addListener(helper, (InvalidationListener)null);
+        });
     }
 
-    @Test(expected = NullPointerException.class)
+
+    @Test
     public void testRemoveInvalidationListener_Null() {
-        SetListenerHelper.removeListener(helper, (InvalidationListener) null);
+        assertThrows(NullPointerException.class, () -> {
+            SetListenerHelper.removeListener(helper, (InvalidationListener) null);
+        });
     }
 
-    @Test(expected = NullPointerException.class)
+
+    @Test
     public void testRemoveSetChangeListener_Null() {
-        SetListenerHelper.removeListener(helper, (SetChangeListener<Object>) null);
+        assertThrows(NullPointerException.class, () -> {
+            SetListenerHelper.removeListener(helper, (SetChangeListener<Object>) null);
+        });
     }
 
-    @Test(expected = NullPointerException.class)
+
+    @Test
     public void testAddSetChangeListener_Null() {
-        SetListenerHelper.addListener(helper, (SetChangeListener<Object>) null);
+        assertThrows(NullPointerException.class, () -> {
+            SetListenerHelper.addListener(helper, (SetChangeListener<Object>) null);
+        });
     }
+
 
     @Test
     public void testEmpty() {
@@ -251,7 +261,7 @@ public class SetListenerHelperTest {
 
     @Test
     public void testGeneric_AddInvalidationInPulse() {
-        final SetChangeListener<Object> addListener = new SetChangeListener<Object>() {
+        final SetChangeListener<Object> addListener = new SetChangeListener<>() {
             int counter;
             @Override
             public void onChanged(Change<? extends Object> change) {
@@ -362,7 +372,7 @@ public class SetListenerHelperTest {
 
     @Test
     public void testGeneric_RemoveInvalidationInPulse() {
-        final SetChangeListener<Object> removeListener = new SetChangeListener<Object>() {
+        final SetChangeListener<Object> removeListener = new SetChangeListener<>() {
             int counter;
             @Override
             public void onChanged(Change<? extends Object> change) {

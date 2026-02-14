@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2009-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,12 +32,21 @@
 #include "GraphicsContext.h"
 #include "GraphicsLayerContentsDisplayDelegate.h"
 #include "LayoutRect.h"
+#include "MediaPlayerEnums.h"
 #include "RotateTransformOperation.h"
+#include <wtf/FileHandle.h>
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/ProcessID.h>
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/MakeString.h>
 #include <wtf/text/TextStream.h>
 #include <wtf/text/WTFString.h>
+
+#if ENABLE(THREADED_ANIMATION_RESOLUTION)
+#include "AcceleratedEffectStack.h"
+#endif
 
 #ifndef NDEBUG
 #include <stdio.h>
@@ -45,7 +54,74 @@
 
 namespace WebCore {
 
-typedef HashMap<const GraphicsLayer*, Vector<FloatRect>> RepaintMap;
+WTF_MAKE_TZONE_ALLOCATED_IMPL(AnimationValue);
+WTF_MAKE_TZONE_ALLOCATED_IMPL(FloatAnimationValue);
+WTF_MAKE_TZONE_ALLOCATED_IMPL(TransformAnimationValue);
+WTF_MAKE_TZONE_ALLOCATED_IMPL(FilterAnimationValue);
+WTF_MAKE_TZONE_ALLOCATED_IMPL(KeyframeValueList);
+WTF_MAKE_TZONE_ALLOCATED_IMPL(GraphicsLayer);
+
+#if ENABLE(THREADED_ANIMATION_RESOLUTION)
+String acceleratedEffectPropertyIDAsString(AcceleratedEffectProperty property)
+{
+    switch (property) {
+    case AcceleratedEffectProperty::Opacity:
+        return "opacity"_s;
+    case AcceleratedEffectProperty::Transform:
+        return "transform"_s;
+    case AcceleratedEffectProperty::Translate:
+        return "translate"_s;
+    case AcceleratedEffectProperty::Rotate:
+        return "rotate"_s;
+    case AcceleratedEffectProperty::Scale:
+        return "scale"_s;
+    case AcceleratedEffectProperty::OffsetPath:
+        return "offset-path"_s;
+    case AcceleratedEffectProperty::OffsetDistance:
+        return "offset-distance"_s;
+    case AcceleratedEffectProperty::OffsetPosition:
+        return "offset-position"_s;
+    case AcceleratedEffectProperty::OffsetAnchor:
+        return "offset-anchor"_s;
+    case AcceleratedEffectProperty::OffsetRotate:
+        return "offset-rotate"_s;
+    case AcceleratedEffectProperty::Filter:
+        return "filter"_s;
+    case AcceleratedEffectProperty::BackdropFilter:
+        return "backdrop-filter"_s;
+    default:
+        ASSERT_NOT_REACHED();
+        return "invalid"_s;
+    }
+    ASSERT_NOT_REACHED();
+    return ""_s;
+}
+#endif
+
+String animatedPropertyIDAsString(AnimatedProperty property)
+{
+    switch (property) {
+    case AnimatedProperty::Translate:
+    case AnimatedProperty::Scale:
+    case AnimatedProperty::Rotate:
+    case AnimatedProperty::Transform:
+        return "transform"_s;
+    case AnimatedProperty::Opacity:
+        return "opacity"_s;
+    case AnimatedProperty::BackgroundColor:
+        return "background-color"_s;
+    case AnimatedProperty::Filter:
+        return "filter"_s;
+    case AnimatedProperty::WebkitBackdropFilter:
+        return "backdrop-filter"_s;
+    case AnimatedProperty::Invalid:
+        return "invalid"_s;
+    }
+    ASSERT_NOT_REACHED();
+    return ""_s;
+}
+
+using RepaintMap = HashMap<const GraphicsLayer*, Vector<FloatRect>>;
 static RepaintMap& repaintRectMap()
 {
     static NeverDestroyed<RepaintMap> map;
@@ -77,9 +153,11 @@ bool GraphicsLayer::supportsLayerType(Type type)
 {
     switch (type) {
     case Type::Normal:
+    case Type::Structural:
     case Type::PageTiledBacking:
     case Type::ScrollContainer:
     case Type::ScrolledContents:
+    case Type::TiledBacking:
         return true;
     case Type::Shape:
         return false;
@@ -87,38 +165,21 @@ bool GraphicsLayer::supportsLayerType(Type type)
     ASSERT_NOT_REACHED();
     return false;
 }
-
-bool GraphicsLayer::supportsRoundedClip()
-{
-    return false;
-}
-
-bool GraphicsLayer::supportsBackgroundColorContent()
-{
-#if USE(TEXTURE_MAPPER)
-    return true;
-#else
-    return false;
-#endif
-}
-
-bool GraphicsLayer::supportsSubpixelAntialiasedLayerText()
-{
-    return false;
-}
 #endif
 
-#if !USE(COORDINATED_GRAPHICS)
 bool GraphicsLayer::supportsContentsTiling()
 {
+#if USE(COORDINATED_GRAPHICS)
+    return true;
+#else
     // FIXME: Enable the feature on different ports.
     return false;
-}
 #endif
+}
 
 // Singleton client used for layers on which clearClient has been called.
 class EmptyGraphicsLayerClient final : public GraphicsLayerClient {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED_INLINE(EmptyGraphicsLayerClient);
 public:
     static EmptyGraphicsLayerClient& singleton();
 };
@@ -134,8 +195,7 @@ GraphicsLayer::GraphicsLayer(Type type, GraphicsLayerClient& layerClient)
     , m_type(type)
     , m_beingDestroyed(false)
     , m_contentsOpaque(false)
-    , m_supportsSubpixelAntialiasedText(false)
-    , m_preserves3D(false)
+    , m_preserves3D(type == Type::Structural)
     , m_backfaceVisibility(true)
     , m_masksToBounds(false)
     , m_drawsContent(false)
@@ -143,15 +203,21 @@ GraphicsLayer::GraphicsLayer(Type type, GraphicsLayerClient& layerClient)
     , m_contentsRectClipsDescendants(false)
     , m_acceleratesDrawing(false)
     , m_usesDisplayListDrawing(false)
+    , m_allowsTiling(true)
     , m_appliesPageScale(false)
+    , m_appliesDeviceScale(true)
     , m_showDebugBorder(false)
     , m_showRepaintCounter(false)
+    , m_showFrameProcessBorders(false)
     , m_isMaskLayer(false)
+    , m_isBackdropRoot(false)
     , m_isTrackingDisplayListReplay(false)
     , m_userInteractionEnabled(true)
     , m_canDetachBackingStore(true)
+    , m_shouldPaintUsingCompositeCopy(false)
 #if HAVE(CORE_ANIMATION_SEPARATED_LAYERS)
     , m_isSeparated(false)
+    , m_isSeparatedImage(false)
 #if HAVE(CORE_ANIMATION_SEPARATED_PORTALS)
     , m_isSeparatedPortal(false)
     , m_isDescendentOfSeparatedPortal(false)
@@ -331,12 +397,15 @@ bool GraphicsLayer::replaceChild(GraphicsLayer* oldChild, Ref<GraphicsLayer>&& n
 
 void GraphicsLayer::removeAllChildren()
 {
-    while (m_children.size()) {
-        GraphicsLayer* curLayer = m_children[0].ptr();
-        ASSERT(curLayer->parent());
-        curLayer->removeFromParent();
-        // curLayer may be destroyed here.
-    }
+    if (m_children.isEmpty())
+        return;
+
+    willModifyChildren();
+
+    for (auto& child : m_children)
+        child->setParent(nullptr);
+
+    m_children.clear();
 }
 
 void GraphicsLayer::removeFromParentInternal()
@@ -350,6 +419,51 @@ void GraphicsLayer::removeFromParentInternal()
         // |this| may be destroyed here.
     }
 }
+
+bool GraphicsLayer::needsBackdrop() const
+{
+#if HAVE(CORE_MATERIAL)
+    if (appleVisualEffectNeedsBackdrop(m_appleVisualEffectData.effect))
+        return true;
+#endif
+    return !m_backdropFilters.isEmpty();
+}
+
+void GraphicsLayer::setPreserves3D(bool b)
+{
+    ASSERT_IMPLIES(m_type == Type::Structural, b);
+    m_preserves3D = b;
+}
+
+void GraphicsLayer::setMasksToBounds(bool b)
+{
+    ASSERT_IMPLIES(m_type == Type::Structural, false);
+    m_masksToBounds = b;
+}
+
+void GraphicsLayer::setDrawsContent(bool b)
+{
+    ASSERT_IMPLIES(m_type == Type::Structural, false);
+    m_drawsContent = b;
+}
+
+#if HAVE(SUPPORT_HDR_DISPLAY)
+void GraphicsLayer::setDrawsHDRContent(bool b)
+{
+    ASSERT(m_type != Type::Structural);
+    m_drawsHDRContent = b;
+}
+
+void GraphicsLayer::setTonemappingEnabled(bool b)
+{
+    ASSERT(m_type != Type::Structural);
+    m_tonemappingEnabled = b;
+}
+
+void GraphicsLayer::setNeedsDisplayIfEDRHeadroomExceeds(float)
+{
+}
+#endif
 
 const TransformationMatrix& GraphicsLayer::transform() const
 {
@@ -377,8 +491,24 @@ void GraphicsLayer::setChildrenTransform(const TransformationMatrix& matrix)
         m_childrenTransform = makeUnique<TransformationMatrix>(matrix);
 }
 
+bool GraphicsLayer::setFilters(const FilterOperations& filters)
+{
+    ASSERT(m_type != Type::Structural);
+    m_filters = filters;
+    return true;
+}
+
+void GraphicsLayer::setOpacity(float opacity)
+{
+    ASSERT(m_type != Type::Structural);
+    m_opacity = opacity;
+}
+
 void GraphicsLayer::removeFromParent()
 {
+    if (m_parent)
+        m_parent->willModifyChildren();
+
     // removeFromParentInternal is nonvirtual, for use in willBeDestroyed,
     // which is called from destructors.
     removeFromParentInternal();
@@ -401,9 +531,22 @@ void GraphicsLayer::setMaskLayer(RefPtr<GraphicsLayer>&& layer)
     m_maskLayer = WTFMove(layer);
 }
 
-void GraphicsLayer::setMasksToBoundsRect(const FloatRoundedRect& roundedRect)
+MediaPlayerVideoGravity GraphicsLayer::videoGravity() const
 {
-    m_masksToBoundsRect = roundedRect;
+#if USE(CA)
+    return m_videoGravity;
+#else
+    return MediaPlayerVideoGravity::ResizeAspect;
+#endif
+}
+
+void GraphicsLayer::setVideoGravity(MediaPlayerVideoGravity gravity)
+{
+#if USE(CA)
+    m_videoGravity = gravity;
+#else
+    UNUSED_PARAM(gravity);
+#endif
 }
 
 Path GraphicsLayer::shapeLayerPath() const
@@ -463,7 +606,7 @@ void GraphicsLayer::noteDeviceOrPageScaleFactorChangedIncludingDescendants()
 
 void GraphicsLayer::setIsInWindow(bool inWindow)
 {
-    if (TiledBacking* tiledBacking = this->tiledBacking())
+    if (auto* tiledBacking = this->tiledBacking())
         tiledBacking->setIsInWindow(inWindow);
 }
 
@@ -518,6 +661,7 @@ void GraphicsLayer::setSize(const FloatSize& size)
 
 void GraphicsLayer::setBackgroundColor(const Color& color)
 {
+    ASSERT(m_type != Type::Structural);
     m_backgroundColor = color;
 }
 
@@ -530,13 +674,15 @@ void GraphicsLayer::setPaintingPhase(OptionSet<GraphicsLayerPaintingPhase> phase
     m_paintingPhase = phase;
 }
 
-void GraphicsLayer::paintGraphicsLayerContents(GraphicsContext& context, const FloatRect& clip, GraphicsLayerPaintBehavior layerPaintBehavior)
+void GraphicsLayer::paintGraphicsLayerContents(GraphicsContext& context, const FloatRect& clip, OptionSet<GraphicsLayerPaintBehavior> layerPaintBehavior) const
 {
-    FloatSize offset = offsetFromRenderer() - toFloatSize(scrollOffset());
-    context.translate(-offset);
+    auto offset = offsetFromRenderer() - toFloatSize(scrollOffset());
+    auto clipRect = clip;
 
-    FloatRect clipRect(clip);
-    clipRect.move(offset);
+    if (!offset.isZero()) {
+        context.translate(-offset);
+        clipRect.move(offset);
+    }
 
     client().paintContents(this, context, clipRect, layerPaintBehavior);
 }
@@ -599,10 +745,10 @@ FloatRect GraphicsLayer::adjustCoverageRectForMovement(const FloatRect& coverage
     return unionRect(coverageRect, expandedRect);
 }
 
-String GraphicsLayer::animationNameForTransition(AnimatedPropertyID property)
+String GraphicsLayer::animationNameForTransition(AnimatedProperty property)
 {
     // | is not a valid identifier character in CSS, so this can never conflict with a keyframe identifier.
-    return makeString("-|transition", static_cast<int>(property), '-');
+    return makeString("-|transition"_s, static_cast<int>(property), '-');
 }
 
 void GraphicsLayer::suspendAnimations(MonotonicTime)
@@ -615,6 +761,11 @@ void GraphicsLayer::resumeAnimations()
 
 void GraphicsLayer::setContentsDisplayDelegate(RefPtr<GraphicsLayerContentsDisplayDelegate>&&, ContentsLayerPurpose)
 {
+}
+
+RefPtr<GraphicsLayerAsyncContentsDisplayDelegate> GraphicsLayer::createAsyncContentsDisplayDelegate(GraphicsLayerAsyncContentsDisplayDelegate*)
+{
+    return nullptr;
 }
 
 void GraphicsLayer::getDebugBorderInfo(Color& color, float& width) const
@@ -649,12 +800,20 @@ void GraphicsLayer::getDebugBorderInfo(Color& color, float& width) const
         return;
     }
 
+    if (isShowingFrameProcessBorders()) {
+        auto hash = intHash(static_cast<uint32_t>(getCurrentProcessID()));
+        uint8_t r = (hash >>  0) & 0xFF, g = (hash >>  8) & 0xFF, b = (hash >> 16) & 0xFF;
+        color = SRGBA<uint8_t> { r, g, b }.colorWithAlphaByte(192);
+        width = 4;
+        return;
+    }
+
     color = Color::yellow.colorWithAlphaByte(192); // container: yellow
 }
 
 void GraphicsLayer::updateDebugIndicators()
 {
-    if (!isShowingDebugBorder())
+    if (!isShowingDebugBorder() && !isShowingFrameProcessBorders())
         return;
 
     Color borderColor;
@@ -675,11 +834,7 @@ static inline const FilterOperations& filterOperationsAt(const KeyframeValueList
 
 int GraphicsLayer::validateFilterOperations(const KeyframeValueList& valueList)
 {
-#if ENABLE(FILTERS_LEVEL_2)
-    ASSERT(valueList.property() == AnimatedPropertyFilter || valueList.property() == AnimatedPropertyWebkitBackdropFilter);
-#else
-    ASSERT(valueList.property() == AnimatedPropertyFilter);
-#endif
+    ASSERT(valueList.property() == AnimatedProperty::Filter || valueList.property() == AnimatedProperty::WebkitBackdropFilter);
 
     if (valueList.size() < 2)
         return -1;
@@ -687,7 +842,7 @@ int GraphicsLayer::validateFilterOperations(const KeyframeValueList& valueList)
     // Empty filters match anything, so find the first non-empty entry as the reference
     size_t firstIndex = 0;
     for ( ; firstIndex < valueList.size(); ++firstIndex) {
-        if (!filterOperationsAt(valueList, firstIndex).operations().isEmpty())
+        if (!filterOperationsAt(valueList, firstIndex).isEmpty())
             break;
     }
 
@@ -699,8 +854,8 @@ int GraphicsLayer::validateFilterOperations(const KeyframeValueList& valueList)
     for (size_t i = firstIndex + 1; i < valueList.size(); ++i) {
         const FilterOperations& val = filterOperationsAt(valueList, i);
 
-        // An emtpy filter list matches anything.
-        if (val.operations().isEmpty())
+        // An empty filter list matches anything.
+        if (val.isEmpty())
             continue;
 
         if (!firstVal.operationsMatch(val))
@@ -710,36 +865,21 @@ int GraphicsLayer::validateFilterOperations(const KeyframeValueList& valueList)
     return firstIndex;
 }
 
-static inline const TransformOperations& operationsAt(const KeyframeValueList& valueList, size_t index)
+#if ENABLE(THREADED_ANIMATION_RESOLUTION)
+void GraphicsLayer::setAcceleratedEffectsAndBaseValues(AcceleratedEffects&& effects, AcceleratedEffectValues&& baseValues)
 {
-    return static_cast<const TransformAnimationValue&>(valueList.at(index)).value();
-}
-
-// A sequence of keyframes with a list of transforms can be represented without matrix interpolation
-// if each transform is compatible with all other transforms at the same index in other keyframes.
-// Two transforms are compatible if they share a primitive defined by the CSS Transforms Level 2
-// specification. For instance, the shared primitive of a translateX and translate3D operation is
-// TransformOperation::TRANSLATE_3D. This function returns true if the TransformOperations in each
-// keyframe share a primitive operation type and stores the compatible OperationTypes in
-// sharedPrimitives. If the keyframes do not share a list of compatible primitives, false is
-// returned.
-bool GraphicsLayer::getSharedPrimitivesForTransformKeyframes(const KeyframeValueList& valueList, Vector<TransformOperation::OperationType>& sharedPrimitives)
-{
-    ASSERT(animatedPropertyIsTransformOrRelated(valueList.property()));
-
-    if (valueList.size() < 2)
-        return false;
-
-    sharedPrimitives.clear();
-    sharedPrimitives.reserveInitialCapacity(operationsAt(valueList, 0).size());
-
-    for (size_t i = 0; i < valueList.size(); ++i) {
-        if (!operationsAt(valueList, i).updateSharedPrimitives(sharedPrimitives))
-            return false;
+    if (effects.isEmpty()) {
+        m_effectStack = nullptr;
+        return;
     }
 
-    return true;
+    if (!m_effectStack)
+        m_effectStack = AcceleratedEffectStack::create();
+
+    m_effectStack->setEffects(WTFMove(effects));
+    m_effectStack->setBaseValues(WTFMove(baseValues));
 }
+#endif
 
 double GraphicsLayer::backingStoreMemoryEstimate() const
 {
@@ -762,18 +902,11 @@ void GraphicsLayer::addRepaintRect(const FloatRect& repaintRect)
 
     FloatRect largestRepaintRect(FloatPoint(), m_size);
     largestRepaintRect.intersect(repaintRect);
-    RepaintMap::iterator repaintIt = repaintRectMap().find(this);
-    if (repaintIt == repaintRectMap().end()) {
-        Vector<FloatRect> repaintRects;
-        repaintRects.append(largestRepaintRect);
-        repaintRectMap().set(this, repaintRects);
-    } else {
-        Vector<FloatRect>& repaintRects = repaintIt->value;
-        repaintRects.append(largestRepaintRect);
-    }
+
+    repaintRectMap().add(this, Vector<FloatRect>()).iterator->value.append(WTFMove(largestRepaintRect));
 }
 
-void GraphicsLayer::traverse(GraphicsLayer& layer, const Function<void(GraphicsLayer&)>& traversalFunc)
+void GraphicsLayer::traverse(GraphicsLayer& layer, NOESCAPE const Function<void(GraphicsLayer&)>& traversalFunc)
 {
     traversalFunc(layer);
 
@@ -787,18 +920,24 @@ void GraphicsLayer::traverse(GraphicsLayer& layer, const Function<void(GraphicsL
         traverse(*maskLayer, traversalFunc);
 }
 
+void GraphicsLayer::setTileCoverage(TileCoverage coverage)
+{
+    if (auto* backing = tiledBacking())
+        backing->setTileCoverage(coverage);
+}
+
 void GraphicsLayer::dumpLayer(TextStream& ts, OptionSet<LayerTreeAsTextOptions> options) const
 {
-    ts << indent << "(" << "GraphicsLayer";
+    ts << indent << '(' << "GraphicsLayer"_s;
 
     if (options & LayerTreeAsTextOptions::Debug) {
-        ts << " " << static_cast<void*>(const_cast<GraphicsLayer*>(this));
-        ts << " \"" << m_name << "\"";
+        ts << ' ' << static_cast<void*>(const_cast<GraphicsLayer*>(this));
+        ts << " \"" << m_name << '"';
     }
 
-    ts << "\n";
+    ts << '\n';
     dumpProperties(ts, options);
-    ts << indent << ")\n";
+    ts << indent << ")\n"_s;
 }
 
 static void dumpChildren(TextStream& ts, const Vector<Ref<GraphicsLayer>>& children, unsigned& totalChildCount, OptionSet<LayerTreeAsTextOptions> options)
@@ -820,149 +959,157 @@ void GraphicsLayer::dumpProperties(TextStream& ts, OptionSet<LayerTreeAsTextOpti
 {
     TextStream::IndentScope indentScope(ts);
     if (!m_offsetFromRenderer.isZero())
-        ts << indent << "(offsetFromRenderer " << m_offsetFromRenderer << ")\n";
+        ts << indent << "(offsetFromRenderer "_s << m_offsetFromRenderer << ")\n"_s;
 
     if (!m_scrollOffset.isZero())
-        ts << indent << "(scrollOffset " << m_scrollOffset << ")\n";
+        ts << indent << "(scrollOffset "_s << m_scrollOffset << ")\n"_s;
 
     if (m_position != FloatPoint())
-        ts << indent << "(position " << m_position.x() << " " << m_position.y() << ")\n";
+        ts << indent << "(position "_s << m_position.x() << ' ' << m_position.y() << ")\n"_s;
 
     if (m_approximatePosition)
-        ts << indent << "(approximate position " << m_approximatePosition.value().x() << " " << m_approximatePosition.value().y() << ")\n";
+        ts << indent << "(approximate position "_s << m_approximatePosition.value().x() << ' ' << m_approximatePosition.value().y() << ")\n"_s;
 
     if (m_boundsOrigin != FloatPoint())
-        ts << indent << "(bounds origin " << m_boundsOrigin.x() << " " << m_boundsOrigin.y() << ")\n";
+        ts << indent << "(bounds origin "_s << m_boundsOrigin.x() << ' ' << m_boundsOrigin.y() << ")\n"_s;
 
-    if (m_anchorPoint != FloatPoint3D(0.5f, 0.5f, 0)) {
-        ts << indent << "(anchor " << m_anchorPoint.x() << " " << m_anchorPoint.y();
+    if (client().shouldDumpPropertyForLayer(this, "anchorPoint"_s, options)) {
+        ts << indent << "(anchor "_s << m_anchorPoint.x() << ' ' << m_anchorPoint.y();
         if (m_anchorPoint.z())
-            ts << " " << m_anchorPoint.z();
-        ts << ")\n";
+            ts << ' ' << m_anchorPoint.z();
+        ts << ")\n"_s;
     }
 
     if (m_size != IntSize())
-        ts << indent << "(bounds " << m_size.width() << " " << m_size.height() << ")\n";
+        ts << indent << "(bounds "_s << m_size.width() << ' ' << m_size.height() << ")\n"_s;
 
     if (m_opacity != 1)
-        ts << indent << "(opacity " << m_opacity << ")\n";
+        ts << indent << "(opacity "_s << m_opacity << ")\n"_s;
 
-#if ENABLE(CSS_COMPOSITING)
     if (m_blendMode != BlendMode::Normal)
-        ts << indent << "(blendMode " << compositeOperatorName(CompositeOperator::SourceOver, m_blendMode) << ")\n";
-#endif
+        ts << indent << "(blendMode "_s << compositeOperatorName(CompositeOperator::SourceOver, m_blendMode) << ")\n"_s;
 
     if (type() == Type::Normal && tiledBacking())
-        ts << indent << "(usingTiledLayer 1)\n";
+        ts << indent << "(usingTiledLayer 1)\n"_s;
 
     bool needsIOSDumpRenderTreeMainFrameRenderViewLayerIsAlwaysOpaqueHack = client().needsIOSDumpRenderTreeMainFrameRenderViewLayerIsAlwaysOpaqueHack(*this);
     if (m_contentsOpaque || needsIOSDumpRenderTreeMainFrameRenderViewLayerIsAlwaysOpaqueHack)
-        ts << indent << "(contentsOpaque " << (m_contentsOpaque || needsIOSDumpRenderTreeMainFrameRenderViewLayerIsAlwaysOpaqueHack) << ")\n";
-
-    if (m_supportsSubpixelAntialiasedText)
-        ts << indent << "(supports subpixel antialiased text " << m_supportsSubpixelAntialiasedText << ")\n";
+        ts << indent << "(contentsOpaque "_s << (m_contentsOpaque || needsIOSDumpRenderTreeMainFrameRenderViewLayerIsAlwaysOpaqueHack) << ")\n"_s;
 
     if (m_masksToBounds && options & LayerTreeAsTextOptions::IncludeClipping)
-        ts << indent << "(clips " << m_masksToBounds << ")\n";
+        ts << indent << "(clips "_s << m_masksToBounds << ")\n"_s;
 
     if (m_preserves3D)
-        ts << indent << "(preserves3D " << m_preserves3D << ")\n";
+        ts << indent << "(preserves3D "_s << m_preserves3D << ")\n"_s;
 
-    if (m_drawsContent && client().shouldDumpPropertyForLayer(this, "drawsContent", options))
-        ts << indent << "(drawsContent " << m_drawsContent << ")\n";
+    if (m_drawsContent && client().shouldDumpPropertyForLayer(this, "drawsContent"_s, options))
+        ts << indent << "(drawsContent "_s << m_drawsContent << ")\n"_s;
+
+#if HAVE(SUPPORT_HDR_DISPLAY)
+    if (m_drawsHDRContent)
+        ts << indent << "(drawsHDRContent "_s << m_drawsHDRContent << ")\n"_s;
+#endif
 
     if (!m_contentsVisible)
-        ts << indent << "(contentsVisible " << m_contentsVisible << ")\n";
+        ts << indent << "(contentsVisible "_s << m_contentsVisible << ")\n"_s;
 
     if (!m_backfaceVisibility)
-        ts << indent << "(backfaceVisibility " << (m_backfaceVisibility ? "visible" : "hidden") << ")\n";
+        ts << indent << "(backfaceVisibility "_s << (m_backfaceVisibility ? "visible"_s : "hidden"_s) << ")\n"_s;
+
+    if (m_isBackdropRoot)
+        ts << indent << "(backdropRoot "_s << m_isBackdropRoot << ")\n"_s;
 
     if (options & LayerTreeAsTextOptions::Debug)
-        ts << indent << "(primary-layer-id " << primaryLayerID() << ")\n";
+        ts << indent << "(primary-layer-id "_s << primaryLayerID() << ")\n"_s;
 
-    if (m_backgroundColor.isValid() && client().shouldDumpPropertyForLayer(this, "backgroundColor", options))
-        ts << indent << "(backgroundColor " << serializationForRenderTreeAsText(m_backgroundColor) << ")\n";
+    if (m_backgroundColor.isValid() && client().shouldDumpPropertyForLayer(this, "backgroundColor"_s, options))
+        ts << indent << "(backgroundColor "_s << serializationForRenderTreeAsText(m_backgroundColor) << ")\n"_s;
 
     if (options & LayerTreeAsTextOptions::IncludeAcceleratesDrawing && m_acceleratesDrawing)
-        ts << indent << "(acceleratesDrawing " << m_acceleratesDrawing << ")\n";
+        ts << indent << "(acceleratesDrawing "_s << m_acceleratesDrawing << ")\n"_s;
 
     if (options & LayerTreeAsTextOptions::IncludeBackingStoreAttached)
-        ts << indent << "(backingStoreAttached " << backingStoreAttachedForTesting() << ")\n";
+        ts << indent << "(backingStoreAttached "_s << backingStoreAttachedForTesting() << ")\n"_s;
 
     if (m_transform && !m_transform->isIdentity()) {
-        ts << indent << "(transform ";
-        ts << "[" << m_transform->m11() << " " << m_transform->m12() << " " << m_transform->m13() << " " << m_transform->m14() << "] ";
-        ts << "[" << m_transform->m21() << " " << m_transform->m22() << " " << m_transform->m23() << " " << m_transform->m24() << "] ";
-        ts << "[" << m_transform->m31() << " " << m_transform->m32() << " " << m_transform->m33() << " " << m_transform->m34() << "] ";
-        ts << "[" << m_transform->m41() << " " << m_transform->m42() << " " << m_transform->m43() << " " << m_transform->m44() << "])\n";
+        ts << indent << "(transform "_s;
+        ts << '[' << m_transform->m11() << ' ' << m_transform->m12() << ' ' << m_transform->m13() << ' ' << m_transform->m14() << "] "_s;
+        ts << '[' << m_transform->m21() << ' ' << m_transform->m22() << ' ' << m_transform->m23() << ' ' << m_transform->m24() << "] "_s;
+        ts << '[' << m_transform->m31() << ' ' << m_transform->m32() << ' ' << m_transform->m33() << ' ' << m_transform->m34() << "] "_s;
+        ts << '[' << m_transform->m41() << ' ' << m_transform->m42() << ' ' << m_transform->m43() << ' ' << m_transform->m44() << "])\n"_s;
     }
 
     // Avoid dumping the sublayer transform on the root layer, because it's used for geometry flipping, whose behavior
     // differs between platforms.
     if (parent() && m_childrenTransform && !m_childrenTransform->isIdentity()) {
-        ts << indent << "(childrenTransform ";
-        ts << "[" << m_childrenTransform->m11() << " " << m_childrenTransform->m12() << " " << m_childrenTransform->m13() << " " << m_childrenTransform->m14() << "] ";
-        ts << "[" << m_childrenTransform->m21() << " " << m_childrenTransform->m22() << " " << m_childrenTransform->m23() << " " << m_childrenTransform->m24() << "] ";
-        ts << "[" << m_childrenTransform->m31() << " " << m_childrenTransform->m32() << " " << m_childrenTransform->m33() << " " << m_childrenTransform->m34() << "] ";
-        ts << "[" << m_childrenTransform->m41() << " " << m_childrenTransform->m42() << " " << m_childrenTransform->m43() << " " << m_childrenTransform->m44() << "])\n";
+        ts << indent << "(childrenTransform "_s;
+        ts << '[' << m_childrenTransform->m11() << ' ' << m_childrenTransform->m12() << ' ' << m_childrenTransform->m13() << ' ' << m_childrenTransform->m14() << "] "_s;
+        ts << '[' << m_childrenTransform->m21() << ' ' << m_childrenTransform->m22() << ' ' << m_childrenTransform->m23() << ' ' << m_childrenTransform->m24() << "] "_s;
+        ts << '[' << m_childrenTransform->m31() << ' ' << m_childrenTransform->m32() << ' ' << m_childrenTransform->m33() << ' ' << m_childrenTransform->m34() << "] "_s;
+        ts << '[' << m_childrenTransform->m41() << ' ' << m_childrenTransform->m42() << ' ' << m_childrenTransform->m43() << ' ' << m_childrenTransform->m44() << "])\n"_s;
     }
 
+#if HAVE(CORE_MATERIAL)
+    if (m_appleVisualEffectData.effect != AppleVisualEffect::None)
+        ts << indent << "(appleVisualEffectData "_s << m_appleVisualEffectData << ")\n"_s;
+#endif
+
     if (m_maskLayer) {
-        ts << indent << "(mask layer";
+        ts << indent << "(mask layer"_s;
         if (options & LayerTreeAsTextOptions::Debug)
-            ts << " " << m_maskLayer.get();
-        ts << ")\n";
+            ts << ' ' << m_maskLayer.get();
+        ts << ")\n"_s;
 
         TextStream::IndentScope indentScope(ts);
         m_maskLayer->dumpLayer(ts, options);
     }
 
     if (m_replicaLayer) {
-        ts << indent << "(replica layer";
+        ts << indent << "(replica layer"_s;
         if (options & LayerTreeAsTextOptions::Debug)
-            ts << " " << m_replicaLayer.get();
-        ts << ")\n";
+            ts << ' ' << m_replicaLayer.get();
+        ts << ")\n"_s;
 
         TextStream::IndentScope indentScope(ts);
         m_replicaLayer->dumpLayer(ts, options);
     }
 
     if (m_replicatedLayer) {
-        ts << indent << "(replicated layer";
+        ts << indent << "(replicated layer"_s;
         if (options & LayerTreeAsTextOptions::Debug)
-            ts << " " << m_replicatedLayer;
-        ts << ")\n";
+            ts << ' ' << m_replicatedLayer;
+        ts << ")\n"_s;
     }
 
-    if (options & LayerTreeAsTextOptions::IncludeRepaintRects && repaintRectMap().contains(this) && !repaintRectMap().get(this).isEmpty() && client().shouldDumpPropertyForLayer(this, "repaintRects", options)) {
-        ts << indent << "(repaint rects\n";
+    if (options & LayerTreeAsTextOptions::IncludeRepaintRects && repaintRectMap().contains(this) && !repaintRectMap().get(this).isEmpty() && client().shouldDumpPropertyForLayer(this, "repaintRects"_s, options)) {
+        ts << indent << "(repaint rects\n"_s;
         for (size_t i = 0; i < repaintRectMap().get(this).size(); ++i) {
             if (repaintRectMap().get(this)[i].isEmpty())
                 continue;
 
             TextStream::IndentScope indentScope(ts);
-            ts << indent << "(rect ";
-            ts << repaintRectMap().get(this)[i].x() << " ";
-            ts << repaintRectMap().get(this)[i].y() << " ";
-            ts << repaintRectMap().get(this)[i].width() << " ";
+            ts << indent << "(rect "_s;
+            ts << repaintRectMap().get(this)[i].x() << ' ';
+            ts << repaintRectMap().get(this)[i].y() << ' ';
+            ts << repaintRectMap().get(this)[i].width() << ' ';
             ts << repaintRectMap().get(this)[i].height();
-            ts << ")\n";
+            ts << ")\n"_s;
         }
-        ts << indent << ")\n";
+        ts << indent << ")\n"_s;
     }
 
     if (options & LayerTreeAsTextOptions::IncludeEventRegion && !m_eventRegion.isEmpty()) {
-        ts << indent << "(event region" << m_eventRegion;
-        ts << indent << ")\n";
+        ts << indent << "(event region"_s << m_eventRegion;
+        ts << indent << ")\n"_s;
     }
 
 #if ENABLE(SCROLLING_THREAD)
     if ((options & LayerTreeAsTextOptions::Debug) && m_scrollingNodeID)
-        ts << indent << "(scrolling node " << m_scrollingNodeID << ")\n";
+        ts << indent << "(scrolling node "_s << m_scrollingNodeID << ")\n"_s;
 #endif
 
     if (options & LayerTreeAsTextOptions::IncludePaintingPhases && paintingPhase())
-        ts << indent << "(paintingPhases " << paintingPhase() << ")\n";
+        ts << indent << "(paintingPhases "_s << paintingPhase() << ")\n"_s;
 
     dumpAdditionalProperties(ts, options);
 
@@ -974,18 +1121,20 @@ void GraphicsLayer::dumpProperties(TextStream& ts, OptionSet<LayerTreeAsTextOpti
         dumpChildren(childrenStream, m_children, totalChildCount, options);
 
         if (totalChildCount) {
-            ts << indent << "(children " << totalChildCount << "\n";
+            ts << indent << "(children "_s << totalChildCount << '\n';
             ts << childrenStream.release();
-            ts << indent << ")\n";
+            ts << indent << ")\n"_s;
         }
     }
+
+    client().dumpProperties(this, ts, options);
 }
 
-TextStream& operator<<(TextStream& ts, const Vector<GraphicsLayer::PlatformLayerID>& layers)
+TextStream& operator<<(TextStream& ts, const Vector<PlatformLayerIdentifier>& layers)
 {
     for (size_t i = 0; i < layers.size(); ++i) {
         if (i)
-            ts << " ";
+            ts << ' ';
         ts << layers[i];
     }
 
@@ -995,13 +1144,13 @@ TextStream& operator<<(TextStream& ts, const Vector<GraphicsLayer::PlatformLayer
 TextStream& operator<<(TextStream& ts, GraphicsLayerPaintingPhase phase)
 {
     switch (phase) {
-    case GraphicsLayerPaintingPhase::Background: ts << "background"; break;
-    case GraphicsLayerPaintingPhase::Foreground: ts << "foreground"; break;
-    case GraphicsLayerPaintingPhase::Mask: ts << "mask"; break;
-    case GraphicsLayerPaintingPhase::ClipPath: ts << "clip-path"; break;
-    case GraphicsLayerPaintingPhase::OverflowContents: ts << "overflow-contents"; break;
-    case GraphicsLayerPaintingPhase::CompositedScroll: ts << "composited-scroll"; break;
-    case GraphicsLayerPaintingPhase::ChildClippingMask: ts << "child-clipping-mask"; break;
+    case GraphicsLayerPaintingPhase::Background: ts << "background"_s; break;
+    case GraphicsLayerPaintingPhase::Foreground: ts << "foreground"_s; break;
+    case GraphicsLayerPaintingPhase::Mask: ts << "mask"_s; break;
+    case GraphicsLayerPaintingPhase::ClipPath: ts << "clip-path"_s; break;
+    case GraphicsLayerPaintingPhase::OverflowContents: ts << "overflow-contents"_s; break;
+    case GraphicsLayerPaintingPhase::CompositedScroll: ts << "composited-scroll"_s; break;
+    case GraphicsLayerPaintingPhase::ChildClippingMask: ts << "child-clipping-mask"_s; break;
     }
 
     return ts;
@@ -1010,18 +1159,16 @@ TextStream& operator<<(TextStream& ts, GraphicsLayerPaintingPhase phase)
 TextStream& operator<<(TextStream& ts, const GraphicsLayer::CustomAppearance& customAppearance)
 {
     switch (customAppearance) {
-    case GraphicsLayer::CustomAppearance::None: ts << "none"; break;
-    case GraphicsLayer::CustomAppearance::ScrollingOverhang: ts << "scrolling-overhang"; break;
-    case GraphicsLayer::CustomAppearance::ScrollingShadow: ts << "scrolling-shadow"; break;
-    case GraphicsLayer::CustomAppearance::LightBackdrop: ts << "light-backdrop"; break;
-    case GraphicsLayer::CustomAppearance::DarkBackdrop: ts << "dark-backdrop"; break;
+    case GraphicsLayer::CustomAppearance::None: ts << "none"_s; break;
+    case GraphicsLayer::CustomAppearance::ScrollingShadow: ts << "scrolling-shadow"_s; break;
     }
     return ts;
 }
 
-String GraphicsLayer::layerTreeAsText(OptionSet<LayerTreeAsTextOptions> options) const
+String GraphicsLayer::layerTreeAsText(OptionSet<LayerTreeAsTextOptions> options, uint32_t baseIndent) const
 {
     TextStream ts(TextStream::LineMode::MultipleLine, TextStream::Formatting::SVGStyleRect);
+    ts.setIndent(baseIndent);
 
     dumpLayer(ts, options);
     return ts.release();
@@ -1037,5 +1184,14 @@ void showGraphicsLayerTree(const WebCore::GraphicsLayer* layer)
 
     String output = layer->layerTreeAsText(WebCore::AllLayerTreeAsTextOptions);
     WTFLogAlways("%s\n", output.utf8().data());
+
+    // The tree is too large to print to the os log so save the tree output
+    // to a file in case we don't have easy access to stderr.
+    auto [tempFilePath, fileHandle] = FileSystem::openTemporaryFile("GraphicsLayerTree"_s);
+    if (fileHandle) {
+        fileHandle.write(byteCast<uint8_t>(output.utf8().span()));
+        WTFLogAlways("Saved GraphicsLayer Tree to %s", tempFilePath.utf8().data());
+    } else
+        WTFLogAlways("Failed to open temporary file for saving the GraphicsLayer Tree.");
 }
 #endif

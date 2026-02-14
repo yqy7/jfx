@@ -30,63 +30,160 @@
 #include "config.h"
 #include "CSSTransformValue.h"
 
-#if ENABLE(CSS_TYPED_OM)
-
+#include "CSSFunctionValue.h"
+#include "CSSMatrixComponent.h"
+#include "CSSPerspective.h"
+#include "CSSRotate.h"
+#include "CSSScale.h"
+#include "CSSSkew.h"
+#include "CSSSkewX.h"
+#include "CSSSkewY.h"
 #include "CSSTransformComponent.h"
+#include "CSSTransformListValue.h"
+#include "CSSTranslate.h"
+#include "CSSValueKeywords.h"
 #include "DOMMatrix.h"
 #include "ExceptionOr.h"
-#include <wtf/IsoMallocInlines.h>
+#include <algorithm>
+#include <wtf/TZoneMallocInlines.h>
+#include <wtf/text/MakeString.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(CSSTransformValue);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(CSSTransformValue);
 
-Ref<CSSTransformValue> CSSTransformValue::create(Vector<RefPtr<CSSTransformComponent>>&& transforms)
+static ExceptionOr<Ref<CSSTransformComponent>> createTransformComponent(Ref<const CSSFunctionValue> functionValue, Document& document)
 {
+    auto makeTransformComponent = [&](auto exceptionOrTransformComponent) -> ExceptionOr<Ref<CSSTransformComponent>> {
+        if (exceptionOrTransformComponent.hasException())
+            return exceptionOrTransformComponent.releaseException();
+        return Ref<CSSTransformComponent> { exceptionOrTransformComponent.releaseReturnValue() };
+    };
+
+    switch (functionValue->name()) {
+    case CSSValueTranslateX:
+    case CSSValueTranslateY:
+    case CSSValueTranslateZ:
+    case CSSValueTranslate:
+    case CSSValueTranslate3d:
+        return makeTransformComponent(CSSTranslate::create(WTFMove(functionValue), document));
+    case CSSValueScaleX:
+    case CSSValueScaleY:
+    case CSSValueScaleZ:
+    case CSSValueScale:
+    case CSSValueScale3d:
+        return makeTransformComponent(CSSScale::create(WTFMove(functionValue), document));
+    case CSSValueRotateX:
+    case CSSValueRotateY:
+    case CSSValueRotateZ:
+    case CSSValueRotate:
+    case CSSValueRotate3d:
+        return makeTransformComponent(CSSRotate::create(WTFMove(functionValue), document));
+    case CSSValueSkewX:
+        return makeTransformComponent(CSSSkewX::create(WTFMove(functionValue), document));
+    case CSSValueSkewY:
+        return makeTransformComponent(CSSSkewY::create(WTFMove(functionValue), document));
+    case CSSValueSkew:
+        return makeTransformComponent(CSSSkew::create(WTFMove(functionValue), document));
+    case CSSValuePerspective:
+        return makeTransformComponent(CSSPerspective::create(WTFMove(functionValue), document));
+    case CSSValueMatrix:
+    case CSSValueMatrix3d:
+        return makeTransformComponent(CSSMatrixComponent::create(WTFMove(functionValue), document));
+    default:
+        return Exception { ExceptionCode::TypeError, "Unexpected function value type"_s };
+    }
+}
+
+ExceptionOr<Ref<CSSTransformValue>> CSSTransformValue::create(Ref<const CSSTransformListValue> list, Document& document)
+{
+    Vector<Ref<CSSTransformComponent>> components;
+    for (auto& value : list.get()) {
+        RefPtr functionValue = dynamicDowncast<CSSFunctionValue>(value);
+        if (!functionValue)
+            return Exception { ExceptionCode::TypeError, "Expected only function values in a transform list."_s };
+        auto component = createTransformComponent(functionValue.releaseNonNull(), document);
+        if (component.hasException())
+            return component.releaseException();
+        components.append(component.releaseReturnValue());
+    }
+    return adoptRef(*new CSSTransformValue(WTFMove(components)));
+}
+
+ExceptionOr<Ref<CSSTransformValue>> CSSTransformValue::create(Vector<Ref<CSSTransformComponent>>&& transforms)
+{
+    // https://drafts.css-houdini.org/css-typed-om/#dom-csstransformvalue-csstransformvalue
+    if (transforms.isEmpty())
+        return Exception { ExceptionCode::TypeError };
     return adoptRef(*new CSSTransformValue(WTFMove(transforms)));
 }
 
-ExceptionOr<RefPtr<CSSTransformComponent>> CSSTransformValue::item(size_t index)
+RefPtr<CSSTransformComponent> CSSTransformValue::item(size_t index)
 {
-    if (index >= m_components.size())
-        return Exception { RangeError, makeString("Index ", index, " exceeds the range of CSSTransformValue.") };
-
-    return RefPtr<CSSTransformComponent> { m_components[index] };
+    return index < m_components.size() ? m_components[index].ptr() : nullptr;
 }
 
-ExceptionOr<RefPtr<CSSTransformComponent>> CSSTransformValue::setItem(size_t index, Ref<CSSTransformComponent>&& value)
+ExceptionOr<Ref<CSSTransformComponent>> CSSTransformValue::setItem(size_t index, Ref<CSSTransformComponent>&& value)
 {
-    if (index >= m_components.size())
-        return Exception { RangeError, makeString("Index ", index, " exceeds the range of CSSTransformValue.") };
+    if (index > m_components.size())
+        return Exception { ExceptionCode::RangeError, makeString("Index "_s, index, " exceeds the range of CSSTransformValue."_s) };
 
-    m_components[index] = WTFMove(value);
+    if (index == m_components.size())
+        m_components.append(WTFMove(value));
+    else
+        m_components[index] = WTFMove(value);
 
-    return RefPtr<CSSTransformComponent> { m_components[index] };
+    return Ref<CSSTransformComponent> { m_components[index] };
 }
 
 bool CSSTransformValue::is2D() const
 {
-    return m_is2D;
-}
-
-void CSSTransformValue::setIs2D(bool is2D)
-{
-    m_is2D = is2D;
+    // https://drafts.css-houdini.org/css-typed-om/#dom-csstransformvalue-is2d
+    return std::ranges::all_of(m_components, [](auto& component) {
+        return component->is2D();
+    });
 }
 
 ExceptionOr<Ref<DOMMatrix>> CSSTransformValue::toMatrix()
 {
-    // FIXME: add correct behavior here.
-    return DOMMatrix::fromMatrix(DOMMatrixInit { });
+    auto matrix = TransformationMatrix();
+    auto is2D = DOMMatrixReadOnly::Is2D::Yes;
+
+    for (auto component : m_components) {
+        auto componentMatrixOrException = component->toMatrix();
+        if (componentMatrixOrException.hasException())
+            return componentMatrixOrException.releaseException();
+        auto componentMatrix = componentMatrixOrException.returnValue();
+        if (!componentMatrix->is2D())
+            is2D = DOMMatrixReadOnly::Is2D::No;
+        matrix.multiply(componentMatrix->transformationMatrix());
+    }
+
+    return DOMMatrix::create(WTFMove(matrix), is2D);
 }
 
-CSSTransformValue::CSSTransformValue(Vector<RefPtr<CSSTransformComponent>>&& transforms)
+CSSTransformValue::CSSTransformValue(Vector<Ref<CSSTransformComponent>>&& transforms)
     : m_components(WTFMove(transforms))
 {
 }
 
+CSSTransformValue::~CSSTransformValue() = default;
+
+void CSSTransformValue::serialize(StringBuilder& builder, OptionSet<SerializationArguments>) const
+{
+    // https://drafts.css-houdini.org/css-typed-om/#serialize-a-csstransformvalue
+    builder.append(interleave(m_components, [](auto& builder, auto& transform) { transform->serialize(builder); }, ' '));
+}
+
+RefPtr<CSSValue> CSSTransformValue::toCSSValue() const
+{
+    CSSValueListBuilder builder;
+    for (auto& component : m_components) {
+        if (auto cssComponent = component->toCSSValue())
+            builder.append(cssComponent.releaseNonNull());
+    }
+    return CSSTransformListValue::create(WTFMove(builder));
+}
 
 } // namespace WebCore
-
-#endif

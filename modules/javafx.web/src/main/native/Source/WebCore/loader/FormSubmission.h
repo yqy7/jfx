@@ -33,6 +33,7 @@
 #include "FormState.h"
 #include "FrameLoaderTypes.h"
 #include "ReferrerPolicy.h"
+#include <wtf/RefCountedAndCanMakeWeakPtr.h>
 #include <wtf/URL.h>
 #include <wtf/WeakPtr.h>
 
@@ -43,22 +44,22 @@ class FormData;
 class FrameLoadRequest;
 class HTMLFormControlElement;
 
-class FormSubmission : public RefCounted<FormSubmission>, public CanMakeWeakPtr<FormSubmission> {
+class FormSubmission : public RefCountedAndCanMakeWeakPtr<FormSubmission> {
 public:
     enum class Method : uint8_t { Get, Post, Dialog };
 
     class Attributes {
     public:
         Method method() const { return m_method; }
-        static Method parseMethodType(const String&, bool);
-        void updateMethodType(const String&, bool);
-        static ASCIILiteral methodString(Method, bool);
+        static Method parseMethodType(const String&);
+        void updateMethodType(const String&);
+        static ASCIILiteral methodString(Method);
 
         const String& action() const { return m_action; }
         void parseAction(const String&);
 
-        const String& target() const { return m_target; }
-        void setTarget(const String& target) { m_target = target; }
+        const AtomString& target() const { return m_target; }
+        void setTarget(const AtomString& target) { m_target = target; }
 
         const String& encodingType() const { return m_encodingType; }
         static String parseEncodingType(const String&);
@@ -72,7 +73,7 @@ public:
         Method m_method { Method::Get };
         bool m_isMultiPartForm { false };
         String m_action;
-        String m_target;
+        AtomString m_target;
         String m_encodingType { "application/x-www-form-urlencoded"_s };
         String m_acceptCharset;
     };
@@ -84,7 +85,7 @@ public:
 
     Method method() const { return m_method; }
     const URL& action() const { return m_action; }
-    const String& target() const { return m_target; }
+    const AtomString& target() const { return m_target; }
     const String& contentType() const { return m_contentType; }
     FormState& state() const { return *m_formState; }
     Ref<FormState> takeState() { return m_formState.releaseNonNull(); }
@@ -99,7 +100,8 @@ public:
 
     void clearTarget() { m_target = { }; }
     void setReferrer(const String& referrer) { m_referrer = referrer; }
-    void setOrigin(const String& origin) { m_origin = origin; }
+    void setReferrer(String&& referrer) { m_referrer = WTFMove(referrer); }
+    void setOrigin(String&& origin) { m_origin = WTFMove(origin); }
 
     void cancel() { m_wasCancelled = true; }
     bool wasCancelled() const { return m_wasCancelled; }
@@ -112,22 +114,22 @@ public:
 
 private:
     // dialog form submissions
-    FormSubmission(Method, const String& returnValue, const URL& action, const String& target, const String& contentType, LockHistory, Event*);
+    FormSubmission(Method, const String& returnValue, const URL& action, const AtomString& target, const String& contentType, LockHistory, Event*);
 
     // get/post form submissions
-    FormSubmission(Method, const URL& action, const String& target, const String& contentType, Ref<FormState>&&, Ref<FormData>&&, const String& boundary, LockHistory, Event*);
+    FormSubmission(Method, const URL& action, const AtomString& target, const String& contentType, Ref<FormState>&&, Ref<FormData>&&, const String& boundary, LockHistory, Event*);
 
     // FIXME: Hold an instance of Attributes instead of individual members.
     Method m_method;
     bool m_wasCancelled { false };
     URL m_action;
-    String m_target;
+    AtomString m_target;
     String m_contentType;
     RefPtr<FormState> m_formState;
-    RefPtr<FormData> m_formData;
+    const RefPtr<FormData> m_formData;
     String m_boundary;
     LockHistory m_lockHistory;
-    RefPtr<Event> m_event;
+    const RefPtr<Event> m_event;
     String m_referrer;
     String m_origin;
 

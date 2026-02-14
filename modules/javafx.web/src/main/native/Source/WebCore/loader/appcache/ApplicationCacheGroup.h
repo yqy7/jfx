@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2017 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,7 +26,6 @@
 #pragma once
 
 #include "ApplicationCacheResourceLoader.h"
-#include "DOMApplicationCache.h"
 #include <wtf/Noncopyable.h>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
@@ -35,13 +34,22 @@
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
+class ApplicationCacheGroup;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::ApplicationCacheGroup> : std::true_type { };
+}
+
+namespace WebCore {
 
 class ApplicationCache;
 class ApplicationCacheResource;
 class ApplicationCacheStorage;
 class Document;
 class DocumentLoader;
-class Frame;
+class LocalFrame;
 class SecurityOrigin;
 
 enum ApplicationCacheUpdateOption {
@@ -51,7 +59,7 @@ enum ApplicationCacheUpdateOption {
 
 class ApplicationCacheGroup : public CanMakeWeakPtr<ApplicationCacheGroup> {
     WTF_MAKE_NONCOPYABLE(ApplicationCacheGroup);
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(ApplicationCacheGroup, Loader);
 public:
     explicit ApplicationCacheGroup(Ref<ApplicationCacheStorage>&&, const URL& manifestURL);
     virtual ~ApplicationCacheGroup();
@@ -61,8 +69,8 @@ public:
     static ApplicationCache* cacheForMainRequest(const ResourceRequest&, DocumentLoader*);
     static ApplicationCache* fallbackCacheForMainRequest(const ResourceRequest&, DocumentLoader*);
 
-    static void selectCache(Frame&, const URL& manifestURL);
-    static void selectCacheWithoutManifestURL(Frame&);
+    static void selectCache(LocalFrame&, const URL& manifestURL);
+    static void selectCacheWithoutManifestURL(LocalFrame&);
 
     ApplicationCacheStorage& storage() { return m_storage; }
     const URL& manifestURL() const { return m_manifestURL; }
@@ -74,14 +82,14 @@ public:
     unsigned storageID() const { return m_storageID; }
     void clearStorageID();
 
-    void update(Frame&, ApplicationCacheUpdateOption); // FIXME: Frame should not be needed when updating without browsing context.
+    void update(LocalFrame&, ApplicationCacheUpdateOption); // FIXME: Frame should not be needed when updating without browsing context.
     void cacheDestroyed(ApplicationCache&);
 
-    void abort(Frame&);
+    void abort(LocalFrame&);
 
     bool cacheIsComplete(ApplicationCache& cache) { return m_caches.contains(&cache); }
 
-    void stopLoadingInFrame(Frame&);
+    void stopLoadingInFrame(LocalFrame&);
 
     ApplicationCache* newestCache() const { return m_newestCache.get(); }
     void setNewestCache(Ref<ApplicationCache>&&);
@@ -105,8 +113,8 @@ private:
     void didFinishLoadingManifest();
     void didFailLoadingManifest(ApplicationCacheResourceLoader::Error);
 
-    void didFailLoadingEntry(ApplicationCacheResourceLoader::Error, const URL&, unsigned type);
-    void didFinishLoadingEntry(const URL&);
+    void didFailLoadingEntry(ApplicationCacheResourceLoader::Error, URL&&, unsigned type);
+    void didFinishLoadingEntry(URL&&);
 
     void didReachMaxAppCacheSize();
     void didReachOriginQuota(int64_t totalSpaceNeeded);
@@ -126,7 +134,7 @@ private:
 
     ResourceRequest createRequest(URL&&, ApplicationCacheResource*);
 
-    Ref<ApplicationCacheStorage> m_storage;
+    const Ref<ApplicationCacheStorage> m_storage;
 
     URL m_manifestURL;
     Ref<SecurityOrigin> m_origin;
@@ -159,7 +167,7 @@ private:
 
     // Frame used for fetching resources when updating.
     // FIXME: An update started by a particular frame should not stop if it is destroyed, but there are other frames associated with the same cache group.
-    WeakPtr<Frame> m_frame;
+    WeakPtr<LocalFrame> m_frame;
 
     // An obsolete cache group is never stored, but the opposite is not true - storing may fail for multiple reasons, such as exceeding disk quota.
     unsigned m_storageID { 0 };
@@ -181,7 +189,7 @@ private:
 
     RefPtr<ApplicationCacheResource> m_currentResource;
     RefPtr<ApplicationCacheResourceLoader> m_entryLoader;
-    ResourceLoaderIdentifier m_currentResourceIdentifier;
+    Markable<ResourceLoaderIdentifier> m_currentResourceIdentifier;
 
     RefPtr<ApplicationCacheResource> m_manifestResource;
     RefPtr<ApplicationCacheResourceLoader> m_manifestLoader;

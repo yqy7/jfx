@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,35 +25,39 @@
 
 package test.javafx.scene.control;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static test.com.sun.javafx.scene.control.infrastructure.ControlTestUtils.assertStyleClassContains;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.scene.Node;
-import javafx.scene.shape.Rectangle;
-
-import test.com.sun.javafx.pgstub.StubToolkit;
-import com.sun.javafx.tk.Toolkit;
 import javafx.scene.control.CustomMenuItem;
-import org.junit.Before;
-import org.junit.Test;
-
-import static test.com.sun.javafx.scene.control.infrastructure.ControlTestUtils.*;
-import static org.junit.Assert.*;
+import javafx.scene.shape.Rectangle;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.tk.Toolkit;
+import test.com.sun.javafx.pgstub.StubToolkit;
 
 /**
  *
  * @author srikalyc
  */
 public class CustomMenuItemTest {
-    private CustomMenuItem customMenuItem, cmi;//Empty string
+    private CustomMenuItem customMenuItem, cmi;
     private CustomMenuItem customMenuItemOneArg;
     private CustomMenuItem customMenuItemTwoArg;
     private Node node;
-    private Toolkit tk;
 
-    @Before public void setup() {
-        tk = (StubToolkit)Toolkit.getToolkit();//This step is not needed (Just to make sure StubToolkit is loaded into VM)
+    @BeforeEach
+    public void setup() {
+        assertTrue(Toolkit.getToolkit() instanceof StubToolkit);  // Ensure StubToolkit is loaded
+
         node = new Rectangle();
         customMenuItem = cmi = new CustomMenuItem();
         customMenuItemOneArg = new CustomMenuItem(node);
@@ -94,17 +98,17 @@ public class CustomMenuItemTest {
     @Test public void checkHideOnClickPropertyBind() {
         BooleanProperty objPr = new SimpleBooleanProperty(true);
         customMenuItem.hideOnClickProperty().bind(objPr);
-        assertTrue("hideOnClickProperty cannot be bound", customMenuItem.hideOnClickProperty().getValue());
+        assertTrue(customMenuItem.hideOnClickProperty().getValue(), "hideOnClickProperty cannot be bound");
         objPr.setValue(false);
-        assertFalse("hideOnClickProperty cannot be bound", customMenuItem.hideOnClickProperty().getValue());
+        assertFalse(customMenuItem.hideOnClickProperty().getValue(), "hideOnClickProperty cannot be bound");
     }
 
     @Test public void checkContentPropertyBind() {
         ObjectProperty objPr = new SimpleObjectProperty<Node>(null);
         customMenuItem.contentProperty().bind(objPr);
-        assertNull("contentProperty cannot be bound", customMenuItem.contentProperty().getValue());
+        assertNull(customMenuItem.contentProperty().getValue(), "contentProperty cannot be bound");
         objPr.setValue(node);
-        assertSame("contentProperty cannot be bound", customMenuItem.contentProperty().getValue(), node);
+        assertSame(customMenuItem.contentProperty().getValue(), node, "contentProperty cannot be bound");
     }
 
     @Test public void contentPropertyHasBeanReference() {
@@ -271,7 +275,7 @@ public class CustomMenuItemTest {
 
     @Test public void contentCanBeBound() {
         Rectangle rect = new Rectangle();
-        SimpleObjectProperty<Node> other = new SimpleObjectProperty<Node>(cmi, "content", rect);
+        SimpleObjectProperty<Node> other = new SimpleObjectProperty<>(cmi, "content", rect);
         cmi.contentProperty().bind(other);
         assertEquals(rect, cmi.getContent());
     }
@@ -306,5 +310,4 @@ public class CustomMenuItemTest {
         cmi.hideOnClickProperty().bind(other);
         assertEquals(other.get(), cmi.isHideOnClick());
     }
-
 }

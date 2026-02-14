@@ -66,6 +66,7 @@ my @supportedGlobalContexts = (
     "Window",
     "DedicatedWorker",
     "ServiceWorker",
+    "SharedWorker",
     "PaintWorklet",
     "AudioWorklet",
     "ShadowRealm",
@@ -182,7 +183,7 @@ using namespace JSC;
 
 class DOMIsoSubspaces {
     WTF_MAKE_NONCOPYABLE(DOMIsoSubspaces);
-    WTF_MAKE_FAST_ALLOCATED(DOMIsoSubspaces);
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(DOMIsoSubspaces);
 public:
     DOMIsoSubspaces() = default;
 END
@@ -198,7 +199,7 @@ using namespace JSC;
 
 class DOMClientIsoSubspaces {
     WTF_MAKE_NONCOPYABLE(DOMClientIsoSubspaces);
-    WTF_MAKE_FAST_ALLOCATED(DOMClientIsoSubspaces);
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(DOMClientIsoSubspaces);
 public:
     DOMClientIsoSubspaces() = default;
 END
@@ -221,7 +222,6 @@ my %idlFileNameHash = map { $_, 1 } @idlFileNames;
 
 # Populate $idlFilePathToInterfaceName and $interfaceNameToIdlFilePath.
 foreach my $idlFileName (sort keys %idlFileNameHash) {
-    $idlFileName =~ s/\s*$//g;
     my $fullPath = Cwd::realpath($idlFileName);
     my $interfaceName = fileparse(basename($idlFileName), ".idl");
     $idlFilePathToInterfaceName{$fullPath} = $interfaceName;
@@ -230,7 +230,6 @@ foreach my $idlFileName (sort keys %idlFileNameHash) {
 
 # Parse all IDL files.
 foreach my $idlFileName (sort keys %idlFileNameHash) {
-    $idlFileName =~ s/\s*$//g;
     my $fullPath = Cwd::realpath($idlFileName);
 
     my $idlFile = processIDL($idlFileName, $fullPath);
@@ -364,7 +363,7 @@ if ($constructorsHeaderFile) {
     $constructorsHeaderCode .= "\n";
     $constructorsHeaderCode .= "class DOMConstructors {\n";
     $constructorsHeaderCode .= "    WTF_MAKE_NONCOPYABLE(DOMConstructors);\n";
-    $constructorsHeaderCode .= "    WTF_MAKE_FAST_ALLOCATED(DOMConstructors);\n";
+    $constructorsHeaderCode .= "    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(DOMConstructors);\n";
     $constructorsHeaderCode .= "public:\n";
     $constructorsHeaderCode .= "    using ConstructorArray = std::array<JSC::WriteBarrier<JSC::JSObject>, numberOfDOMConstructors>;\n";
     $constructorsHeaderCode .= "    DOMConstructors() = default;\n";
@@ -491,7 +490,7 @@ sub GenerateConstructorAttributes
     my $globalContext = shift;
 
     # FIXME: Rather than being ConditionalForWorker=FOO, we need a syntax like ConditionalForContext=(Worker:FOO).
-    if ($extendedAttributes->{"ConditionalForWorker"} && $globalContext eq "Worker") {
+    if ($extendedAttributes->{"ConditionalForWorker"} && ($globalContext eq "Worker" || $globalContext eq "DedicatedWorker" )) {
       my $conditionalForWorker = $extendedAttributes->{"ConditionalForWorker"};
       my $existingConditional = $extendedAttributes->{"Conditional"};
       if ($existingConditional) {
@@ -502,15 +501,24 @@ sub GenerateConstructorAttributes
       $extendedAttributes->{"Conditional"} = $existingConditional;
     }
 
+    if ($globalContext eq "ShadowRealm" && $extendedAttributes->{"Exposed"} eq "*") {
+        my $enabledBySetting = "WebAPIsInShadowRealmEnabled";
+        my $existingEnabledBySetting = $extendedAttributes->{"EnabledBySetting"};
+        if ($existingEnabledBySetting) {
+            $enabledBySetting .= "&" . $existingEnabledBySetting;
+        }
+        $extendedAttributes->{"EnabledBySetting"} = $enabledBySetting;
+    }
+
     my $code = "    ";
     my @extendedAttributesList;
     foreach my $attributeName (sort keys %{$extendedAttributes}) {
-      next unless ($attributeName eq "Conditional" || $attributeName eq "EnabledAtRuntime" || $attributeName eq "EnabledForWorld"
+      next unless ($attributeName eq "Conditional" || $attributeName eq "EnabledByDeprecatedGlobalSetting" || $attributeName eq "EnabledForWorld"
         || $attributeName eq "EnabledBySetting" || $attributeName eq "SecureContext" || $attributeName eq "PrivateIdentifier"
         || $attributeName eq "PublicIdentifier" || $attributeName eq "DisabledByQuirk" || $attributeName eq "EnabledByQuirk"
         || $attributeName eq "EnabledForContext") || $attributeName eq "LegacyFactoryFunctionEnabledBySetting";
       my $extendedAttribute = $attributeName;
-      
+
       $extendedAttribute .= "=" . $extendedAttributes->{$attributeName} unless $extendedAttributes->{$attributeName} eq "VALUE_IS_MISSING";
       push(@extendedAttributesList, $extendedAttribute);
     }
@@ -529,7 +537,7 @@ sub GenerateConstructorAttributes
         $code .= "[" . join(', ', @extendedAttributesList) . "] " if @extendedAttributesList;
         $code .= "attribute " . $originalInterfaceName . "LegacyFactoryFunctionConstructor $constructorName;\n";
     }
-    
+
     my $windowAliasesCode;
     if ($extendedAttributes->{"LegacyWindowAlias"}) {
         my $attributeValue = $extendedAttributes->{"LegacyWindowAlias"};
@@ -541,7 +549,7 @@ sub GenerateConstructorAttributes
             $windowAliasesCode .= "attribute " . $originalInterfaceName . "Constructor $windowAlias; // Legacy Window alias.\n";
         }
     }
-    
+
     return ($code, $windowAliasesCode);
 }
 
@@ -751,7 +759,7 @@ sub containsIterableInterfaceFromIDL
 
         my $containsIterableInterfaceFromParsedDocument = 0;
         foreach my $interface (@{$idlFile->parsedDocument->interfaces}) {
-            if ($interface->iterable) {
+            if ($interface->iterable or $interface->asyncIterable) {
                 $containsIterableInterfaceFromParsedDocument = 1;
                 last;
             }

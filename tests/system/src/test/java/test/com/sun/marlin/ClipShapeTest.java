@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,8 @@
  */
 package test.com.sun.marlin;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import java.awt.BasicStroke;
 import java.awt.Shape;
 import java.awt.geom.CubicCurve2D;
@@ -45,7 +47,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Handler;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
-
+import javax.imageio.IIOImage;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageOutputStream;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.collections.ObservableList;
@@ -70,21 +76,11 @@ import javafx.scene.shape.StrokeLineCap;
 import javafx.scene.shape.StrokeLineJoin;
 import javafx.scene.text.Text;
 import javafx.stage.Stage;
-import javax.imageio.IIOImage;
-import javax.imageio.ImageIO;
-import javax.imageio.ImageWriteParam;
-import javax.imageio.ImageWriter;
-import javax.imageio.stream.ImageOutputStream;
-
-import junit.framework.AssertionFailedError;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-import org.junit.BeforeClass;
-import org.junit.Test;
-
-import static test.util.Util.TIMEOUT;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import test.util.Util;
 
 /**
  * @test
@@ -973,15 +969,16 @@ NbPixels [All Test setups][n: 30] sum: 232 avg: 7.733 [1 | 27]
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void setupOnce() throws Exception {
-        // Start the Application
-        new Thread(() -> Application.launch(MyApp.class, (String[]) null)).start();
-
-        assertTrue("Timeout waiting for Application to launch",
-                launchLatch.await(TIMEOUT, TimeUnit.MILLISECONDS));
+        Util.launch(launchLatch, MyApp.class);
 
         assertEquals(0, launchLatch.getCount());
+    }
+
+    @AfterAll
+    public static void teardownOnce() {
+        Util.shutdown();
     }
 
     private void checkMarlin() {
@@ -993,24 +990,22 @@ NbPixels [All Test setups][n: 30] sum: 232 avg: 7.733 [1 | 27]
         }
     }
 
-    @AfterClass
-    public static void teardownOnce() {
-        Platform.exit();
-    }
-
-    @Test(timeout = 600000)
+    @Test
+    @Timeout(value=600000, unit=TimeUnit.MILLISECONDS)
     public void TestPoly() throws InterruptedException {
         test(new String[]{"-poly"});
         test(new String[]{"-poly", "-doDash"});
     }
 
-    @Test(timeout = 900000)
+    @Test
+    @Timeout(value=900000, unit=TimeUnit.MILLISECONDS)
     public void TestQuad() throws InterruptedException {
         test(new String[]{"-quad"});
         test(new String[]{"-quad", "-doDash"});
     }
 
-    @Test(timeout = 900000)
+    @Test
+    @Timeout(value=900000, unit=TimeUnit.MILLISECONDS)
     public void TestCubic() throws InterruptedException {
         test(new String[]{"-cubic"});
         test(new String[]{"-cubic", "-doDash"});
@@ -1020,7 +1015,7 @@ NbPixels [All Test setups][n: 30] sum: 232 avg: 7.733 [1 | 27]
         initArgs(args);
         runTests();
         checkMarlin();
-        Assert.assertFalse("Detected a problem.", doChecksFailed);
+        assertFalse(doChecksFailed, "Detected a problem.");
     }
 
     private static void dumpShape(final Shape shape) {

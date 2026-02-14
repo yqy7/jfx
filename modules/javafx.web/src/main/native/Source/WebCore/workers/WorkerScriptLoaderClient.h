@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2009 Apple Inc. All Rights Reserved.
- * Copyright (C) 2009 Google Inc. All Rights Reserved.
+ * Copyright (C) 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2009 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,15 +27,25 @@
 #pragma once
 
 #include "ResourceLoaderIdentifier.h"
+#include "ScriptExecutionContextIdentifier.h"
+
+namespace WebCore {
+class WorkerScriptLoaderClient;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::WorkerScriptLoaderClient> : std::true_type { };
+}
 
 namespace WebCore {
 
 class ResourceResponse;
 
-class WorkerScriptLoaderClient {
+class WorkerScriptLoaderClient : public CanMakeWeakPtr<WorkerScriptLoaderClient> {
 public:
-    virtual void didReceiveResponse(ResourceLoaderIdentifier, const ResourceResponse&) = 0;
-    virtual void notifyFinished() = 0;
+    virtual void didReceiveResponse(ScriptExecutionContextIdentifier, std::optional<ResourceLoaderIdentifier>, const ResourceResponse&) = 0;
+    virtual void notifyFinished(std::optional<ScriptExecutionContextIdentifier>) = 0;
 
 protected:
     virtual ~WorkerScriptLoaderClient() = default;

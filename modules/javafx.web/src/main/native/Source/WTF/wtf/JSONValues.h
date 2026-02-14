@@ -33,10 +33,13 @@
 #pragma once
 
 #include <wtf/HashMap.h>
+#include <wtf/NoVirtualDestructorBase.h>
 #include <wtf/text/StringHash.h>
 #include <wtf/text/WTFString.h>
 
 namespace WTF {
+
+class PrintStream;
 
 // Make sure compiled symbols contain the WTF namespace prefix, but
 // use a different inner namespace name so that JSON::Value is not ambigious.
@@ -50,24 +53,26 @@ class Object;
 class ObjectBase;
 
 // FIXME: unify this JSON parser with JSONParse in JavaScriptCore.
-class WTF_EXPORT_PRIVATE Value : public RefCounted<Value> {
+class WTF_EXPORT_PRIVATE Value : public RefCounted<Value>, public NoVirtualDestructorBase {
 public:
     static constexpr int maxDepth = 1000;
 
-    virtual ~Value()
+    void operator delete(Value*, std::destroying_delete_t);
+    bool operator!() const;
+
+    ~Value()
     {
         switch (m_type) {
         case Type::Null:
         case Type::Boolean:
         case Type::Double:
         case Type::Integer:
+        case Type::Object:
+        case Type::Array:
             break;
         case Type::String:
             if (m_value.string)
                 m_value.string->deref();
-            break;
-        case Type::Object:
-        case Type::Array:
             break;
         }
     }
@@ -98,22 +103,24 @@ public:
     std::optional<double> asDouble() const;
     String asString() const;
     RefPtr<Value> asValue();
-    virtual RefPtr<Object> asObject();
-    virtual RefPtr<const Object> asObject() const;
-    virtual RefPtr<Array> asArray();
+    RefPtr<Object> asObject();
+    RefPtr<const Object> asObject() const;
+    RefPtr<Array> asArray();
 
-    static RefPtr<Value> parseJSON(const String&);
-    static void escapeString(StringBuilder&, StringView);
+    static RefPtr<Value> parseJSON(StringView);
+    static std::optional<Ref<Value>> optionalParseJSON(StringView);
 
     String toJSONString() const;
-    virtual void writeJSON(StringBuilder& output) const;
 
-    virtual size_t memoryCost() const;
+    void dump(PrintStream&) const;
 
     // FIXME: <http://webkit.org/b/179847> remove these functions when legacy InspectorObject symbols are no longer needed.
     bool asDouble(double&) const;
     bool asInteger(int&) const;
     bool asString(String&) const;
+
+    size_t memoryCost() const;
+    void writeJSON(StringBuilder& output) const;
 
 protected:
     Value()
@@ -152,6 +159,11 @@ protected:
             m_value.string->ref();
     }
 
+    template<typename Visitor> constexpr decltype(auto) visitDerived(Visitor&&);
+    template<typename Visitor> constexpr decltype(auto) visitDerived(Visitor&&) const;
+    size_t memoryCostImpl() const;
+    void writeJSONImpl(StringBuilder& output) const;
+
 private:
     Type m_type { Type::Null };
     union {
@@ -163,6 +175,7 @@ private:
 
 class ObjectBase : public Value {
 private:
+    friend class Value;
     using DataStorage = HashMap<String, Ref<Value>>;
     using OrderStorage = Vector<String>;
 
@@ -170,13 +183,8 @@ public:
     using iterator = DataStorage::iterator;
     using const_iterator = DataStorage::const_iterator;
 
-    WTF_EXPORT_PRIVATE RefPtr<Object> asObject() final;
-    WTF_EXPORT_PRIVATE RefPtr<const Object> asObject() const final;
-
-    WTF_EXPORT_PRIVATE size_t memoryCost() const final;
-
 protected:
-    ~ObjectBase() override;
+    ~ObjectBase();
 
     // FIXME: use templates to reduce the amount of duplicated set*() methods.
     void setBoolean(const String& name, bool);
@@ -200,12 +208,12 @@ protected:
 
     WTF_EXPORT_PRIVATE void remove(const String& name);
 
-    void writeJSON(StringBuilder& output) const final;
+    iterator begin() LIFETIME_BOUND { return m_map.begin(); }
+    iterator end() LIFETIME_BOUND { return m_map.end(); }
+    const_iterator begin() const LIFETIME_BOUND { return m_map.begin(); }
+    const_iterator end() const LIFETIME_BOUND { return m_map.end(); }
 
-    iterator begin() { return m_map.begin(); }
-    iterator end() { return m_map.end(); }
-    const_iterator begin() const { return m_map.begin(); }
-    const_iterator end() const { return m_map.end(); }
+    OrderStorage keys() const { return m_order; }
 
     unsigned size() const { return m_map.size(); }
 
@@ -220,6 +228,9 @@ protected:
     ObjectBase();
 
 private:
+    size_t memoryCostImpl() const;
+    void writeJSONImpl(StringBuilder& output) const;
+
     DataStorage m_map;
     OrderStorage m_order;
 };
@@ -251,12 +262,15 @@ public:
     using ObjectBase::begin;
     using ObjectBase::end;
 
+    using ObjectBase::keys;
+
     using ObjectBase::size;
 };
 
 
 class WTF_EXPORT_PRIVATE ArrayBase : public Value {
 private:
+    friend class Value;
     using DataStorage = Vector<Ref<Value>>;
 
 public:
@@ -267,12 +281,8 @@ public:
 
     Ref<Value> get(size_t index) const;
 
-    size_t memoryCost() const final;
-
-    RefPtr<Array> asArray() final;
-
 protected:
-    ~ArrayBase() override;
+    ~ArrayBase();
 
     void pushBoolean(bool);
     void pushInteger(int);
@@ -286,12 +296,14 @@ protected:
     iterator end() { return m_map.end(); }
     const_iterator begin() const { return m_map.begin(); }
     const_iterator end() const { return m_map.end(); }
-    void writeJSON(StringBuilder& output) const final;
 
 protected:
     ArrayBase();
 
 private:
+    size_t memoryCostImpl() const;
+    void writeJSONImpl(StringBuilder& output) const;
+
     DataStorage m_map;
 };
 
@@ -404,7 +416,7 @@ private:
 
     Array& castedArray()
     {
-        COMPILE_ASSERT(sizeof(Array) == sizeof(ArrayOf<T>), cannot_cast);
+        static_assert(sizeof(Array) == sizeof(ArrayOf<T>), "cannot cast");
         return *static_cast<Array*>(static_cast<ArrayBase*>(this));
     }
 
@@ -462,7 +474,74 @@ public:
     using ArrayBase::end;
 };
 
+
+inline bool Value::operator!() const
+{
+    return isNull();
+}
+
+inline RefPtr<Value> Value::asValue()
+{
+    return this;
+}
+
+inline RefPtr<Object> Value::asObject()
+{
+    switch (m_type) {
+    case Type::Null:
+    case Type::Boolean:
+    case Type::Double:
+    case Type::Integer:
+    case Type::String:
+    case Type::Array:
+        return nullptr;
+    case Type::Object:
+        static_assert(sizeof(Object) == sizeof(ObjectBase));
+        return static_cast<Object*>(this);
+    }
+    RELEASE_ASSERT_NOT_REACHED();
+    return nullptr;
+}
+
+inline RefPtr<const Object> Value::asObject() const
+{
+    switch (m_type) {
+    case Type::Null:
+    case Type::Boolean:
+    case Type::Double:
+    case Type::Integer:
+    case Type::String:
+    case Type::Array:
+        return nullptr;
+    case Type::Object:
+        static_assert(sizeof(Object) == sizeof(ObjectBase));
+        return static_cast<const Object*>(this);
+    }
+    RELEASE_ASSERT_NOT_REACHED();
+    return nullptr;
+}
+
+inline RefPtr<Array> Value::asArray()
+{
+    switch (m_type) {
+    case Type::Null:
+    case Type::Boolean:
+    case Type::Double:
+    case Type::Integer:
+    case Type::Object:
+    case Type::String:
+        return nullptr;
+    case Type::Array:
+        static_assert(sizeof(ArrayBase) == sizeof(Array));
+        return static_cast<Array*>(this);
+    }
+    RELEASE_ASSERT_NOT_REACHED();
+    return nullptr;
+}
+
 } // namespace JSONImpl
+
+inline size_t containerSize(const JSONImpl::Array& array) { return array.length(); }
 
 } // namespace WTF
 

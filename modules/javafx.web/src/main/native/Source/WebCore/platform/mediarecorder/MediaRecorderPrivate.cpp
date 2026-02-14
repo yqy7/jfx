@@ -29,8 +29,11 @@
 #if ENABLE(MEDIA_RECORDER)
 
 #include "MediaStreamPrivate.h"
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(MediaRecorderPrivate);
 
 constexpr unsigned SmallAudioBitRate = 8000;
 constexpr unsigned SmallVideoBitRate = 80000;
@@ -44,8 +47,6 @@ MediaRecorderPrivate::AudioVideoSelectedTracks MediaRecorderPrivate::selectTrack
         if (track.ended())
             return;
         switch (track.type()) {
-        case RealtimeMediaSource::Type::Screen:
-        case RealtimeMediaSource::Type::Window:
         case RealtimeMediaSource::Type::Video: {
             auto& settings = track.settings();
             if (!selectedTracks.videoTrack && settings.supportsWidth() && settings.supportsHeight())
@@ -53,11 +54,8 @@ MediaRecorderPrivate::AudioVideoSelectedTracks MediaRecorderPrivate::selectTrack
             break;
         }
         case RealtimeMediaSource::Type::Audio:
-        case RealtimeMediaSource::Type::SystemAudio:
             if (!selectedTracks.audioTrack)
                 selectedTracks.audioTrack = &track;
-            break;
-        case RealtimeMediaSource::Type::None:
             break;
         }
     });
@@ -66,11 +64,11 @@ MediaRecorderPrivate::AudioVideoSelectedTracks MediaRecorderPrivate::selectTrack
 
 void MediaRecorderPrivate::checkTrackState(const MediaStreamTrackPrivate& track)
 {
-    if (&track.source() == m_audioSource.get()) {
+    if (track.hasSource(m_audioSource.get())) {
         m_shouldMuteAudio = track.muted() || !track.enabled();
         return;
     }
-    if (&track.source() == m_videoSource.get())
+    if (track.hasSource(m_videoSource.get()))
         m_shouldMuteVideo = track.muted() || !track.enabled();
 }
 

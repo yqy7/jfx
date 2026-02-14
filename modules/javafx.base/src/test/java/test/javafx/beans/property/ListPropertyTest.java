@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,10 +36,10 @@ import javafx.beans.value.ObservableValue;
 import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class ListPropertyTest {
 
@@ -52,8 +52,8 @@ public class ListPropertyTest {
 
     @Test
     public void testBindBidirectional() {
-        final ListProperty<Object> p1 = new SimpleListProperty<Object>(VALUE_2);
-        final ListProperty<Object> p2 = new SimpleListProperty<Object>(VALUE_1);
+        final ListProperty<Object> p1 = new SimpleListProperty<>(VALUE_2);
+        final ListProperty<Object> p2 = new SimpleListProperty<>(VALUE_1);
 
         p1.bindBidirectional(p2);
         assertEquals(VALUE_1, p1.get());

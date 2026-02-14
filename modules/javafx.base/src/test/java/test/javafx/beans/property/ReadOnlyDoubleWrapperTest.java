@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,17 +30,18 @@ import javafx.beans.property.DoubleProperty;
 import javafx.beans.property.ReadOnlyDoubleProperty;
 import javafx.beans.property.ReadOnlyDoubleWrapper;
 import javafx.beans.property.SimpleDoubleProperty;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import test.javafx.beans.InvalidationListenerMock;
 import test.javafx.beans.value.ChangeListenerMock;
 import javafx.beans.value.ObservableDoubleValueStub;
 import javafx.beans.value.ObservableObjectValueStub;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class ReadOnlyDoubleWrapperTest {
 
@@ -57,14 +58,14 @@ public class ReadOnlyDoubleWrapperTest {
     private ChangeListenerMock<Number> internalChangeListener;
     private ChangeListenerMock<Number> publicChangeListener;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         property = new ReadOnlyDoubleWrapperMock();
         readOnlyProperty = property.getReadOnlyProperty();
         internalInvalidationListener = new InvalidationListenerMock();
         publicInvalidationListener = new InvalidationListenerMock();
-        internalChangeListener = new ChangeListenerMock<Number>(UNDEFINED);
-        publicChangeListener = new ChangeListenerMock<Number>(UNDEFINED);
+        internalChangeListener = new ChangeListenerMock<>(UNDEFINED);
+        publicChangeListener = new ChangeListenerMock<>(UNDEFINED);
     }
 
     private void attachInvalidationListeners() {
@@ -92,13 +93,13 @@ public class ReadOnlyDoubleWrapperTest {
     public void testConstructor_NoArguments() {
         final ReadOnlyDoubleWrapper p1 = new ReadOnlyDoubleWrapper();
         assertEquals(DEFAULT, p1.get(), EPSILON);
-        assertEquals((Double)DEFAULT, p1.getValue(), EPSILON);
+        assertEquals(DEFAULT, p1.getValue(), EPSILON);
         assertFalse(property.isBound());
         assertEquals(null, p1.getBean());
         assertEquals("", p1.getName());
         final ReadOnlyDoubleProperty r1 = p1.getReadOnlyProperty();
         assertEquals(DEFAULT, r1.get(), EPSILON);
-        assertEquals((Double)DEFAULT, r1.getValue(), EPSILON);
+        assertEquals(DEFAULT, r1.getValue(), EPSILON);
         assertEquals(null, r1.getBean());
         assertEquals("", r1.getName());
     }
@@ -107,13 +108,13 @@ public class ReadOnlyDoubleWrapperTest {
     public void testConstructor_InitialValue() {
         final ReadOnlyDoubleWrapper p1 = new ReadOnlyDoubleWrapper(VALUE_1);
         assertEquals(VALUE_1, p1.get(), EPSILON);
-        assertEquals((Double)VALUE_1, p1.getValue(), EPSILON);
+        assertEquals(VALUE_1, p1.getValue(), EPSILON);
         assertFalse(property.isBound());
         assertEquals(null, p1.getBean());
         assertEquals("", p1.getName());
         final ReadOnlyDoubleProperty r1 = p1.getReadOnlyProperty();
         assertEquals(VALUE_1, r1.get(), EPSILON);
-        assertEquals((Double)VALUE_1, r1.getValue(), EPSILON);
+        assertEquals(VALUE_1, r1.getValue(), EPSILON);
         assertEquals(null, r1.getBean());
         assertEquals("", r1.getName());
     }
@@ -124,13 +125,13 @@ public class ReadOnlyDoubleWrapperTest {
         final String name = "My name";
         final ReadOnlyDoubleWrapper p1 = new ReadOnlyDoubleWrapper(bean, name);
         assertEquals(DEFAULT, p1.get(), EPSILON);
-        assertEquals((Double)DEFAULT, p1.getValue(), EPSILON);
+        assertEquals(DEFAULT, p1.getValue(), EPSILON);
         assertFalse(property.isBound());
         assertEquals(bean, p1.getBean());
         assertEquals(name, p1.getName());
         final ReadOnlyDoubleProperty r1 = p1.getReadOnlyProperty();
         assertEquals(DEFAULT, r1.get(), EPSILON);
-        assertEquals((Double)DEFAULT, r1.getValue(), EPSILON);
+        assertEquals(DEFAULT, r1.getValue(), EPSILON);
         assertEquals(bean, r1.getBean());
         assertEquals(name, r1.getName());
     }
@@ -141,13 +142,13 @@ public class ReadOnlyDoubleWrapperTest {
         final String name = "My name";
         final ReadOnlyDoubleWrapper p1 = new ReadOnlyDoubleWrapper(bean, name, VALUE_1);
         assertEquals(VALUE_1, p1.get(), EPSILON);
-        assertEquals((Double)VALUE_1, p1.getValue(), EPSILON);
+        assertEquals(VALUE_1, p1.getValue(), EPSILON);
         assertFalse(property.isBound());
         assertEquals(bean, p1.getBean());
         assertEquals(name, p1.getName());
         final ReadOnlyDoubleProperty r1 = p1.getReadOnlyProperty();
         assertEquals(VALUE_1, r1.get(), EPSILON);
-        assertEquals((Double)VALUE_1, r1.getValue(), EPSILON);
+        assertEquals(VALUE_1, r1.getValue(), EPSILON);
         assertEquals(bean, r1.getBean());
         assertEquals(name, r1.getName());
     }
@@ -320,12 +321,15 @@ public class ReadOnlyDoubleWrapperTest {
         publicChangeListener.check(readOnlyProperty, VALUE_2, VALUE_1, 2);
     }
 
-    @Test(expected=RuntimeException.class)
+    @Test
     public void testSetBoundValue() {
-        final DoubleProperty v = new SimpleDoubleProperty(VALUE_1);
-        property.bind(v);
-        property.set(VALUE_1);
+        assertThrows(RuntimeException.class, () -> {
+            final DoubleProperty v = new SimpleDoubleProperty(VALUE_1);
+            property.bind(v);
+            property.set(VALUE_1);
+        });
     }
+
 
     @Test
     public void testLazyBind_primitive() {
@@ -442,7 +446,7 @@ public class ReadOnlyDoubleWrapperTest {
     @Test
     public void testLazyBind_generic() {
         attachInvalidationListeners();
-        final ObservableObjectValueStub<Double> v = new ObservableObjectValueStub<Double>(VALUE_1);
+        final ObservableObjectValueStub<Double> v = new ObservableObjectValueStub<>(VALUE_1);
 
         property.bind(v);
         assertEquals(VALUE_1, property.get(), EPSILON);
@@ -482,7 +486,7 @@ public class ReadOnlyDoubleWrapperTest {
     @Test
     public void testInternalEagerBind_generic() {
         attachInternalChangeListener();
-        final ObservableObjectValueStub<Double> v = new ObservableObjectValueStub<Double>(VALUE_1);
+        final ObservableObjectValueStub<Double> v = new ObservableObjectValueStub<>(VALUE_1);
 
         property.bind(v);
         assertEquals(VALUE_1, property.get(), EPSILON);
@@ -518,7 +522,7 @@ public class ReadOnlyDoubleWrapperTest {
     @Test
     public void testPublicEagerBind_generic() {
         attachPublicChangeListener();
-        final ObservableObjectValueStub<Double> v = new ObservableObjectValueStub<Double>(VALUE_1);
+        final ObservableObjectValueStub<Double> v = new ObservableObjectValueStub<>(VALUE_1);
 
         property.bind(v);
         assertEquals(VALUE_1, property.get(), EPSILON);
@@ -551,10 +555,13 @@ public class ReadOnlyDoubleWrapperTest {
         publicChangeListener.check(readOnlyProperty, VALUE_2, VALUE_1, 1);
     }
 
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testBindToNull() {
-        property.bind(null);
+        assertThrows(NullPointerException.class, () -> {
+            property.bind(null);
+        });
     }
+
 
     @Test
     public void testRebind() {

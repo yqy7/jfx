@@ -26,6 +26,7 @@
 #pragma once
 
 #include "SVGAnimationAdditiveListFunction.h"
+#include "SVGElement.h"
 #include "SVGLengthList.h"
 #include "SVGNumberList.h"
 #include "SVGPointList.h"
@@ -240,7 +241,7 @@ public:
 
         auto fromItemsSize = fromItems.size();
 
-        static const AffineTransform zerosAffineTransform = { 0, 0, 0, 0, 0, 0 };
+        static constexpr AffineTransform zerosAffineTransform = { 0, 0, 0, 0, 0, 0 };
         const SVGTransformValue& to = toItems[0]->value();
         const SVGTransformValue zerosTransform = SVGTransformValue(to.type(), zerosAffineTransform);
 

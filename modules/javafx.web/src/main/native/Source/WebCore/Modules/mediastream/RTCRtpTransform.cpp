@@ -30,8 +30,11 @@
 
 #include "RTCRtpReceiver.h"
 #include "RTCRtpSender.h"
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(RTCRtpTransform);
 
 std::unique_ptr<RTCRtpTransform> RTCRtpTransform::from(std::optional<Internal>&& internal)
 {
@@ -67,7 +70,8 @@ void RTCRtpTransform::attachToReceiver(RTCRtpReceiver& receiver, RTCRtpTransform
         m_backend = previousTransform->takeBackend();
     else if (auto* backend = receiver.backend())
         m_backend = backend->rtcRtpTransformBackend();
-    else
+
+    if (!m_backend)
         return;
 
     switchOn(m_transform, [&](RefPtr<RTCRtpSFrameTransform>& sframeTransform) {
@@ -85,7 +89,8 @@ void RTCRtpTransform::attachToSender(RTCRtpSender& sender, RTCRtpTransform* prev
         m_backend = previousTransform->takeBackend();
     else if (auto* backend = sender.backend())
         m_backend = backend->rtcRtpTransformBackend();
-    else
+
+    if (!m_backend)
         return;
 
     switchOn(m_transform, [&](RefPtr<RTCRtpSFrameTransform>& sframeTransform) {

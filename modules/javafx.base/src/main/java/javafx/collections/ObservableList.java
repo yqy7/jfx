@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,6 +29,7 @@ import java.text.Collator;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Predicate;
 
 import javafx.beans.Observable;
@@ -83,6 +84,43 @@ public interface ObservableList<E> extends List<E>, Observable {
     public boolean setAll(Collection<? extends E> col);
 
     /**
+     * Replaces the elements in the range {@code [from, to)} with the elements
+     * from the given collection. The existing elements in the specified range
+     * are removed, and the new elements are inserted at position {@code from}.
+     * <p>
+     * If {@code from == to}, the range is empty and the elements from the given
+     * collection are inserted at position {@code from}.
+     *
+     * @param from start of the range (inclusive), must be in {@code 0..size()}
+     * @param to end of the range (exclusive), must be in {@code from..size()}
+     * @param col collection containing elements to be inserted, cannot be {@code null}
+     * @return {@code true} if this list changed as a result of the call
+     * @throws ClassCastException if the class of an element of the specified
+     *         collection prevents it from being added to this list
+     * @throws NullPointerException if the specified collection contains one
+     *         or more null elements and this list does not permit null
+     *         elements, or if the specified collection is null
+     * @throws IllegalArgumentException if some property of an element of the
+     *         specified collection prevents it from being added to this list
+     * @throws IndexOutOfBoundsException if {@code from < 0}, {@code to > size()},
+     *         or {@code from > to}
+     * @since 26
+     */
+    public default boolean replaceRange(int from, int to, Collection<? extends E> col) {
+        Objects.checkFromToIndex(from, to, size());
+
+        // implicit check to ensure col != null
+        if (col.isEmpty() && from == to) {
+            return false;
+        }
+
+        remove(from, to);
+        addAll(from, col);
+
+        return true;
+    }
+
+    /**
      * A convenience method for var-arg usage of the {@link #removeAll(Collection) removeAll} method.
      * @param elements the elements to be removed
      * @return true if list changed as a result of this call
@@ -134,7 +172,7 @@ public interface ObservableList<E> extends List<E>, Observable {
      * @since JavaFX 8.0
      */
     public default SortedList<E> sorted() {
-        Comparator naturalOrder = new Comparator<E>() {
+        Comparator<E> naturalOrder = new Comparator<>() {
 
             @Override
             public int compare(E o1, E o2) {
@@ -149,7 +187,10 @@ public interface ObservableList<E> extends List<E>, Observable {
                 }
 
                 if (o1 instanceof Comparable) {
-                    return ((Comparable) o1).compareTo(o2);
+                    @SuppressWarnings("unchecked")
+                    Comparable<E> casted = (Comparable<E>) o1;  // cast is not safe, assumes the comparable interface implemented is Comparable<E> but it might be anything
+
+                    return casted.compareTo(o2);
                 }
 
                 return Collator.getInstance().compare(o1.toString(), o2.toString());

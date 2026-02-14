@@ -41,14 +41,14 @@ ContentExtensionRule::ContentExtensionRule(Trigger&& trigger, Action&& action)
 
 template<size_t index, typename... Types>
 struct VariantDeserializerHelper {
-    using VariantType = typename std::variant_alternative<index, std::variant<Types...>>::type;
-    static std::variant<Types...> deserialize(Span<const uint8_t> span, size_t i)
+    using VariantType = typename WTF::VariantAlternativeT<index, Variant<Types...>>;
+    static Variant<Types...> deserialize(std::span<const uint8_t> span, size_t i)
     {
         if (i == index)
             return VariantType::deserialize(span);
         return VariantDeserializerHelper<index - 1, Types...>::deserialize(span, i);
     }
-    static size_t serializedLength(Span<const uint8_t> span, size_t i)
+    static size_t serializedLength(std::span<const uint8_t> span, size_t i)
     {
         if (i == index)
             return VariantType::serializedLength(span);
@@ -58,13 +58,13 @@ struct VariantDeserializerHelper {
 
 template<typename... Types>
 struct VariantDeserializerHelper<0, Types...> {
-    using VariantType = typename std::variant_alternative<0, std::variant<Types...>>::type;
-    static std::variant<Types...> deserialize(Span<const uint8_t> span, size_t i)
+    using VariantType = typename WTF::VariantAlternativeT<0, Variant<Types...>>;
+    static Variant<Types...> deserialize(std::span<const uint8_t> span, size_t i)
     {
         ASSERT_UNUSED(i, !i);
         return VariantType::deserialize(span);
     }
-    static size_t serializedLength(Span<const uint8_t> span, size_t i)
+    static size_t serializedLength(std::span<const uint8_t> span, size_t i)
     {
         ASSERT_UNUSED(i, !i);
         return VariantType::serializedLength(span);
@@ -72,44 +72,49 @@ struct VariantDeserializerHelper<0, Types...> {
 };
 
 template<typename T> struct VariantDeserializer;
-template<typename... Types> struct VariantDeserializer<std::variant<Types...>> {
-    static std::variant<Types...> deserialize(Span<const uint8_t> span, size_t i)
+template<typename... Types> struct VariantDeserializer<Variant<Types...>> {
+    static Variant<Types...> deserialize(std::span<const uint8_t> span, size_t i)
     {
         return VariantDeserializerHelper<sizeof...(Types) - 1, Types...>::deserialize(span, i);
     }
-    static size_t serializedLength(Span<const uint8_t> span, size_t i)
+    static size_t serializedLength(std::span<const uint8_t> span, size_t i)
     {
         return VariantDeserializerHelper<sizeof...(Types) - 1, Types...>::serializedLength(span, i);
     }
 };
 
-DeserializedAction DeserializedAction::deserialize(Span<const uint8_t> serializedActions, uint32_t location)
+DeserializedAction DeserializedAction::deserialize(std::span<const uint8_t> serializedActions, uint32_t location)
 {
-    RELEASE_ASSERT(location < serializedActions.size());
+    auto serializedActionSize = serializedActions.size();
+    RELEASE_ASSERT(location < serializedActionSize, location, serializedActionSize);
     return { location, VariantDeserializer<ActionData>::deserialize(serializedActions.subspan(location + 1), serializedActions[location]) };
 }
 
-size_t DeserializedAction::serializedLength(Span<const uint8_t> serializedActions, uint32_t location)
+size_t DeserializedAction::serializedLength(std::span<const uint8_t> serializedActions, uint32_t location)
 {
-    RELEASE_ASSERT(location < serializedActions.size());
+    auto serializedActionSize = serializedActions.size();
+    RELEASE_ASSERT(location < serializedActionSize, location, serializedActionSize);
     return 1 + VariantDeserializer<ActionData>::serializedLength(serializedActions.subspan(location + 1), serializedActions[location]);
 }
 
-Trigger Trigger::isolatedCopy() const
+Trigger Trigger::isolatedCopy() const &
 {
-    return {
-        urlFilter.isolatedCopy(),
-        urlFilterIsCaseSensitive,
-        topURLFilterIsCaseSensitive,
-        frameURLFilterIsCaseSensitive,
-        flags,
-        conditions.isolatedCopy()
-    };
+    return { urlFilter.isolatedCopy(), urlFilterIsCaseSensitive, topURLFilterIsCaseSensitive, frameURLFilterIsCaseSensitive, flags, crossThreadCopy(conditions) };
 }
 
-Action Action::isolatedCopy() const
+Trigger Trigger::isolatedCopy() &&
+{
+    return { WTFMove(urlFilter).isolatedCopy(), urlFilterIsCaseSensitive, topURLFilterIsCaseSensitive, frameURLFilterIsCaseSensitive, flags, crossThreadCopy(WTFMove(conditions)) };
+}
+
+Action Action::isolatedCopy() const &
 {
     return { crossThreadCopy(m_data) };
+}
+
+Action Action::isolatedCopy() &&
+{
+    return { crossThreadCopy(WTFMove(m_data)) };
 }
 
 } // namespace WebCore::ContentExtensions

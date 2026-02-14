@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,15 +28,10 @@ package com.sun.javafx.tk.quantum;
 import com.sun.glass.events.KeyEvent;
 import com.sun.glass.events.TouchEvent;
 
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 import javafx.util.Duration;
-import javafx.event.EventType;
 import javafx.scene.input.RotateEvent;
-import javafx.animation.Animation;
 import javafx.animation.Interpolator;
 import javafx.animation.KeyFrame;
 import javafx.animation.KeyValue;
@@ -53,18 +48,14 @@ class RotateGestureRecognizer implements GestureRecognizer {
     private static double MAX_INITIAL_VELOCITY = 500;
     private static double ROTATION_INERTIA_MILLIS = 1500;
     static {
-        @SuppressWarnings("removal")
-        var dummy = AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            String s = System.getProperty("com.sun.javafx.gestures.rotate.threshold");
-            if (s != null) {
-                ROTATATION_THRESHOLD = Double.valueOf(s);
-            }
-            s = System.getProperty("com.sun.javafx.gestures.rotate.inertia");
-            if (s != null) {
-                ROTATION_INERTIA_ENABLED = Boolean.valueOf(s);
-            }
-            return null;
-        });
+        String s = System.getProperty("com.sun.javafx.gestures.rotate.threshold");
+        if (s != null) {
+            ROTATATION_THRESHOLD = Double.valueOf(s);
+        }
+        s = System.getProperty("com.sun.javafx.gestures.rotate.inertia");
+        if (s != null) {
+            ROTATION_INERTIA_ENABLED = Boolean.valueOf(s);
+        }
     }
 
     private RotateRecognitionState state = RotateRecognitionState.IDLE;
@@ -75,8 +66,7 @@ class RotateGestureRecognizer implements GestureRecognizer {
     private double lastTouchEventTime = 0;
 
     // from MultiTouchTracker
-    Map<Long, TouchPointTracker> trackers =
-            new HashMap<Long, TouchPointTracker>();
+    Map<Long, TouchPointTracker> trackers = new HashMap<>();
 
     int modifiers;
     boolean direct;
@@ -318,60 +308,48 @@ class RotateGestureRecognizer implements GestureRecognizer {
         }
     }
 
-    @SuppressWarnings("removal")
     private void sendRotateStartedEvent() {
-        AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            if (scene.sceneListener != null) {
-                scene.sceneListener.rotateEvent(RotateEvent.ROTATION_STARTED,
-                    0, 0,
-                    centerX, centerY,
-                    centerAbsX, centerAbsY,
-                    (modifiers & KeyEvent.MODIFIER_SHIFT) != 0,
-                    (modifiers & KeyEvent.MODIFIER_CONTROL) != 0,
-                    (modifiers & KeyEvent.MODIFIER_ALT) != 0,
-                    (modifiers & KeyEvent.MODIFIER_WINDOWS) != 0,
-                    direct,
-                    false /*inertia*/);
-            }
-            return null;
-        }, scene.getAccessControlContext());
+        if (scene.sceneListener != null) {
+            scene.sceneListener.rotateEvent(RotateEvent.ROTATION_STARTED,
+                0, 0,
+                centerX, centerY,
+                centerAbsX, centerAbsY,
+                (modifiers & KeyEvent.MODIFIER_SHIFT) != 0,
+                (modifiers & KeyEvent.MODIFIER_CONTROL) != 0,
+                (modifiers & KeyEvent.MODIFIER_ALT) != 0,
+                (modifiers & KeyEvent.MODIFIER_WINDOWS) != 0,
+                direct,
+                false /*inertia*/);
+        }
     }
 
-    @SuppressWarnings("removal")
     private void sendRotateEvent(boolean isInertia) {
-        AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            if (scene.sceneListener != null) {
-                scene.sceneListener.rotateEvent(RotateEvent.ROTATE,
-                    currentRotation, totalRotation,
-                    centerX, centerY,
-                    centerAbsX, centerAbsY,
-                    (modifiers & KeyEvent.MODIFIER_SHIFT) != 0,
-                    (modifiers & KeyEvent.MODIFIER_CONTROL) != 0,
-                    (modifiers & KeyEvent.MODIFIER_ALT) != 0,
-                    (modifiers & KeyEvent.MODIFIER_WINDOWS) != 0,
-                    direct, isInertia);
-            }
-            return null;
-        }, scene.getAccessControlContext());
+        if (scene.sceneListener != null) {
+            scene.sceneListener.rotateEvent(RotateEvent.ROTATE,
+                currentRotation, totalRotation,
+                centerX, centerY,
+                centerAbsX, centerAbsY,
+                (modifiers & KeyEvent.MODIFIER_SHIFT) != 0,
+                (modifiers & KeyEvent.MODIFIER_CONTROL) != 0,
+                (modifiers & KeyEvent.MODIFIER_ALT) != 0,
+                (modifiers & KeyEvent.MODIFIER_WINDOWS) != 0,
+                direct, isInertia);
+        }
     }
 
-    @SuppressWarnings("removal")
     private void sendRotateFinishedEvent() {
-        AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            if (scene.sceneListener != null) {
-                scene.sceneListener.rotateEvent(RotateEvent.ROTATION_FINISHED,
-                    0, totalRotation,
-                    centerX, centerY,
-                    centerAbsX, centerAbsY,
-                    (modifiers & KeyEvent.MODIFIER_SHIFT) != 0,
-                    (modifiers & KeyEvent.MODIFIER_CONTROL) != 0,
-                    (modifiers & KeyEvent.MODIFIER_ALT) != 0,
-                    (modifiers & KeyEvent.MODIFIER_WINDOWS) != 0,
-                    direct,
-                    false /*inertia*/);
-            }
-            return null;
-        }, scene.getAccessControlContext());
+        if (scene.sceneListener != null) {
+            scene.sceneListener.rotateEvent(RotateEvent.ROTATION_FINISHED,
+                0, totalRotation,
+                centerX, centerY,
+                centerAbsX, centerAbsY,
+                (modifiers & KeyEvent.MODIFIER_SHIFT) != 0,
+                (modifiers & KeyEvent.MODIFIER_CONTROL) != 0,
+                (modifiers & KeyEvent.MODIFIER_ALT) != 0,
+                (modifiers & KeyEvent.MODIFIER_WINDOWS) != 0,
+                direct,
+                false /*inertia*/);
+        }
     }
 
     public void params(int modifiers, boolean direct) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,7 +28,8 @@
 
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
 
-#include "PlatformView.h"
+#include "CocoaView.h"
+#include <wtf/CheckedPtr.h>
 #include <wtf/Ref.h>
 #include <wtf/RunLoop.h>
 
@@ -37,7 +38,9 @@ namespace WebCore {
 class FloatRect;
 class MediaPlaybackTarget;
 
-class MediaPlaybackTargetPicker {
+class MediaPlaybackTargetPicker : public CanMakeCheckedPtr<MediaPlaybackTargetPicker> {
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(MediaPlaybackTargetPicker);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(MediaPlaybackTargetPicker);
 public:
     class Client {
     protected:
@@ -51,7 +54,7 @@ public:
 
     virtual ~MediaPlaybackTargetPicker();
 
-    virtual void showPlaybackTargetPicker(PlatformView*, const FloatRect&, bool checkActiveRoute, bool useDarkAppearance, bool useiTunesAVOutputContext);
+    virtual void showPlaybackTargetPicker(CocoaView*, const FloatRect&, bool checkActiveRoute, bool useDarkAppearance);
     virtual void startingMonitoringPlaybackTargets();
     virtual void stopMonitoringPlaybackTargets();
     virtual void invalidatePlaybackTargets();
@@ -81,7 +84,7 @@ private:
 
     PendingActionFlags m_pendingActionFlags { 0 };
     Client* m_client;
-    RunLoop::Timer<MediaPlaybackTargetPicker> m_pendingActionTimer;
+    RunLoop::Timer m_pendingActionTimer;
 };
 
 } // namespace WebCore

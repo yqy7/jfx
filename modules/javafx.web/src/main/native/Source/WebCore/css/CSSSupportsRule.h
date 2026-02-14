@@ -34,7 +34,6 @@
 
 namespace WebCore {
 
-class CSSRule;
 class StyleRuleSupports;
 
 class CSSSupportsRule final : public CSSConditionRule {
@@ -42,8 +41,8 @@ public:
     static Ref<CSSSupportsRule> create(StyleRuleSupports&, CSSStyleSheet* parent);
 
     String cssText() const final;
+    String cssText(const CSS::SerializationContext&) const final;
     String conditionText() const final;
-    void setConditionText(const String&) final;
 
 private:
     CSSSupportsRule(StyleRuleSupports&, CSSStyleSheet*);

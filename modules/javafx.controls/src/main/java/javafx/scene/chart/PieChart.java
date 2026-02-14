@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,19 +25,18 @@
 
 package javafx.scene.chart;
 
+import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-
 import javafx.animation.Animation;
 import javafx.animation.FadeTransition;
 import javafx.animation.Interpolator;
 import javafx.animation.KeyFrame;
 import javafx.animation.KeyValue;
 import javafx.animation.Timeline;
-import javafx.application.Platform;
 import javafx.beans.binding.StringBinding;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.DoubleProperty;
@@ -49,10 +48,16 @@ import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.StringProperty;
 import javafx.beans.property.StringPropertyBase;
-import javafx.beans.value.WritableValue;
 import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
+import javafx.css.CssMetaData;
+import javafx.css.Styleable;
+import javafx.css.StyleableBooleanProperty;
+import javafx.css.StyleableDoubleProperty;
+import javafx.css.StyleableProperty;
+import javafx.css.converter.BooleanConverter;
+import javafx.css.converter.SizeConverter;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.geometry.NodeOrientation;
@@ -70,20 +75,10 @@ import javafx.scene.shape.Path;
 import javafx.scene.text.Text;
 import javafx.scene.transform.Scale;
 import javafx.util.Duration;
-
 import com.sun.javafx.charts.Legend;
 import com.sun.javafx.charts.Legend.LegendItem;
 import com.sun.javafx.collections.NonIterableChange;
-
-import javafx.css.StyleableBooleanProperty;
-import javafx.css.StyleableDoubleProperty;
-import javafx.css.CssMetaData;
-
-import javafx.css.converter.BooleanConverter;
-import javafx.css.converter.SizeConverter;
-
-import javafx.css.Styleable;
-import javafx.css.StyleableProperty;
+import com.sun.javafx.scene.control.skin.resources.ControlResources;
 
 /**
  * Displays a PieChart. The chart content is populated by pie slices based on
@@ -114,7 +109,7 @@ public class PieChart extends Chart {
     private Timeline dataRemoveTimeline = null;
     private final ListChangeListener<Data> dataChangeListener = c -> {
         while (c.next()) {
-            // RT-28090 Probably a sort happened, just reorder the pointers.
+            // JDK-8124777 Probably a sort happened, just reorder the pointers.
             if (c.wasPermutated()) {
                 Data ptr = begin;
                 for (int i = 0; i < getData().size(); i++) {
@@ -182,7 +177,7 @@ public class PieChart extends Chart {
     // -------------- PUBLIC PROPERTIES ----------------------------------------
 
     /** PieCharts data */
-    private ObjectProperty<ObservableList<Data>> data = new ObjectPropertyBase<ObservableList<Data>>() {
+    private ObjectProperty<ObservableList<Data>> data = new ObjectPropertyBase<>() {
         private ObservableList<Data> old;
         @Override protected void invalidated() {
             final ObservableList<Data> current = getValue();
@@ -195,7 +190,7 @@ public class PieChart extends Chart {
                 final int toIndex = (current != null) ? current.size() : 0;
                 // let data listener know all old data have been removed and new data that has been added
                 if (toIndex > 0 || !removed.isEmpty()) {
-                    dataChangeListener.onChanged(new NonIterableChange<Data>(0, toIndex, current){
+                    dataChangeListener.onChanged(new NonIterableChange<>(0, toIndex, current){
                         @Override public List<Data> getRemoved() { return removed; }
                         @Override public boolean wasPermutated() { return false; }
                         @Override protected int[] getPermutation() {
@@ -205,7 +200,7 @@ public class PieChart extends Chart {
                 }
             } else if (old != null && old.size() > 0) {
                 // let series listener know all old series have been removed
-                dataChangeListener.onChanged(new NonIterableChange<Data>(0, 0, current){
+                dataChangeListener.onChanged(new NonIterableChange<>(0, 0, current){
                     @Override public List<Data> getRemoved() { return old; }
                     @Override public boolean wasPermutated() { return false; }
                     @Override protected int[] getPermutation() {
@@ -245,6 +240,7 @@ public class PieChart extends Chart {
             return "startAngle";
         }
 
+        @Override
         public CssMetaData<PieChart,Number> getCssMetaData() {
             return StyleableProperties.START_ANGLE;
         }
@@ -270,6 +266,7 @@ public class PieChart extends Chart {
             return "clockwise";
         }
 
+        @Override
         public CssMetaData<PieChart,Boolean> getCssMetaData() {
             return StyleableProperties.CLOCKWISE;
         }
@@ -296,6 +293,7 @@ public class PieChart extends Chart {
             return "labelLineLength";
         }
 
+        @Override
         public CssMetaData<PieChart,Number> getCssMetaData() {
             return StyleableProperties.LABEL_LINE_LENGTH;
         }
@@ -321,6 +319,7 @@ public class PieChart extends Chart {
             return "labelsVisible";
         }
 
+        @Override
         public CssMetaData<PieChart,Boolean> getCssMetaData() {
             return StyleableProperties.LABELS_VISIBLE;
         }
@@ -376,7 +375,7 @@ public class PieChart extends Chart {
             );
         } else {
             item.setCurrentPieValue(item.getPieValue());
-            requestChartLayout(); // RT-23091
+            requestChartLayout(); // JDK-8115802
         }
     }
 
@@ -411,6 +410,7 @@ public class PieChart extends Chart {
     }
 
     private void dataItemAdded(final Data item, int index) {
+        item.textNode.setFocusTraversable(isAccessibilityActive());
         // create shape
         Node shape = createArcRegion(item);
         final Text text = createPieLabel(item);
@@ -434,7 +434,7 @@ public class PieChart extends Chart {
                 new KeyFrame(Duration.millis(500),
                         actionEvent -> {
                             text.setOpacity(0);
-                            // RT-23597 : item's chart might have been set to null if
+                            // JDK-8117811 : item's chart might have been set to null if
                             // this item is added and removed before its add animation finishes.
                             if (item.getChart() == null) item.setChart(PieChart.this);
                             item.getChart().getChartChildren().add(text);
@@ -452,7 +452,7 @@ public class PieChart extends Chart {
         }
 
         // we sort the text nodes to always be at the end of the children list, so they have a higher z-order
-        // (Fix for RT-34564)
+        // (Fix for JDK-8122332)
         for (int i = 0; i < getChartChildren().size(); i++) {
             Node n = getChartChildren().get(i);
             if (n instanceof Text) {
@@ -491,7 +491,7 @@ public class PieChart extends Chart {
                             ft.setOnFinished(new EventHandler<ActionEvent>() {
                                  @Override public void handle(ActionEvent actionEvent) {
                                      getChartChildren().remove(item.textNode);
-                                     // remove chart references from old data - RT-22553
+                                     // remove chart references from old data - JDK-8126613
                                      item.setChart(null);
                                      removeDataItemRef(item);
                                      item.textNode.setOpacity(1.0);
@@ -738,7 +738,7 @@ public class PieChart extends Chart {
      */
     private void updateLegend() {
         Node legendNode = getLegend();
-        if (legendNode != null && legendNode != legend) return; // RT-23596 dont update when user has set legend.
+        if (legendNode != null && legendNode != legend) return; // JDK-8126273 dont update when user has set legend.
         legend.setVertical(getLegendSide().equals(Side.LEFT) || getLegendSide().equals(Side.RIGHT));
         List<Legend.LegendItem> legendList = new ArrayList<>();
         if (getData() != null) {
@@ -768,11 +768,11 @@ public class PieChart extends Chart {
     }
 
     private static double calcX(double angle, double radius, double centerX) {
-        return (double)(centerX + radius * Math.cos(Math.toRadians(-angle)));
+        return centerX + radius * Math.cos(Math.toRadians(-angle));
     }
 
     private static double calcY(double angle, double radius, double centerY) {
-        return (double)(centerY + radius * Math.sin(Math.toRadians(-angle)));
+        return centerY + radius * Math.sin(Math.toRadians(-angle));
     }
 
      /** Normalize any angle into -180 to 180 deg range */
@@ -851,7 +851,7 @@ public class PieChart extends Chart {
         /**
          * The chart which this data belongs to.
          */
-        private ReadOnlyObjectWrapper<PieChart> chart = new ReadOnlyObjectWrapper<PieChart>(this, "chart");
+        private ReadOnlyObjectWrapper<PieChart> chart = new ReadOnlyObjectWrapper<>(this, "chart");
 
         public final PieChart getChart() {
             return chart.getValue();
@@ -994,17 +994,19 @@ public class PieChart extends Chart {
          * @param name  name for Pie
          * @param value pie value
          */
-        public Data(java.lang.String name, double value) {
+        public Data(String name, double value) {
             setName(name);
             setPieValue(value);
             textNode.getStyleClass().addAll("text", "chart-pie-label");
             textNode.setAccessibleRole(AccessibleRole.TEXT);
             textNode.setAccessibleRoleDescription("slice");
-            textNode.focusTraversableProperty().bind(Platform.accessibilityActiveProperty());
             textNode.accessibleTextProperty().bind( new StringBinding() {
                 {bind(nameProperty(), currentPieValueProperty());}
                 @Override protected String computeValue() {
-                    return getName() + " represents " + getCurrentPieValue() + " percent";
+                    String format = ControlResources.getString("PieChart.data.accessibleText");
+                    MessageFormat mf = new MessageFormat(format);
+                    Object[] args = {getName(), getCurrentPieValue()};
+                    return mf.format(args);
                 }
             });
         }
@@ -1029,7 +1031,7 @@ public class PieChart extends Chart {
      */
      private static class StyleableProperties {
          private static final CssMetaData<PieChart,Boolean> CLOCKWISE =
-             new CssMetaData<PieChart,Boolean>("-fx-clockwise",
+             new CssMetaData<>("-fx-clockwise",
                  BooleanConverter.getInstance(), Boolean.TRUE) {
 
             @Override
@@ -1039,12 +1041,12 @@ public class PieChart extends Chart {
 
             @Override
             public StyleableProperty<Boolean> getStyleableProperty(PieChart node) {
-                return (StyleableProperty<Boolean>)(WritableValue<Boolean>)node.clockwiseProperty();
+                return (StyleableProperty<Boolean>)node.clockwiseProperty();
             }
         };
 
          private static final CssMetaData<PieChart,Boolean> LABELS_VISIBLE =
-             new CssMetaData<PieChart,Boolean>("-fx-pie-label-visible",
+             new CssMetaData<>("-fx-pie-label-visible",
                  BooleanConverter.getInstance(), Boolean.TRUE) {
 
             @Override
@@ -1054,12 +1056,12 @@ public class PieChart extends Chart {
 
             @Override
             public StyleableProperty<Boolean> getStyleableProperty(PieChart node) {
-                return (StyleableProperty<Boolean>)(WritableValue<Boolean>)node.labelsVisibleProperty();
+                return (StyleableProperty<Boolean>)node.labelsVisibleProperty();
             }
         };
 
          private static final CssMetaData<PieChart,Number> LABEL_LINE_LENGTH =
-             new CssMetaData<PieChart,Number>("-fx-label-line-length",
+             new CssMetaData<>("-fx-label-line-length",
                  SizeConverter.getInstance(), 20d) {
 
             @Override
@@ -1069,12 +1071,12 @@ public class PieChart extends Chart {
 
             @Override
             public StyleableProperty<Number> getStyleableProperty(PieChart node) {
-                return (StyleableProperty<Number>)(WritableValue<Number>)node.labelLineLengthProperty();
+                return (StyleableProperty<Number>)node.labelLineLengthProperty();
             }
         };
 
          private static final CssMetaData<PieChart,Number> START_ANGLE =
-             new CssMetaData<PieChart,Number>("-fx-start-angle",
+             new CssMetaData<>("-fx-start-angle",
                  SizeConverter.getInstance(), 0d) {
 
             @Override
@@ -1084,7 +1086,7 @@ public class PieChart extends Chart {
 
             @Override
             public StyleableProperty<Number> getStyleableProperty(PieChart node) {
-                return (StyleableProperty<Number>)(WritableValue<Number>)node.startAngleProperty();
+                return (StyleableProperty<Number>)node.startAngleProperty();
             }
         };
 
@@ -1092,7 +1094,7 @@ public class PieChart extends Chart {
          static {
 
             final List<CssMetaData<? extends Styleable, ?>> styleables =
-                new ArrayList<CssMetaData<? extends Styleable, ?>>(Chart.getClassCssMetaData());
+                new ArrayList<>(Chart.getClassCssMetaData());
             styleables.add(CLOCKWISE);
             styleables.add(LABELS_VISIBLE);
             styleables.add(LABEL_LINE_LENGTH);
@@ -1120,6 +1122,12 @@ public class PieChart extends Chart {
         return getClassCssMetaData();
     }
 
+    @Override
+    void updateSymbolFocusable(boolean on) {
+        for (Data d : getData()) {
+            d.textNode.setFocusTraversable(on);
+        }
+    }
 }
 
 

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2009, Google Inc. All rights reserved.
- * Copyright (c) 2017 Apple Inc. All rights reserved.
+ * Copyright (c) 2009 Google Inc. All rights reserved.
+ * Copyright (c) 2017-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -31,6 +31,8 @@
 
 #pragma once
 
+#include "LoaderMalloc.h"
+#include <wtf/CheckedRef.h>
 #include <wtf/Deque.h>
 #include <wtf/URL.h>
 #include <wtf/Vector.h>
@@ -43,17 +45,17 @@ class ApplicationCacheGroup;
 class ApplicationCacheResource;
 class ApplicationCacheStorage;
 class SharedBuffer;
-class DOMApplicationCache;
 class DocumentLoader;
-class Frame;
+class LocalFrame;
 class ResourceError;
 class ResourceLoader;
 class ResourceRequest;
 class ResourceResponse;
 class SubstituteData;
+class WeakPtrImplWithEventTargetData;
 
 class ApplicationCacheHost {
-    WTF_MAKE_NONCOPYABLE(ApplicationCacheHost); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(ApplicationCacheHost); WTF_DEPRECATED_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(ApplicationCacheHost, Loader);
 public:
     // The Status numeric values are specified in the HTML5 spec.
     enum Status {
@@ -104,7 +106,7 @@ public:
     WEBCORE_EXPORT bool maybeLoadFallbackForResponse(ResourceLoader*, const ResourceResponse&);
     WEBCORE_EXPORT bool maybeLoadFallbackForError(ResourceLoader*, const ResourceError&);
 
-    bool maybeLoadSynchronously(ResourceRequest&, ResourceError&, ResourceResponse&, RefPtr<SharedBuffer>&);
+    bool maybeLoadSynchronously(const ResourceRequest&, ResourceError&, ResourceResponse&, RefPtr<SharedBuffer>&);
     void maybeLoadFallbackSynchronously(const ResourceRequest&, ResourceError&, ResourceResponse&, RefPtr<SharedBuffer>&);
 
     bool canCacheInBackForwardCache();
@@ -114,18 +116,17 @@ public:
     bool swapCache();
     void abort();
 
-    void setDOMApplicationCache(DOMApplicationCache*);
     void notifyDOMApplicationCache(const AtomString& eventType, int progressTotal, int progressDone);
 
-    void stopLoadingInFrame(Frame&);
+    void stopLoadingInFrame(LocalFrame&);
 
     void stopDeferringEvents(); // Also raises the events that have been queued up.
 
     Vector<ResourceInfo> resourceList();
     CacheInfo applicationCacheInfo();
 
-    bool shouldLoadResourceFromApplicationCache(const ResourceRequest&, ApplicationCacheResource*&);
-    bool getApplicationCacheFallbackResource(const ResourceRequest&, ApplicationCacheResource*&, ApplicationCache* = nullptr);
+    bool shouldLoadResourceFromApplicationCache(const ResourceRequest&, RefPtr<ApplicationCacheResource>&);
+    bool getApplicationCacheFallbackResource(const ResourceRequest&, RefPtr<ApplicationCacheResource>&, ApplicationCache* = nullptr);
 
 private:
     friend class ApplicationCacheGroup;
@@ -149,8 +150,7 @@ private:
     ApplicationCache* mainResourceApplicationCache() const { return m_mainResourceApplicationCache.get(); }
     bool maybeLoadFallbackForMainError(const ResourceRequest&, const ResourceError&);
 
-    WeakPtr<DOMApplicationCache> m_domApplicationCache;
-    DocumentLoader& m_documentLoader;
+    SingleThreadWeakRef<DocumentLoader> m_documentLoader;
 
     bool m_defersEvents { true }; // Events are deferred until after document onload.
     Vector<DeferredEvent> m_deferredEvents;

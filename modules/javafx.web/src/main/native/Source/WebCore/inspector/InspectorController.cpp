@@ -34,35 +34,30 @@
 
 #include "CommandLineAPIHost.h"
 #include "CommonVM.h"
-#include "DOMWindow.h"
 #include "DOMWrapperWorld.h"
-#include "Frame.h"
+#include "EventTargetInlines.h"
 #include "GraphicsContext.h"
 #include "InspectorAnimationAgent.h"
-#include "InspectorApplicationCacheAgent.h"
+#include "InspectorBackendClient.h"
 #include "InspectorCPUProfilerAgent.h"
 #include "InspectorCSSAgent.h"
-#include "InspectorCanvasAgent.h"
-#include "InspectorClient.h"
 #include "InspectorDOMAgent.h"
 #include "InspectorDOMStorageAgent.h"
-#include "InspectorDatabaseAgent.h"
-#include "InspectorDatabaseResource.h"
 #include "InspectorFrontendClient.h"
 #include "InspectorIndexedDBAgent.h"
 #include "InspectorInstrumentation.h"
 #include "InspectorLayerTreeAgent.h"
 #include "InspectorMemoryAgent.h"
 #include "InspectorPageAgent.h"
-#include "InspectorTimelineAgent.h"
-#include "InspectorWorkerAgent.h"
 #include "InstrumentingAgents.h"
 #include "JSDOMBindingSecurity.h"
 #include "JSDOMWindow.h"
-#include "JSDOMWindowCustom.h"
 #include "JSExecState.h"
+#include "LocalDOMWindow.h"
+#include "LocalFrame.h"
 #include "Page.h"
 #include "PageAuditAgent.h"
+#include "PageCanvasAgent.h"
 #include "PageConsoleAgent.h"
 #include "PageDOMDebuggerAgent.h"
 #include "PageDebugger.h"
@@ -70,6 +65,8 @@
 #include "PageHeapAgent.h"
 #include "PageNetworkAgent.h"
 #include "PageRuntimeAgent.h"
+#include "PageTimelineAgent.h"
+#include "PageWorkerAgent.h"
 #include "Settings.h"
 #include "SharedBuffer.h"
 #include "WebInjectedScriptHost.h"
@@ -83,6 +80,7 @@
 #include <JavaScriptCore/InspectorScriptProfilerAgent.h>
 #include <JavaScriptCore/JSLock.h>
 #include <wtf/Stopwatch.h>
+#include <wtf/TZoneMallocInlines.h>
 
 #if ENABLE(REMOTE_INSPECTOR)
 #include "PageDebuggable.h"
@@ -93,18 +91,19 @@ namespace WebCore {
 using namespace JSC;
 using namespace Inspector;
 
-InspectorController::InspectorController(Page& page, InspectorClient* inspectorClient)
-    : m_instrumentingAgents(InstrumentingAgents::create(*this))
-    , m_injectedScriptManager(makeUnique<WebInjectedScriptManager>(*this, WebInjectedScriptHost::create()))
+WTF_MAKE_TZONE_ALLOCATED_IMPL(InspectorController);
+
+InspectorController::InspectorController(Page& page, std::unique_ptr<InspectorBackendClient>&& inspectorBackendClient)
+    : m_page(page)
+    , m_instrumentingAgents(InstrumentingAgents::create(*this))
+    , m_injectedScriptManager(makeUniqueRef<WebInjectedScriptManager>(*this, WebInjectedScriptHost::create()))
     , m_frontendRouter(FrontendRouter::create())
     , m_backendDispatcher(BackendDispatcher::create(m_frontendRouter.copyRef()))
-    , m_overlay(makeUnique<InspectorOverlay>(page, inspectorClient))
+    , m_overlay(makeUniqueRefWithoutRefCountedCheck<InspectorOverlay>(*this, inspectorBackendClient.get()))
     , m_executionStopwatch(Stopwatch::create())
-    , m_debugger(page)
-    , m_page(page)
-    , m_inspectorClient(inspectorClient)
+    , m_inspectorBackendClient(WTFMove(inspectorBackendClient))
 {
-    ASSERT_ARG(inspectorClient, inspectorClient);
+    ASSERT_ARG(inspectorBackendClient, m_inspectorBackendClient);
 
     auto pageContext = pageAgentContext();
 
@@ -116,16 +115,26 @@ InspectorController::InspectorController(Page& page, InspectorClient* inspectorC
 InspectorController::~InspectorController()
 {
     m_instrumentingAgents->reset();
-    ASSERT(!m_inspectorClient);
+    ASSERT(!m_inspectorBackendClient);
+}
+
+void InspectorController::ref() const
+{
+    m_page->ref();
+}
+
+void InspectorController::deref() const
+{
+    m_page->deref();
 }
 
 PageAgentContext InspectorController::pageAgentContext()
 {
     AgentContext baseContext = {
         *this,
-        *m_injectedScriptManager,
-        m_frontendRouter.get(),
-        m_backendDispatcher.get()
+        m_injectedScriptManager,
+        m_frontendRouter,
+        m_backendDispatcher
     };
 
     WebAgentContext webContext = {
@@ -148,6 +157,8 @@ void InspectorController::createLazyAgents()
 
     m_didCreateLazyAgents = true;
 
+    m_debugger = makeUnique<PageDebugger>(m_page);
+
     m_injectedScriptManager->connect();
 
     auto pageContext = pageAgentContext();
@@ -161,15 +172,13 @@ void InspectorController::createLazyAgents()
     auto debuggerAgentPtr = debuggerAgent.get();
     m_agents.append(WTFMove(debuggerAgent));
 
-    m_agents.append(makeUnique<PageNetworkAgent>(pageContext));
+    m_agents.append(makeUnique<PageNetworkAgent>(pageContext, m_inspectorBackendClient.get()));
     m_agents.append(makeUnique<InspectorCSSAgent>(pageContext));
     ensureDOMAgent();
     m_agents.append(makeUnique<PageDOMDebuggerAgent>(pageContext, debuggerAgentPtr));
-    m_agents.append(makeUnique<InspectorApplicationCacheAgent>(pageContext));
     m_agents.append(makeUnique<InspectorLayerTreeAgent>(pageContext));
-    m_agents.append(makeUnique<InspectorWorkerAgent>(pageContext));
+    m_agents.append(makeUnique<PageWorkerAgent>(pageContext));
     m_agents.append(makeUnique<InspectorDOMStorageAgent>(pageContext));
-    m_agents.append(makeUnique<InspectorDatabaseAgent>(pageContext));
     m_agents.append(makeUnique<InspectorIndexedDBAgent>(pageContext));
 
     auto scriptProfilerAgentPtr = makeUnique<InspectorScriptProfilerAgent>(pageContext);
@@ -182,8 +191,8 @@ void InspectorController::createLazyAgents()
 #endif
     m_agents.append(makeUnique<PageHeapAgent>(pageContext));
     m_agents.append(makeUnique<PageAuditAgent>(pageContext));
-    m_agents.append(makeUnique<InspectorCanvasAgent>(pageContext));
-    m_agents.append(makeUnique<InspectorTimelineAgent>(pageContext));
+    m_agents.append(makeUnique<PageCanvasAgent>(pageContext));
+    m_agents.append(makeUnique<PageTimelineAgent>(pageContext));
     m_agents.append(makeUnique<InspectorAnimationAgent>(pageContext));
 
     if (auto& commandLineAPIHost = m_injectedScriptManager->commandLineAPIHost())
@@ -196,10 +205,11 @@ void InspectorController::inspectedPageDestroyed()
     disconnectAllFrontends();
 
     // Disconnect the client.
-    m_inspectorClient->inspectedPageDestroyed();
-    m_inspectorClient = nullptr;
+    m_inspectorBackendClient->inspectedPageDestroyed();
+    m_inspectorBackendClient = nullptr;
 
     m_agents.discardValues();
+    m_debugger = nullptr;
 }
 
 void InspectorController::setInspectorFrontendClient(InspectorFrontendClient* inspectorFrontendClient)
@@ -222,9 +232,9 @@ unsigned InspectorController::inspectionLevel() const
     return m_inspectorFrontendClient ? m_inspectorFrontendClient->inspectionLevel() : 0;
 }
 
-void InspectorController::didClearWindowObjectInWorld(Frame& frame, DOMWrapperWorld& world)
+void InspectorController::didClearWindowObjectInWorld(LocalFrame& frame, DOMWrapperWorld& world)
 {
-    if (&world != &mainThreadNormalWorld())
+    if (&world != &mainThreadNormalWorldSingleton())
         return;
 
     if (frame.isMainFrame())
@@ -238,10 +248,10 @@ void InspectorController::didClearWindowObjectInWorld(Frame& frame, DOMWrapperWo
 
 void InspectorController::connectFrontend(Inspector::FrontendChannel& frontendChannel, bool isAutomaticInspection, bool immediatelyPause)
 {
-    ASSERT(m_inspectorClient);
+    ASSERT(m_inspectorBackendClient);
 
     // If a frontend has connected enable the developer extras and keep them enabled.
-    m_page.settings().setDeveloperExtrasEnabled(true);
+    m_page->settings().setDeveloperExtrasEnabled(true);
 
     createLazyAgents();
 
@@ -255,14 +265,14 @@ void InspectorController::connectFrontend(Inspector::FrontendChannel& frontendCh
 
     if (connectedFirstFrontend) {
         InspectorInstrumentation::registerInstrumentingAgents(m_instrumentingAgents.get());
-        m_agents.didCreateFrontendAndBackend(&m_frontendRouter.get(), &m_backendDispatcher.get());
+        m_agents.didCreateFrontendAndBackend();
     }
 
-    m_inspectorClient->frontendCountChanged(m_frontendRouter->frontendCount());
+    m_inspectorBackendClient->frontendCountChanged(m_frontendRouter->frontendCount());
 
 #if ENABLE(REMOTE_INSPECTOR)
     if (hasLocalFrontend())
-        m_page.remoteInspectorInformationDidChange();
+        m_page->remoteInspectorInformationDidChange();
 #endif
 }
 
@@ -287,11 +297,11 @@ void InspectorController::disconnectFrontend(FrontendChannel& frontendChannel)
         InspectorInstrumentation::unregisterInstrumentingAgents(m_instrumentingAgents.get());
     }
 
-    m_inspectorClient->frontendCountChanged(m_frontendRouter->frontendCount());
+    m_inspectorBackendClient->frontendCountChanged(m_frontendRouter->frontendCount());
 
 #if ENABLE(REMOTE_INSPECTOR)
     if (disconnectedLastFrontend)
-        m_page.remoteInspectorInformationDidChange();
+        m_page->remoteInspectorInformationDidChange();
 #endif
 }
 
@@ -313,7 +323,7 @@ void InspectorController::disconnectAllFrontends()
     // Unplug all instrumentations to prevent further agent callbacks.
     InspectorInstrumentation::unregisterInstrumentingAgents(m_instrumentingAgents.get());
 
-    // Notify agents first, since they may need to use InspectorClient.
+    // Notify agents first, since they may need to use InspectorBackendClient.
     m_agents.willDestroyFrontendAndBackend(DisconnectReason::InspectedTargetDestroyed);
 
     // Clean up inspector resources.
@@ -324,10 +334,10 @@ void InspectorController::disconnectAllFrontends()
     m_isAutomaticInspection = false;
     m_pauseAfterInitialization = false;
 
-    m_inspectorClient->frontendCountChanged(m_frontendRouter->frontendCount());
+    m_inspectorBackendClient->frontendCountChanged(m_frontendRouter->frontendCount());
 
 #if ENABLE(REMOTE_INSPECTOR)
-    m_page.remoteInspectorInformationDidChange();
+    m_page->remoteInspectorInformationDidChange();
 #endif
 }
 
@@ -339,8 +349,8 @@ void InspectorController::show()
         return;
 
     if (m_frontendRouter->hasLocalFrontend())
-        m_inspectorClient->bringFrontendToFront();
-    else if (Inspector::FrontendChannel* frontendChannel = m_inspectorClient->openLocalFrontend(this))
+        m_inspectorBackendClient->bringFrontendToFront();
+    else if (Inspector::FrontendChannel* frontendChannel = m_inspectorBackendClient->openLocalFrontend(this))
         connectFrontend(*frontendChannel);
 }
 
@@ -359,11 +369,6 @@ void InspectorController::getHighlight(InspectorOverlay::Highlight& highlight, I
     m_overlay->getHighlight(highlight, coordinateSystem);
 }
 
-bool InspectorController::isUnderTest() const
-{
-    return m_isUnderTest;
-}
-
 unsigned InspectorController::gridOverlayCount() const
 {
     return m_overlay->gridOverlayCount();
@@ -376,8 +381,8 @@ unsigned InspectorController::flexOverlayCount() const
 
 unsigned InspectorController::paintRectCount() const
 {
-    if (m_inspectorClient->overridesShowPaintRects())
-        return m_inspectorClient->paintRectCount();
+    if (m_inspectorBackendClient->overridesShowPaintRects())
+        return m_inspectorBackendClient->paintRectCount();
 
     return m_overlay->paintRectCount();
 }
@@ -400,6 +405,7 @@ void InspectorController::inspect(Node* node)
 
 bool InspectorController::enabled() const
 {
+    // FIXME: <http://webkit.org/b/246237> Local inspection should be controlled by `inspectable` API.
     return developerExtrasEnabled();
 }
 
@@ -429,9 +435,9 @@ void InspectorController::setIndicating(bool indicating)
     m_overlay->setIndicating(indicating);
 #else
     if (indicating)
-        m_inspectorClient->showInspectorIndication();
+        m_inspectorBackendClient->showInspectorIndication();
     else
-        m_inspectorClient->hideInspectorIndication();
+        m_inspectorBackendClient->hideInspectorIndication();
 #endif
 }
 
@@ -462,7 +468,7 @@ InspectorPageAgent& InspectorController::ensurePageAgent()
 {
     if (!m_pageAgent) {
         auto pageContext = pageAgentContext();
-        auto pageAgent = makeUnique<InspectorPageAgent>(pageContext, m_inspectorClient, m_overlay.get());
+        auto pageAgent = makeUnique<InspectorPageAgent>(pageContext, m_inspectorBackendClient.get(), m_overlay.get());
         m_pageAgent = pageAgent.get();
         m_agents.append(WTFMove(pageAgent));
     }
@@ -471,14 +477,14 @@ InspectorPageAgent& InspectorController::ensurePageAgent()
 
 bool InspectorController::developerExtrasEnabled() const
 {
-    return m_page.settings().developerExtrasEnabled();
+    return m_page->settings().developerExtrasEnabled();
 }
 
 bool InspectorController::canAccessInspectedScriptState(JSC::JSGlobalObject* lexicalGlobalObject) const
 {
     JSLockHolder lock(lexicalGlobalObject);
 
-    auto* inspectedWindow = jsDynamicCast<JSDOMWindow*>(lexicalGlobalObject->vm(), lexicalGlobalObject);
+    auto* inspectedWindow = jsDynamicCast<JSDOMWindow*>(lexicalGlobalObject);
     if (!inspectedWindow)
         return false;
 
@@ -505,7 +511,7 @@ void InspectorController::frontendInitialized()
 
 #if ENABLE(REMOTE_INSPECTOR)
     if (m_isAutomaticInspection)
-        m_page.inspectorDebuggable().unpauseForInitializedInspector();
+        m_page->inspectorDebuggable().unpauseForResolvedAutomaticInspection();
 #endif
 }
 
@@ -514,9 +520,10 @@ Stopwatch& InspectorController::executionStopwatch() const
     return m_executionStopwatch;
 }
 
-PageDebugger& InspectorController::debugger()
+JSC::Debugger* InspectorController::debugger()
 {
-    return m_debugger;
+    ASSERT_IMPLIES(m_didCreateLazyAgents, m_debugger);
+    return m_debugger.get();
 }
 
 JSC::VM& InspectorController::vm()
@@ -524,12 +531,12 @@ JSC::VM& InspectorController::vm()
     return commonVM();
 }
 
-void InspectorController::willComposite(Frame& frame)
+void InspectorController::willComposite(LocalFrame& frame)
 {
     InspectorInstrumentation::willComposite(frame);
 }
 
-void InspectorController::didComposite(Frame& frame)
+void InspectorController::didComposite(LocalFrame& frame)
 {
     InspectorInstrumentation::didComposite(frame);
 }

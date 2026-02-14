@@ -27,9 +27,12 @@
 #include "SerializedScriptValue.h"
 #include "WindowProxy.h"
 #include <JavaScriptCore/JSBase.h>
+#include <JavaScriptCore/ScriptFetchParameters.h>
 #include <JavaScriptCore/Strong.h>
+#include <wtf/CheckedRef.h>
 #include <wtf/Forward.h>
 #include <wtf/RefPtr.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/WeakPtr.h>
 #include <wtf/text/TextPosition.h>
 
@@ -40,10 +43,10 @@ OBJC_CLASS WebScriptObject;
 #endif
 
 namespace JSC {
+class AbstractModuleRecord;
 class CallFrame;
 class JSGlobalObject;
 class JSInternalPromise;
-class JSModuleRecord;
 
 namespace Bindings {
 class Instance;
@@ -54,11 +57,12 @@ class RootObject;
 namespace WebCore {
 
 class CachedScriptFetcher;
-class Frame;
 class HTMLDocument;
 class HTMLPlugInElement;
 class LoadableModuleScript;
+class LocalFrame;
 class ModuleFetchParameters;
+class NavigationAction;
 class ScriptSourceCode;
 class SecurityOrigin;
 class Widget;
@@ -68,7 +72,7 @@ enum class RunAsAsyncFunction : bool;
 struct ExceptionDetails;
 struct RunJavaScriptParameters;
 
-enum ReasonForCallingCanExecuteScripts {
+enum class ReasonForCallingCanExecuteScripts : uint8_t {
     AboutToCreateEventListener,
     AboutToExecuteScript,
     NotAboutToExecuteScript
@@ -76,29 +80,30 @@ enum ReasonForCallingCanExecuteScripts {
 
 using ValueOrException = Expected<JSC::JSValue, ExceptionDetails>;
 
-class ScriptController : public CanMakeWeakPtr<ScriptController> {
-    WTF_MAKE_FAST_ALLOCATED;
+class ScriptController final : public CanMakeWeakPtr<ScriptController>, public CanMakeCheckedPtr<ScriptController> {
+    WTF_MAKE_TZONE_ALLOCATED(ScriptController);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(ScriptController);
 
     using RootObjectMap = HashMap<void*, Ref<JSC::Bindings::RootObject>>;
 
 public:
-    explicit ScriptController(Frame&);
+    explicit ScriptController(LocalFrame&);
     ~ScriptController();
 
     enum class WorldType { User, Internal };
     WEBCORE_EXPORT static Ref<DOMWrapperWorld> createWorld(const String& name, WorldType = WorldType::Internal);
 
-    JSDOMWindow* globalObject(DOMWrapperWorld& world)
+    JSDOMGlobalObject* globalObject(DOMWrapperWorld& world)
     {
-        return JSC::jsCast<JSDOMWindow*>(jsWindowProxy(world).window());
+        return jsWindowProxy(world).window();
     }
 
     static void getAllWorlds(Vector<Ref<DOMWrapperWorld>>&);
 
     using ResolveFunction = CompletionHandler<void(ValueOrException)>;
 
-    WEBCORE_EXPORT JSC::JSValue executeScriptIgnoringException(const String& script, bool forceUserGesture = false);
-    WEBCORE_EXPORT JSC::JSValue executeScriptInWorldIgnoringException(DOMWrapperWorld&, const String& script, bool forceUserGesture = false);
+    WEBCORE_EXPORT JSC::JSValue executeScriptIgnoringException(const String& script, JSC::SourceTaintedOrigin, bool forceUserGesture = false);
+    WEBCORE_EXPORT JSC::JSValue executeScriptInWorldIgnoringException(DOMWrapperWorld&, const String& script, JSC::SourceTaintedOrigin, bool forceUserGesture = false);
     WEBCORE_EXPORT JSC::JSValue executeUserAgentScriptInWorldIgnoringException(DOMWrapperWorld&, const String& script, bool forceUserGesture);
     WEBCORE_EXPORT ValueOrException executeUserAgentScriptInWorld(DOMWrapperWorld&, const String& script, bool forceUserGesture);
     WEBCORE_EXPORT void executeAsynchronousUserAgentScriptInWorld(DOMWrapperWorld&, RunJavaScriptParameters&&, ResolveFunction&&);
@@ -107,29 +112,28 @@ public:
     JSC::JSValue evaluateInWorldIgnoringException(const ScriptSourceCode&, DOMWrapperWorld&);
 
     // This asserts that URL argument is a JavaScript URL.
-    void executeJavaScriptURL(const URL&, RefPtr<SecurityOrigin> = nullptr, ShouldReplaceDocumentIfJavaScriptURL = ReplaceDocumentIfJavaScriptURL);
+    void executeJavaScriptURL(const URL&, const NavigationAction&, bool& didReplaceDocument);
 
     static void initializeMainThread();
 
-    void loadModuleScriptInWorld(LoadableModuleScript&, const String& moduleName, Ref<ModuleFetchParameters>&&, DOMWrapperWorld&);
-    void loadModuleScript(LoadableModuleScript&, const String& moduleName, Ref<ModuleFetchParameters>&&);
+    void loadModuleScriptInWorld(LoadableModuleScript&, const URL& topLevelModuleURL, Ref<JSC::ScriptFetchParameters>&&, DOMWrapperWorld&);
+    void loadModuleScript(LoadableModuleScript&, const URL&, Ref<JSC::ScriptFetchParameters>&&);
     void loadModuleScriptInWorld(LoadableModuleScript&, const ScriptSourceCode&, DOMWrapperWorld&);
     void loadModuleScript(LoadableModuleScript&, const ScriptSourceCode&);
 
     JSC::JSValue linkAndEvaluateModuleScriptInWorld(LoadableModuleScript& , DOMWrapperWorld&);
     JSC::JSValue linkAndEvaluateModuleScript(LoadableModuleScript&);
 
-    JSC::JSValue evaluateModule(const URL&, JSC::JSModuleRecord&, DOMWrapperWorld&, JSC::JSValue awaitedValue, JSC::JSValue resumeMode);
-    JSC::JSValue evaluateModule(const URL&, JSC::JSModuleRecord&, JSC::JSValue awaitedValue, JSC::JSValue resumeMode);
+    JSC::JSValue evaluateModule(const URL&, JSC::AbstractModuleRecord&, DOMWrapperWorld&, JSC::JSValue awaitedValue, JSC::JSValue resumeMode);
+    JSC::JSValue evaluateModule(const URL&, JSC::AbstractModuleRecord&, JSC::JSValue awaitedValue, JSC::JSValue resumeMode);
 
     TextPosition eventHandlerPosition() const;
 
-    void enableEval();
-    void enableWebAssembly();
-    void disableEval(const String& errorMessage);
-    void disableWebAssembly(const String& errorMessage);
+    void setEvalEnabled(bool, const String& errorMessage = String());
+    void setWebAssemblyEnabled(bool, const String& errorMessage = String());
+    void setTrustedTypesEnforcement(JSC::TrustedTypesEnforcement);
 
-    static bool canAccessFromCurrentOrigin(Frame*, Document& accessingDocument);
+    static bool canAccessFromCurrentOrigin(LocalFrame*, Document& accessingDocument);
     WEBCORE_EXPORT bool canExecuteScripts(ReasonForCallingCanExecuteScripts);
 
     void setPaused(bool b) { m_paused = b; }
@@ -149,12 +153,13 @@ public:
 
     RefPtr<JSC::Bindings::Instance>  createScriptInstanceForWidget(Widget*);
     WEBCORE_EXPORT JSC::Bindings::RootObject* bindingRootObject();
+    RefPtr<JSC::Bindings::RootObject> protectedBindingRootObject();
     JSC::Bindings::RootObject* cacheableBindingRootObject();
     JSC::Bindings::RootObject* existingCacheableBindingRootObject() const { return m_cacheableBindingRootObject.get(); }
 
     WEBCORE_EXPORT Ref<JSC::Bindings::RootObject> createRootObject(void* nativeHandle);
 
-    void collectIsolatedContexts(Vector<std::pair<JSC::JSGlobalObject*, SecurityOrigin*>>&);
+    void collectIsolatedContexts(Vector<std::pair<JSC::JSGlobalObject*, RefPtr<SecurityOrigin>>>&);
 
 #if PLATFORM(COCOA)
     WEBCORE_EXPORT WebScriptObject* windowScriptObject();
@@ -169,6 +174,8 @@ public:
 
     void reportExceptionFromScriptError(LoadableScript::Error, bool);
 
+    void registerImportMap(const ScriptSourceCode&, const URL& baseURL);
+
 private:
     ValueOrException executeScriptInWorld(DOMWrapperWorld&, RunJavaScriptParameters&&);
     ValueOrException callInWorld(RunJavaScriptParameters&&, DOMWrapperWorld&);
@@ -177,13 +184,16 @@ private:
 
     void disconnectPlatformScriptObjects();
 
+    Ref<WindowProxy> protectedWindowProxy() { return windowProxy(); }
     WEBCORE_EXPORT WindowProxy& windowProxy();
     WEBCORE_EXPORT JSWindowProxy& jsWindowProxy(DOMWrapperWorld&);
 
-    Frame& m_frame;
+    Ref<LocalFrame> protectedFrame() const;
+
+    WeakRef<LocalFrame> m_frame;
     const URL* m_sourceURL { nullptr };
 
-    bool m_paused;
+    bool m_paused { false };
     bool m_willReplaceWithResultOfExecutingJavascriptURL { false };
 
     // The root object used for objects bound outside the context of a plugin, such
@@ -197,6 +207,7 @@ private:
 #if PLATFORM(COCOA)
     RetainPtr<WebScriptObject> m_windowScriptObject;
 #endif
+
 };
 
 } // namespace WebCore

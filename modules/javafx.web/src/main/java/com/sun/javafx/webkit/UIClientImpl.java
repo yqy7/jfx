@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -41,9 +41,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -59,7 +56,6 @@ import javafx.scene.web.PromptData;
 import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebEvent;
 import javafx.scene.web.WebView;
-import javafx.scene.paint.Color;
 import javafx.stage.FileChooser;
 import javafx.stage.FileChooser.ExtensionFilter;
 import javafx.stage.Window;
@@ -112,31 +108,20 @@ public final class UIClientImpl implements UIClient {
         return accessor.getEngine();
     }
 
-    @SuppressWarnings("removal")
-    private AccessControlContext getAccessContext() {
-        return accessor.getPage().getAccessControlContext();
-    }
-
     @Override public WebPage createPage(
             boolean menu, boolean status, boolean toolbar, boolean resizable) {
         final WebEngine w = getWebEngine();
         if (w != null && w.getCreatePopupHandler() != null) {
             final PopupFeatures pf =
                     new PopupFeatures(menu, status, toolbar, resizable);
-            @SuppressWarnings("removal")
-            WebEngine popup = AccessController.doPrivileged(
-                    (PrivilegedAction<WebEngine>) () -> w.getCreatePopupHandler().call(pf), getAccessContext());
+            WebEngine popup = w.getCreatePopupHandler().call(pf);
             return Accessor.getPageFor(popup);
         }
         return null;
     }
 
-    @SuppressWarnings("removal")
     private void dispatchWebEvent(final EventHandler handler, final WebEvent ev) {
-        AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            handler.handle(ev);
-            return null;
-        }, getAccessContext());
+        handler.handle(ev);
     }
 
     private void notifyVisibilityChanged(boolean visible) {
@@ -144,7 +129,7 @@ public final class UIClientImpl implements UIClient {
         if (w != null && w.getOnVisibilityChanged() != null) {
             dispatchWebEvent(
                     w.getOnVisibilityChanged(),
-                    new WebEvent<Boolean>(w, VISIBILITY_CHANGED, visible));
+                    new WebEvent<>(w, VISIBILITY_CHANGED, visible));
         }
     }
 
@@ -175,7 +160,7 @@ public final class UIClientImpl implements UIClient {
         if (w != null && w.getOnResized() != null) {
             dispatchWebEvent(
                     w.getOnResized(),
-                    new WebEvent<Rectangle2D>(w, RESIZED,
+                    new WebEvent<>(w, RESIZED,
                         new Rectangle2D(r.getX(), r.getY(), r.getWidth(), r.getHeight())));
         }
     }
@@ -185,7 +170,7 @@ public final class UIClientImpl implements UIClient {
         if (w != null && w.getOnStatusChanged() != null) {
             dispatchWebEvent(
                     w.getOnStatusChanged(),
-                    new WebEvent<String>(w, STATUS_CHANGED, text));
+                    new WebEvent<>(w, STATUS_CHANGED, text));
         }
     }
 
@@ -194,27 +179,23 @@ public final class UIClientImpl implements UIClient {
         if (w != null && w.getOnAlert() != null) {
             dispatchWebEvent(
                     w.getOnAlert(),
-                    new WebEvent<String>(w, ALERT, text));
+                    new WebEvent<>(w, ALERT, text));
         }
     }
 
-    @SuppressWarnings("removal")
     @Override public boolean confirm(final String text) {
         final WebEngine w = getWebEngine();
         if (w != null && w.getConfirmHandler() != null) {
-            return AccessController.doPrivileged(
-                    (PrivilegedAction<Boolean>) () -> w.getConfirmHandler().call(text), getAccessContext());
+            return w.getConfirmHandler().call(text);
         }
         return false;
     }
 
-    @SuppressWarnings("removal")
     @Override public String prompt(String text, String defaultValue) {
         final WebEngine w = getWebEngine();
         if (w != null && w.getPromptHandler() != null) {
             final PromptData data = new PromptData(text, defaultValue);
-            return AccessController.doPrivileged(
-                    (PrivilegedAction<String>) () -> w.getPromptHandler().call(data), getAccessContext());
+            return w.getPromptHandler().call(data);
         }
         return "";
     }

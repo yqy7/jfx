@@ -41,26 +41,24 @@ public:
         return &vm.plainObjectSpace();
     }
 
-    static JSONObject* create(VM& vm, Structure* structure)
+    static JSONObject* create(VM& vm, JSGlobalObject* globalObject, Structure* structure)
     {
         JSONObject* object = new (NotNull, allocateCell<JSONObject>(vm)) JSONObject(vm, structure);
-        object->finishCreation(vm);
+        object->finishCreation(vm, globalObject);
         return object;
     }
 
-    static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
-    {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), info());
-    }
+    inline static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
     DECLARE_INFO;
 
 private:
     JSONObject(VM&, Structure*);
-    void finishCreation(VM&);
+    void finishCreation(VM&, JSGlobalObject*);
 };
 
-JS_EXPORT_PRIVATE JSValue JSONParse(JSGlobalObject*, const String&);
+JS_EXPORT_PRIVATE JSValue JSONParse(JSGlobalObject*, StringView);
+JSValue JSONParseWithException(JSGlobalObject*, StringView);
 JS_EXPORT_PRIVATE String JSONStringify(JSGlobalObject*, JSValue, JSValue space);
 JS_EXPORT_PRIVATE String JSONStringify(JSGlobalObject*, JSValue, unsigned indent);
 

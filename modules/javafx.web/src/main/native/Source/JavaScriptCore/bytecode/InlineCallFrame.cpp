@@ -31,6 +31,8 @@
 
 namespace JSC {
 
+DEFINE_COMPACT_ALLOCATOR_WITH_HEAP_IDENTIFIER(InlineCallFrame);
+
 JSFunction* InlineCallFrame::calleeConstant() const
 {
     if (calleeRecovery.isConstant())
@@ -48,11 +50,6 @@ CodeBlockHash InlineCallFrame::hash() const
     return baselineCodeBlock->hash();
 }
 
-CString InlineCallFrame::hashAsStringIfPossible() const
-{
-    return baselineCodeBlock->hashAsStringIfPossible();
-}
-
 CString InlineCallFrame::inferredName() const
 {
     return jsCast<FunctionExecutable*>(baselineCodeBlock->ownerExecutable())->ecmaName().utf8();
@@ -60,7 +57,7 @@ CString InlineCallFrame::inferredName() const
 
 void InlineCallFrame::dumpBriefFunctionInformation(PrintStream& out) const
 {
-    out.print(inferredName(), "#", hashAsStringIfPossible());
+    out.print(inferredName(), "#", hash());
 }
 
 void InlineCallFrame::dumpInContext(PrintStream& out, DumpContext* context) const
@@ -114,6 +111,21 @@ void printInternal(PrintStream& out, JSC::InlineCallFrame::Kind kind)
         return;
     case JSC::InlineCallFrame::SetterCall:
         out.print("SetterCall");
+        return;
+    case JSC::InlineCallFrame::ProxyObjectLoadCall:
+        out.print("ProxyObjectLoadCall");
+        return;
+    case JSC::InlineCallFrame::ProxyObjectStoreCall:
+        out.print("ProxyObjectStoreCall");
+        return;
+    case JSC::InlineCallFrame::ProxyObjectInCall:
+        out.print("ProxyObjectInCall");
+        return;
+    case JSC::InlineCallFrame::BoundFunctionCall:
+        out.print("BoundFunctionCall");
+        return;
+    case JSC::InlineCallFrame::BoundFunctionTailCall:
+        out.print("BoundFunctionTailCall");
         return;
     }
     RELEASE_ASSERT_NOT_REACHED();

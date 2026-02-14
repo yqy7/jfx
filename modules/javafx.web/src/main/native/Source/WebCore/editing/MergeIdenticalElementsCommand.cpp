@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2005-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -50,7 +50,7 @@ void MergeIdenticalElementsCommand::doApply()
         children.append(*child);
 
     for (auto& child : children)
-        m_element2->insertBefore(child, m_atChild.get());
+        m_element2->insertBefore(child, m_atChild.copyRef());
 
     m_element1->remove();
 }
@@ -59,11 +59,11 @@ void MergeIdenticalElementsCommand::doUnapply()
 {
     RefPtr<Node> atChild = WTFMove(m_atChild);
 
-    auto* parent = m_element2->parentNode();
+    RefPtr parent = m_element2->parentNode();
     if (!parent || !parent->hasEditableStyle())
         return;
 
-    if (parent->insertBefore(m_element1, m_element2.ptr()).hasException())
+    if (parent->insertBefore(m_element1, m_element2.copyRef()).hasException())
         return;
 
     Vector<Ref<Node>> children;
@@ -75,7 +75,7 @@ void MergeIdenticalElementsCommand::doUnapply()
 }
 
 #ifndef NDEBUG
-void MergeIdenticalElementsCommand::getNodesInCommand(HashSet<Ref<Node>>& nodes)
+void MergeIdenticalElementsCommand::getNodesInCommand(NodeSet& nodes)
 {
     addNodeAndDescendants(m_element1.ptr(), nodes);
     addNodeAndDescendants(m_element2.ptr(), nodes);

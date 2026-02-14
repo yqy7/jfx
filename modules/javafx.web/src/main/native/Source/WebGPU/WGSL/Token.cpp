@@ -32,89 +32,128 @@ String toString(TokenType type)
 {
     switch (type) {
     case TokenType::Invalid:
-        return "Invalid";
+        return "Invalid"_s;
     case TokenType::EndOfFile:
-        return "EOF";
+        return "EOF"_s;
+    case TokenType::AbstractFloatLiteral:
+        return "AbstractFloatLiteral"_s;
     case TokenType::IntegerLiteral:
-        return "IntegerLiteral";
+        return "IntegerLiteral"_s;
     case TokenType::IntegerLiteralSigned:
-        return "IntegerLiteralSigned";
+        return "IntegerLiteralSigned"_s;
     case TokenType::IntegerLiteralUnsigned:
-        return "IntegerLiteralUnsigned";
-    case TokenType::DecimalFloatLiteral:
-        return "DecimalFloatLiteral";
-    case TokenType::HexFloatLiteral:
-        return "HexFloatLiteral";
+        return "IntegerLiteralUnsigned"_s;
+    case TokenType::FloatLiteral:
+        return "FloatLiteral"_s;
+    case TokenType::HalfLiteral:
+        return "HalfLiteral"_s;
     case TokenType::Identifier:
-        return "Identifier";
+        return "Identifier"_s;
     case TokenType::ReservedWord:
-        return "ReservedWord";
-    case TokenType::KeywordStruct:
-        return "struct";
-    case TokenType::KeywordFn:
-        return "fn";
-    case TokenType::KeywordFunction:
-        return "function";
-    case TokenType::KeywordPrivate:
-        return "private";
-    case TokenType::KeywordRead:
-        return "read";
-    case TokenType::KeywordReadWrite:
-        return "read_write";
-    case TokenType::KeywordReturn:
-        return "return";
-    case TokenType::KeywordStorage:
-        return "storage";
-    case TokenType::KeywordUniform:
-        return "uniform";
-    case TokenType::KeywordVar:
-        return "var";
-    case TokenType::KeywordWorkgroup:
-        return "workgroup";
-    case TokenType::KeywordWrite:
-        return "write";
-    case TokenType::KeywordI32:
-        return "i32";
-    case TokenType::KeywordU32:
-        return "u32";
-    case TokenType::KeywordF32:
-        return "f32";
-    case TokenType::KeywordBool:
-        return "bool";
-    case TokenType::LiteralTrue:
-        return "true";
-    case TokenType::LiteralFalse:
-        return "false";
+        return "ReservedWord"_s;
+
+#define KEYWORD_TO_STRING(lexeme, name) \
+    case TokenType::Keyword##name: \
+        return #lexeme##_s;
+FOREACH_KEYWORD(KEYWORD_TO_STRING)
+#undef KEYWORD_TO_STRING
+
+    case TokenType::And:
+        return "&"_s;
+    case TokenType::AndAnd:
+        return "&&"_s;
+    case TokenType::AndEq:
+        return "&="_s;
     case TokenType::Arrow:
-        return "->";
+        return "->"_s;
     case TokenType::Attribute:
-        return "@";
+        return "@"_s;
+    case TokenType::Bang:
+        return "!"_s;
+    case TokenType::BangEq:
+        return "!="_s;
     case TokenType::BracketLeft:
-        return "[";
+        return "["_s;
     case TokenType::BracketRight:
-        return "]";
+        return "]"_s;
     case TokenType::BraceLeft:
-        return "{";
+        return "{"_s;
     case TokenType::BraceRight:
-        return "}";
+        return "}"_s;
     case TokenType::Colon:
-        return ":";
+        return ":"_s;
     case TokenType::Comma:
-        return ",";
+        return ","_s;
     case TokenType::Equal:
-        return "=";
-    case TokenType::GT:
-        return ">";
-    case TokenType::LT:
-        return "<";
+        return "="_s;
+    case TokenType::EqEq:
+        return "=="_s;
+    case TokenType::TemplateArgsRight:
+    case TokenType::Gt:
+        return ">"_s;
+    case TokenType::GtEq:
+        return ">="_s;
+    case TokenType::GtGt:
+        return ">>"_s;
+    case TokenType::GtGtEq:
+        return ">>="_s;
+    case TokenType::TemplateArgsLeft:
+    case TokenType::Lt:
+        return "<"_s;
+    case TokenType::LtEq:
+        return "<="_s;
+    case TokenType::LtLt:
+        return "<<"_s;
+    case TokenType::LtLtEq:
+        return "<<="_s;
+    case TokenType::Minus:
+        return "-"_s;
+    case TokenType::MinusMinus:
+        return "--"_s;
+    case TokenType::MinusEq:
+        return "-="_s;
+    case TokenType::Modulo:
+        return "%"_s;
+    case TokenType::ModuloEq:
+        return "%="_s;
+    case TokenType::Or:
+        return "|"_s;
+    case TokenType::OrOr:
+        return "||"_s;
+    case TokenType::OrEq:
+        return "|="_s;
+    case TokenType::Plus:
+        return "+"_s;
+    case TokenType::PlusPlus:
+        return "++"_s;
+    case TokenType::PlusEq:
+        return "+="_s;
     case TokenType::Period:
-        return ".";
+        return "."_s;
     case TokenType::ParenLeft:
-        return "(";
+        return "("_s;
     case TokenType::ParenRight:
-        return ")";
+        return ")"_s;
     case TokenType::Semicolon:
-        return ";";
+        return ";"_s;
+    case TokenType::Slash:
+        return "/"_s;
+    case TokenType::SlashEq:
+        return "/="_s;
+    case TokenType::Star:
+        return "*"_s;
+    case TokenType::StarEq:
+        return "*="_s;
+    case TokenType::Tilde:
+        return "~"_s;
+    case TokenType::Underbar:
+        return "_"_s;
+    case TokenType::Xor:
+        return "^"_s;
+    case TokenType::XorEq:
+        return "^="_s;
+    case TokenType::Placeholder:
+        return "<placeholder>"_s;
     }
 }
 

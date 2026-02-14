@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,9 +26,10 @@
 #include "config.h"
 #include "InspectorFrontendAPIDispatcher.h"
 
-#include "Frame.h"
+#include "DOMWrapperWorld.h"
 #include "InspectorController.h"
 #include "JSDOMPromise.h"
+#include "LocalFrame.h"
 #include "Page.h"
 #include "ScriptController.h"
 #include "ScriptDisallowedScope.h"
@@ -36,6 +37,7 @@
 #include <JavaScriptCore/FrameTracers.h>
 #include <JavaScriptCore/JSPromise.h>
 #include <wtf/RunLoop.h>
+#include <wtf/text/MakeString.h>
 
 namespace WebCore {
 
@@ -81,7 +83,7 @@ void InspectorFrontendAPIDispatcher::suspend(UnsuspendSoon unsuspendSoon)
     m_suspended = true;
 
     if (unsuspendSoon == UnsuspendSoon::Yes) {
-        RunLoop::main().dispatch([protectedThis = Ref { *this }] {
+        RunLoop::mainSingleton().dispatch([protectedThis = Ref { *this }] {
             // If the frontend page has been deallocated, there's nothing to do.
             if (!protectedThis->m_frontendPage)
                 return;
@@ -107,18 +109,22 @@ JSDOMGlobalObject* InspectorFrontendAPIDispatcher::frontendGlobalObject()
     if (!m_frontendPage)
         return nullptr;
 
-    return m_frontendPage->mainFrame().script().globalObject(mainThreadNormalWorld());
+    RefPtr localMainFrame = m_frontendPage->localMainFrame();
+    if (!localMainFrame)
+        return nullptr;
+
+    return localMainFrame->script().globalObject(mainThreadNormalWorldSingleton());
 }
 
 static String expressionForEvaluatingCommand(const String& command, Vector<Ref<JSON::Value>>&& arguments)
 {
     StringBuilder expression;
-    expression.append("InspectorFrontendAPI.dispatch([\"", command, '"');
+    expression.append("InspectorFrontendAPI.dispatch([\""_s, command, '"');
     for (auto& argument : arguments) {
-        expression.append(", ");
+        expression.append(", "_s);
         argument->writeJSON(expression);
     }
-    expression.append("])");
+    expression.append("])"_s);
     return expression.toString();
 }
 
@@ -137,7 +143,7 @@ void InspectorFrontendAPIDispatcher::dispatchCommandWithResultAsync(const String
 
 void InspectorFrontendAPIDispatcher::dispatchMessageAsync(const String& message)
 {
-    evaluateOrQueueExpression(makeString("InspectorFrontendAPI.dispatchMessageAsync(", message, ")"));
+    evaluateOrQueueExpression(makeString("InspectorFrontendAPI.dispatchMessageAsync("_s, message, ')'));
 }
 
 void InspectorFrontendAPIDispatcher::evaluateOrQueueExpression(const String& expression, EvaluationResultHandler&& optionalResultHandler)
@@ -178,8 +184,7 @@ void InspectorFrontendAPIDispatcher::evaluateOrQueueExpression(const String& exp
 
     JSC::JSLockHolder lock(globalObject);
 
-    auto& vm = globalObject->vm();
-    auto* castedPromise = JSC::jsDynamicCast<JSC::JSPromise*>(vm, result.value());
+    auto* castedPromise = JSC::jsDynamicCast<JSC::JSPromise*>(result.value());
     if (!castedPromise) {
         // Simple case: result is NOT a promise, just return the JSValue.
         optionalResultHandler(result);
@@ -196,14 +201,14 @@ void InspectorFrontendAPIDispatcher::evaluateOrQueueExpression(const String& exp
         if (!weakThis)
             return;
 
-        Ref strongThis = { *weakThis };
-        if (!strongThis->m_pendingResponses.size())
+        Ref protectedThis = { *weakThis };
+        if (!protectedThis->m_pendingResponses.size())
             return;
 
-        EvaluationResultHandler resultHandler = strongThis->m_pendingResponses.take(promise);
+        EvaluationResultHandler resultHandler = protectedThis->m_pendingResponses.take(promise);
         ASSERT(resultHandler);
 
-        JSDOMGlobalObject* globalObject = strongThis->frontendGlobalObject();
+        JSDOMGlobalObject* globalObject = protectedThis->frontendGlobalObject();
         if (!globalObject) {
             resultHandler(makeUnexpected(EvaluationError::ContextDestroyed));
             return;
@@ -259,8 +264,10 @@ ValueOrException InspectorFrontendAPIDispatcher::evaluateExpression(const String
     ASSERT(!m_suspended);
     ASSERT(m_queuedEvaluations.isEmpty());
 
-    JSC::SuspendExceptionScope scope(&m_frontendPage->inspectorController().vm());
-    return m_frontendPage->mainFrame().script().evaluateInWorld(ScriptSourceCode(expression), mainThreadNormalWorld());
+    JSC::SuspendExceptionScope scope(m_frontendPage->inspectorController().vm());
+
+    RefPtr localMainFrame = m_frontendPage->localMainFrame();
+    return localMainFrame->script().evaluateInWorld(ScriptSourceCode(expression, JSC::SourceTaintedOrigin::Untainted), mainThreadNormalWorldSingleton());
 }
 
 void InspectorFrontendAPIDispatcher::evaluateExpressionForTesting(const String& expression)

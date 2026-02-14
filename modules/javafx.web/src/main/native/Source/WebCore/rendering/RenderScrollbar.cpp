@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2009, 2013, 2015 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008, 2009, 2013, 2015 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,23 +26,27 @@
 #include "config.h"
 #include "RenderScrollbar.h"
 
-#include "Frame.h"
-#include "FrameView.h"
+#include "ContainerNodeInlines.h"
+#include "LocalFrame.h"
+#include "LocalFrameInlines.h"
+#include "LocalFrameView.h"
+#include "RenderObjectInlines.h"
 #include "RenderScrollbarPart.h"
 #include "RenderScrollbarTheme.h"
+#include "RenderStyleSetters.h"
 #include "RenderWidget.h"
 #include "StyleInheritedData.h"
 #include "StyleResolver.h"
 
 namespace WebCore {
 
-Ref<Scrollbar> RenderScrollbar::createCustomScrollbar(ScrollableArea& scrollableArea, ScrollbarOrientation orientation, Element* ownerElement, Frame* owningFrame)
+Ref<Scrollbar> RenderScrollbar::createCustomScrollbar(ScrollableArea& scrollableArea, ScrollbarOrientation orientation, Element* ownerElement, LocalFrame* owningFrame)
 {
     return adoptRef(*new RenderScrollbar(scrollableArea, orientation, ownerElement, owningFrame));
 }
 
-RenderScrollbar::RenderScrollbar(ScrollableArea& scrollableArea, ScrollbarOrientation orientation, Element* ownerElement, Frame* owningFrame)
-    : Scrollbar(scrollableArea, orientation, ScrollbarControlSize::Regular, RenderScrollbarTheme::renderScrollbarTheme(), true)
+RenderScrollbar::RenderScrollbar(ScrollableArea& scrollableArea, ScrollbarOrientation orientation, Element* ownerElement, LocalFrame* owningFrame)
+    : Scrollbar(scrollableArea, orientation, ScrollbarWidth::Auto, RenderScrollbarTheme::renderScrollbarTheme(), true)
     , m_ownerElement(ownerElement)
     , m_owningFrame(owningFrame)
 {
@@ -100,7 +104,7 @@ void RenderScrollbar::styleChanged()
     updateScrollbarParts();
 }
 
-void RenderScrollbar::paint(GraphicsContext& context, const IntRect& damageRect, Widget::SecurityOriginPaintPolicy, EventRegionContext*)
+void RenderScrollbar::paint(GraphicsContext& context, const IntRect& damageRect, Widget::SecurityOriginPaintPolicy, RegionContext*)
 {
     if (context.invalidatingControlTints()) {
         updateScrollbarParts();
@@ -197,22 +201,22 @@ static PseudoId pseudoForScrollbarPart(ScrollbarPart part)
         case ForwardButtonStartPart:
         case BackButtonEndPart:
         case ForwardButtonEndPart:
-            return PseudoId::ScrollbarButton;
+            return PseudoId::WebKitScrollbarButton;
         case BackTrackPart:
         case ForwardTrackPart:
-            return PseudoId::ScrollbarTrackPiece;
+            return PseudoId::WebKitScrollbarTrackPiece;
         case ThumbPart:
-            return PseudoId::ScrollbarThumb;
+            return PseudoId::WebKitScrollbarThumb;
         case TrackBGPart:
-            return PseudoId::ScrollbarTrack;
+            return PseudoId::WebKitScrollbarTrack;
         case ScrollbarBGPart:
-            return PseudoId::Scrollbar;
+            return PseudoId::WebKitScrollbar;
         case NoPart:
         case AllParts:
             break;
     }
     ASSERT_NOT_REACHED();
-    return PseudoId::Scrollbar;
+    return PseudoId::WebKitScrollbar;
 }
 
 void RenderScrollbar::updateScrollbarPart(ScrollbarPart partType)
@@ -357,7 +361,7 @@ float RenderScrollbar::opacity() const
     if (!partRenderer)
         return 1;
 
-    return partRenderer->style().opacity();
+    return partRenderer->style().opacity().value.value;
 }
 
 bool RenderScrollbar::isHiddenByStyle() const

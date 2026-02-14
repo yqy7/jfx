@@ -44,7 +44,7 @@ pas_segregated_partial_view_create(
     pas_segregated_size_directory* directory,
     size_t index)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
 
     pas_segregated_partial_view* result;
 
@@ -86,7 +86,7 @@ void pas_segregated_partial_view_note_eligibility(
     pas_segregated_partial_view* view,
     pas_segregated_page* page)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
     if (page->lock_ptr)
         pas_lock_assert_held(page->lock_ptr);
     PAS_ASSERT(!view->eligibility_has_been_noted);
@@ -109,7 +109,7 @@ void pas_segregated_partial_view_set_is_in_use_for_allocation(
     pas_segregated_shared_view* shared_view,
     pas_segregated_shared_handle* shared_handle)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_SEGREGATED_HEAPS);
 
     pas_segregated_shared_page_directory* shared_page_directory;
     size_t index;
@@ -141,7 +141,7 @@ void pas_segregated_partial_view_set_is_in_use_for_allocation(
 
 bool pas_segregated_partial_view_should_table(
     pas_segregated_partial_view* view,
-    pas_segregated_page_config* page_config)
+    const pas_segregated_page_config* page_config)
 {
     pas_segregated_shared_view* shared_view;
     pas_shared_handle_or_page_boundary shared_handle_or_page_boundary;
@@ -162,7 +162,7 @@ bool pas_segregated_partial_view_should_table(
     shared_handle_or_page_boundary = shared_view->shared_handle_or_page_boundary;
     shared_handle = pas_unwrap_shared_handle(shared_handle_or_page_boundary, *page_config);
     page = pas_segregated_page_for_boundary(shared_handle->page_boundary, *page_config);
-    return !page->num_non_empty_words;
+    return !page->emptiness.num_non_empty_words;
 }
 
 static pas_heap_summary compute_summary(pas_segregated_partial_view* view)
@@ -170,7 +170,7 @@ static pas_heap_summary compute_summary(pas_segregated_partial_view* view)
     pas_segregated_size_directory* size_directory;
     pas_segregated_directory* directory;
     pas_segregated_shared_view* shared_view;
-    pas_segregated_page_config* page_config_ptr;
+    const pas_segregated_page_config* page_config_ptr;
     pas_segregated_page_config page_config;
     pas_segregated_page* page;
     unsigned* full_alloc_bits;

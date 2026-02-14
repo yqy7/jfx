@@ -33,7 +33,18 @@
 #include "PlatformMediaSession.h"
 #include "Timer.h"
 #include <memory>
+#include <wtf/Markable.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/TypeCasts.h>
+
+namespace WebCore {
+class MediaElementSession;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::MediaElementSession> : std::true_type { };
+}
 
 namespace WebCore {
 
@@ -47,20 +58,27 @@ enum class MediaPlaybackDenialReason {
     InvalidState,
 };
 
+class AudioTrack;
 class Document;
 class HTMLMediaElement;
 class MediaMetadata;
 class MediaSession;
-class MediaSessionObserver;
+class MediaElementSessionObserver;
 class SourceBuffer;
+class VideoTrack;
 
 struct MediaPositionState;
 
 enum class MediaSessionPlaybackState : uint8_t;
 
 class MediaElementSession final : public PlatformMediaSession {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(MediaElementSession);
 public:
+    static Ref<MediaElementSession> create(HTMLMediaElement& element)
+    {
+        return adoptRef(*new MediaElementSession(element));
+    }
+
     explicit MediaElementSession(HTMLMediaElement&);
     virtual ~MediaElementSession();
 
@@ -70,6 +88,7 @@ public:
     void clientWillBeginAutoplaying() final;
     bool clientWillBeginPlayback() final;
     bool clientWillPausePlayback() final;
+    void clientCharacteristicsChanged(bool) final;
 
     void visibilityChanged();
     void isVisibleInViewportChanged();
@@ -130,6 +149,10 @@ public:
         RequirePlaybackToControlControlsManager = 1 << 14,
         RequireUserGestureForVideoDueToLowPowerMode = 1 << 15,
         RequirePageVisibilityToPlayAudio = 1 << 16,
+        RequireUserGestureForVideoDueToAggressiveThermalMitigation = 1 << 17,
+#if ENABLE(REQUIRES_PAGE_VISIBILITY_FOR_NOW_PLAYING)
+        RequirePageVisibilityForVideoToBeNowPlaying = 1 << 18,
+#endif
         AllRestrictions = ~NoRestrictions,
     };
     typedef unsigned BehaviorRestrictions;
@@ -139,20 +162,17 @@ public:
     WEBCORE_EXPORT void removeBehaviorRestriction(BehaviorRestrictions);
     bool hasBehaviorRestriction(BehaviorRestrictions restriction) const { return restriction & m_restrictions; }
 
-#if ENABLE(MEDIA_SOURCE)
-    size_t maximumMediaSourceBufferSize(const SourceBuffer&) const;
-#endif
-
-    HTMLMediaElement& element() const { return m_element; }
+    WeakPtr<HTMLMediaElement> element() const { return m_element; }
+    RefPtr<HTMLMediaElement> protectedElement() const;
 
     bool wantsToObserveViewportVisibilityForMediaControls() const;
     bool wantsToObserveViewportVisibilityForAutoplay() const;
 
-    enum class PlaybackControlsPurpose { ControlsManager, NowPlaying, MediaSession };
     bool canShowControlsManager(PlaybackControlsPurpose) const;
     bool isLargeEnoughForMainContent(MediaSessionMainContentPurpose) const;
+    bool isLongEnoughForMainContent() const final;
     bool isMainContentForPurposesOfAutoplayEvents() const;
-    MonotonicTime mostRecentUserInteractionTime() const;
+    Markable<MonotonicTime> mostRecentUserInteractionTime() const;
 
     bool allowsPlaybackControlsForAutoplayingAudio() const;
 
@@ -163,14 +183,16 @@ public:
             || type == MediaType::VideoAudio;
     }
 
-    std::optional<NowPlayingInfo> nowPlayingInfo() const final;
+    std::optional<NowPlayingInfo> computeNowPlayingInfo() const;
 
     WEBCORE_EXPORT void updateMediaUsageIfChanged() final;
     std::optional<MediaUsageInfo> mediaUsageInfo() const { return m_mediaUsageInfo; }
 
 #if !RELEASE_LOG_DISABLED
-    const void* logIdentifier() const final { return m_logIdentifier; }
-    const char* logClassName() const final { return "MediaElementSession"; }
+    static String descriptionForTrack(const VideoTrack&);
+    static String descriptionForTrack(const AudioTrack&);
+    String description() const final;
+    ASCIILiteral logClassName() const final { return "MediaElementSession"_s; }
 #endif
 
 #if ENABLE(MEDIA_SESSION)
@@ -183,6 +205,8 @@ public:
 
     MediaSession* mediaSession() const;
 
+    bool hasNowPlayingInfo() const;
+
 private:
 
 #if ENABLE(WIRELESS_PLAYBACK_TARGET)
@@ -193,6 +217,7 @@ private:
     void externalOutputDeviceAvailableDidChange(bool) override;
     void setShouldPlayToPlaybackTarget(bool) override;
     void playbackTargetPickerWasDismissed() override;
+    void audioSessionCategoryChanged(AudioSessionCategory, AudioSessionMode, RouteSharingPolicy) override;
 #endif
 #if PLATFORM(IOS_FAMILY)
     bool requiresPlaybackTargetRouteMonitoring() const override;
@@ -208,7 +233,7 @@ private:
 
     void addMediaUsageManagerSessionIfNecessary();
 
-    HTMLMediaElement& m_element;
+    WeakPtr<HTMLMediaElement> m_element;
     BehaviorRestrictions m_restrictions;
 
     std::optional<MediaUsageInfo> m_mediaUsageInfo;
@@ -226,15 +251,11 @@ private:
     bool m_hasPlaybackTargetAvailabilityListeners { false };
 #endif
 
-    MonotonicTime m_mostRecentUserInteractionTime;
+    Markable<MonotonicTime> m_mostRecentUserInteractionTime;
 
     mutable bool m_isMainContent { false };
     Timer m_mainContentCheckTimer;
     Timer m_clientDataBufferingTimer;
-
-#if !RELEASE_LOG_DISABLED
-    const void* m_logIdentifier;
-#endif
 
 #if ENABLE(MEDIA_USAGE)
     bool m_haveAddedMediaUsageManagerSession { false };
@@ -242,7 +263,7 @@ private:
 
 #if ENABLE(MEDIA_SESSION)
     bool m_isScrubbing { false };
-    std::unique_ptr<MediaSessionObserver> m_observer;
+    std::unique_ptr<MediaElementSessionObserver> m_observer;
 #endif
 };
 
@@ -267,7 +288,7 @@ struct LogArgument<WebCore::MediaPlaybackDenialReason> {
 
 
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::MediaElementSession)
-static bool isType(const WebCore::PlatformMediaSession& session) { return WebCore::MediaElementSession::isMediaElementSessionMediaType(session.mediaType()); }
+static bool isType(const WebCore::PlatformMediaSessionInterface& session) { return WebCore::MediaElementSession::isMediaElementSessionMediaType(session.mediaType()); }
 SPECIALIZE_TYPE_TRAITS_END()
 
 #endif // ENABLE(VIDEO)

@@ -25,7 +25,9 @@
 #pragma once
 
 #include "ContainerQuery.h"
-#include "SelectorMatchingState.h"
+#include "GenericMediaQueryEvaluator.h"
+#include "StyleScopeOrdinal.h"
+#include "StyleUpdate.h"
 #include <wtf/Ref.h>
 
 namespace WebCore {
@@ -34,54 +36,28 @@ class Element;
 
 namespace Style {
 
-enum class EvaluationResult : uint8_t { False, True, Unknown };
+struct ContainerQueryEvaluationState {
+    Vector<Ref<const Element>> sizeQueryContainers;
+    CheckedPtr<Style::Update> styleUpdate;
+};
 
-class ContainerQueryEvaluator {
+class ContainerQueryEvaluator : public MQ::GenericMediaQueryEvaluator<ContainerQueryEvaluator> {
 public:
-    ContainerQueryEvaluator(const Element&, PseudoId, SelectorMatchingState*);
+    enum class SelectionMode : uint8_t { Element, PseudoElement, PartPseudoElement };
+    ContainerQueryEvaluator(const Element&, SelectionMode, ScopeOrdinal, ContainerQueryEvaluationState*);
 
-    bool evaluate(const FilteredContainerQuery&) const;
+    bool evaluate(const CQ::ContainerQuery&) const;
+
+    static const Element* selectContainer(OptionSet<CQ::Axis>, const String& name, const Element&, SelectionMode = SelectionMode::Element, ScopeOrdinal = ScopeOrdinal::Element, const ContainerQueryEvaluationState* = nullptr);
 
 private:
-    struct ResolvedContainer;
-    std::optional<ResolvedContainer> resolveContainer(const FilteredContainerQuery&) const;
-
-    EvaluationResult evaluateQuery(const CQ::ContainerQuery&, const ResolvedContainer&) const;
-    EvaluationResult evaluateQuery(const CQ::SizeQuery&, const ResolvedContainer&) const;
-    template<typename ConditionType> EvaluationResult evaluateCondition(const ConditionType&, const ResolvedContainer&) const;
-    EvaluationResult evaluateSizeFeature(const CQ::SizeFeature&, const ResolvedContainer&) const;
+    std::optional<MQ::FeatureEvaluationContext> featureEvaluationContextForQuery(const CQ::ContainerQuery&) const;
 
     const Ref<const Element> m_element;
-    const PseudoId m_pseudoId;
-    SelectorMatchingState* m_selectorMatchingState;
+    const SelectionMode m_selectionMode;
+    const ScopeOrdinal m_scopeOrdinal;
+    ContainerQueryEvaluationState* m_evaluationState { nullptr };
 };
-
-inline EvaluationResult toEvaluationResult(bool boolean)
-{
-    return boolean ? EvaluationResult::True : EvaluationResult::False;
-};
-
-inline EvaluationResult operator&(EvaluationResult left, EvaluationResult right)
-{
-    if (left == EvaluationResult::Unknown || right == EvaluationResult::Unknown)
-        return EvaluationResult::Unknown;
-    if (left == EvaluationResult::True && right == EvaluationResult::True)
-        return EvaluationResult::True;
-    return EvaluationResult::False;
-}
-
-inline EvaluationResult operator!(EvaluationResult result)
-{
-    switch (result) {
-    case EvaluationResult::True:
-        return EvaluationResult::False;
-    case EvaluationResult::False:
-        return EvaluationResult::True;
-    case EvaluationResult::Unknown:
-        return EvaluationResult::Unknown;
-    }
-    RELEASE_ASSERT_NOT_REACHED();
-}
 
 }
 }

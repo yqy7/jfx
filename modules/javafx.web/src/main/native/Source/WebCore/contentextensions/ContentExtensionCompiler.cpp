@@ -89,7 +89,7 @@ static Vector<unsigned> serializeActions(const Vector<ContentExtensionRule>& rul
 
     for (auto& rule : ruleList) {
         auto& actionData = rule.action().data();
-        if (std::holds_alternative<IgnorePreviousRulesAction>(actionData)) {
+        if (std::holds_alternative<IgnorePreviousRulesAction>(actionData) || std::holds_alternative<IgnoreFollowingRulesAction>(actionData)) {
             resolvePendingDisplayNoneActions(actions, actionLocations, cssDisplayNoneActionsMap);
 
             blockLoadActionsMap.clear();
@@ -97,16 +97,22 @@ static Vector<unsigned> serializeActions(const Vector<ContentExtensionRule>& rul
             cssDisplayNoneActionsMap.clear();
             makeHTTPSActionsMap.clear();
             notifyActionsMap.clear();
-        } else
+        }
+
+        if (!std::holds_alternative<IgnorePreviousRulesAction>(actionData))
             ignorePreviousRuleActionsMap.clear();
 
         // Anything with condition is just pushed.
         // We could try to merge conditions but that case is not common in practice.
-        if (!rule.trigger().conditions.isEmpty()) {
+        //
+        // Also, if the rule is an ignore-following-rules rule, we shouldn't try to
+        // combine them so that we maintain the position of the rule when we process
+        // them later.
+        if (!rule.trigger().conditions.isEmpty() || std::holds_alternative<IgnoreFollowingRulesAction>(actionData)) {
             actionLocations.append(actions.size());
 
             actions.append(actionData.index());
-            std::visit(WTF::makeVisitor([&](const auto& member) {
+            WTF::visit(WTF::makeVisitor([&](const auto& member) {
                 member.serialize(actions);
             }), actionData);
             continue;
@@ -140,7 +146,7 @@ static Vector<unsigned> serializeActions(const Vector<ContentExtensionRule>& rul
             }).iterator->value;
         };
 
-        auto actionLocation = std::visit(WTF::makeVisitor([&] (const CSSDisplayNoneSelectorAction& actionData) {
+        auto actionLocation = WTF::visit(WTF::makeVisitor([&] (const CSSDisplayNoneSelectorAction& actionData) {
             const auto addResult = cssDisplayNoneActionsMap.add(rule.trigger(), PendingDisplayNoneActions());
             auto& pendingStringActions = addResult.iterator->value;
             if (!pendingStringActions.combinedSelectors.isEmpty())
@@ -152,6 +158,9 @@ static Vector<unsigned> serializeActions(const Vector<ContentExtensionRule>& rul
             return std::numeric_limits<ActionLocation>::max();
         }, [&] (const IgnorePreviousRulesAction&) {
             return findOrMakeActionLocation(ignorePreviousRuleActionsMap);
+        }, [&] (const IgnoreFollowingRulesAction&) {
+            ASSERT_NOT_REACHED();
+            return static_cast<ActionLocation>(0);
         }, [&] (const BlockLoadAction&) {
             return findOrMakeActionLocation(blockLoadActionsMap);
         }, [&] (const BlockCookiesAction&) {
@@ -182,8 +191,7 @@ static void addUniversalActionsToDFA(DFA& dfa, UniversalActionSet&& universalAct
     ASSERT(!root.actionsLength());
     unsigned actionsStart = dfa.actions.size();
     dfa.actions.reserveCapacity(dfa.actions.size() + universalActions.size());
-    for (uint64_t action : universalActions)
-        dfa.actions.uncheckedAppend(action);
+    dfa.actions.appendRange(universalActions.begin(), universalActions.end());
     unsigned actionsEnd = dfa.actions.size();
 
     unsigned actionsLength = actionsEnd - actionsStart;
@@ -272,8 +280,8 @@ static bool compileToBytecode(CombinedURLFilters&& filters, UniversalActionSet&&
 std::error_code compileRuleList(ContentExtensionCompilationClient& client, String&& ruleJSON, Vector<ContentExtensionRule>&& parsedRuleList)
 {
 #if ASSERT_ENABLED
-    callOnMainThread([ruleJSON = ruleJSON.isolatedCopy(), parsedRuleList = parsedRuleList.isolatedCopy()] {
-        ASSERT(parseRuleList(ruleJSON).value() == parsedRuleList);
+    callOnMainThread([ruleJSON = ruleJSON.isolatedCopy(), parsedRuleList = crossThreadCopy(parsedRuleList)] {
+        ASSERT(parseRuleList(ruleJSON, WebCore::ContentExtensions::CSSSelectorsAllowed::Yes).value() == parsedRuleList);
     });
 #endif
 
@@ -307,7 +315,6 @@ std::error_code compileRuleList(ContentExtensionCompilationClient& client, Strin
         ASSERT(trigger.urlFilter.length());
 
         // High bits are used for flags. This should match how they are used in DFABytecodeCompiler::compileNode.
-        ASSERT(!trigger.flags || ActionFlagMask & (static_cast<uint64_t>(trigger.flags) << 32));
         ASSERT(!(~ActionFlagMask & (static_cast<uint64_t>(trigger.flags) << 32)));
         uint64_t actionLocationAndFlags = (static_cast<uint64_t>(trigger.flags) << 32) | static_cast<uint64_t>(actionLocations[ruleIndex]);
         URLFilterParser::ParseStatus status = URLFilterParser::Ok;
@@ -317,7 +324,7 @@ std::error_code compileRuleList(ContentExtensionCompilationClient& client, Strin
             status = URLFilterParser::Ok;
         }
         if (status != URLFilterParser::Ok) {
-            dataLogF("Error while parsing %s: %s\n", trigger.urlFilter.utf8().data(), URLFilterParser::statusString(status).utf8().data());
+            dataLogF("Error while parsing %s: %s\n", trigger.urlFilter.utf8().data(), URLFilterParser::statusString(status).characters());
             return ContentExtensionError::JSONInvalidRegex;
         }
 
@@ -334,18 +341,19 @@ std::error_code compileRuleList(ContentExtensionCompilationClient& client, Strin
                     status = URLFilterParser::Ok;
                 }
                 if (status != URLFilterParser::Ok) {
-                    dataLogF("Error while parsing %s: %s\n", condition.utf8().data(), URLFilterParser::statusString(status).utf8().data());
+                    dataLogF("Error while parsing %s: %s\n", condition.utf8().data(), URLFilterParser::statusString(status).characters());
                     return ContentExtensionError::JSONInvalidRegex;
                 }
                 break;
             case ActionCondition::IfFrameURL:
+            case ActionCondition::UnlessFrameURL:
                 status = frameURLFilterParser.addPattern(condition, trigger.frameURLFilterIsCaseSensitive, actionLocationAndFlags);
                 if (status == URLFilterParser::MatchesEverything) {
                     frameURLUniversalActions.add(actionLocationAndFlags);
                     status = URLFilterParser::Ok;
                 }
                 if (status != URLFilterParser::Ok) {
-                    dataLogF("Error while parsing %s: %s\n", condition.utf8().data(), URLFilterParser::statusString(status).utf8().data());
+                    dataLogF("Error while parsing %s: %s\n", condition.utf8().data(), URLFilterParser::statusString(status).characters());
                     return ContentExtensionError::JSONInvalidRegex;
                 }
                 break;

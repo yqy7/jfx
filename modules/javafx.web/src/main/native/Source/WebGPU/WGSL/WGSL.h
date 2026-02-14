@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,13 +25,18 @@
 
 #pragma once
 
+#include "CompilationMessage.h"
+#include "CompilationScope.h"
+#include "ConstantValue.h"
+#include "WGSLEnums.h"
 #include <cinttypes>
 #include <cstdint>
 #include <memory>
-#include <variant>
 #include <wtf/HashMap.h>
+#include <wtf/HashSet.h>
 #include <wtf/OptionSet.h>
 #include <wtf/UniqueRef.h>
+#include <wtf/Variant.h>
 #include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
 
@@ -41,33 +46,25 @@ namespace WGSL {
 // Step 1
 //
 
-enum class CompilationMessageType : uint8_t {
-    Error,
-    Warning,
-    Info
-};
+class ShaderModule;
+class CompilationScope;
 
-struct CompilationMessage {
-    String message;
-    uint64_t lineNumber;
-    uint64_t linePosition;
-    uint64_t offset;
-    uint64_t length;
-};
-
-class AST;
+namespace AST {
+class Expression;
+}
 
 struct SuccessfulCheck {
     SuccessfulCheck() = delete;
     SuccessfulCheck(SuccessfulCheck&&);
+    SuccessfulCheck(Vector<Warning>&&, UniqueRef<ShaderModule>&&);
     ~SuccessfulCheck();
-    Vector<CompilationMessage> warnings;
-    UniqueRef<AST> ast;
+    Vector<Warning> warnings;
+    UniqueRef<ShaderModule> ast;
 };
 
 struct FailedCheck {
-    Vector<CompilationMessage> errors;
-    Vector<CompilationMessage> warnings;
+    Vector<Error> errors;
+    Vector<Warning> warnings;
 };
 
 struct SourceMap {
@@ -75,7 +72,15 @@ struct SourceMap {
     // https://sourcemaps.info/spec.html
 };
 
-std::variant<SuccessfulCheck, FailedCheck> staticCheck(const String& wgsl, const std::optional<SourceMap>&);
+struct Configuration {
+    uint32_t maxBuffersPlusVertexBuffersForVertexStage = 8;
+    uint32_t maxBuffersForFragmentStage = 8;
+    uint32_t maxBuffersForComputeStage = 8;
+    uint32_t maximumCombinedWorkgroupVariablesSize = 16384;
+    const HashSet<String> supportedFeatures = { };
+};
+
+Variant<SuccessfulCheck, FailedCheck> staticCheck(const String& wgsl, const std::optional<SourceMap>&, const Configuration&);
 
 //
 // Step 2
@@ -126,13 +131,15 @@ struct TextureBindingLayout {
     bool multisampled;
 };
 
-/* enum class StorageTextureAccess : uint8_t {
-    writeOnly
-}; */
+enum class StorageTextureAccess : uint8_t {
+    WriteOnly,
+    ReadOnly,
+    ReadWrite,
+};
 
 struct StorageTextureBindingLayout {
-    // StorageTextureAccess access; // There's only one field in this enum
-    // TextureFormat format; // Not sure this is necessary
+    StorageTextureAccess access { StorageTextureAccess::WriteOnly };
+    TexelFormat format;
     TextureViewDimension viewDimension;
 };
 
@@ -140,20 +147,29 @@ struct ExternalTextureBindingLayout {
     // Sentinel
 };
 
-enum class ShaderStage : uint8_t {
-    Vertex = 0x1,
-    Fragment = 0x2,
-    Compute = 0x4
-};
-
 struct BindGroupLayoutEntry {
     uint32_t binding;
+    uint32_t webBinding;
     OptionSet<ShaderStage> visibility;
-    std::variant<BufferBindingLayout, SamplerBindingLayout, TextureBindingLayout, StorageTextureBindingLayout, ExternalTextureBindingLayout> bindingMember;
+    using BindingMember = Variant<BufferBindingLayout, SamplerBindingLayout, TextureBindingLayout, StorageTextureBindingLayout, ExternalTextureBindingLayout>;
+    BindingMember bindingMember;
+    String name;
+    std::optional<uint32_t> vertexArgumentBufferIndex;
+    std::optional<uint32_t> vertexArgumentBufferSizeIndex;
+    std::optional<uint32_t> vertexBufferDynamicOffset;
+
+    std::optional<uint32_t> fragmentArgumentBufferIndex;
+    std::optional<uint32_t> fragmentArgumentBufferSizeIndex;
+    std::optional<uint32_t> fragmentBufferDynamicOffset;
+
+    std::optional<uint32_t> computeArgumentBufferIndex;
+    std::optional<uint32_t> computeArgumentBufferSizeIndex;
+    std::optional<uint32_t> computeBufferDynamicOffset;
 };
 
 struct BindGroupLayout {
     // Metal's [[id(n)]] indices are equal to the index into this vector.
+    uint32_t group;
     Vector<BindGroupLayoutEntry> entries;
 };
 
@@ -174,9 +190,9 @@ struct Fragment {
 };
 
 struct WorkgroupSize {
-    unsigned width;
-    unsigned height;
-    unsigned depth;
+    const AST::Expression* width;
+    const AST::Expression* height;
+    const AST::Expression* depth;
 };
 
 struct Compute {
@@ -187,34 +203,43 @@ enum class SpecializationConstantType : uint8_t {
     Boolean,
     Float,
     Int,
-    Unsigned
+    Unsigned,
+    Half
 };
 
 struct SpecializationConstant {
     String mangledName;
     SpecializationConstantType type;
+    AST::Expression* defaultValue;
 };
 
 struct EntryPointInformation {
-    // FIXME: This can probably be factored better.
+    String originalName;
     String mangledName;
     std::optional<PipelineLayout> defaultLayout; // If the input PipelineLayout is nullopt, the compiler computes a layout and returns it. https://gpuweb.github.io/gpuweb/#default-pipeline-layout
-    HashMap<std::pair<size_t, size_t>, size_t> bufferLengthLocations; // Metal buffer identity -> offset within helper buffer where its size needs to lie
-    HashMap<size_t, SpecializationConstant> specializationConstants;
-    HashMap<String, size_t> specializationConstantIndices; // Points into specializationConstantsByIndex
-    std::variant<Vertex, Fragment, Compute> typedEntryPoint;
+    HashMap<String, SpecializationConstant> specializationConstants;
+    Variant<Vertex, Fragment, Compute> typedEntryPoint;
+    size_t sizeForWorkgroupVariables { 0 };
+    size_t bindingCount { 0 };
 };
 
 } // namespace Reflection
 
 struct PrepareResult {
-    String msl;
     HashMap<String, Reflection::EntryPointInformation> entryPoints;
+    CompilationScope compilationScope;
 };
 
-// These are not allowed to fail.
-// All failures must have already been caught in check().
-PrepareResult prepare(const AST&, const HashMap<String, PipelineLayout>&);
-PrepareResult prepare(const AST&, const String& entryPointName, const std::optional<PipelineLayout>&);
+struct DeviceState {
+    unsigned appleGPUFamily { 4 };
+    bool shaderValidationEnabled { false };
+};
+
+Variant<PrepareResult, Error> prepare(ShaderModule&, const HashMap<String, PipelineLayout*>&);
+Variant<PrepareResult, Error> prepare(ShaderModule&, const String& entryPointName, PipelineLayout*);
+
+Variant<String, Error> generate(ShaderModule&, PrepareResult&, HashMap<String, ConstantValue>&, DeviceState&&);
+
+std::optional<ConstantValue> evaluate(const AST::Expression&, const HashMap<String, ConstantValue>&);
 
 } // namespace WGSL

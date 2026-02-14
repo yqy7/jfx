@@ -38,41 +38,14 @@ struct NetworkTransactionInformation {
     ResourceRequest request;
     ResourceResponse response;
     NetworkLoadMetrics metrics;
-
-    template<class Encoder> void encode(Encoder&) const;
-    template<class Decoder> static std::optional<NetworkTransactionInformation> decode(Decoder&);
 };
 
 struct NetworkLoadInformation {
-    WTF_MAKE_STRUCT_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_STRUCT_FAST_ALLOCATED(NetworkLoadInformation);
     ResourceRequest request;
     ResourceResponse response;
     NetworkLoadMetrics metrics;
     Vector<NetworkTransactionInformation> transactions;
 };
-
-template<class Encoder> inline void NetworkTransactionInformation::encode(Encoder& encoder) const
-{
-    encoder << type;
-    encoder << request;
-    encoder << response;
-    encoder << metrics;
-}
-
-template<class Decoder> inline std::optional<NetworkTransactionInformation> NetworkTransactionInformation::decode(Decoder& decoder)
-{
-    NetworkTransactionInformation information;
-
-    if (!decoder.decode(information.type))
-        return std::nullopt;
-    if (!decoder.decode(information.request))
-        return std::nullopt;
-    if (!decoder.decode(information.response))
-        return std::nullopt;
-    if (!decoder.decode(information.metrics))
-        return std::nullopt;
-
-    return information;
-}
 
 }

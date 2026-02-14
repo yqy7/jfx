@@ -124,10 +124,6 @@ typedef struct tagTHREADNAME_INFO {
 
 void Thread::initializeCurrentThreadInternal(const char* szThreadName)
 {
-#if COMPILER(MINGW)
-    // FIXME: Implement thread name setting with MingW.
-    UNUSED_PARAM(szThreadName);
-#else
     THREADNAME_INFO info;
     info.dwType = 0x1000;
     info.szName = Thread::normalizeThreadName(szThreadName);
@@ -137,7 +133,7 @@ void Thread::initializeCurrentThreadInternal(const char* szThreadName)
     __try {
         RaiseException(MS_VC_EXCEPTION, 0, sizeof(info) / sizeof(ULONG_PTR), reinterpret_cast<ULONG_PTR*>(&info));
     } __except(EXCEPTION_CONTINUE_EXECUTION) { }
-#endif
+
     initializeCurrentThreadEvenIfNonWTFCreated();
 }
 
@@ -151,7 +147,7 @@ static unsigned __stdcall wtfThreadEntryPoint(void* data)
     return 0;
 }
 
-bool Thread::establishHandle(NewThreadContext* data, std::optional<size_t> stackSize, QOS)
+bool Thread::establishHandle(NewThreadContext* data, std::optional<size_t> stackSize, QOS, SchedulingPolicy)
 {
     unsigned threadIdentifier = 0;
     unsigned initFlag = stackSize ? STACK_SIZE_PARAM_IS_A_RESERVATION : 0;
@@ -211,7 +207,7 @@ void Thread::detach()
 
 auto Thread::suspend(const ThreadSuspendLocker&) -> Expected<void, PlatformSuspendError>
 {
-    RELEASE_ASSERT_WITH_MESSAGE(this != &Thread::current(), "We do not support suspending the current thread itself.");
+    RELEASE_ASSERT_WITH_MESSAGE(this != &Thread::currentSingleton(), "We do not support suspending the current thread itself.");
     DWORD result = SuspendThread(m_handle);
     if (result != (DWORD)-1)
         return { };
@@ -270,6 +266,7 @@ struct Thread::ThreadHolder {
         if (isMainThread())
             return;
         if (thread) {
+            thread->m_clientData = nullptr;
             thread->specificStorage().destroySlots();
             thread->didExit();
         }
@@ -291,12 +288,12 @@ Thread& Thread::initializeTLS(Ref<Thread>&& thread)
     return *s_threadHolder.thread;
 }
 
-Atomic<int> Thread::SpecificStorage::s_numberOfKeys;
+Atomic<size_t> Thread::SpecificStorage::s_numberOfKeys;
 std::array<Atomic<Thread::SpecificStorage::DestroyFunction>, Thread::SpecificStorage::s_maxKeys> Thread::SpecificStorage::s_destroyFunctions;
 
 bool Thread::SpecificStorage::allocateKey(int& key, DestroyFunction destroy)
 {
-    int k = s_numberOfKeys.exchangeAdd(1);
+    auto k = s_numberOfKeys.exchangeAdd(1);
     if (k >= s_maxKeys) {
         s_numberOfKeys.exchangeSub(1);
         return false;
@@ -328,9 +325,7 @@ void Thread::SpecificStorage::destroySlots()
     }
 }
 
-Mutex::~Mutex()
-{
-}
+Mutex::~Mutex() = default;
 
 void Mutex::lock()
 {
@@ -350,6 +345,12 @@ void Mutex::unlock()
 // Returns an interval in milliseconds suitable for passing to one of the Win32 wait functions (e.g., ::WaitForSingleObject).
 static DWORD absoluteTimeToWaitTimeoutInterval(WallTime absoluteTime)
 {
+    if (absoluteTime.isInfinity()) {
+        if (absoluteTime == -WallTime::infinity())
+            return 0;
+        return INFINITE;
+    }
+
     WallTime currentTime = WallTime::now();
 
     // Time is in the past - return immediately.
@@ -363,9 +364,7 @@ static DWORD absoluteTimeToWaitTimeoutInterval(WallTime absoluteTime)
     return static_cast<DWORD>((absoluteTime - currentTime).milliseconds());
 }
 
-ThreadCondition::~ThreadCondition()
-{
-}
+ThreadCondition::~ThreadCondition() = default;
 
 void ThreadCondition::wait(Mutex& mutex)
 {

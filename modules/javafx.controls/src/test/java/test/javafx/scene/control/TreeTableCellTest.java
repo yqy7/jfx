@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,13 +25,24 @@
 
 package test.javafx.scene.control;
 
-import javafx.beans.property.SimpleStringProperty;
-import javafx.scene.control.skin.TreeTableCellSkin;
-import test.com.sun.javafx.scene.control.infrastructure.StageLoader;
-import test.com.sun.javafx.scene.control.infrastructure.VirtualFlowTestUtils;
-import javafx.beans.property.SimpleObjectProperty;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static test.com.sun.javafx.scene.control.infrastructure.ControlSkinFactory.attemptGC;
+import static test.com.sun.javafx.scene.control.infrastructure.ControlTestUtils.assertStyleClassContains;
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleObjectProperty;
+import javafx.beans.property.SimpleStringProperty;
 import javafx.scene.control.CellShim;
+import javafx.scene.control.IndexedCell;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableCell;
 import javafx.scene.control.TreeTableCellShim;
@@ -40,24 +51,17 @@ import javafx.scene.control.TreeTableColumn.CellEditEvent;
 import javafx.scene.control.TreeTablePosition;
 import javafx.scene.control.TreeTableRow;
 import javafx.scene.control.TreeTableView;
-
-import java.lang.ref.WeakReference;
-import java.util.ArrayList;
-import java.util.List;
-
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Ignore;
-import org.junit.Test;
-
+import javafx.scene.control.skin.TreeTableCellSkin;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 import com.sun.javafx.tk.Toolkit;
-
-import static test.com.sun.javafx.scene.control.infrastructure.ControlSkinFactory.*;
-import static test.com.sun.javafx.scene.control.infrastructure.ControlTestUtils.*;
-import static org.junit.Assert.*;
+import test.com.sun.javafx.scene.control.infrastructure.StageLoader;
+import test.com.sun.javafx.scene.control.infrastructure.VirtualFlowTestUtils;
 
 public class TreeTableCellTest {
-    private TreeTableCell<String, String> cell;
+    private TreeTableCellShim<String, String> cell;
     private TreeTableView<String> tree;
     private TreeTableRow<String> row;
 
@@ -74,7 +78,8 @@ public class TreeTableCellTest {
 
     private TreeTableColumn<String, String> editingColumn;
 
-    @Before public void setup() {
+    @BeforeEach
+    public void setup() {
         Thread.currentThread().setUncaughtExceptionHandler((thread, throwable) -> {
             if (throwable instanceof RuntimeException) {
                 throw (RuntimeException)throwable;
@@ -83,7 +88,7 @@ public class TreeTableCellTest {
             }
         });
 
-        cell = new TreeTableCell<String, String>();
+        cell = new TreeTableCellShim<>();
 
         root = new TreeItem<>(ROOT);
         apples = new TreeItem<>(APPLES);
@@ -91,14 +96,14 @@ public class TreeTableCellTest {
         pears = new TreeItem<>(PEARS);
         root.getChildren().addAll(apples, oranges, pears);
 
-        tree = new TreeTableView<String>(root);
+        tree = new TreeTableView<>(root);
         root.setExpanded(true);
         editingColumn = new TreeTableColumn<>("TEST");
 
         row = new TreeTableRow<>();
     }
 
-    @After
+    @AfterEach
     public void cleanup() {
         if (stageLoader != null) stageLoader.dispose();
         Thread.currentThread().setUncaughtExceptionHandler(null);
@@ -123,7 +128,7 @@ public class TreeTableCellTest {
      * index, or treeView changes, including the treeView's items.       *
      ********************************************************************/
 
-    @Ignore // TODO file bug!
+    @Disabled // TODO file bug!
     @Test public void itemMatchesIndexWithinTreeItems() {
         cell.updateIndex(0);
         cell.updateTreeTableView(tree);
@@ -134,7 +139,7 @@ public class TreeTableCellTest {
         assertSame(apples, cell.getTableRow().getTreeItem());
     }
 
-    @Ignore // TODO file bug!
+    @Disabled // TODO file bug!
     @Test public void itemMatchesIndexWithinTreeItems2() {
         cell.updateTreeTableView(tree);
         cell.updateIndex(0);
@@ -167,15 +172,15 @@ public class TreeTableCellTest {
     // Above were the simple tests. Now we check various circumstances
     // to make sure the item is updated correctly.
 
-    @Ignore // TODO file bug!
+    @Disabled // TODO file bug!
     @Test public void itemIsUpdatedWhenItWasOutOfRangeButUpdatesToTreeTableViewItemsMakesItInRange() {
         cell.updateIndex(4);
         cell.updateTreeTableView(tree);
-        root.getChildren().addAll(new TreeItem<String>("Pumpkin"), new TreeItem<>("Lemon"));
+        root.getChildren().addAll(new TreeItem<>("Pumpkin"), new TreeItem<>("Lemon"));
         assertSame("Pumpkin", cell.getItem());
     }
 
-    @Ignore // TODO file bug!
+    @Disabled // TODO file bug!
     @Test public void itemIsUpdatedWhenItWasInRangeButUpdatesToTreeTableViewItemsMakesItOutOfRange() {
         cell.updateIndex(2);
         cell.updateTreeTableView(tree);
@@ -185,7 +190,7 @@ public class TreeTableCellTest {
         assertNull(cell.getItem());
     }
 
-    @Ignore // TODO file bug!
+    @Disabled // TODO file bug!
     @Test public void itemIsUpdatedWhenTreeTableViewItemsIsUpdated() {
         // set cell index to point to 'Apples'
         cell.updateIndex(1);
@@ -199,7 +204,7 @@ public class TreeTableCellTest {
         assertEquals("Lime", cell.getItem());
     }
 
-    @Ignore // TODO file bug!
+    @Disabled // TODO file bug!
     @Test public void itemIsUpdatedWhenTreeTableViewItemsHasNewItemInsertedBeforeIndex() {
         cell.updateIndex(2);
         cell.updateTreeTableView(tree);
@@ -219,7 +224,7 @@ public class TreeTableCellTest {
 //        assertEquals(other, cell.getItem());
 //    }
 
-    @Ignore // TODO file bug!
+    @Disabled // TODO file bug!
     @Test public void itemIsUpdatedWhenTreeTableViewItemsIsReplaced() {
         cell.updateIndex(1);
         cell.updateTreeTableView(tree);
@@ -227,14 +232,14 @@ public class TreeTableCellTest {
         assertEquals("Water", cell.getItem());
     }
 
-    @Ignore // TODO file bug!
+    @Disabled // TODO file bug!
     @Test public void itemIsUpdatedWhenTreeTableViewIsReplaced() {
         cell.updateIndex(2);
         cell.updateTreeTableView(tree);
         TreeItem<String> newRoot = new TreeItem<>();
         newRoot.setExpanded(true);
         newRoot.getChildren().setAll(new TreeItem<>("Water"), new TreeItem<>("Juice"), new TreeItem<>("Soda"));
-        TreeTableView<String> treeView2 = new TreeTableView<String>(newRoot);
+        TreeTableView<String> treeView2 = new TreeTableView<>(newRoot);
         cell.updateTreeTableView(treeView2);
         assertEquals("Juice", cell.getItem());
     }
@@ -255,7 +260,7 @@ public class TreeTableCellTest {
 //        assertListenerListDoesNotContain(model, treeener);
 //    }
 //
-@Ignore // TODO file bug!
+    @Disabled // TODO file bug!
     @Test public void replaceANullItemsWithNotNull() {
         cell.updateIndex(1);
         cell.updateTreeTableView(tree);
@@ -274,7 +279,7 @@ public class TreeTableCellTest {
      ********************************************************************/
 
     // startEdit()
-    @Ignore // TODO file bug!
+    @Disabled // TODO file bug!
     @Test public void editOnTreeTableViewResultsInEditingInCell() {
         tree.setEditable(true);
         cell.updateTreeTableView(tree);
@@ -345,7 +350,7 @@ public class TreeTableCellTest {
         cell.commitEdit("Watermelon");
     }
 
-    @Ignore // TODO file bug!
+    @Disabled // TODO file bug!
     @Test public void commitWhenTreeIsNotNullWillUpdateTheItemsTree() {
         tree.setEditable(true);
         cell.updateTreeTableView(tree);
@@ -534,7 +539,7 @@ public class TreeTableCellTest {
     private int rt_29923_count = 0;
     @Test public void test_rt_29923() {
         // setup test
-        cell = new TreeTableCellShim<String,String>() {
+        cell = new TreeTableCellShim<>() {
             @Override public void updateItem(String item, boolean empty) {
                 super.updateItem(item, empty);
                 rt_29923_count++;
@@ -557,8 +562,8 @@ public class TreeTableCellTest {
         assertNull(cell.getItem());
         assertFalse(cell.isEmpty());
 
-        // This test used to be as shown below....but due to RT-33108, it changed
-        // to the enabled code beneath. Refer to the first comment in RT-33108
+        // This test used to be as shown below....but due to JDK-8122970, it changed
+        // to the enabled code beneath. Refer to the first comment in JDK-8122970
         // for more detail, but in short we can't optimise and not call updateItem
         // when the new and old items are the same - doing so means we can end
         // up with bad bindings, etc in the individual cells (in other words,
@@ -708,7 +713,6 @@ public class TreeTableCellTest {
      * The item of the {@link TreeTableRow} should not be null, when the {@link TreeTableCell} is not empty.
      * See also: JDK-8251483
      */
-    @Ignore("Fails currently but will be enabled again in JDK-8289357")
     @Test
     public void testRowItemIsNotNullForNonEmptyCell() {
         TreeTableColumn<String, String> treeTableColumn = new TreeTableColumn<>();
@@ -831,8 +835,8 @@ public class TreeTableCellTest {
         List<CellEditEvent<?, ?>> events = new ArrayList<>();
         editingColumn.setOnEditCancel(events::add);
         cell.cancelEdit();
-        assertEquals("column must have received editCancel", 1, events.size());
-        assertEquals("editing location of cancel event", editingPosition, events.get(0).getTreeTablePosition());
+        assertEquals(1, events.size(), "column must have received editCancel");
+        assertEquals(editingPosition, events.get(0).getTreeTablePosition(), "editing location of cancel event");
     }
 
     @Test
@@ -845,8 +849,8 @@ public class TreeTableCellTest {
         List<CellEditEvent<?, ?>> events = new ArrayList<>();
         editingColumn.setOnEditCancel(events::add);
         tree.edit(-1, null);
-        assertEquals("column must have received editCancel", 1, events.size());
-        assertEquals("editing location of cancel event", editingPosition, events.get(0).getTreeTablePosition());
+        assertEquals(1, events.size(), "column must have received editCancel");
+        assertEquals(editingPosition, events.get(0).getTreeTablePosition(), "editing location of cancel event");
     }
 
     @Test
@@ -859,8 +863,8 @@ public class TreeTableCellTest {
         List<CellEditEvent<?, ?>> events = new ArrayList<>();
         editingColumn.setOnEditCancel(events::add);
         cell.updateIndex(0);
-        assertEquals("column must have received editCancel", 1, events.size());
-        assertEquals("editing location of cancel event", editingPosition, events.get(0).getTreeTablePosition());
+        assertEquals(1, events.size(), "column must have received editCancel");
+        assertEquals(editingPosition, events.get(0).getTreeTablePosition(), "editing location of cancel event");
     }
 
     @Test
@@ -874,8 +878,8 @@ public class TreeTableCellTest {
         editingColumn.setOnEditCancel(events::add);
         root.setExpanded(false);
         Toolkit.getToolkit().firePulse();
-        assertEquals("column must have received editCancel", 1, events.size());
-        assertEquals("editing location of cancel event", editingPosition, events.get(0).getTreeTablePosition());
+        assertEquals(1, events.size(), "column must have received editCancel");
+        assertEquals(editingPosition, events.get(0).getTreeTablePosition(), "editing location of cancel event");
     }
 
     @Test
@@ -889,9 +893,9 @@ public class TreeTableCellTest {
         editingColumn.setOnEditCancel(events::add);
         root.getChildren().add(0, new TreeItem<>("added"));
         Toolkit.getToolkit().firePulse();
-        assertNull("sanity: editing terminated on items modification", tree.getEditingCell());
-        assertEquals("column must have received editCancel", 1, events.size());
-        assertEquals("editing location of cancel event", editingPosition, events.get(0).getTreeTablePosition());
+        assertNull(tree.getEditingCell(), "sanity: editing terminated on items modification");
+        assertEquals(1, events.size(), "column must have received editCancel");
+        assertEquals(editingPosition, events.get(0).getTreeTablePosition(), "editing location of cancel event");
     }
 
     /**
@@ -909,9 +913,9 @@ public class TreeTableCellTest {
         editingColumn.setOnEditCancel(events::add);
         root.getChildren().remove(editingIndex - 1);
         Toolkit.getToolkit().firePulse();
-        assertNull("sanity: editing terminated on items modification", tree.getEditingCell());
-        assertEquals("column must have received editCancel", 1, events.size());
-        assertEquals("editing location of cancel event", editingPosition, events.get(0).getTreeTablePosition());
+        assertNull(tree.getEditingCell(), "sanity: editing terminated on items modification");
+        assertEquals(1, events.size(), "column must have received editCancel");
+        assertEquals(editingPosition, events.get(0).getTreeTablePosition(), "editing location of cancel event");
     }
 
     /**
@@ -932,7 +936,7 @@ public class TreeTableCellTest {
         Toolkit.getToolkit().firePulse();
         editingItem = null;
         attemptGC(itemRef);
-        assertEquals("treeItem must be gc'ed", null, itemRef.get());
+        assertEquals(null, itemRef.get(), "treeItem must be gc'ed");
     }
 
     @Test
@@ -979,8 +983,8 @@ public class TreeTableCellTest {
         editingColumn.setOnEditCancel(events::add);
         String value = "edited";
         cell.commitEdit(value);
-        assertEquals("sanity: value committed", value, tree.getTreeItem(editingRow).getValue());
-        assertEquals("commit must not have fired editCancel", 0, events.size());
+        assertEquals(value, tree.getTreeItem(editingRow).getValue(), "sanity: value committed");
+        assertEquals(0, events.size(), "commit must not have fired editCancel");
     }
 
 // fix of JDK-8271474 changed the implementation of how the editing location is evaluated
@@ -995,9 +999,8 @@ public class TreeTableCellTest {
          List<CellEditEvent<?, ?>> events = new ArrayList<>();
          editingColumn.setOnEditCommit(events::add);
          cell.commitEdit("edited");
-         assertEquals("column must have received editCommit", 1, events.size());
-         assertEquals("editing location of commit event must be same as table's editingCell",
-                 editingPosition, events.get(0).getTreeTablePosition());
+         assertEquals(1, events.size(), "column must have received editCommit");
+         assertEquals(editingPosition, events.get(0).getTreeTablePosition(), "editing location of commit event must be same as table's editingCell");
      }
 
      @Test
@@ -1010,9 +1013,8 @@ public class TreeTableCellTest {
          List<CellEditEvent<?, ?>> events = new ArrayList<>();
          editingColumn.setOnEditCommit(events::add);
          cell.commitEdit("edited");
-         assertEquals("column must have received editCommit", 1, events.size());
-         assertEquals("editing location of commit event must be same as editingCellAtStartEdit",
-                 editingCellAtStartEdit, events.get(0).getTreeTablePosition());
+         assertEquals(1, events.size(), "column must have received editCommit");
+         assertEquals(editingCellAtStartEdit, events.get(0).getTreeTablePosition(), "editing location of commit event must be same as editingCellAtStartEdit");
      }
 
      @Test
@@ -1023,9 +1025,8 @@ public class TreeTableCellTest {
          List<CellEditEvent<?, ?>> events = new ArrayList<>();
          editingColumn.addEventHandler(TreeTableColumn.editAnyEvent(), events::add);
          cell.commitEdit("edited");
-         assertEquals("column must have received editCommit", 1, events.size());
-         assertEquals("editing location of commit event must be same as editingCellAtStartEdit",
-                 editingCellAtStartEdit, events.get(0).getTreeTablePosition());
+         assertEquals(1, events.size(), "column must have received editCommit");
+         assertEquals(editingCellAtStartEdit, events.get(0).getTreeTablePosition(), "editing location of commit event must be same as editingCellAtStartEdit");
      }
 
 // --- JDK-8271474: implement consistent event firing pattern
@@ -1111,8 +1112,8 @@ public class TreeTableCellTest {
          List<CellEditEvent<?, ?>> events = new ArrayList<>();
          editingColumn.addEventHandler(TreeTableColumn.editStartEvent(), events::add);
          cell.startEdit();
-         assertFalse("sanity: off-range cell must not be editing", cell.isEditing());
-         assertEquals("cell must not fire editStart if not editing", 0, events.size());
+         assertFalse(cell.isEditing(), "sanity: off-range cell must not be editing");
+         assertEquals(0, events.size(), "cell must not fire editStart if not editing");
      }
 
      @Test
@@ -1120,8 +1121,8 @@ public class TreeTableCellTest {
          setupForEditing();
          cell.updateIndex(tree.getExpandedItemCount());
          cell.startEdit();
-         assertFalse("sanity: off-range cell must not be editing", cell.isEditing());
-         assertNull("treetable editing location must not be updated", tree.getEditingCell());
+         assertFalse(cell.isEditing(), "sanity: off-range cell must not be editing");
+         assertNull(tree.getEditingCell(), "treetable editing location must not be updated");
      }
 
 
@@ -1164,7 +1165,7 @@ public class TreeTableCellTest {
          }
          if (editingColumn != null ) cell.updateTableColumn(editingColumn);
          // force into editable state (not empty)
-         TreeTableCellShim.set_lockItemOnEdit(cell, true);
+         cell.setLockItemOnStartEdit(true);
          CellShim.updateItem(cell, "something", false);
      }
 
@@ -1192,27 +1193,101 @@ public class TreeTableCellTest {
         int intermediate = 0;
         cell.updateIndex(editingIndex);
         tree.edit(editingIndex, editingColumn);
-        assertTrue("sanity: ", cell.isEditing());
+        assertTrue(cell.isEditing(), "sanity: ");
         try {
             tree.edit(intermediate, editingColumn);
         } catch (Exception ex) {
             // catching to test in finally
         } finally {
-            assertFalse("cell must not be editing", cell.isEditing());
-            assertEquals("table must be editing at intermediate index", intermediate, tree.getEditingCell().getRow());
+            assertFalse(cell.isEditing(), "cell must not be editing");
+            assertEquals(intermediate, tree.getEditingCell().getRow(), "table must be editing at intermediate index");
         }
         // test editing: second round
         // switch cell off editing by cell api
         tree.edit(editingIndex, editingColumn);
-        assertTrue("sanity: ", cell.isEditing());
+        assertTrue(cell.isEditing(), "sanity: ");
         try {
             cell.cancelEdit();
         } catch (Exception ex) {
             // catching to test in finally
         } finally {
-            assertFalse("cell must not be editing", cell.isEditing());
-            assertNull("table editing must be cancelled by cell", tree.getEditingCell());
+            assertFalse(cell.isEditing(), "cell must not be editing");
+            assertNull(tree.getEditingCell(), "table editing must be cancelled by cell");
         }
+    }
+
+    /**
+     * See also: <a href="https://bugs.openjdk.org/browse/JDK-8187314">JDK-8187314</a>.
+     */
+    @Test
+    public void testEditCommitValueChangeIsReflectedInCell() {
+        setupForEditing();
+        editingColumn.setCellValueFactory(cc -> new SimpleObjectProperty<>(cc.getValue().getValue()));
+        editingColumn.setOnEditCommit(event -> {
+            assertEquals("ABCDEF", event.getNewValue());
+            // Change the underlying item.
+            root.setValue("ABCDEF [Changed]");
+        });
+
+        cell.updateIndex(0);
+
+        assertEquals("Root", cell.getItem());
+
+        cell.startEdit();
+        cell.commitEdit("ABCDEF");
+
+        assertEquals("ABCDEF [Changed]", cell.getItem());
+    }
+
+    /**
+     * Same index and underlying item should not cause the updateItem(..) method to be called.
+     */
+    @Test
+    public void testSameIndexAndItemShouldNotUpdateItem() {
+        AtomicInteger counter = new AtomicInteger();
+
+        editingColumn.setCellFactory(view -> new TreeTableCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                counter.incrementAndGet();
+                super.updateItem(item, empty);
+            }
+        });
+        setupForEditing();
+
+        stageLoader = new StageLoader(tree);
+
+        counter.set(0);
+        IndexedCell<String> cell = VirtualFlowTestUtils.getCell(tree, 0, 0);
+        cell.updateIndex(0);
+
+        assertEquals(0, counter.get());
+    }
+
+    /**
+     * The contract of a {@link TreeTableCell} is that isItemChanged(..)
+     * is called when the index is 'changed' to the same number as the old one, to evaluate if we need to call
+     * updateItem(..).
+     */
+    @Test
+    public void testSameIndexIsItemsChangedShouldBeCalled() {
+        AtomicBoolean isItemChangedCalled = new AtomicBoolean();
+
+        editingColumn.setCellFactory(view -> new TreeTableCell<>() {
+            @Override
+            protected boolean isItemChanged(String oldItem, String newItem) {
+                isItemChangedCalled.set(true);
+                return super.isItemChanged(oldItem, newItem);
+            }
+        });
+        setupForEditing();
+
+        stageLoader = new StageLoader(tree);
+
+        IndexedCell<String> cell = VirtualFlowTestUtils.getCell(tree, 0, 0);
+        cell.updateIndex(0);
+
+        assertTrue(isItemChangedCalled.get());
     }
 
     public static class MisbehavingOnCancelTreeTableCell<S, T> extends TreeTableCell<S, T> {
@@ -1222,7 +1297,5 @@ public class TreeTableCellTest {
             super.cancelEdit();
             throw new RuntimeException("violating contract");
         }
-
     }
-
 }

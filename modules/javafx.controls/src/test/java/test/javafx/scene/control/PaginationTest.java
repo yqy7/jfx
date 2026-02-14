@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,14 +25,14 @@
 
 package test.javafx.scene.control;
 
-import com.sun.javafx.scene.SceneHelper;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static test.com.sun.javafx.scene.control.infrastructure.ControlTestUtils.assertStyleClassContains;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -41,22 +41,21 @@ import javafx.css.CssMetaData;
 import javafx.css.StyleableProperty;
 import javafx.scene.Node;
 import javafx.scene.Scene;
+import javafx.scene.control.Label;
+import javafx.scene.control.Pagination;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import javafx.util.Callback;
-
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.scene.SceneHelper;
+import com.sun.javafx.tk.Toolkit;
 import test.com.sun.javafx.pgstub.StubToolkit;
 import test.com.sun.javafx.scene.control.infrastructure.KeyEventFirer;
 import test.com.sun.javafx.scene.control.infrastructure.MouseEventGenerator;
-import com.sun.javafx.tk.Toolkit;
-import javafx.scene.control.Label;
-import javafx.scene.control.Pagination;
 
 public class PaginationTest {
     private Pagination pagination;
@@ -65,16 +64,21 @@ public class PaginationTest {
     private Stage stage;
     private StackPane root;
 
-    @Before public void setup() {
+    @BeforeEach
+    public void setup() {
         pagination = new Pagination();
-        tk = (StubToolkit)Toolkit.getToolkit();//This step is not needed (Just to make sure StubToolkit is loaded into VM)
+        tk = Toolkit.getToolkit();//This step is not needed (Just to make sure StubToolkit is loaded into VM)
+
+        assertTrue(tk instanceof StubToolkit);  // Ensure it's StubToolkit
+
         root = new StackPane();
         scene = new Scene(root);
         stage = new Stage();
         stage.setScene(scene);
     }
 
-    @After public void tearDown() {
+    @AfterEach
+    public void tearDown() {
         stage.hide();
     }
 
@@ -114,24 +118,29 @@ public class PaginationTest {
      * Tests for property binding                                        *
      ********************************************************************/
 
-    @Test public void checkMaxPageIndicatorCountPropertyBind() {
+    @Test
+    public void checkMaxPageIndicatorCountPropertyBind() {
         IntegerProperty intPr = new SimpleIntegerProperty(200);
         pagination.maxPageIndicatorCountProperty().bind(intPr);
-        assertEquals("number of visible pages cannot be bound", pagination.maxPageIndicatorCountProperty().getValue(), 200.0, 0.0);
+        assertEquals(pagination.maxPageIndicatorCountProperty().getValue(), 200.0, 0.0, "number of visible pages cannot be bound");
         intPr.setValue(105);
-        assertEquals("number of visible pages cannot be bound", pagination.maxPageIndicatorCountProperty().getValue(), 105.0, 0.0);
+        assertEquals(pagination.maxPageIndicatorCountProperty().getValue(), 105.0, 0.0, "number of visible pages cannot be bound");
     }
 
-    @Test(expected = java.lang.UnsupportedOperationException.class) public void checkPageIndexPropertyBind() {
-        IntegerProperty intPr = new SimpleIntegerProperty(10);
-        pagination.currentPageIndexProperty().bind(intPr);
+    @Test
+    public void checkPageIndexPropertyBind() {
+        assertThrows(UnsupportedOperationException.class, () -> {
+            IntegerProperty intPr = new SimpleIntegerProperty(10);
+            pagination.currentPageIndexProperty().bind(intPr);
+        });
     }
 
-    @Test public void checkPageFactoryPropertyBind() {
+    @Test
+    public void checkPageFactoryPropertyBind() {
         Callback callback = arg0 -> null;
         ObjectProperty objPr = new SimpleObjectProperty(callback);
         pagination.pageFactoryProperty().bind(objPr);
-        assertSame("page factory cannot be bound", pagination.pageFactoryProperty().getValue(), callback);
+        assertSame(pagination.pageFactoryProperty().getValue(), callback, "page factory cannot be bound");
     }
 
     /*********************************************************************
@@ -320,5 +329,24 @@ public class PaginationTest {
             box.getChildren().add(l);
         }
         return box;
+    }
+
+    /** JDK-8301797 */
+    @Test
+    public void testInitialPreferredSize() {
+        pagination.setPageCount(150);
+        pagination.setCurrentPageIndex(0);
+        pagination.setMaxPageIndicatorCount(50);
+        Label label = new Label();
+        pagination.setPageFactory(index -> {
+            label.setText("" + (index + 1));
+            return label;
+        });
+
+        root.getChildren().add(pagination);
+        show();
+
+        tk.firePulse();
+        assertTrue((pagination.prefWidth(-1) > 200), "pagination prefWidth() is incorrect");
     }
 }

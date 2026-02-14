@@ -28,14 +28,14 @@
 
 #if ENABLE(USER_MESSAGE_HANDLERS)
 
-#include "Frame.h"
 #include "JSDOMPromiseDeferred.h"
+#include "LocalFrame.h"
 #include "SerializedScriptValue.h"
 #include <JavaScriptCore/JSCJSValue.h>
 
 namespace WebCore {
 
-UserMessageHandler::UserMessageHandler(Frame& frame, UserMessageHandlerDescriptor& descriptor)
+UserMessageHandler::UserMessageHandler(LocalFrame& frame, UserMessageHandlerDescriptor& descriptor)
     : FrameDestructionObserver(&frame)
     , m_descriptor(&descriptor)
 {
@@ -43,28 +43,24 @@ UserMessageHandler::UserMessageHandler(Frame& frame, UserMessageHandlerDescripto
 
 UserMessageHandler::~UserMessageHandler() = default;
 
-ExceptionOr<void> UserMessageHandler::postMessage(RefPtr<SerializedScriptValue>&& value, Ref<DeferredPromise>&& promise)
+ExceptionOr<void> UserMessageHandler::postMessage(JSC::JSGlobalObject& globalObject, JSC::JSValue value, Ref<DeferredPromise>&& promise)
 {
     // Check to see if the descriptor has been removed. This can happen if the host application has
     // removed the named message handler at the WebKit2 API level.
     if (!m_descriptor) {
-        promise->reject(Exception { InvalidAccessError });
-        return Exception { InvalidAccessError };
+        promise->reject(Exception { ExceptionCode::InvalidAccessError });
+        return Exception { ExceptionCode::InvalidAccessError };
     }
 
-    m_descriptor->didPostMessage(*this, value.get(), [promise = WTFMove(promise)](SerializedScriptValue* result, const String& errorMessage) {
+    m_descriptor->didPostMessage(*this, globalObject, value, [promise = WTFMove(promise)](JSC::JSValue result, const String& errorMessage) {
+        if (errorMessage.isNull())
+            return promise->resolveWithJSValue(result);
+
         auto* globalObject = promise->globalObject();
         if (!globalObject)
             return;
-
-        if (!errorMessage.isNull()) {
             JSC::JSLockHolder lock(globalObject);
             promise->reject<IDLAny>(JSC::createError(globalObject, errorMessage));
-            return;
-        }
-
-        ASSERT(result);
-        promise->resolve<IDLAny>(result->deserialize(*globalObject, globalObject));
     });
     return { };
 }

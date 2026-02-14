@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2016 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,13 +23,12 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-const SkipSeconds = 15;
 const MinimumSizeToShowAnyControl = 47;
 const MaximumSizeToShowSmallProminentControl = 88;
 
 let mediaControlsHost;
 
-// This is called from HTMLMediaElement::ensureMediaControlsInjectedScript().
+// This is called from HTMLMediaElement::ensureMediaControls().
 function createControls(shadowRoot, media, host)
 {
     if (host) {
@@ -38,25 +37,19 @@ function createControls(shadowRoot, media, host)
         iconService.shadowRoot = shadowRoot;
         iconService.mediaControlsHost = host;
 
-        shadowRoot.appendChild(document.createElement("style")).textContent = host.shadowRootCSSText;
+        for (let styleSheet of host.shadowRootStyleSheets)
+            shadowRoot.appendChild(document.createElement("style")).textContent = styleSheet;
     }
 
     return new MediaController(shadowRoot, media, host);
 }
 
-function UIString(stringToLocalize, replacementString)
+function UIString(stringToLocalize, ...replacementStrings)
 {
-    let allLocalizedStrings = {};
-    try {
-        allLocalizedStrings = UIStrings;
-    } catch (error) {}
+    let localizedString = window.UIStrings?.[stringToLocalize] ?? stringToLocalize;
 
-    const localizedString = allLocalizedStrings[stringToLocalize];
-    if (!localizedString)
-        return stringToLocalize;
-
-    if (replacementString)
-        return localizedString.replace("%s", replacementString);
+    for (let replacementString of replacementStrings)
+        localizedString = localizedString.replace("%s", replacementString);
 
     return localizedString;
 }

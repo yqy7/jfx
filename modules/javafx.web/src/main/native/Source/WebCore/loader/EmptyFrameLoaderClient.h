@@ -25,16 +25,18 @@
 
 #pragma once
 
-#include "FrameLoaderClient.h"
+#include "LocalFrameLoaderClient.h"
 
 namespace WebCore {
 
-class WEBCORE_EXPORT EmptyFrameLoaderClient : public FrameLoaderClient {
-private:
-    Ref<DocumentLoader> createDocumentLoader(const ResourceRequest&, const SubstituteData&) override;
+class WEBCORE_EXPORT EmptyFrameLoaderClient : public LocalFrameLoaderClient {
+public:
+    explicit EmptyFrameLoaderClient(FrameLoader& frameLoader)
+        : LocalFrameLoaderClient(frameLoader)
+    { }
 
-    std::optional<FrameIdentifier> frameID() const override;
-    std::optional<PageIdentifier> pageID() const override;
+private:
+    Ref<DocumentLoader> createDocumentLoader(ResourceRequest&&, SubstituteData&&) override;
 
     bool hasWebView() const final;
 
@@ -53,7 +55,7 @@ private:
 
     void convertMainResourceLoadToDownload(DocumentLoader*, const ResourceRequest&, const ResourceResponse&) final;
 
-    void assignIdentifierToInitialRequest(ResourceLoaderIdentifier, DocumentLoader*, const ResourceRequest&) final;
+    void assignIdentifierToInitialRequest(ResourceLoaderIdentifier, IsMainResourceLoad, DocumentLoader*, const ResourceRequest&) final;
     bool shouldUseCredentialStorage(DocumentLoader*, ResourceLoaderIdentifier) override;
     void dispatchWillSendRequest(DocumentLoader*, ResourceLoaderIdentifier, ResourceRequest&, const ResourceResponse&) final;
     void dispatchDidReceiveAuthenticationChallenge(DocumentLoader*, ResourceLoaderIdentifier, const AuthenticationChallenge&) final;
@@ -67,11 +69,11 @@ private:
 
     void dispatchDidReceiveResponse(DocumentLoader*, ResourceLoaderIdentifier, const ResourceResponse&) final;
     void dispatchDidReceiveContentLength(DocumentLoader*, ResourceLoaderIdentifier, int) final;
-    void dispatchDidFinishLoading(DocumentLoader*, ResourceLoaderIdentifier) final;
+    void dispatchDidFinishLoading(DocumentLoader*, IsMainResourceLoad, ResourceLoaderIdentifier) final;
 #if ENABLE(DATA_DETECTION)
     void dispatchDidFinishDataDetection(NSArray *) final;
 #endif
-    void dispatchDidFailLoading(DocumentLoader*, ResourceLoaderIdentifier, const ResourceError&) final;
+    void dispatchDidFailLoading(DocumentLoader*, IsMainResourceLoad, ResourceLoaderIdentifier, const ResourceError&) final;
     bool dispatchDidLoadResourceFromMemoryCache(DocumentLoader*, const ResourceRequest&, const ResourceResponse&, int) final;
 
     void dispatchDidDispatchOnloadEvents() final;
@@ -85,20 +87,22 @@ private:
     void dispatchWillClose() final;
     void dispatchDidStartProvisionalLoad() final;
     void dispatchDidReceiveTitle(const StringWithDirection&) final;
-    void dispatchDidCommitLoad(std::optional<HasInsecureContent>, std::optional<UsedLegacyTLS>) final;
-    void dispatchDidFailProvisionalLoad(const ResourceError&, WillContinueLoading) final;
+    void dispatchDidCommitLoad(std::optional<HasInsecureContent>, std::optional<UsedLegacyTLS>, std::optional<WasPrivateRelayed>) final;
+    void dispatchDidFailProvisionalLoad(const ResourceError&, WillContinueLoading, WillInternallyHandleFailure) final;
     void dispatchDidFailLoad(const ResourceError&) final;
     void dispatchDidFinishDocumentLoad() final;
     void dispatchDidFinishLoad() final;
     void dispatchDidReachLayoutMilestone(OptionSet<LayoutMilestone>) final;
     void dispatchDidReachVisuallyNonEmptyState() final;
 
-    Frame* dispatchCreatePage(const NavigationAction&, NewFrameOpenerPolicy) final;
+    LocalFrame* dispatchCreatePage(const NavigationAction&, NewFrameOpenerPolicy) final;
     void dispatchShow() final;
 
-    void dispatchDecidePolicyForResponse(const ResourceResponse&, const ResourceRequest&, PolicyCheckIdentifier, const String&, FramePolicyFunction&&) final;
-    void dispatchDecidePolicyForNewWindowAction(const NavigationAction&, const ResourceRequest&, FormState*, const String&, PolicyCheckIdentifier, FramePolicyFunction&&) final;
-    void dispatchDecidePolicyForNavigationAction(const NavigationAction&, const ResourceRequest&, const ResourceResponse& redirectResponse, FormState*, PolicyDecisionMode, PolicyCheckIdentifier, FramePolicyFunction&&) final;
+    void dispatchDecidePolicyForResponse(const ResourceResponse&, const ResourceRequest&, const String&, FramePolicyFunction&&) final;
+    void dispatchDecidePolicyForNewWindowAction(const NavigationAction&, const ResourceRequest&, FormState*, const String&, std::optional<HitTestResult>&&, FramePolicyFunction&&) final;
+    void dispatchDecidePolicyForNavigationAction(const NavigationAction&, const ResourceRequest&, const ResourceResponse& redirectResponse, FormState*, const String&, std::optional<NavigationIdentifier>, std::optional<HitTestResult>&&, bool, IsPerformingHTTPFallback, SandboxFlags, PolicyDecisionMode, FramePolicyFunction&&) final;
+    void updateSandboxFlags(SandboxFlags) final;
+    void updateOpener(const Frame&) final;
     void cancelPolicyCheck() final;
 
     void dispatchUnableToImplementPolicy(const ResourceError&) final;
@@ -111,7 +115,7 @@ private:
 
     void setMainFrameDocumentReady(bool) final;
 
-    void startDownload(const ResourceRequest&, const String&) final;
+    void startDownload(const ResourceRequest&, const String&, FromDownloadAttribute = FromDownloadAttribute::No) final;
 
     void willChangeTitle(DocumentLoader*) final;
     void didChangeTitle(DocumentLoader*) final;
@@ -122,26 +126,15 @@ private:
     void committedLoad(DocumentLoader*, const SharedBuffer&) final;
     void finishedLoading(DocumentLoader*) final;
 
-    ResourceError cancelledError(const ResourceRequest&) const final;
-    ResourceError blockedError(const ResourceRequest&) const final;
-    ResourceError blockedByContentBlockerError(const ResourceRequest&) const final;
-    ResourceError cannotShowURLError(const ResourceRequest&) const final;
-    ResourceError interruptedForPolicyChangeError(const ResourceRequest&) const final;
-#if ENABLE(CONTENT_FILTERING)
-    ResourceError blockedByContentFilterError(const ResourceRequest&) const final;
-#endif
-
-    ResourceError cannotShowMIMETypeError(const ResourceResponse&) const final;
-    ResourceError fileDoesNotExistError(const ResourceResponse&) const final;
-    ResourceError pluginWillHandleLoadError(const ResourceResponse&) const final;
+    void loadStorageAccessQuirksIfNeeded() final;
 
     bool shouldFallBack(const ResourceError&) const final;
 
     bool canHandleRequest(const ResourceRequest&) const final;
     bool canShowMIMEType(const String&) const final;
     bool canShowMIMETypeAsHTML(const String&) const final;
-    bool representationExistsForURLScheme(const String&) const final;
-    String generatedMIMETypeForURLScheme(const String&) const final;
+    bool representationExistsForURLScheme(StringView) const final;
+    String generatedMIMETypeForURLScheme(StringView) const final;
 
     void frameLoadCompleted() final;
     void restoreViewState() final;
@@ -159,34 +152,36 @@ private:
 #if PLATFORM(IOS_FAMILY)
     void didRestoreFrameHierarchyForCachedFrame() final;
 #endif
-    void transitionToCommittedForNewPage() final;
+    void transitionToCommittedForNewPage(InitializingIframe) final;
 
     void didRestoreFromBackForwardCache() final;
 
     void updateGlobalHistory() final;
     void updateGlobalHistoryRedirectLinks() final;
-    bool shouldGoToHistoryItem(HistoryItem&) const final;
+    ShouldGoToHistoryItem shouldGoToHistoryItem(HistoryItem&, IsSameDocumentNavigation, ProcessSwapDisposition) const final;
+    bool supportsAsyncShouldGoToHistoryItem() const final;
+    void shouldGoToHistoryItemAsync(HistoryItem&, CompletionHandler<void(ShouldGoToHistoryItem)>&&) const final;
+
     void saveViewStateToItem(HistoryItem&) final;
     bool canCachePage() const final;
     void didDisplayInsecureContent() final;
-    void didRunInsecureContent(SecurityOrigin&, const URL&) final;
-    void didDetectXSS(const URL&, bool) final;
-    RefPtr<Frame> createFrame(const String&, HTMLFrameOwnerElement&) final;
-    RefPtr<Widget> createPlugin(const IntSize&, HTMLPlugInElement&, const URL&, const Vector<String>&, const Vector<String>&, const String&, bool) final;
+    void didRunInsecureContent(SecurityOrigin&) final;
+    RefPtr<LocalFrame> createFrame(const AtomString&, HTMLFrameOwnerElement&) final;
+    RefPtr<Widget> createPlugin(HTMLPlugInElement&, const URL&, const Vector<AtomString>&, const Vector<AtomString>&, const String&, bool) final;
 
     ObjectContentType objectContentType(const URL&, const String&) final;
-    String overrideMediaType() const final;
+    AtomString overrideMediaType() const final;
 
     void redirectDataToPlugin(Widget&) final;
     void dispatchDidClearWindowObjectInWorld(DOMWrapperWorld&) final;
 
 #if PLATFORM(COCOA)
     RemoteAXObjectRef accessibilityRemoteObject() final;
-    void willCacheResponse(DocumentLoader*, ResourceLoaderIdentifier, NSCachedURLResponse *, CompletionHandler<void(NSCachedURLResponse *)>&&) const final;
+    IntPoint accessibilityRemoteFrameOffset() final;
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+    void setIsolatedTree(Ref<WebCore::AXIsolatedTree>&&) final;
 #endif
-
-#if USE(CFURLCONNECTION)
-    bool shouldCacheResponse(DocumentLoader*, ResourceLoaderIdentifier, const ResourceResponse&, const unsigned char*, unsigned long long) final;
+    void willCacheResponse(DocumentLoader*, ResourceLoaderIdentifier, NSCachedURLResponse *, CompletionHandler<void(NSCachedURLResponse *)>&&) const final;
 #endif
 
     Ref<FrameNetworkingContext> createNetworkingContext() final;
@@ -199,9 +194,14 @@ private:
     RefPtr<LegacyPreviewLoaderClient> createPreviewLoaderClient(const String&, const String&) final;
 #endif
 
-#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
     bool hasFrameSpecificStorageAccess() final;
+
+    void dispatchLoadEventToOwnerElementInAnotherProcess() final;
+#if PLATFORM(JAVA)
+    bool isJavaFrameLoaderClient() override { return true; }
 #endif
+
+    RefPtr<HistoryItem> createHistoryItemTree(bool, BackForwardItemIdentifier) const final;
 };
 
 } // namespace WebCore

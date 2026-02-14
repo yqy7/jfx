@@ -29,6 +29,7 @@
 #include "FloatSize.h"
 #include "Logging.h"
 #include "PlatformWheelEvent.h"
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/TextStream.h>
 
 #if PLATFORM(MAC)
@@ -36,6 +37,8 @@
 #endif
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(BasicWheelEventDeltaFilter);
 
 WheelEventDeltaFilter::WheelEventDeltaFilter() = default;
 
@@ -58,6 +61,7 @@ bool WheelEventDeltaFilter::shouldApplyFilteringForEvent(const PlatformWheelEven
     auto phase = event.phase();
     return phase == PlatformWheelEventPhase::Began || phase == PlatformWheelEventPhase::Changed;
 #else
+    UNUSED_PARAM(event);
     return false;
 #endif
 }
@@ -109,6 +113,7 @@ void BasicWheelEventDeltaFilter::updateFromEvent(const PlatformWheelEvent& event
         break;
 
     case PlatformWheelEventPhase::None:
+    case PlatformWheelEventPhase::WillBegin:
         break;
 
     case PlatformWheelEventPhase::Began:
@@ -150,7 +155,7 @@ void BasicWheelEventDeltaFilter::reset()
 
 static inline bool deltaIsPredominantlyVertical(const FloatSize& delta)
 {
-    return fabs(delta.height()) > fabs(delta.width());
+    return std::abs(delta.height()) > std::abs(delta.width());
 }
 
 std::optional<ScrollEventAxis> BasicWheelEventDeltaFilter::dominantAxis() const

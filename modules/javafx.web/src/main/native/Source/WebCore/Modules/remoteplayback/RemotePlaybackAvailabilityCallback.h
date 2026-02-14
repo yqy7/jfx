@@ -38,7 +38,11 @@ class RemotePlaybackAvailabilityCallback : public RefCounted<RemotePlaybackAvail
 public:
     using ActiveDOMCallback::ActiveDOMCallback;
 
-    virtual CallbackResult<bool> handleEvent(bool) = 0;
+    virtual CallbackResult<bool> invoke(bool) = 0;
+    virtual CallbackResult<bool> invokeRethrowingException(bool) = 0;
+
+private:
+    virtual bool hasCallback() const = 0;
 };
 
 }

@@ -20,7 +20,8 @@
 
 [
     CustomToJSObject,
-    Exposed=(Window,Worker),
+    ExportMacro=WEBCORE_EXPORT,
+    Exposed=*,
     IsImmutablePrototypeExoticObjectOnPrototype,
     JSCustomHeader,
     JSCustomMarkFunction,

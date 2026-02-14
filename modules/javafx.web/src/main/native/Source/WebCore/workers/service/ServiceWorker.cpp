@@ -26,14 +26,14 @@
 #include "config.h"
 #include "ServiceWorker.h"
 
-#if ENABLE(SERVICE_WORKER)
-
 #include "Document.h"
 #include "EventNames.h"
+#include "EventTargetInterfaces.h"
+#include "ExceptionOr.h"
 #include "Logging.h"
 #include "MessagePort.h"
 #include "SWClientConnection.h"
-#include "ScriptExecutionContext.h"
+#include "ScriptExecutionContextInlines.h"
 #include "SerializedScriptValue.h"
 #include "ServiceWorkerClientData.h"
 #include "ServiceWorkerContainer.h"
@@ -43,21 +43,22 @@
 #include "StructuredSerializeOptions.h"
 #include "WorkerSWClientConnection.h"
 #include <JavaScriptCore/JSCJSValueInlines.h>
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/EnumTraits.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/TZoneMallocInlines.h>
 
 #define WORKER_RELEASE_LOG(fmt, ...) RELEASE_LOG(ServiceWorker, "%p - ServiceWorker::" fmt, this, ##__VA_ARGS__)
 #define WORKER_RELEASE_LOG_ERROR(fmt, ...) RELEASE_LOG_ERROR(ServiceWorker, "%p - ServiceWorker::" fmt, this, ##__VA_ARGS__)
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(ServiceWorker);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(ServiceWorker);
 
 Ref<ServiceWorker> ServiceWorker::getOrCreate(ScriptExecutionContext& context, ServiceWorkerData&& data)
 {
-    if (auto existingServiceWorker = context.serviceWorker(data.identifier))
-        return *existingServiceWorker;
-    auto serviceWorker = adoptRef(*new ServiceWorker(context, WTFMove(data)));
+    if (RefPtr existingServiceWorker = context.serviceWorker(data.identifier))
+        return existingServiceWorker.releaseNonNull();
+    Ref serviceWorker = adoptRef(*new ServiceWorker(context, WTFMove(data)));
     serviceWorker->suspendIfNeeded();
     return serviceWorker;
 }
@@ -71,18 +72,18 @@ ServiceWorker::ServiceWorker(ScriptExecutionContext& context, ServiceWorkerData&
     relaxAdoptionRequirement();
     updatePendingActivityForEventDispatch();
 
-    WORKER_RELEASE_LOG("serviceWorkerID=%llu, state=%hhu", identifier().toUInt64(), m_data.state);
+    WORKER_RELEASE_LOG("serviceWorkerID=%" PRIu64 ", state=%hhu", identifier().toUInt64(), enumToUnderlyingType(m_data.state));
 }
 
 ServiceWorker::~ServiceWorker()
 {
-    if (auto* context = scriptExecutionContext())
+    if (RefPtr context = scriptExecutionContext())
         context->unregisterServiceWorker(*this);
 }
 
 void ServiceWorker::updateState(State state)
 {
-    WORKER_RELEASE_LOG("updateState: Updating service worker %llu state from %hhu to %hhu. registrationID=%llu", identifier().toUInt64(), m_data.state, state, registrationIdentifier().toUInt64());
+    WORKER_RELEASE_LOG("updateState: Updating service worker %" PRIu64 " state from %hhu to %hhu. registrationID=%" PRIu64, identifier().toUInt64(), enumToUnderlyingType(m_data.state), enumToUnderlyingType(state), registrationIdentifier().toUInt64());
     m_data.state = state;
     if (state != State::Installing && !m_isStopped) {
         ASSERT(m_pendingActivityForEventDispatch);
@@ -95,18 +96,18 @@ void ServiceWorker::updateState(State state)
 SWClientConnection& ServiceWorker::swConnection()
 {
     ASSERT(scriptExecutionContext());
-    if (is<WorkerGlobalScope>(scriptExecutionContext()))
-        return downcast<WorkerGlobalScope>(scriptExecutionContext())->swClientConnection();
+    if (RefPtr worker = dynamicDowncast<WorkerGlobalScope>(scriptExecutionContext()))
+        return worker->swClientConnection();
     return ServiceWorkerProvider::singleton().serviceWorkerConnection();
 }
 
 ExceptionOr<void> ServiceWorker::postMessage(JSC::JSGlobalObject& globalObject, JSC::JSValue messageValue, StructuredSerializeOptions&& options)
 {
     if (m_isStopped)
-        return Exception { InvalidStateError };
+        return Exception { ExceptionCode::InvalidStateError };
 
-    Vector<RefPtr<MessagePort>> ports;
-    auto messageData = SerializedScriptValue::create(globalObject, messageValue, WTFMove(options.transfer), ports, SerializationContext::WorkerPostMessage);
+    Vector<Ref<MessagePort>> ports;
+    auto messageData = SerializedScriptValue::create(globalObject, messageValue, WTFMove(options.transfer), ports, SerializationForStorage::No, SerializationContext::WorkerPostMessage);
     if (messageData.hasException())
         return messageData.releaseException();
 
@@ -115,32 +116,27 @@ ExceptionOr<void> ServiceWorker::postMessage(JSC::JSGlobalObject& globalObject, 
     if (portsOrException.hasException())
         return portsOrException.releaseException();
 
-    auto& context = *scriptExecutionContext();
+    Ref context = *scriptExecutionContext();
     // FIXME: Maybe we could use a ScriptExecutionContextIdentifier for service workers too.
-    ServiceWorkerOrClientIdentifier sourceIdentifier;
-    if (is<ServiceWorkerGlobalScope>(context))
-        sourceIdentifier = downcast<ServiceWorkerGlobalScope>(context).thread().identifier();
-    else
-        sourceIdentifier = context.identifier();
+    ServiceWorkerOrClientIdentifier sourceIdentifier = [&]() -> ServiceWorkerOrClientIdentifier {
+        if (RefPtr serviceWorker = dynamicDowncast<ServiceWorkerGlobalScope>(context))
+            return serviceWorker->thread().identifier();
+        return context->identifier();
+    }();
 
     MessageWithMessagePorts message { messageData.releaseReturnValue(), portsOrException.releaseReturnValue() };
     swConnection().postMessageToServiceWorker(identifier(), WTFMove(message), sourceIdentifier);
     return { };
 }
 
-EventTargetInterface ServiceWorker::eventTargetInterface() const
+enum EventTargetInterfaceType ServiceWorker::eventTargetInterface() const
 {
-    return ServiceWorkerEventTargetInterfaceType;
+    return EventTargetInterfaceType::ServiceWorker;
 }
 
 ScriptExecutionContext* ServiceWorker::scriptExecutionContext() const
 {
     return ContextDestructionObserver::scriptExecutionContext();
-}
-
-const char* ServiceWorker::activeDOMObjectName() const
-{
-    return "ServiceWorker";
 }
 
 void ServiceWorker::stop()
@@ -164,5 +160,3 @@ void ServiceWorker::updatePendingActivityForEventDispatch()
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(SERVICE_WORKER)

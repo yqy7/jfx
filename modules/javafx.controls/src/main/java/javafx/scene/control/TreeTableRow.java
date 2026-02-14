@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -126,7 +126,7 @@ public class TreeTableRow<T> extends IndexedCell<T> {
     };
 
     private final WeakListChangeListener<Integer> weakSelectedListener =
-            new WeakListChangeListener<Integer>(selectedListener);
+            new WeakListChangeListener<>(selectedListener);
     private final WeakInvalidationListener weakFocusedListener =
             new WeakInvalidationListener(focusedListener);
     private final WeakInvalidationListener weakEditingListener =
@@ -146,7 +146,7 @@ public class TreeTableRow<T> extends IndexedCell<T> {
 
     // --- TreeItem
     private ReadOnlyObjectWrapper<TreeItem<T>> treeItem =
-        new ReadOnlyObjectWrapper<TreeItem<T>>(this, "treeItem") {
+        new ReadOnlyObjectWrapper<>(this, "treeItem") {
 
             TreeItem<T> oldValue = null;
 
@@ -185,7 +185,7 @@ public class TreeTableRow<T> extends IndexedCell<T> {
 
 
     // --- Disclosure Node
-    private ObjectProperty<Node> disclosureNode = new SimpleObjectProperty<Node>(this, "disclosureNode");
+    private ObjectProperty<Node> disclosureNode = new SimpleObjectProperty<>(this, "disclosureNode");
 
     /**
      * The node to use as the "disclosure" triangle, or toggle, used for
@@ -213,7 +213,7 @@ public class TreeTableRow<T> extends IndexedCell<T> {
 
 
     // --- TreeView
-    private ReadOnlyObjectWrapper<TreeTableView<T>> treeTableView = new ReadOnlyObjectWrapper<TreeTableView<T>>(this, "treeTableView") {
+    private ReadOnlyObjectWrapper<TreeTableView<T>> treeTableView = new ReadOnlyObjectWrapper<>(this, "treeTableView") {
         private WeakReference<TreeTableView<T>> weakTreeTableViewRef;
         @Override protected void invalidated() {
             TreeTableViewSelectionModel<T> sm;
@@ -255,10 +255,10 @@ public class TreeTableRow<T> extends IndexedCell<T> {
 
                 get().editingCellProperty().addListener(weakEditingListener);
 
-                weakTreeTableViewRef = new WeakReference<TreeTableView<T>>(get());
+                weakTreeTableViewRef = new WeakReference<>(get());
             }
 
-            updateItem();
+            updateItem(-1);
             requestLayout();
         }
     };
@@ -291,14 +291,13 @@ public class TreeTableRow<T> extends IndexedCell<T> {
 
 
     @Override void indexChanged(int oldIndex, int newIndex) {
-        index = getIndex();
+        super.indexChanged(oldIndex, newIndex);
 
         // when the cell index changes, this may result in the cell
         // changing state to be selected and/or focused.
-        updateItem();
+        updateItem(oldIndex);
         updateSelection();
         updateFocus();
-//        oldIndex = index;
     }
 
 
@@ -316,7 +315,7 @@ public class TreeTableRow<T> extends IndexedCell<T> {
 
          // Inform the TreeView of the edit starting.
         if (treeTable != null) {
-            treeTable.fireEvent(new TreeTableView.EditEvent<T>(treeTable,
+            treeTable.fireEvent(new TreeTableView.EditEvent<>(treeTable,
                     TreeTableView.<T>editStartEvent(),
                     getTreeItem(),
                     getItem(),
@@ -333,7 +332,7 @@ public class TreeTableRow<T> extends IndexedCell<T> {
         final TreeTableView<T> treeTable = getTreeTableView();
         if (treeTable != null) {
             // Inform the TreeView of the edit being ready to be committed.
-            treeTable.fireEvent(new TreeTableView.EditEvent<T>(treeTable,
+            treeTable.fireEvent(new TreeTableView.EditEvent<>(treeTable,
                     TreeTableView.<T>editCommitEvent(),
                     treeItem,
                     getItem(),
@@ -364,7 +363,7 @@ public class TreeTableRow<T> extends IndexedCell<T> {
 
         TreeTableView<T> treeTable = getTreeTableView();
         if (treeTable != null) {
-            treeTable.fireEvent(new TreeTableView.EditEvent<T>(treeTable,
+            treeTable.fireEvent(new TreeTableView.EditEvent<>(treeTable,
                     TreeTableView.<T>editCancelEvent(),
                     getTreeItem(),
                     getItem(),
@@ -388,15 +387,15 @@ public class TreeTableRow<T> extends IndexedCell<T> {
      *                                                                         *
      **************************************************************************/
 
-    private int index = -1;
     private boolean isFirstRun = true;
 
-    private void updateItem() {
+    private void updateItem(int oldIndex) {
         TreeTableView<T> tv = getTreeTableView();
         if (tv == null) return;
 
         // Compute whether the index for this cell is for a real item
-        boolean valid = index >=0 && index < tv.getExpandedItemCount();
+        final int newIndex = getIndex();
+        boolean valid = newIndex >= 0 && newIndex < tv.getExpandedItemCount();
 
         final TreeItem<T> oldTreeItem = getTreeItem();
         final boolean isEmpty = isEmpty();
@@ -405,26 +404,33 @@ public class TreeTableRow<T> extends IndexedCell<T> {
         if (valid) {
             // update the TreeCell state.
             // get the new treeItem that is about to go in to the TreeCell
-            final TreeItem<T> newTreeItem = tv.getTreeItem(index);
+            final TreeItem<T> newTreeItem = tv.getTreeItem(newIndex);
             final T newValue = newTreeItem == null ? null : newTreeItem.getValue();
+            final T oldValue = oldTreeItem == null ? null : oldTreeItem.getValue();
 
-            // For the sake of RT-14279, it is important that the order of these
+            // For the sake of JDK-8113226, it is important that the order of these
             // method calls is as shown below. If the order is switched, it is
             // likely that events will be fired where the item is null, even
             // though calling cell.getTreeItem().getValue() returns the value
             // as expected
 
-            // There used to be conditional code here to prevent updateItem from
-            // being called when the value didn't change, but that led us to
-            // issues such as RT-33108, where the value didn't change but the item
-            // we needed to be listening to did. Without calling updateItem we
-            // were breaking things, so once again the conditionals are gone.
+            // JDK-8092593 - if the index didn't change, then avoid calling updateItem
+            // unless the item has changed.
+            if (oldIndex == newIndex) {
+                if (!isItemChanged(oldValue, newValue)) {
+                    // JDK-8096969:  we break out of the if/else code here and
+                    // proceed with the code following this, so that we may
+                    // still update references, listeners, etc as required.
+                    return;
+                }
+            }
+
             updateTreeItem(newTreeItem);
             updateItem(newValue, false);
         } else {
-            // RT-30484 We need to allow a first run to be special-cased to allow
+            // JDK-8116529 We need to allow a first run to be special-cased to allow
             // for the updateItem method to be called at least once to allow for
-            // the correct visual state to be set up. In particular, in RT-30484
+            // the correct visual state to be set up. In particular, in JDK-8116529
             // refer to Ensemble8PopUpTree.png - in this case the arrows are being
             // shown as the new cells are instantiated with the arrows in the
             // children list, and are only hidden in updateItem.
@@ -438,14 +444,17 @@ public class TreeTableRow<T> extends IndexedCell<T> {
 
     private void updateSelection() {
         if (isEmpty()) return;
-        if (index == -1 || getTreeTableView() == null) return;
+        if (getIndex() == -1 || getTreeTableView() == null) return;
 
         TreeTableViewSelectionModel<T> sm = getTreeTableView().getSelectionModel();
         if (sm == null) {
+            if (isSelected()) {
+                updateSelected(false);
+            }
             return;
         }
 
-        boolean isSelected = !sm.isCellSelectionEnabled() && sm.isSelected(index);
+        boolean isSelected = !sm.isCellSelectionEnabled() && sm.isSelected(getIndex());
         if (isSelected() != isSelected) {
             updateSelected(isSelected);
         }
@@ -530,7 +539,7 @@ public class TreeTableRow<T> extends IndexedCell<T> {
 
     /** {@inheritDoc} */
     @Override protected Skin<?> createDefaultSkin() {
-        return new TreeTableRowSkin<T>(this);
+        return new TreeTableRowSkin<>(this);
     }
 
 

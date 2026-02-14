@@ -31,9 +31,31 @@
 
 #include <errno.h>
 #include "pas_snprintf.h"
+#if PAS_OS(WINDOWS)
+#include <io.h>
+typedef __int64 ssize_t;
+#else
 #include <unistd.h>
+#endif
 
 pthread_t pas_thread_that_is_crash_logging;
+
+// Debug option to log to a file instead of stdout by default.
+// This does not affect pas_fd_stream.
+#define PAS_DEBUG_LOG_TO_SYSLOG 0
+
+#if PAS_DEBUG_LOG_TO_SYSLOG
+#include <sys/syslog.h>
+#endif
+
+static PAS_ALWAYS_INLINE ssize_t pas_write(int fd, char* ptr, size_t size)
+{
+#if PAS_OS(WINDOWS)
+    return _write(fd, ptr, size);
+#else
+    return write(fd, ptr, size);
+#endif
+}
 
 void pas_vlog_fd(int fd, const char* format, va_list list)
 {
@@ -61,7 +83,7 @@ void pas_vlog_fd(int fd, const char* format, va_list list)
     ptr = buf;
 
     while (bytes_left_to_write) {
-        result = write(fd, ptr, bytes_left_to_write);
+        result = pas_write(fd, ptr, bytes_left_to_write);
         if (result < 0) {
             PAS_ASSERT(errno == EINTR);
             continue;
@@ -84,7 +106,13 @@ void pas_log_fd(int fd, const char* format, ...)
 
 void pas_vlog(const char* format, va_list list)
 {
+#if PAS_DEBUG_LOG_TO_SYSLOG
+PAS_IGNORE_WARNINGS_BEGIN("format-nonliteral")
+    syslog(LOG_WARNING, format, list);
+PAS_IGNORE_WARNINGS_END
+#else
     pas_vlog_fd(PAS_LOG_DEFAULT_FD, format, list);
+#endif
 }
 
 void pas_log(const char* format, ...)

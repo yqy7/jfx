@@ -28,8 +28,8 @@
 
 #include "FloatPoint.h"
 #include "ScrollTypes.h"
-#include <wtf/FastMalloc.h>
 #include <wtf/MonotonicTime.h>
+#include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
 
@@ -50,13 +50,14 @@ public:
 };
 
 class ScrollAnimation {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(ScrollAnimation);
 public:
     enum class Type {
         Smooth,
         Kinetic,
         Momentum,
         RubberBand,
+        Keyboard,
     };
 
     ScrollAnimation(Type animationType, ScrollAnimationClient& client)

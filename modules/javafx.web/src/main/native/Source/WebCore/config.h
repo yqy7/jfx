@@ -36,30 +36,19 @@
 // Using CMake with Unix makefiles does not use prefix headers.
 #if PLATFORM(MAC) && defined(BUILDING_WITH_CMAKE)
 #include "WebCorePrefix.h"
-#ifndef JSC_API_AVAILABLE
-#define JSC_API_AVAILABLE(...)
-#endif
-#ifndef JSC_CLASS_AVAILABLE
-#define JSC_CLASS_AVAILABLE(...) JS_EXPORT
-#endif
-#ifndef JSC_API_DEPRECATED
-#define JSC_API_DEPRECATED(...)
-#endif
 #endif
 
 #ifdef __cplusplus
 
-// These undefs match up with defines in WebCorePrefix.h for Mac OS X.
+// These undefs match up with defines in WebCorePrefix.h for macOS.
 // Helps us catch if anyone uses new or delete by accident in code and doesn't include "config.h".
 #undef new
 #undef delete
 #include <wtf/FastMalloc.h>
-
-#include <ciso646>
+#include <wtf/IsoMalloc.h>
+#include <wtf/TZoneMalloc.h>
 
 #endif
-
-#include <wtf/DisallowCType.h>
 
 #if USE(CG)
 #ifndef CGFLOAT_DEFINED

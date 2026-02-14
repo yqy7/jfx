@@ -5,7 +5,7 @@
  * Copyright (C) 2009 Dirk Schulze <krit@webkit.org>
  * Copyright (C) 2010 Renata Hodovan <reni@inf.u-szeged.hu>
  * Copyright (C) 2011 Gabor Loki <loki@webkit.org>
- * Copyright (C) 2017-2021 Apple Inc.  All rights reserved.
+ * Copyright (C) 2017-2022 Apple Inc.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -31,8 +31,11 @@
 #include "PixelBuffer.h"
 #include <wtf/MathExtras.h>
 #include <wtf/ParallelJobs.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(FETurbulenceSoftwareApplier);
 
 // The turbulence calculation code is an adapted version of what appears in the SVG 1.1 specification:
 // http://www.w3.org/TR/SVG11/filters.html#feTurbulence
@@ -47,7 +50,7 @@ FETurbulenceSoftwareApplier::PaintingData FETurbulenceSoftwareApplier::initPaint
     if (paintingData.seed > s_randMaximum - 1)
         paintingData.seed = s_randMaximum - 1;
 
-    float* gradient;
+    std::span<float> gradient;
     for (int channel = 0; channel < 4; ++channel) {
         for (int i = 0; i < s_blockSize; ++i) {
             paintingData.latticeSelector[i] = i;
@@ -186,7 +189,7 @@ ColorComponents<float, 4> FETurbulenceSoftwareApplier::noise2D(const PaintingDat
         // b00 = uLatticeSelector[i + by0]
         int b00 = paintingData.latticeSelector[latticeIndex + noiseY.index];
         // q = fGradient[nColorChannel][b00]; u = rx0 * q[0] + ry0 * q[1];
-        const float* q = paintingData.gradient[channel][b00];
+        std::span<const float> q = paintingData.gradient[channel][b00];
         float u = noiseX.fraction * q[0] + noiseY.fraction * q[1];
 
         // b10 = uLatticeSelector[j + by0];
@@ -270,7 +273,7 @@ ColorComponents<uint8_t, 4> FETurbulenceSoftwareApplier::calculateTurbulenceValu
     return toIntBasedColorComponents(turbulenceFunctionResult);
 }
 
-void FETurbulenceSoftwareApplier::applyPlatformGeneric(const IntRect& filterRegion, const FloatSize& filterScale, Uint8ClampedArray& pixelArray, const PaintingData& paintingData, StitchData stitchData, int startY, int endY)
+void FETurbulenceSoftwareApplier::applyPlatformGeneric(const IntRect& filterRegion, const FloatSize& filterScale, PixelBuffer& pixelBuffer, const PaintingData& paintingData, StitchData stitchData, int startY, int endY)
 {
     ASSERT(endY > startY);
 
@@ -285,7 +288,7 @@ void FETurbulenceSoftwareApplier::applyPlatformGeneric(const IntRect& filterRegi
             point.setX(point.x() + 1);
             FloatPoint localPoint = point.scaled(inverseScale.width(), inverseScale.height());
             auto values = calculateTurbulenceValueForPoint(paintingData, stitchData, localPoint);
-            pixelArray.setRange(values.components.data(), 4, indexOfPixelChannel);
+            pixelBuffer.setRange(std::span { values.components }, indexOfPixelChannel);
             indexOfPixelChannel += 4;
         }
     }
@@ -293,10 +296,10 @@ void FETurbulenceSoftwareApplier::applyPlatformGeneric(const IntRect& filterRegi
 
 void FETurbulenceSoftwareApplier::applyPlatformWorker(ApplyParameters* parameters)
 {
-    applyPlatformGeneric(parameters->filterRegion, parameters->filterScale, *parameters->pixelArray, *parameters->paintingData, parameters->stitchData, parameters->startY, parameters->endY);
+    applyPlatformGeneric(parameters->filterRegion, parameters->filterScale, *parameters->pixelBuffer, *parameters->paintingData, parameters->stitchData, parameters->startY, parameters->endY);
 }
 
-void FETurbulenceSoftwareApplier::applyPlatform(const IntRect& filterRegion, const FloatSize& filterScale, Uint8ClampedArray& pixelArray, PaintingData& paintingData, StitchData& stitchData)
+void FETurbulenceSoftwareApplier::applyPlatform(const IntRect& filterRegion, const FloatSize& filterScale, PixelBuffer& pixelBuffer, PaintingData& paintingData, StitchData& stitchData)
 {
     int height = filterRegion.height();
     unsigned area = filterRegion.area();
@@ -320,7 +323,7 @@ void FETurbulenceSoftwareApplier::applyPlatform(const IntRect& filterRegion, con
                 ApplyParameters& params = parallelJobs.parameter(i);
                 params.filterRegion = filterRegion;
                 params.filterScale = filterScale;
-                params.pixelArray = &pixelArray;
+                params.pixelBuffer = &pixelBuffer;
                 params.paintingData = &paintingData;
                 params.stitchData = stitchData;
                 params.startY = startY;
@@ -336,10 +339,10 @@ void FETurbulenceSoftwareApplier::applyPlatform(const IntRect& filterRegion, con
     }
 
     // Fallback to single threaded mode if there is no room for a new thread or the paint area is too small.
-    applyPlatformGeneric(filterRegion, filterScale, pixelArray, paintingData, stitchData, 0, height);
+    applyPlatformGeneric(filterRegion, filterScale, pixelBuffer, paintingData, stitchData, 0, height);
 }
 
-bool FETurbulenceSoftwareApplier::apply(const Filter& filter, const FilterImageVector&, FilterImage& result) const
+bool FETurbulenceSoftwareApplier::apply(const Filter& filter, std::span<const Ref<FilterImage>>, FilterImage& result) const
 {
     auto destinationPixelBuffer = result.pixelBuffer(AlphaPremultiplication::Unpremultiplied);
     if (!destinationPixelBuffer)
@@ -349,22 +352,20 @@ bool FETurbulenceSoftwareApplier::apply(const Filter& filter, const FilterImageV
     if (resultSize.area().hasOverflowed())
         return false;
 
-    auto& destinationPixelArray = destinationPixelBuffer->data();
-
     if (resultSize.isEmpty()) {
-        destinationPixelArray.zeroFill();
+        destinationPixelBuffer->zeroFill();
         return true;
     }
 
     auto tileSize = roundedIntSize(result.primitiveSubregion().size());
 
-    float baseFrequencyX = m_effect.baseFrequencyX();
-    float baseFrequencyY = m_effect.baseFrequencyY();
-    auto stitchData = computeStitching(tileSize, baseFrequencyX, baseFrequencyY, m_effect.stitchTiles());
+    float baseFrequencyX = m_effect->baseFrequencyX();
+    float baseFrequencyY = m_effect->baseFrequencyY();
+    auto stitchData = computeStitching(tileSize, baseFrequencyX, baseFrequencyY, m_effect->stitchTiles());
 
-    auto paintingData = initPaintingData(m_effect.type(), baseFrequencyX, baseFrequencyY, m_effect.numOctaves(), m_effect.seed(), m_effect.stitchTiles(), tileSize);
+    auto paintingData = initPaintingData(m_effect->type(), baseFrequencyX, baseFrequencyY, m_effect->numOctaves(), m_effect->seed(), m_effect->stitchTiles(), tileSize);
 
-    applyPlatform(result.absoluteImageRect(), filter.filterScale(), destinationPixelArray, paintingData, stitchData);
+    applyPlatform(result.absoluteImageRect(), filter.filterScale(), *destinationPixelBuffer, paintingData, stitchData);
     return true;
 }
 

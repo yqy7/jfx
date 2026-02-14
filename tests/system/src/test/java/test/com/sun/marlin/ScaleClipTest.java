@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,14 +24,13 @@
  */
 package test.com.sun.marlin;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
 import java.awt.Color;
-import java.io.File;
-import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javafx.application.Application;
-import javafx.application.Platform;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Group;
 import javafx.scene.Scene;
@@ -45,15 +44,11 @@ import javafx.scene.shape.StrokeLineCap;
 import javafx.scene.shape.StrokeLineJoin;
 import javafx.scene.transform.Transform;
 import javafx.stage.Stage;
-import junit.framework.AssertionFailedError;
-import org.junit.AfterClass;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import test.util.Util;
-import static test.util.Util.TIMEOUT;
 
 /**
  * Scaled Line Clipping rendering test
@@ -101,25 +96,21 @@ public class ScaleClipTest {
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void setupOnce() throws Exception {
-        // Start the Application
-        new Thread(() -> Application.launch(MyApp.class, (String[]) null)).start();
-
-        assertTrue("Timeout waiting for Application to launch",
-                launchLatch.await(TIMEOUT, TimeUnit.MILLISECONDS));
-
+        Util.launch(launchLatch, MyApp.class);
         assertEquals(0, launchLatch.getCount());
 
         System.out.println("ScaleClipTest: size = " + SIZE);
     }
 
-    @AfterClass
+    @AfterAll
     public static void teardownOnce() {
-        Platform.exit();
+        Util.shutdown();
     }
 
-    @Test(timeout = 10000)
+    @Test
+    @Timeout(value=10000, unit=TimeUnit.MILLISECONDS)
     public void TestNegativeScaleClipPath() throws InterruptedException {
         final AtomicBoolean fail = new AtomicBoolean();
 
@@ -141,7 +132,8 @@ public class ScaleClipTest {
         }
     }
 
-    @Test(timeout = 10000)
+    @Test
+    @Timeout(value=10000, unit=TimeUnit.MILLISECONDS)
     public void TestMarginScaleClipPath() throws InterruptedException {
         final AtomicBoolean fail = new AtomicBoolean();
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,8 +33,6 @@ import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.LinkedList;
 import java.util.ListIterator;
 import java.util.Map;
@@ -73,7 +71,7 @@ class D3DResourceFactory extends BaseShaderFactory {
      * @see D3DResource
      */
     private final LinkedList<D3DResource.D3DRecord> records =
-        new LinkedList<D3DResource.D3DRecord>();
+        new LinkedList<>();
 
     D3DResourceFactory(long pContext, Screen screen) {
         super(clampTexCache, repeatTexCache, mipmapTexCache);
@@ -166,6 +164,16 @@ class D3DResourceFactory extends BaseShaderFactory {
             allocw = w;
             alloch = h;
         }
+
+        if (allocw <= 0 || alloch <= 0) {
+            throw new RuntimeException("Illegal texture dimensions (" + allocw + "x" + alloch + ")");
+        }
+
+        int bpp = format.getBytesPerPixelUnit();
+        if (allocw >= (Integer.MAX_VALUE / alloch / bpp)) {
+            throw new RuntimeException("Illegal texture dimensions (" + allocw + "x" + alloch + ")");
+        }
+
         D3DVramPool pool = D3DVramPool.instance;
         long size = pool.estimateTextureSize(allocw, alloch, format);
         if (!pool.prepareForAllocation(size)) {
@@ -227,6 +235,18 @@ class D3DResourceFactory extends BaseShaderFactory {
             frame.releaseFrame();
             return tex;
         } else {
+
+            if (texWidth <= 0 || texHeight <= 0) {
+                frame.releaseFrame();
+                throw new RuntimeException("Illegal texture dimensions (" + texWidth + "x" + texHeight + ")");
+            }
+
+            int bpp = texFormat.getBytesPerPixelUnit();
+            if (texWidth >= (Integer.MAX_VALUE / texHeight / bpp)) {
+                frame.releaseFrame();
+                throw new RuntimeException("Illegal texture dimensions (" + texWidth + "x" + texHeight + ")");
+            }
+
             D3DVramPool pool = D3DVramPool.instance;
             long size = pool.estimateTextureSize(texWidth, texHeight, texFormat);
             if (!pool.prepareForAllocation(size)) {
@@ -297,6 +317,17 @@ class D3DResourceFactory extends BaseShaderFactory {
             createw = nextPowerOfTwo(createw, Integer.MAX_VALUE);
             createh = nextPowerOfTwo(createh, Integer.MAX_VALUE);
         }
+
+        if (createw <= 0 || createh <= 0) {
+            throw new RuntimeException("Illegal texture dimensions (" + createw + "x" + createh + ")");
+        }
+
+        PixelFormat format = PixelFormat.INT_ARGB_PRE;
+        int bpp = format.getBytesPerPixelUnit();
+        if (createw >= (Integer.MAX_VALUE / createh / bpp)) {
+            throw new RuntimeException("Illegal texture dimensions (" + createw + "x" + createh + ")");
+        }
+
         D3DVramPool pool = D3DVramPool.instance;
         int aaSamples;
         if (msaa) {
@@ -312,7 +343,7 @@ class D3DResourceFactory extends BaseShaderFactory {
         }
 
         long pResource = nCreateTexture(context.getContextHandle(),
-                                        PixelFormat.INT_ARGB_PRE.ordinal(),
+                                        format.ordinal(),
                                         Usage.DEFAULT.ordinal(),
                                         true /*isRTT*/, createw, createh, aaSamples, false);
         if (pResource == 0L) {
@@ -346,18 +377,18 @@ class D3DResourceFactory extends BaseShaderFactory {
             int width = pState.getRenderWidth();
             int height = pState.getRenderHeight();
             D3DRTTexture rtt = createRTTexture(width, height, WrapMode.CLAMP_NOT_NEEDED, pState.isMSAA());
-            if (PrismSettings.dirtyOptsEnabled) {
-                rtt.contentsUseful();
-            }
-
             if (rtt != null) {
+                if (PrismSettings.dirtyOptsEnabled) {
+                    rtt.contentsUseful();
+                }
+
                 return new D3DSwapChain(context, pResource, rtt, pState.getRenderScaleX(), pState.getRenderScaleY());
             }
 
             D3DResourceFactory.nReleaseResource(context.getContextHandle(), pResource);
         }
-        return null;
 
+        return null;
     }
 
     private static ByteBuffer getBuffer(InputStream is) {
@@ -396,7 +427,8 @@ class D3DResourceFactory extends BaseShaderFactory {
     }
 
     @Override
-    public Shader createShader(InputStream pixelShaderCode,
+    public Shader createShader(String pixelShaderName,
+                               InputStream pixelShaderCode,
                                Map<String, Integer> samplers,
                                Map<String, Integer> params,
                                int maxTexCoordIndex,
@@ -413,20 +445,26 @@ class D3DResourceFactory extends BaseShaderFactory {
     }
 
     @Override
+    public Shader createShader(String shaderName,
+                               Map<String, Integer> samplers,
+                               Map<String, Integer> params,
+                               int maxTexCoordIndex,
+                               boolean isPixcoordUsed,
+                               boolean isPerVertexColorUsed) {
+        throw new UnsupportedOperationException("Not supported for D3D pipeline");
+    }
+
+    @Override
     public Shader createStockShader(final String name) {
         if (name == null) {
             throw new IllegalArgumentException("Shader name must be non-null");
         }
         try {
-            @SuppressWarnings("removal")
-            InputStream stream = AccessController.doPrivileged(
-                    (PrivilegedAction<InputStream>) () -> D3DResourceFactory.class.
-                           getResourceAsStream("hlsl/" + name + ".obj")
-            );
+            InputStream stream = D3DResourceFactory.class.getResourceAsStream("hlsl/" + name + ".obj");
             Class klass = Class.forName("com.sun.prism.shader." + name + "_Loader");
             Method m = klass.getMethod("loadShader",
-                new Class[] { ShaderFactory.class, InputStream.class });
-            return (Shader)m.invoke(null, new Object[] { this, stream });
+                new Class[] { ShaderFactory.class, String.class, InputStream.class });
+            return (Shader)m.invoke(null, new Object[] { this, name, stream });
         } catch (Throwable e) {
             e.printStackTrace();
             throw new InternalError("Error loading stock shader " + name);

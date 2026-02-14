@@ -33,13 +33,16 @@
 
 #include "CSSParserContext.h"
 #include "CSSValueKeywords.h"
+#include "CSSWideKeyword.h"
 #include <wtf/ASCIICType.h>
 
 namespace WebCore {
 
 // Space characters as defined by the CSS specification.
 // http://www.w3.org/TR/css3-syntax/#whitespace
-inline bool isCSSSpace(UChar c)
+
+template<typename CharacterType>
+inline bool isCSSSpace(CharacterType c)
 {
     return c == ' ' || c == '\t' || c == '\n';
 }
@@ -58,26 +61,24 @@ bool isNameCodePoint(CharacterType c)
     return isNameStartCodePoint(c) || isASCIIDigit(c) || c == '-';
 }
 
-bool isValueAllowedInMode(unsigned short, CSSParserMode);
-
-inline bool isCSSWideKeyword(CSSValueID valueID)
-{
-    switch (valueID) {
-    case CSSValueInitial:
-    case CSSValueInherit:
-    case CSSValueUnset:
-    case CSSValueRevert:
-    case CSSValueRevertLayer:
-        return true;
-    default:
-        return false;
-    };
-}
-
 inline bool isValidCustomIdentifier(CSSValueID valueID)
 {
     // "default" is obsolete as a CSS-wide keyword but is still not allowed as a custom identifier.
     return !isCSSWideKeyword(valueID) && valueID != CSSValueDefault;
+}
+
+// https://drafts.csswg.org/css-conditional-5/#propdef-container-name
+inline bool isValidContainerNameIdentifier(CSSValueID valueID)
+{
+    switch (valueID) {
+    case CSSValueNone:
+    case CSSValueAnd:
+    case CSSValueOr:
+    case CSSValueNot:
+        return false;
+    default:
+        return isValidCustomIdentifier(valueID);
+    }
 }
 
 } // namespace WebCore

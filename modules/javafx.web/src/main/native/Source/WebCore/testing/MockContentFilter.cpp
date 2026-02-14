@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,9 +35,13 @@
 #include "ResourceResponse.h"
 #include "SharedBuffer.h"
 #include <mutex>
+#include <wtf/EnumTraits.h>
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/CString.h>
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(MockContentFilter);
 
 using Decision = MockContentFilterSettings::Decision;
 using DecisionPoint = MockContentFilterSettings::DecisionPoint;
@@ -50,21 +54,16 @@ void MockContentFilter::ensureInstalled()
     });
 }
 
-static inline MockContentFilterSettings& settings()
-{
-    return MockContentFilterSettings::singleton();
-}
-
 bool MockContentFilter::enabled()
 {
-    bool enabled = settings().enabled();
+    bool enabled = MockContentFilterSettings::singleton().enabled();
     LOG(ContentFiltering, "MockContentFilter is %s.\n", enabled ? "enabled" : "not enabled");
     return enabled;
 }
 
-UniqueRef<MockContentFilter> MockContentFilter::create()
+Ref<MockContentFilter> MockContentFilter::create(const PlatformContentFilter::FilterParameters&)
 {
-    return makeUniqueRef<MockContentFilter>();
+    return adoptRef(*new MockContentFilter);
 }
 
 void MockContentFilter::willSendRequest(ResourceRequest& request, const ResourceResponse& redirectResponse)
@@ -82,7 +81,7 @@ void MockContentFilter::willSendRequest(ResourceRequest& request, const Resource
     if (m_state == State::Filtering)
         return;
 
-    String modifiedRequestURLString { settings().modifiedRequestURL() };
+    String modifiedRequestURLString { MockContentFilterSettings::singleton().modifiedRequestURL() };
     if (modifiedRequestURLString.isEmpty())
         return;
 
@@ -92,7 +91,7 @@ void MockContentFilter::willSendRequest(ResourceRequest& request, const Resource
         return;
     }
 
-    request.setURL(modifiedRequestURL);
+    request.setURL(WTFMove(modifiedRequestURL));
 }
 
 void MockContentFilter::responseReceived(const ResourceResponse&)
@@ -113,7 +112,7 @@ void MockContentFilter::finishedAddingData()
 Ref<FragmentedSharedBuffer> MockContentFilter::replacementData() const
 {
     ASSERT(didBlockData());
-    return SharedBuffer::create(m_replacementData.data(), m_replacementData.size());
+    return SharedBuffer::create(m_replacementData.span());
 }
 
 ContentFilterUnblockHandler MockContentFilter::unblockHandler() const
@@ -123,9 +122,9 @@ ContentFilterUnblockHandler MockContentFilter::unblockHandler() const
 
     return ContentFilterUnblockHandler {
         MockContentFilterSettings::unblockURLHost(), [](DecisionHandlerFunction decisionHandler) {
-            bool shouldAllow { settings().unblockRequestDecision() == Decision::Allow };
+            bool shouldAllow { MockContentFilterSettings::singleton().unblockRequestDecision() == Decision::Allow };
             if (shouldAllow)
-                settings().setDecision(Decision::Allow);
+                MockContentFilterSettings::singleton().setDecision(Decision::Allow);
             LOG(ContentFiltering, "MockContentFilter %s the unblock request.\n", shouldAllow ? "allowed" : "did not allow");
             decisionHandler(shouldAllow);
         }
@@ -139,18 +138,16 @@ String MockContentFilter::unblockRequestDeniedScript() const
 
 void MockContentFilter::maybeDetermineStatus(DecisionPoint decisionPoint)
 {
-    if (m_state != State::Filtering || decisionPoint != settings().decisionPoint())
+    if (m_state != State::Filtering || decisionPoint != MockContentFilterSettings::singleton().decisionPoint())
         return;
 
-    LOG(ContentFiltering, "MockContentFilter stopped buffering with state %u at decision point %u.\n", m_state, decisionPoint);
+    LOG(ContentFiltering, "MockContentFilter stopped buffering with state %u at decision point %hhu.\n", enumToUnderlyingType(m_state), enumToUnderlyingType(decisionPoint));
 
-    m_state = settings().decision() == Decision::Allow ? State::Allowed : State::Blocked;
+    m_state = MockContentFilterSettings::singleton().decision() == Decision::Allow ? State::Allowed : State::Blocked;
     if (m_state != State::Blocked)
         return;
 
-    m_replacementData.clear();
-    const CString utf8BlockedString = settings().blockedString().utf8();
-    m_replacementData.append(utf8BlockedString.data(), utf8BlockedString.length());
+    m_replacementData = MockContentFilterSettings::singleton().blockedString().utf8().span();
 }
 
 } // namespace WebCore

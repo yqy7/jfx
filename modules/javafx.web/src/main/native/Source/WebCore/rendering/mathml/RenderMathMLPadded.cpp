@@ -28,17 +28,21 @@
 
 #if ENABLE(MATHML)
 
+#include "RenderMathMLBlockInlines.h"
 #include <cmath>
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(RenderMathMLPadded);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(RenderMathMLPadded);
 
 RenderMathMLPadded::RenderMathMLPadded(MathMLPaddedElement& element, RenderStyle&& style)
-    : RenderMathMLRow(element, WTFMove(style))
+    : RenderMathMLRow(Type::MathMLPadded, element, WTFMove(style))
 {
+    ASSERT(isRenderMathMLPadded());
 }
+
+RenderMathMLPadded::~RenderMathMLPadded() = default;
 
 LayoutUnit RenderMathMLPadded::voffset() const
 {
@@ -69,25 +73,35 @@ LayoutUnit RenderMathMLPadded::mpaddedDepth(LayoutUnit contentDepth) const
 
 void RenderMathMLPadded::computePreferredLogicalWidths()
 {
-    ASSERT(preferredLogicalWidthsDirty());
-
-    // Determine the intrinsic width of the content.
-    RenderMathMLRow::computePreferredLogicalWidths();
+    ASSERT(needsPreferredLogicalWidthsUpdate());
 
     // Only the width attribute should modify the width.
     // We parse it using the preferred width of the content as its default value.
-    m_maxPreferredLogicalWidth = mpaddedWidth(m_maxPreferredLogicalWidth);
-    m_minPreferredLogicalWidth = m_maxPreferredLogicalWidth;
+    LayoutUnit preferredWidth = preferredLogicalWidthOfRowItems();
+    preferredWidth = mpaddedWidth(preferredWidth);
+    m_maxPreferredLogicalWidth = m_minPreferredLogicalWidth = preferredWidth;
 
-    setPreferredLogicalWidthsDirty(false);
+    auto sizes = sizeAppliedToMathContent(LayoutPhase::CalculatePreferredLogicalWidth);
+    applySizeToMathContent(LayoutPhase::CalculatePreferredLogicalWidth, sizes);
+
+    adjustPreferredLogicalWidthsForBorderAndPadding();
+
+    clearNeedsPreferredWidthsUpdate();
 }
 
-void RenderMathMLPadded::layoutBlock(bool relayoutChildren, LayoutUnit)
+void RenderMathMLPadded::layoutBlock(RelayoutChildren relayoutChildren, LayoutUnit)
 {
     ASSERT(needsLayout());
 
-    if (!relayoutChildren && simplifiedLayout())
+    insertPositionedChildrenIntoContainingBlock();
+
+    if (relayoutChildren == RelayoutChildren::No && simplifiedLayout())
         return;
+
+    layoutFloatingChildren();
+
+    recomputeLogicalWidth();
+    computeAndSetBlockDirectionMarginsOfChildren();
 
     // We first layout our children as a normal <mrow> element.
     LayoutUnit contentWidth, contentAscent, contentDescent;
@@ -101,15 +115,19 @@ void RenderMathMLPadded::layoutBlock(bool relayoutChildren, LayoutUnit)
     LayoutUnit descent = mpaddedDepth(contentDescent);
 
     // Align children on the new baseline and shift them by (lspace, -voffset)
-    LayoutPoint contentLocation(lspace(), ascent - contentAscent - voffset());
-    for (auto* child = firstChildBox(); child; child = child->nextSiblingBox())
-        child->setLocation(child->location() + contentLocation);
+    shiftInFlowChildren(lspace(), ascent - contentAscent - voffset());
 
     // Set the final metrics.
     setLogicalWidth(width);
     setLogicalHeight(ascent + descent);
 
-    layoutPositionedObjects(relayoutChildren);
+    auto sizes = sizeAppliedToMathContent(LayoutPhase::Layout);
+    auto shift = applySizeToMathContent(LayoutPhase::Layout, sizes);
+    shiftInFlowChildren(shift, 0);
+
+    adjustLayoutForBorderAndPadding();
+
+    layoutOutOfFlowBoxes(relayoutChildren);
 
     updateScrollInfoAfterLayout();
 
@@ -120,7 +138,7 @@ std::optional<LayoutUnit> RenderMathMLPadded::firstLineBaseline() const
 {
     // We try and calculate the baseline from the position of the first child.
     LayoutUnit ascent;
-    if (auto* baselineChild = firstChildBox())
+    if (auto* baselineChild = firstInFlowChildBox())
         ascent = ascentForChild(*baselineChild) + baselineChild->logicalTop() + voffset();
     else
         ascent = mpaddedHeight(0);

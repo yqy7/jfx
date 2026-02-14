@@ -29,24 +29,38 @@
 #if ENABLE(WHEEL_EVENT_LATCHING)
 
 #include "Element.h"
-#include "Frame.h"
-#include "FrameView.h"
+#include "LocalFrame.h"
+#include "LocalFrameView.h"
 #include "Logging.h"
 #include "PlatformWheelEvent.h"
 #include "ScrollableArea.h"
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/TextStream.h>
 
 namespace WebCore {
 
+WTF_MAKE_TZONE_ALLOCATED_IMPL(ScrollLatchingController);
+
 // See also ScrollTreeLatchingController.cpp
 static const Seconds resetLatchedStateTimeout { 100_ms };
 
-ScrollLatchingController::ScrollLatchingController()
-    : m_clearLatchingStateTimer(*this, &ScrollLatchingController::clearTimerFired)
+ScrollLatchingController::ScrollLatchingController(Page& page)
+    : m_page(page)
+    , m_clearLatchingStateTimer(*this, &ScrollLatchingController::clearTimerFired)
 {
 }
 
 ScrollLatchingController::~ScrollLatchingController() = default;
+
+void ScrollLatchingController::ref() const
+{
+    m_page->ref();
+}
+
+void ScrollLatchingController::deref() const
+{
+    m_page->deref();
+}
 
 void ScrollLatchingController::clear()
 {
@@ -99,7 +113,7 @@ void ScrollLatchingController::receivedWheelEvent(const PlatformWheelEvent& whee
         m_cumulativeEventDelta += wheelEvent.delta();
 }
 
-bool ScrollLatchingController::latchingAllowsScrollingInFrame(const Frame& frame, WeakPtr<ScrollableArea>& latchedScroller) const
+bool ScrollLatchingController::latchingAllowsScrollingInFrame(const LocalFrame& frame, WeakPtr<ScrollableArea>& latchedScroller) const
 {
     if (m_frameStateStack.isEmpty())
         return true;
@@ -111,7 +125,7 @@ bool ScrollLatchingController::latchingAllowsScrollingInFrame(const Frame& frame
     return false;
 }
 
-void ScrollLatchingController::updateAndFetchLatchingStateForFrame(Frame& frame, const PlatformWheelEvent& wheelEvent, RefPtr<Element>& latchedElement, WeakPtr<ScrollableArea>& scrollableArea, bool& isOverWidget)
+void ScrollLatchingController::updateAndFetchLatchingStateForFrame(LocalFrame& frame, const PlatformWheelEvent& wheelEvent, RefPtr<Element>& latchedElement, WeakPtr<ScrollableArea>& scrollableArea, bool& isOverWidget)
 {
     if (wheelEvent.isGestureStart()) {
         // We can have existing state here because state is cleared on a timer.
@@ -169,13 +183,13 @@ void ScrollLatchingController::removeLatchingStateForTarget(const Element& eleme
         m_frameStateStack.clear();
 }
 
-void ScrollLatchingController::removeLatchingStateForFrame(const Frame& frame)
+void ScrollLatchingController::removeLatchingStateForFrame(const LocalFrame& frame)
 {
     if (m_frameStateStack.isEmpty())
         return;
 
     // If the frame was in the latching stack, just clear state.
-    if (auto* frameState = stateForFrame(frame))
+    if (stateForFrame(frame))
         clear();
 }
 
@@ -184,7 +198,7 @@ static bool deltaIsPredominantlyVertical(FloatSize delta)
     return std::abs(delta.height()) > std::abs(delta.width());
 }
 
-bool ScrollLatchingController::shouldLatchToScrollableArea(const Frame& frame, ScrollableArea* scrollableArea, FloatSize scrollDelta) const
+bool ScrollLatchingController::shouldLatchToScrollableArea(const LocalFrame& frame, ScrollableArea* scrollableArea, FloatSize scrollDelta) const
 {
     if (!scrollableArea)
         return false;
@@ -218,7 +232,7 @@ bool ScrollLatchingController::shouldLatchToScrollableArea(const Frame& frame, S
     return !scrollableArea->scrolledToTop();
 }
 
-bool ScrollLatchingController::hasStateForFrame(const Frame& frame) const
+bool ScrollLatchingController::hasStateForFrame(const LocalFrame& frame) const
 {
     for (const auto& state : m_frameStateStack) {
         if (state.frame == &frame)
@@ -227,7 +241,7 @@ bool ScrollLatchingController::hasStateForFrame(const Frame& frame) const
     return false;
 }
 
-ScrollLatchingController::FrameState* ScrollLatchingController::stateForFrame(const Frame& frame)
+ScrollLatchingController::FrameState* ScrollLatchingController::stateForFrame(const LocalFrame& frame)
 {
     for (auto& state : m_frameStateStack) {
         if (state.frame == &frame)
@@ -236,7 +250,7 @@ ScrollLatchingController::FrameState* ScrollLatchingController::stateForFrame(co
     return nullptr;
 }
 
-const ScrollLatchingController::FrameState* ScrollLatchingController::stateForFrame(const Frame& frame) const
+const ScrollLatchingController::FrameState* ScrollLatchingController::stateForFrame(const LocalFrame& frame) const
 {
     for (const auto& state : m_frameStateStack) {
         if (state.frame == &frame)
@@ -252,13 +266,13 @@ void ScrollLatchingController::dump(WTF::TextStream& ts) const
 
     for (const auto& state : m_frameStateStack) {
         TextStream::GroupScope groupScope(multilineStream);
-        multilineStream.dumpProperty("frame", ValueOrNull(state.frame));
-        multilineStream.dumpProperty("element", ValueOrNull(state.wheelEventElement.get()));
-        multilineStream.dumpProperty("scrollable area", ValueOrNull(state.scrollableArea.get()));
-        multilineStream.dumpProperty("is over widget", state.isOverWidget);
+        multilineStream.dumpProperty("frame"_s, ValueOrNull(state.frame));
+        multilineStream.dumpProperty("element"_s, ValueOrNull(state.wheelEventElement.get()));
+        multilineStream.dumpProperty("scrollable area"_s, ValueOrNull(state.scrollableArea.get()));
+        multilineStream.dumpProperty("is over widget"_s, state.isOverWidget);
     }
 
-    ts << "ScrollLatchingController state " << multilineStream.release();
+    ts << "ScrollLatchingController state "_s << multilineStream.release();
 }
 
 TextStream& operator<<(TextStream& ts, const ScrollLatchingController& controller)

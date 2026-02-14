@@ -38,7 +38,7 @@
 #include "pas_segregated_size_directory.h"
 
 pas_bitfit_heap* pas_bitfit_heap_create(pas_segregated_heap* segregated_heap,
-                                        pas_heap_config* heap_config)
+                                        const pas_heap_config* heap_config)
 {
     pas_bitfit_heap* result;
     pas_bitfit_page_config_variant variant;
@@ -60,10 +60,10 @@ pas_bitfit_heap* pas_bitfit_heap_create(pas_segregated_heap* segregated_heap,
 }
 
 pas_bitfit_variant_selection pas_bitfit_heap_select_variant(size_t requested_object_size,
-                                                            pas_heap_config* config,
+                                                            const pas_heap_config* config,
                                                             pas_heap_runtime_config* runtime_config)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_BITFIT_HEAPS);
 
     pas_bitfit_page_config_variant variant;
     pas_bitfit_page_config_variant best_variant;
@@ -84,7 +84,8 @@ pas_bitfit_variant_selection pas_bitfit_heap_select_variant(size_t requested_obj
             continue;
 
         if (verbose)
-            pas_log("max object size = %zu\n", page_config.base.max_object_size);
+            pas_log("max object size = %zu min align = %zu\n",
+                    page_config.base.max_object_size, pas_page_base_config_min_align(page_config.base));
 
         PAS_ASSERT(
             page_config.base.max_object_size
@@ -126,10 +127,10 @@ pas_bitfit_variant_selection pas_bitfit_heap_select_variant(size_t requested_obj
 void pas_bitfit_heap_construct_and_insert_size_class(pas_bitfit_heap* heap,
                                                      pas_bitfit_size_class* size_class,
                                                      unsigned object_size,
-                                                     pas_heap_config* config,
+                                                     const pas_heap_config* config,
                                                      pas_heap_runtime_config* runtime_config)
 {
-    static const bool verbose = false;
+    static const bool verbose = PAS_SHOULD_LOG(PAS_LOG_BITFIT_HEAPS);
 
     pas_bitfit_variant_selection best;
     pas_compact_atomic_bitfit_size_class_ptr* insertion_point;

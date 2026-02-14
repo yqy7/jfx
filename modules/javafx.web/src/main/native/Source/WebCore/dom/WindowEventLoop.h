@@ -29,6 +29,7 @@
 #include "GCReachableRef.h"
 #include "Timer.h"
 #include <wtf/HashSet.h>
+#include <wtf/WeakHashMap.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
@@ -37,6 +38,7 @@ class CustomElementQueue;
 class Document;
 class HTMLSlotElement;
 class MutationObserver;
+class Page;
 class SecurityOrigin;
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#window-event-loop
@@ -53,6 +55,10 @@ public:
 
     CustomElementQueue& backupElementQueue();
 
+    void scheduleIdlePeriod();
+    void opportunisticallyRunIdleCallbacks(std::optional<MonotonicTime> deadline = std::nullopt);
+    MonotonicTime computeIdleDeadline();
+
     WEBCORE_EXPORT static void breakToAllowRenderingUpdate();
 
 private:
@@ -63,10 +69,18 @@ private:
     bool isContextThread() const final;
     MicrotaskQueue& microtaskQueue() final;
 
+    void startIdlePeriod(MonotonicTime);
+    bool shouldEndIdlePeriod();
+    std::optional<MonotonicTime> nextScheduledWorkTime() const;
+    std::optional<MonotonicTime> nextRenderingTime() const;
     void didReachTimeToRun();
+    void didFireIdleTimer();
+
+    void decayIdleCallbackDuration() { m_expectedIdleCallbackDuration /= 2; }
 
     String m_agentClusterKey;
     Timer m_timer;
+    Timer m_idleTimer;
     std::unique_ptr<MicrotaskQueue> m_microtaskQueue;
 
     // Each task scheduled in event loop is associated with a document so that it can be suspened or stopped
@@ -82,6 +96,9 @@ private:
 
     std::unique_ptr<CustomElementQueue> m_customElementQueue;
     bool m_processingBackupElementQueue { false };
+
+    MonotonicTime m_lastIdlePeriodStartTime;
+    Seconds m_expectedIdleCallbackDuration { 4_ms };
 };
 
 } // namespace WebCore

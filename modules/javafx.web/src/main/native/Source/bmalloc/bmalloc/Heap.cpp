@@ -30,7 +30,6 @@
 #include "BumpAllocator.h"
 #include "Chunk.h"
 #include "CryptoRandom.h"
-#include "DebugHeap.h"
 #include "Environment.h"
 #include "Gigacage.h"
 #include "HeapConstants.h"
@@ -38,6 +37,7 @@
 #include "Scavenger.h"
 #include "SmallLine.h"
 #include "SmallPage.h"
+#include "SystemHeap.h"
 #include "bmalloc.h"
 #include <thread>
 #include <vector>
@@ -53,7 +53,7 @@ namespace bmalloc {
 Heap::Heap(HeapKind kind, LockHolder&)
     : m_kind { kind }, m_constants { *HeapConstants::get() }
 {
-    BASSERT(!Environment::get()->isDebugHeapEnabled());
+    BASSERT(!Environment::get()->isSystemHeapEnabled());
 
     Gigacage::ensureGigacage();
 #if GIGACAGE_ENABLED
@@ -91,7 +91,7 @@ size_t Heap::footprint()
     return m_footprint;
 }
 
-BINLINE void Heap::adjustStat(size_t& value, ssize_t amount)
+BINLINE void Heap::adjustStat(size_t& value, std::ptrdiff_t amount)
 {
     constexpr bool check = false;
 
@@ -103,12 +103,12 @@ BINLINE void Heap::adjustStat(size_t& value, ssize_t amount)
     value = result;
 }
 
-BINLINE void Heap::logStat(size_t value, ssize_t amount, const char* label, const char* note)
+BINLINE void Heap::logStat(size_t value, std::ptrdiff_t amount, const char* label, const char* note)
 {
     fprintf(stderr, "%s: %zu (%zd) %s\n", label, value, amount, note);
 }
 
-BINLINE void Heap::adjustFreeableMemory(UniqueLockHolder&, ssize_t amount, const char* note)
+BINLINE void Heap::adjustFreeableMemory(UniqueLockHolder&, std::ptrdiff_t amount, const char* note)
 {
     constexpr bool verbose = false;
 
@@ -118,7 +118,7 @@ BINLINE void Heap::adjustFreeableMemory(UniqueLockHolder&, ssize_t amount, const
         logStat(m_freeableMemory, amount, "freeableMemory", note);
 }
 
-BINLINE void Heap::adjustFootprint(UniqueLockHolder&, ssize_t amount, const char* note)
+BINLINE void Heap::adjustFootprint(UniqueLockHolder&, std::ptrdiff_t amount, const char* note)
 {
     constexpr bool verbose = false;
 

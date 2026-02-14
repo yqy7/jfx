@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,6 +31,9 @@
 #include "ContextMenuItem.h"
 #include "HitTestRequest.h"
 #include <wtf/OptionSet.h>
+#include <wtf/TZoneMalloc.h>
+#include <wtf/UniqueRef.h>
+#include <wtf/WeakRef.h>
 
 namespace WebCore {
 
@@ -41,13 +44,13 @@ class HitTestResult;
 class Page;
 
 class ContextMenuController {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(ContextMenuController);
 public:
-    ContextMenuController(Page&, ContextMenuClient&);
+    ContextMenuController(Page&, UniqueRef<ContextMenuClient>&&);
     ~ContextMenuController();
 
-    Page& page() { return m_page; }
-    ContextMenuClient& client() { return m_client; }
+    Page& page();
+    ContextMenuClient& client() { return m_client.get(); }
 
     ContextMenu* contextMenu() const { return m_contextMenu.get(); }
     WEBCORE_EXPORT void clearContextMenu();
@@ -58,7 +61,7 @@ public:
     void populate();
     WEBCORE_EXPORT void didDismissContextMenu();
     WEBCORE_EXPORT void contextMenuItemSelected(ContextMenuAction, const String& title);
-    void addInspectElementItem();
+    void addDebuggingItems();
 
     WEBCORE_EXPORT void checkOrEnableIfNeeded(ContextMenuItem&) const;
 
@@ -67,7 +70,7 @@ public:
     const HitTestResult& hitTestResult() const { return m_context.hitTestResult(); }
 
 #if USE(ACCESSIBILITY_CONTEXT_MENUS)
-    void showContextMenuAt(Frame&, const IntPoint& clickPoint);
+    void showContextMenuAt(LocalFrame&, const IntPoint& clickPoint);
 #endif
 
 #if ENABLE(SERVICE_CONTROLS)
@@ -88,12 +91,17 @@ private:
     void createAndAppendTextDirectionSubMenu(ContextMenuItem&);
     void createAndAppendSubstitutionsSubMenu(ContextMenuItem&);
     void createAndAppendTransformationsSubMenu(ContextMenuItem&);
+    bool shouldEnableCopyLinkWithHighlight() const;
 #if PLATFORM(GTK)
     void createAndAppendUnicodeSubMenu(ContextMenuItem&);
 #endif
 
-    Page& m_page;
-    ContextMenuClient& m_client;
+#if ENABLE(PDFJS)
+    void performPDFJSAction(LocalFrame&, const String& action);
+#endif
+
+    WeakRef<Page> m_page;
+    const UniqueRef<ContextMenuClient> m_client;
     std::unique_ptr<ContextMenu> m_contextMenu;
     RefPtr<ContextMenuProvider> m_menuProvider;
     ContextMenuContext m_context;

@@ -1,6 +1,8 @@
 /* GObject - GLib Type, Object, Parameter and Signal Library
  * Copyright (C) 1998-1999, 2000-2001 Tim Janik and Red Hat, Inc.
  *
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -27,43 +29,6 @@
 #include "gtype-private.h"
 #include "gvalue.h"
 #include "gvaluecollector.h"
-
-
-/**
- * SECTION:enumerations_flags
- * @short_description: Enumeration and flags types
- * @title: Enumeration and Flag Types
- * @see_also:#GParamSpecEnum, #GParamSpecFlags, g_param_spec_enum(),
- * g_param_spec_flags()
- *
- * The GLib type system provides fundamental types for enumeration and
- * flags types. (Flags types are like enumerations, but allow their
- * values to be combined by bitwise or). A registered enumeration or
- * flags type associates a name and a nickname with each allowed
- * value, and the methods g_enum_get_value_by_name(),
- * g_enum_get_value_by_nick(), g_flags_get_value_by_name() and
- * g_flags_get_value_by_nick() can look up values by their name or
- * nickname.  When an enumeration or flags type is registered with the
- * GLib type system, it can be used as value type for object
- * properties, using g_param_spec_enum() or g_param_spec_flags().
- *
- * GObject ships with a utility called [glib-mkenums][glib-mkenums],
- * that can construct suitable type registration functions from C enumeration
- * definitions.
- *
- * Example of how to get a string representation of an enum value:
- * |[<!-- language="C" -->
- * GEnumClass *enum_class;
- * GEnumValue *enum_value;
- *
- * enum_class = g_type_class_ref (MAMAN_TYPE_MY_ENUM);
- * enum_value = g_enum_get_value (enum_class, MAMAN_MY_ENUM_FOO);
- *
- * g_print ("Name: %s\n", enum_value->value_name);
- *
- * g_type_class_unref (enum_class);
- * ]|
- */
 
 
 /* --- prototypes --- */
@@ -178,10 +143,10 @@ value_flags_enum_lcopy_value (const GValue *value,
 /**
  * g_enum_register_static:
  * @name: A nul-terminated string used as the name of the new type.
- * @const_static_values: An array of #GEnumValue structs for the possible
- *  enumeration values. The array is terminated by a struct with all
- *  members being 0. GObject keeps a reference to the data, so it cannot
- *  be stack-allocated.
+ * @const_static_values: (array zero-terminated=1): An array of
+ *  #GEnumValue structs for the possible enumeration values. The array is
+ *  terminated by a struct with all members being 0. GObject keeps a
+ *  reference to the data, so it cannot be stack-allocated.
  *
  * Registers a new static enumeration type with the name @name.
  *
@@ -222,9 +187,10 @@ g_enum_register_static (const gchar  *name,
 /**
  * g_flags_register_static:
  * @name: A nul-terminated string used as the name of the new type.
- * @const_static_values: An array of #GFlagsValue structs for the possible
- *  flags values. The array is terminated by a struct with all members being 0.
- *  GObject keeps a reference to the data, so it cannot be stack-allocated.
+ * @const_static_values: (array zero-terminated=1): An array of
+ *  #GFlagsValue structs for the possible flags values. The array is
+ *  terminated by a struct with all members being 0. GObject keeps a
+ *  reference to the data, so it cannot be stack-allocated.
  *
  * Registers a new static flags type with the name @name.
  *

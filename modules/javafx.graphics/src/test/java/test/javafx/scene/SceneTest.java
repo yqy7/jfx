@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,18 +25,19 @@
 
 package test.javafx.scene;
 
+import com.sun.javafx.scene.KeyboardShortcutsHandler;
 import com.sun.javafx.scene.NodeHelper;
+import com.sun.javafx.scene.SceneEventDispatcher;
 import com.sun.javafx.scene.SceneHelper;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
-import javafx.concurrent.Task;
+import javafx.css.PseudoClass;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.TilePane;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.transform.Scale;
-import javafx.stage.PopupWindow;
 import javafx.stage.Stage;
 
 import test.com.sun.javafx.pgstub.StubScene;
@@ -46,17 +47,9 @@ import test.com.sun.javafx.test.MouseEventGenerator;
 import com.sun.javafx.tk.Toolkit;
 
 import javafx.application.Platform;
-import javafx.beans.InvalidationListener;
-import javafx.beans.Observable;
 import javafx.scene.input.MouseEvent;
 
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-
 import java.lang.ref.WeakReference;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import javafx.scene.Camera;
@@ -72,9 +65,17 @@ import javafx.scene.SceneShim;
 import javafx.scene.SubScene;
 import test.util.memory.JMemoryBuddy;
 
-import static junit.framework.Assert.assertEquals;
-import static junit.framework.Assert.assertNotNull;
-import static org.junit.Assert.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Tests various aspects of Scene.
@@ -87,14 +88,14 @@ public class SceneTest {
     private boolean handler2Called = false;
 
 
-    @Before
+    @BeforeEach
     public void setUp() {
         stage = new Stage();
         stage.show();
         stage.requestFocus();
     }
 
-    @After
+    @AfterEach
     public void tearDown() {
         stage.hide();
     }
@@ -170,15 +171,19 @@ public class SceneTest {
         assertTrue(Platform.isFxApplicationThread());
     }
 
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testNullRoot() {
-        Scene scene = new Scene(null);
+        assertThrows(NullPointerException.class, () -> {
+            Scene scene = new Scene(null);
+        });
     }
 
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testSetNullRoot() {
-        Scene scene = new Scene(new Group());
-        scene.setRoot(null);
+        assertThrows(NullPointerException.class, () -> {
+            Scene scene = new Scene(new Group());
+            scene.setRoot(null);
+        });
     }
 
     @Test
@@ -231,6 +236,18 @@ public class SceneTest {
         assertTrue(g.getStyleClass().contains("root"));
         scene.setRoot(new Group());
         assertFalse(g.getStyleClass().contains("root"));
+    }
+
+    @Test
+    public void testRootPseudoClassIsSetOnRootNode() {
+        var root = PseudoClass.getPseudoClass("root");
+        Scene scene = new Scene(new Group());
+        Group g = new Group();
+        assertFalse(g.getPseudoClassStates().contains(root));
+        scene.setRoot(g);
+        assertTrue(g.getPseudoClassStates().contains(root));
+        scene.setRoot(new Group());
+        assertFalse(g.getPseudoClassStates().contains(root));
     }
 
     @Test
@@ -655,62 +672,72 @@ public class SceneTest {
         assertNull(scene.getCamera());
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    @Test
     public void testSetIllegalCameraFromOtherScene() {
-        Camera camera = new PerspectiveCamera();
+        assertThrows(IllegalArgumentException.class, () -> {
+            Camera camera = new PerspectiveCamera();
 
-        Scene scene1 = new Scene(new Group(camera));
-        Scene scene2 = new Scene(new Group());
+            Scene scene1 = new Scene(new Group(camera));
+            Scene scene2 = new Scene(new Group());
 
-        scene1.setCamera(camera);
-        scene2.setCamera(camera);
+            scene1.setCamera(camera);
+            scene2.setCamera(camera);
+        });
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    @Test
     public void testSetIllegalCameraFromItsSubScene() {
-        Camera camera = new PerspectiveCamera();
+        assertThrows(IllegalArgumentException.class, () -> {
+            Camera camera = new PerspectiveCamera();
 
-        SubScene subScene = new SubScene(new Group(camera), 150, 150);
-        Scene scene = new Scene(new Group(subScene));
+            SubScene subScene = new SubScene(new Group(camera), 150, 150);
+            Scene scene = new Scene(new Group(subScene));
 
-        subScene.setCamera(camera);
-        scene.setCamera(camera);
+            subScene.setCamera(camera);
+            scene.setCamera(camera);
+        });
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    @Test
     public void testSetIllegalCameraFromOtherSubScene() {
-        Camera camera = new PerspectiveCamera();
+        assertThrows(IllegalArgumentException.class, () -> {
+            Camera camera = new PerspectiveCamera();
 
-        Scene scene = new Scene(new Group());
+            Scene scene = new Scene(new Group());
 
-        SubScene subScene = new SubScene(new Group(camera), 150, 150);
-        Scene otherScene = new Scene(new Group(subScene));
+            SubScene subScene = new SubScene(new Group(camera), 150, 150);
+            Scene otherScene = new Scene(new Group(subScene));
 
-        subScene.setCamera(camera);
-        scene.setCamera(camera);
+            subScene.setCamera(camera);
+            scene.setCamera(camera);
+        });
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    @Test
     public void testSetIllegalCameraFromSubScene() {
-        Camera camera = new PerspectiveCamera();
+        assertThrows(IllegalArgumentException.class, () -> {
+            Camera camera = new PerspectiveCamera();
 
-        SubScene subScene = new SubScene(new Group(camera), 150, 150);
-        Scene scene = new Scene(new Group());
+            SubScene subScene = new SubScene(new Group(camera), 150, 150);
+            Scene scene = new Scene(new Group());
 
-        subScene.setCamera(camera);
-        scene.setCamera(camera);
+            subScene.setCamera(camera);
+            scene.setCamera(camera);
+        });
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    @Test
     public void testSetIllegalCameraFromNestedSubScene() {
-        Camera camera = new PerspectiveCamera();
+        assertThrows(IllegalArgumentException.class, () -> {
+            Camera camera = new PerspectiveCamera();
 
-        SubScene nestedSubScene = new SubScene(new Group(camera), 100, 100);
-        SubScene subScene = new SubScene(new Group(nestedSubScene), 150, 150);
-        Scene scene = new Scene(new Group(subScene));
+            SubScene nestedSubScene = new SubScene(new Group(camera), 100, 100);
+            SubScene subScene = new SubScene(new Group(nestedSubScene), 150, 150);
+            Scene scene = new Scene(new Group(subScene));
 
-        nestedSubScene.setCamera(camera);
-        scene.setCamera(camera);
+            nestedSubScene.setCamera(camera);
+            scene.setCamera(camera);
+        });
     }
 
     @Test
@@ -766,22 +793,26 @@ public class SceneTest {
         assertEquals(20, camera.getNearClip(), 0.00001);
     }
 
-    @Test(expected=IllegalArgumentException.class)
+    @Test
     public void scenesCannotShareCamera() {
-        Scene scene = new Scene(new Group(), 300, 200);
-        Scene scene2 = new Scene(new Group(), 300, 200);
-        Camera cam = new ParallelCamera();
-        scene.setCamera(cam);
-        scene2.setCamera(cam);
+        assertThrows(IllegalArgumentException.class, () -> {
+            Scene scene = new Scene(new Group(), 300, 200);
+            Scene scene2 = new Scene(new Group(), 300, 200);
+            Camera cam = new ParallelCamera();
+            scene.setCamera(cam);
+            scene2.setCamera(cam);
+        });
     }
 
-    @Test(expected=IllegalArgumentException.class)
+    @Test
     public void subSceneAndSceneCannotShareCamera() {
-        SubScene sub = new SubScene(new Group(), 100, 100);
-        Scene scene = new Scene(new Group(sub), 300, 200);
-        Camera cam = new ParallelCamera();
-        sub.setCamera(cam);
-        scene.setCamera(cam);
+        assertThrows(IllegalArgumentException.class, () -> {
+            SubScene sub = new SubScene(new Group(), 100, 100);
+            Scene scene = new Scene(new Group(sub), 300, 200);
+            Camera cam = new ParallelCamera();
+            sub.setCamera(cam);
+            scene.setCamera(cam);
+        });
     }
 
     @Test
@@ -882,16 +913,20 @@ public class SceneTest {
      *                                                                         *
      **************************************************************************/
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void testAddNullPreLayoutPulseListener() {
-        Scene scene = new Scene(new Group(), 300, 300);
-        scene.addPreLayoutPulseListener(null);
+        assertThrows(NullPointerException.class, () -> {
+            Scene scene = new Scene(new Group(), 300, 300);
+            scene.addPreLayoutPulseListener(null);
+        });
     }
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void testAddNullPostLayoutPulseListener() {
-        Scene scene = new Scene(new Group(), 300, 300);
-        scene.addPostLayoutPulseListener(null);
+        assertThrows(NullPointerException.class, () -> {
+            Scene scene = new Scene(new Group(), 300, 300);
+            scene.addPostLayoutPulseListener(null);
+        });
     }
 
     @Test public void testRemoveNullPreLayoutPulseListener_nullListenersList() {
@@ -1029,5 +1064,82 @@ public class SceneTest {
 
         // Verify TilePane was GC'd:
         JMemoryBuddy.assertCollectable(ref);
+    }
+
+    @Test public void testNoReferencesRemainToRemovedNodeAfterStartingFullDrag() {
+        TilePane pane = new TilePane();
+        pane.setMinSize(200, 200);
+
+        WeakReference<TilePane> ref = new WeakReference<>(pane);
+
+        Group root = new Group(pane);
+        final Scene scene = new Scene(root, 400, 400);
+        stage.setScene(scene);
+
+        pane.setOnDragDetected(event -> ((Node) event.getSource()).startFullDrag());
+
+        // Simulate a drag operation from the user
+        SceneHelper.processMouseEvent(scene,
+                MouseEventGenerator.generateMouseEvent(MouseEvent.MOUSE_PRESSED, 50, 50));
+
+        SceneHelper.processMouseEvent(scene,
+                MouseEventGenerator.generateMouseEvent(MouseEvent.MOUSE_DRAGGED, 70, 70));
+
+        SceneHelper.processMouseEvent(scene,
+                MouseEventGenerator.generateMouseEvent(MouseEvent.MOUSE_RELEASED, 50, 50));
+
+        root.getChildren().setAll(new StackPane());
+
+        // Generate a MOUSE_EXITED event for the removed node and a pulse as otherwise many unrelated Scene references
+        // hang around to the removed node:
+        SceneHelper.processMouseEvent(
+                scene,
+                new MouseEvent(
+                        MouseEvent.MOUSE_EXITED, 50, 50, 50, 50, MouseButton.NONE, 0, false, false, false,
+                        false, false, false, false, false, false, true, null
+                )
+        );
+
+        Toolkit.getToolkit().firePulse();
+
+        pane = null;
+
+        JMemoryBuddy.assertCollectable(ref);
+    }
+
+    @Test
+    public void sceneShouldSet_MnemonicsDisplayEnabled_ToFalseWhenWindowFocusIsLost() {
+        Group root = new Group();
+
+        root.setFocusTraversable(true);
+
+        Scene scene = new Scene(root);
+        SceneEventDispatcher dispatcher = (SceneEventDispatcher) scene.getEventDispatcher();
+        KeyboardShortcutsHandler keyboardShortcutsHandler = dispatcher.getKeyboardShortcutsHandler();
+
+        stage.setScene(scene);
+        stage.show();
+        stage.requestFocus();
+
+        assertFalse(keyboardShortcutsHandler.isMnemonicsDisplayEnabled());
+
+        keyboardShortcutsHandler.setMnemonicsDisplayEnabled(true);
+
+        assertTrue(keyboardShortcutsHandler.isMnemonicsDisplayEnabled());
+
+        stage.close();
+
+        assertFalse(keyboardShortcutsHandler.isMnemonicsDisplayEnabled());
+    }
+
+    @Test
+    public void invalidMouseButtonTypeNoneEvent() {
+        Group g = new Group();
+        Scene scene = new Scene(g, 100, 100, true);
+
+        MouseEvent event = new MouseEvent(MouseEvent.MOUSE_PRESSED, 0, 0, 0, 0, MouseButton.NONE,
+                1, false, false, false, false, false,
+                false, false, false, false, false, null);
+        SceneHelper.processMouseEvent(scene, event);
     }
 }

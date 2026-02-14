@@ -2,7 +2,7 @@
     Copyright (C) 1998 Lars Knoll (knoll@mpi-hd.mpg.de)
     Copyright (C) 2001 Dirk Mueller <mueller@kde.org>
     Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
-    Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+    Copyright (C) 2004-2025 Apple Inc. All rights reserved.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -26,6 +26,15 @@
 #include <wtf/CompletionHandler.h>
 
 namespace WebCore {
+class CachedRawResourceClient;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::CachedRawResourceClient> : std::true_type { };
+}
+
+namespace WebCore {
 
 class CachedResource;
 class ResourceRequest;
@@ -35,12 +44,11 @@ class SharedBuffer;
 
 class CachedRawResourceClient : public CachedResourceClient {
 public:
-    virtual ~CachedRawResourceClient() = default;
     static CachedResourceClientType expectedType() { return RawResourceType; }
     CachedResourceClientType resourceClientType() const override { return expectedType(); }
 
     virtual void dataSent(CachedResource&, unsigned long long /* bytesSent */, unsigned long long /* totalBytesToBeSent */) { }
-    virtual void responseReceived(CachedResource&, const ResourceResponse&, CompletionHandler<void()>&& completionHandler)
+    virtual void responseReceived(const CachedResource&, const ResourceResponse&, CompletionHandler<void()>&& completionHandler)
     {
         if (completionHandler)
             completionHandler();
@@ -52,8 +60,10 @@ public:
     virtual void finishedTimingForWorkerLoad(CachedResource&, const ResourceTiming&) { }
 
 #if USE(QUICK_LOOK)
-    virtual void previewResponseReceived(CachedResource&, const ResourceResponse&) { };
+    virtual void previewResponseReceived(const CachedResource&, const ResourceResponse&) { };
 #endif
 };
 
-}
+} // namespace WebCore
+
+SPECIALIZE_TYPE_TRAITS_CACHED_RESOURCE_CLIENT(CachedRawResourceClient, RawResourceType);

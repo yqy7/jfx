@@ -23,15 +23,18 @@
 #include "SVGFEOffsetElement.h"
 
 #include "FEOffset.h"
+#include "NodeName.h"
+#include "SVGFilter.h"
 #include "SVGNames.h"
-#include <wtf/IsoMallocInlines.h>
+#include "SVGPropertyOwnerRegistry.h"
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(SVGFEOffsetElement);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(SVGFEOffsetElement);
 
 inline SVGFEOffsetElement::SVGFEOffsetElement(const QualifiedName& tagName, Document& document)
-    : SVGFilterPrimitiveStandardAttributes(tagName, document)
+    : SVGFilterPrimitiveStandardAttributes(tagName, document, makeUniqueRef<PropertyRegistry>(*this))
 {
     ASSERT(hasTagName(SVGNames::feOffsetTag));
 
@@ -48,38 +51,70 @@ Ref<SVGFEOffsetElement> SVGFEOffsetElement::create(const QualifiedName& tagName,
     return adoptRef(*new SVGFEOffsetElement(tagName, document));
 }
 
-void SVGFEOffsetElement::parseAttribute(const QualifiedName& name, const AtomString& value)
+void SVGFEOffsetElement::attributeChanged(const QualifiedName& name, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason attributeModificationReason)
 {
-    if (name == SVGNames::dxAttr) {
-        m_dx->setBaseValInternal(value.toFloat());
-        return;
+    switch (name.nodeName()) {
+    case AttributeNames::dxAttr:
+        Ref { m_dx }->setBaseValInternal(newValue.toFloat());
+        break;
+    case AttributeNames::dyAttr:
+        Ref { m_dy }->setBaseValInternal(newValue.toFloat());
+        break;
+    case AttributeNames::inAttr:
+        Ref { m_in1 }->setBaseValInternal(newValue);
+        break;
+    default:
+        break;
     }
 
-    if (name == SVGNames::dyAttr) {
-        m_dy->setBaseValInternal(value.toFloat());
-        return;
-    }
-
-    if (name == SVGNames::inAttr) {
-        m_in1->setBaseValInternal(value);
-        return;
-    }
-
-    SVGFilterPrimitiveStandardAttributes::parseAttribute(name, value);
+    SVGFilterPrimitiveStandardAttributes::attributeChanged(name, oldValue, newValue, attributeModificationReason);
 }
 
 void SVGFEOffsetElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (PropertyRegistry::isKnownAttribute(attrName)) {
+    switch (attrName.nodeName()) {
+    case AttributeNames::inAttr: {
         InstanceInvalidationGuard guard(*this);
-        invalidate();
-        return;
+        updateSVGRendererForElementChange();
+        break;
     }
-
+    case AttributeNames::dxAttr:
+    case AttributeNames::dyAttr: {
+        InstanceInvalidationGuard guard(*this);
+        primitiveAttributeChanged(attrName);
+        break;
+    }
+    default:
     SVGFilterPrimitiveStandardAttributes::svgAttributeChanged(attrName);
+        break;
+    }
 }
 
-RefPtr<FilterEffect> SVGFEOffsetElement::filterEffect(const SVGFilterBuilder&, const FilterEffectVector&) const
+bool SVGFEOffsetElement::setFilterEffectAttribute(FilterEffect& effect, const QualifiedName& attrName)
+{
+    auto& offset = downcast<FEOffset>(effect);
+
+    if (attrName == SVGNames::dxAttr)
+        return offset.setDx(dx());
+    if (attrName == SVGNames::dyAttr)
+        return offset.setDy(dy());
+
+    ASSERT_NOT_REACHED();
+    return false;
+}
+
+bool SVGFEOffsetElement::isIdentity() const
+{
+    return !dx() && !dy();
+}
+
+IntOutsets SVGFEOffsetElement::outsets(const FloatRect& targetBoundingBox, SVGUnitTypes::SVGUnitType primitiveUnits) const
+{
+    auto offset = SVGFilter::calculateResolvedSize({ dx(), dy() }, targetBoundingBox, primitiveUnits);
+    return FEOffset::calculateOutsets(offset);
+}
+
+RefPtr<FilterEffect> SVGFEOffsetElement::createFilterEffect(const FilterEffectVector&, const GraphicsContext&) const
 {
     return FEOffset::create(dx(), dy());
 }

@@ -33,6 +33,7 @@
 #include "ActiveDOMObject.h"
 #include "AudioNode.h"
 #include <wtf/Lock.h>
+#include <wtf/RobinHoodHashMap.h>
 
 namespace JSC {
 class JSGlobalObject;
@@ -51,10 +52,14 @@ template<typename> class AudioArray;
 typedef AudioArray<float> AudioFloatArray;
 
 class AudioWorkletNode : public AudioNode, public ActiveDOMObject {
-    WTF_MAKE_ISO_ALLOCATED(AudioWorkletNode);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(AudioWorkletNode);
 public:
     static ExceptionOr<Ref<AudioWorkletNode>> create(JSC::JSGlobalObject&, BaseAudioContext&, String&& name, AudioWorkletNodeOptions&&);
     ~AudioWorkletNode();
+
+    // ActiveDOMObject.
+    void ref() const final { AudioNode::ref(); }
+    void deref() const final { AudioNode::deref(); }
 
     AudioParamMap& parameters() { return m_parameters.get(); }
     MessagePort& port() { return m_port.get(); }
@@ -78,16 +83,15 @@ private:
     void updatePullStatus() final;
 
     // ActiveDOMObject.
-    const char* activeDOMObjectName() const final;
     bool virtualHasPendingActivity() const final;
 
     String m_name;
-    Ref<AudioParamMap> m_parameters;
-    Ref<MessagePort> m_port;
+    const Ref<AudioParamMap> m_parameters;
+    const Ref<MessagePort> m_port;
     Lock m_processLock;
     RefPtr<AudioWorkletProcessor> m_processor; // Should only be used on the rendering thread.
-    HashMap<String, std::unique_ptr<AudioFloatArray>> m_paramValuesMap;
-    Thread* m_workletThread { nullptr };
+    MemoryCompactLookupOnlyRobinHoodHashMap<String, std::unique_ptr<AudioFloatArray>> m_paramValuesMap;
+    RefPtr<Thread> m_workletThread;
 
     // Keeps the reference of AudioBus objects from AudioNodeInput and AudioNodeOutput in order
     // to pass them to AudioWorkletProcessor.

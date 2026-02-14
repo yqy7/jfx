@@ -27,6 +27,7 @@
 #include "DFABytecodeInterpreter.h"
 
 #include "ContentExtensionsDebugging.h"
+#include <wtf/StdLibExtras.h>
 #include <wtf/text/CString.h>
 
 #if ENABLE(CONTENT_EXTENSIONS)
@@ -34,13 +35,12 @@
 namespace WebCore::ContentExtensions {
 
 template <typename IntType>
-static IntType getBits(Span<const uint8_t> bytecode, uint32_t index)
+static IntType getBits(std::span<const uint8_t> bytecode, uint32_t index)
 {
-    ASSERT(index + sizeof(IntType) <= bytecode.size());
-    return *reinterpret_cast<const IntType*>(bytecode.data() + index);
+    return reinterpretCastSpanStartTo<const IntType>(bytecode.subspan(index));
 }
 
-static uint32_t get24BitsUnsigned(Span<const uint8_t> bytecode, uint32_t index)
+static uint32_t get24BitsUnsigned(std::span<const uint8_t> bytecode, uint32_t index)
 {
     ASSERT(index + UInt24Size <= bytecode.size());
     uint32_t highBits = getBits<uint8_t>(bytecode, index + sizeof(uint16_t));
@@ -48,7 +48,7 @@ static uint32_t get24BitsUnsigned(Span<const uint8_t> bytecode, uint32_t index)
     return (highBits << 16) | lowBits;
 }
 
-static DFABytecodeInstruction getInstruction(Span<const uint8_t> bytecode, uint32_t index)
+static DFABytecodeInstruction getInstruction(std::span<const uint8_t> bytecode, uint32_t index)
 {
     return static_cast<DFABytecodeInstruction>(getBits<uint8_t>(bytecode, index) & DFABytecodeInstructionMask);
 }
@@ -68,12 +68,12 @@ static size_t jumpSizeInBytes(DFABytecodeJumpSize jumpSize)
     RELEASE_ASSERT_NOT_REACHED();
 }
 
-template<typename T> uint32_t consumeInteger(Span<const uint8_t> bytecode, uint32_t& programCounter)
+template<typename T> uint32_t consumeInteger(std::span<const uint8_t> bytecode, uint32_t& programCounter)
 {
     programCounter += sizeof(T);
     return getBits<T>(bytecode, programCounter - sizeof(T));
 }
-static uint32_t consume24BitUnsignedInteger(Span<const uint8_t> bytecode, uint32_t& programCounter)
+static uint32_t consume24BitUnsignedInteger(std::span<const uint8_t> bytecode, uint32_t& programCounter)
 {
     programCounter += UInt24Size;
     return get24BitsUnsigned(bytecode, programCounter - UInt24Size);
@@ -117,7 +117,7 @@ static constexpr bool hasAction(DFABytecodeInstruction instruction)
     return false;
 }
 
-static ResourceFlags consumeResourceFlagsAndInstruction(Span<const uint8_t> bytecode, uint32_t& programCounter)
+static ResourceFlags consumeResourceFlagsAndInstruction(std::span<const uint8_t> bytecode, uint32_t& programCounter)
 {
     ASSERT_UNUSED(hasFlags, hasFlags(getInstruction(bytecode, programCounter)));
     switch (static_cast<DFABytecodeFlagsSize>(bytecode[programCounter++] & DFABytecodeFlagsSizeMask)) {
@@ -127,12 +127,14 @@ static ResourceFlags consumeResourceFlagsAndInstruction(Span<const uint8_t> byte
         return consumeInteger<uint16_t>(bytecode, programCounter);
     case DFABytecodeFlagsSize::UInt24:
         return consume24BitUnsignedInteger(bytecode, programCounter);
+    case DFABytecodeFlagsSize::UInt32:
+        return consumeInteger<uint32_t>(bytecode, programCounter);
     }
     ASSERT_NOT_REACHED();
     return 0;
 }
 
-static uint32_t consumeAction(Span<const uint8_t> bytecode, uint32_t& programCounter, uint32_t instructionLocation)
+static uint32_t consumeAction(std::span<const uint8_t> bytecode, uint32_t& programCounter, uint32_t instructionLocation)
 {
     ASSERT_UNUSED(hasAction, hasAction(getInstruction(bytecode, instructionLocation)));
     ASSERT(programCounter > instructionLocation);
@@ -150,7 +152,7 @@ static uint32_t consumeAction(Span<const uint8_t> bytecode, uint32_t& programCou
     return 0;
 }
 
-static DFABytecodeJumpSize getJumpSize(Span<const uint8_t> bytecode, uint32_t index)
+static DFABytecodeJumpSize getJumpSize(std::span<const uint8_t> bytecode, uint32_t index)
 {
     auto jumpSize = static_cast<DFABytecodeJumpSize>(getBits<uint8_t>(bytecode, index) & DFABytecodeJumpSizeMask);
     ASSERT(jumpSize == DFABytecodeJumpSize::Int32
@@ -160,7 +162,7 @@ static DFABytecodeJumpSize getJumpSize(Span<const uint8_t> bytecode, uint32_t in
     return jumpSize;
 }
 
-static int32_t getJumpDistance(Span<const uint8_t> bytecode, uint32_t index, DFABytecodeJumpSize jumpSize)
+static int32_t getJumpDistance(std::span<const uint8_t> bytecode, uint32_t index, DFABytecodeJumpSize jumpSize)
 {
     switch (jumpSize) {
     case DFABytecodeJumpSize::Int8:
@@ -190,20 +192,22 @@ void DFABytecodeInterpreter::interpretTestFlagsAndAppendAction(uint32_t& program
     ResourceFlags loadTypeFlags = flagsToCheck & LoadTypeMask;
     ResourceFlags loadContextFlags = flagsToCheck & LoadContextMask;
     ResourceFlags resourceTypeFlags = flagsToCheck & ResourceTypeMask;
+    ResourceFlags requestMethodFlags = flagsToCheck & RequestMethodMask;
 
     bool loadTypeMatches = loadTypeFlags ? (loadTypeFlags & flags) : true;
     bool loadContextMatches = loadContextFlags ? (loadContextFlags & flags) : true;
     bool resourceTypeMatches = resourceTypeFlags ? (resourceTypeFlags & flags) : true;
+    bool requestMethodMatches = requestMethodFlags ? (requestMethodFlags == (flags & RequestMethodMask)) : true;
 
     auto actionWithoutFlags = consumeAction(m_bytecode, programCounter, instructionLocation);
-    if (loadTypeMatches && loadContextMatches && resourceTypeMatches) {
+    if (loadTypeMatches && loadContextMatches && resourceTypeMatches && requestMethodMatches) {
         uint64_t actionAndFlags = (static_cast<uint64_t>(flagsToCheck) << 32) | static_cast<uint64_t>(actionWithoutFlags);
         actions.add(actionAndFlags);
     }
 }
 
 template<bool caseSensitive>
-inline void DFABytecodeInterpreter::interpetJumpTable(Span<const char> url, uint32_t& urlIndex, uint32_t& programCounter)
+inline void DFABytecodeInterpreter::interpretJumpTable(std::span<const LChar> url, uint32_t& urlIndex, uint32_t& programCounter)
 {
     DFABytecodeJumpSize jumpSize = getJumpSize(m_bytecode, programCounter);
 
@@ -245,12 +249,13 @@ auto DFABytecodeInterpreter::actionsMatchingEverything() -> Actions
 auto DFABytecodeInterpreter::interpret(const String& urlString, ResourceFlags flags) -> Actions
 {
     CString urlCString;
-    Span<const char> url;
-    if (LIKELY(urlString.is8Bit()))
-        url = { reinterpret_cast<const char*>(urlString.characters8()), urlString.length() };
+    std::span<const LChar> url;
+    if (urlString.is8Bit()) [[likely]]
+        url = urlString.span8();
     else {
+        // FIXME: Stuffing a UTF-8 string into a Latin1 buffer seems wrong.
         urlCString = urlString.utf8();
-        url = { urlCString.data(), urlCString.length() };
+        url = byteCast<LChar>(urlCString.span());
     }
     ASSERT(url.data());
 
@@ -330,13 +335,13 @@ auto DFABytecodeInterpreter::interpret(const String& urlString, ResourceFlags fl
                 if (urlIndex > url.size())
                     goto nextDFA;
 
-                interpetJumpTable<false>(url, urlIndex, programCounter);
+                interpretJumpTable<false>(url, urlIndex, programCounter);
                 break;
             case DFABytecodeInstruction::JumpTableCaseSensitive:
                 if (urlIndex > url.size())
                     goto nextDFA;
 
-                interpetJumpTable<true>(url, urlIndex, programCounter);
+                interpretJumpTable<true>(url, urlIndex, programCounter);
                 break;
 
             case DFABytecodeInstruction::CheckValueRangeCaseSensitive: {

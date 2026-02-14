@@ -24,7 +24,6 @@
  */
 
 [
-    Conditional=SERVICE_WORKER,
     ExportMacro=WEBCORE_TESTSUPPORT_EXPORT,
     LegacyNoInterfaceObject,
 ] interface ServiceWorkerInternals {
@@ -52,4 +51,8 @@
     boolean fetchEventIsSameSite(FetchEvent event);
 
     DOMString serviceWorkerClientInternalIdentifier(ServiceWorkerClient client);
+
+    undefined setAsInspected(boolean isInspected);
+    [CallWith=CurrentScriptExecutionContext] undefined enableConsoleMessageReporting();
+    [CallWith=CurrentScriptExecutionContext] undefined logReportedConsoleMessage(DOMString value);
 };

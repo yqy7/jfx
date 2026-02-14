@@ -30,22 +30,25 @@ namespace WebCore {
 
 class HTMLSelectElement;
 
-enum class AllowStyleInvalidation { Yes, No };
+enum class AllowStyleInvalidation : bool { No, Yes };
 
 class HTMLOptionElement final : public HTMLElement {
-    WTF_MAKE_ISO_ALLOCATED(HTMLOptionElement);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(HTMLOptionElement);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(HTMLOptionElement);
 public:
     static Ref<HTMLOptionElement> create(Document&);
     static Ref<HTMLOptionElement> create(const QualifiedName&, Document&);
-    static ExceptionOr<Ref<HTMLOptionElement>> createForLegacyFactoryFunction(Document&, const String& text, const String& value, bool defaultSelected, bool selected);
+    static ExceptionOr<Ref<HTMLOptionElement>> createForLegacyFactoryFunction(Document&, String&& text, const AtomString& value, bool defaultSelected, bool selected);
 
     WEBCORE_EXPORT String text() const;
-    void setText(const String&);
+    void setText(String&&);
+
+    WEBCORE_EXPORT HTMLFormElement* form() const;
+    WEBCORE_EXPORT HTMLFormElement* formForBindings() const;
 
     WEBCORE_EXPORT int index() const;
 
     WEBCORE_EXPORT String value() const;
-    WEBCORE_EXPORT void setValue(const String&);
 
     WEBCORE_EXPORT bool selected(AllowStyleInvalidation = AllowStyleInvalidation::Yes) const;
     WEBCORE_EXPORT void setSelected(bool);
@@ -53,8 +56,7 @@ public:
     WEBCORE_EXPORT HTMLSelectElement* ownerSelectElement() const;
 
     WEBCORE_EXPORT String label() const;
-    String displayLabel() const;
-    WEBCORE_EXPORT void setLabel(const String&);
+    WEBCORE_EXPORT String displayLabel() const;
 
     bool ownElementDisabled() const { return m_disabled; }
 
@@ -72,7 +74,7 @@ private:
     bool rendererIsNeeded(const RenderStyle&) final { return false; }
     bool matchesDefaultPseudoClass() const final;
 
-    void parseAttribute(const QualifiedName&, const AtomString&) final;
+    void attributeChanged(const QualifiedName&, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason) final;
 
     bool accessKeyAction(bool) final;
 
@@ -81,6 +83,7 @@ private:
     void willResetComputedStyle() final;
 
     String collectOptionInnerText() const;
+    String collectOptionInnerTextCollapsingWhitespace() const;
 
     bool m_disabled { false };
     bool m_isSelected { false };

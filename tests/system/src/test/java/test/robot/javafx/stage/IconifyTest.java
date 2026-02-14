@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,10 @@
 
 package test.robot.javafx.stage;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static test.util.Util.TIMEOUT;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import javafx.application.Platform;
@@ -33,16 +37,16 @@ import javafx.scene.layout.Pane;
 import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import com.sun.javafx.PlatformUtil;
 import test.robot.testharness.VisualTestBase;
-
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.assertFalse;
-import static test.util.Util.TIMEOUT;
 
 /**
  * Test ability to programmatically iconify UNDECORATED and TRANSPARENT stages
  */
+@Timeout(value=15000, unit=TimeUnit.MILLISECONDS)
 public class IconifyTest extends VisualTestBase {
 
     private static final int WIDTH = 300;
@@ -57,19 +61,24 @@ public class IconifyTest extends VisualTestBase {
     private Stage topStage;
 
     public void canIconifyStage(StageStyle stageStyle, boolean resizable) throws Exception {
-        final CountDownLatch shownLatch = new CountDownLatch(2);
+        final CountDownLatch bottomShownLatch = new CountDownLatch(1);
+        final CountDownLatch topShownLatch = new CountDownLatch(1);
 
         runAndWait(() -> {
             // Bottom stage, should be visible after top stage is iconified
-            bottomStage = getStage(true);
+            bottomStage = getStage(false);
             Scene bottomScene = new Scene(new Pane(), WIDTH, HEIGHT);
             bottomScene.setFill(BOTTOM_COLOR);
             bottomStage.setScene(bottomScene);
             bottomStage.setX(0);
             bottomStage.setY(0);
-            bottomStage.setOnShown(e -> Platform.runLater(shownLatch::countDown));
+            bottomStage.setOnShown(e -> Platform.runLater(bottomShownLatch::countDown));
             bottomStage.show();
+        });
 
+        Assertions.assertTrue(bottomShownLatch.await(TIMEOUT, TimeUnit.MILLISECONDS), "Timeout waiting for bottom stage to be shown");
+
+        runAndWait(() -> {
             // Top stage, will be inconified
             topStage = getStage(true);
             topStage.initStyle(stageStyle);
@@ -79,18 +88,13 @@ public class IconifyTest extends VisualTestBase {
             topStage.setScene(topScene);
             topStage.setX(0);
             topStage.setY(0);
-            topStage.setOnShown(e -> Platform.runLater(shownLatch::countDown));
+            topStage.setOnShown(e -> Platform.runLater(topShownLatch::countDown));
             topStage.show();
         });
 
-        assertTrue("Timeout waiting for stages to be shown",
-            shownLatch.await(TIMEOUT, TimeUnit.MILLISECONDS));
+        Assertions.assertTrue(topShownLatch.await(TIMEOUT, TimeUnit.MILLISECONDS), "Timeout waiting for top stage to be shown");
 
-        runAndWait(() -> {
-            topStage.toFront();
-        });
-
-        sleep(500);
+        sleep(1000);
         runAndWait(() -> {
             assertFalse(topStage.isIconified());
             Color color = getColor(100, 100);
@@ -101,7 +105,7 @@ public class IconifyTest extends VisualTestBase {
             topStage.setIconified(true);
         });
 
-        sleep(500);
+        sleep(1000);
         runAndWait(() -> {
             assertTrue(topStage.isIconified());
             Color color = getColor(100, 100);
@@ -112,7 +116,7 @@ public class IconifyTest extends VisualTestBase {
             topStage.setIconified(false);
         });
 
-        sleep(500);
+        sleep(1000);
         runAndWait(() -> {
             assertFalse(topStage.isIconified());
             Color color = getColor(100, 100);
@@ -120,24 +124,24 @@ public class IconifyTest extends VisualTestBase {
         });
     }
 
-    @Test(timeout = 15000)
+    @Test
     public void canIconifyDecoratedStage() throws Exception {
+        assumeTrue(!PlatformUtil.isLinux()); // Skip due to JDK-8316891
         canIconifyStage(StageStyle.DECORATED, true);
     }
 
-    @Test(timeout = 15000)
+    @Test
     public void canIconifyUndecoratedStage() throws Exception {
         canIconifyStage(StageStyle.UNDECORATED, true);
     }
 
-    @Test(timeout = 15000)
+    @Test
     public void canIconifyTransparentStage() throws Exception {
         canIconifyStage(StageStyle.TRANSPARENT, true);
     }
 
-    @Test(timeout = 15000)
+    @Test
     public void canIconifyNonResizableStage() throws Exception {
         canIconifyStage(StageStyle.DECORATED, false);
     }
-
 }

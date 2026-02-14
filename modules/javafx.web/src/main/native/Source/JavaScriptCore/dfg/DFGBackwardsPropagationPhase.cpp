@@ -38,11 +38,14 @@ namespace JSC { namespace DFG {
 
 // This phase is run at the end of BytecodeParsing, so the graph isn't in a fully formed state.
 // For example, we can't access the predecessor list of any basic blocks yet.
-
-class BackwardsPropagationPhase {
+//
+// Note that, so far, this phase should only be used in the byte code parsing phase
+// or after the fix up phases. We don't want to validate graph since
+// unreachable blocks won't be removed until the end of the parsing phase.
+class BackwardsPropagationPhase : public Phase {
 public:
     BackwardsPropagationPhase(Graph& graph)
-        : m_graph(graph)
+        : Phase(graph, "backwards propagation"_s, !graph.afterFixup())
         , m_flagsAtHead(graph)
     {
     }
@@ -97,12 +100,50 @@ public:
     }
 
 private:
-    bool isNotNegZero(Node* node)
+    bool isNotNegZero(Node* node, unsigned timeToLive = 3)
     {
+        if (!timeToLive)
+            return false;
+
+        switch (node->op()) {
+        case DoubleConstant:
+        case JSConstant:
+        case Int52Constant: {
         if (!node->isNumberConstant())
             return false;
         double value = node->asNumber();
         return (value || 1.0 / value > 0.0);
+    }
+
+        case ValueBitAnd:
+        case ValueBitOr:
+        case ValueBitXor:
+        case ValueBitLShift:
+        case ValueBitRShift:
+        case ValueBitURShift:
+        case ArithBitAnd:
+        case ArithBitOr:
+        case ArithBitXor:
+        case ArithBitLShift:
+        case ArithBitRShift:
+        case ArithBitURShift: {
+            return true;
+        }
+
+        case ValueAdd:
+        case ArithAdd: {
+            if (isNotNegZero(node->child1().node(), timeToLive - 1) || isNotNegZero(node->child2().node(), timeToLive - 1))
+                return true;
+            return false;
+        }
+
+        case Int52Rep:
+            // Do not decrease timeToLive since it is just propagating to the caller (not increasing the leaves of the tree).
+            return isNotNegZero(node->child1().node(), timeToLive);
+
+        default:
+            return false;
+        }
     }
 
     bool isNotPosZero(Node* node)
@@ -162,7 +203,8 @@ private:
 
         case ArithBitRShift:
         case ValueBitRShift:
-        case BitURShift: {
+        case ArithBitURShift:
+        case ValueBitURShift: {
             if (power > 31)
                 return true;
 
@@ -272,8 +314,8 @@ private:
         case ValueBitNot:
         case ArithBitNot: {
             flags |= NodeBytecodeUsesAsInt;
-            flags &= ~(NodeBytecodeUsesAsNumber | NodeBytecodeNeedsNegZero | NodeBytecodeUsesAsOther);
-            flags &= ~NodeBytecodeUsesAsArrayIndex;
+            flags &= ~(NodeBytecodeUsesAsNumber | NodeBytecodeNeedsNegZero | NodeBytecodeNeedsNaNOrInfinity | NodeBytecodeUsesAsOther);
+            flags &= ~NodeBytecodePrefersArrayIndex;
             node->child1()->mergeFlags(flags);
             break;
         }
@@ -288,29 +330,40 @@ private:
         case ArithBitLShift:
         case ArithBitRShift:
         case ValueBitRShift:
-        case BitURShift:
+        case ArithBitURShift:
+        case ValueBitURShift:
         case ArithIMul: {
             flags |= NodeBytecodeUsesAsInt;
-            flags &= ~(NodeBytecodeUsesAsNumber | NodeBytecodeNeedsNegZero | NodeBytecodeUsesAsOther);
-            flags &= ~NodeBytecodeUsesAsArrayIndex;
+            flags &= ~(NodeBytecodeUsesAsNumber | NodeBytecodeNeedsNegZero | NodeBytecodeNeedsNaNOrInfinity | NodeBytecodeUsesAsOther);
+            flags &= ~NodeBytecodePrefersArrayIndex;
             node->child1()->mergeFlags(flags);
             node->child2()->mergeFlags(flags);
             break;
         }
 
+        case StringAt:
         case StringCharAt:
         case StringCharCodeAt:
         case StringCodePointAt: {
             node->child1()->mergeFlags(NodeBytecodeUsesAsValue);
-            node->child2()->mergeFlags(NodeBytecodeUsesAsValue | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
+            node->child2()->mergeFlags(NodeBytecodeUsesAsValue | NodeBytecodeUsesAsInt | NodeBytecodePrefersArrayIndex);
             break;
         }
 
-        case StringSlice: {
+        case StringIndexOf: {
             node->child1()->mergeFlags(NodeBytecodeUsesAsValue);
-            node->child2()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
+            node->child2()->mergeFlags(NodeBytecodeUsesAsValue);
             if (node->child3())
-                node->child3()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
+                node->child3()->mergeFlags(NodeBytecodeUsesAsValue | NodeBytecodeUsesAsInt | NodeBytecodePrefersArrayIndex);
+            break;
+        }
+
+        case StringSlice:
+        case StringSubstring: {
+            node->child1()->mergeFlags(NodeBytecodeUsesAsValue);
+            node->child2()->mergeFlags(NodeBytecodeUsesAsArrayIndex);
+            if (node->child3())
+                node->child3()->mergeFlags(NodeBytecodeUsesAsArrayIndex);
             break;
         }
 
@@ -320,11 +373,11 @@ private:
             if (node->numChildren() == 2)
                 m_graph.varArgChild(node, 1)->mergeFlags(NodeBytecodeUsesAsValue);
             else if (node->numChildren() == 3) {
-                m_graph.varArgChild(node, 1)->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
+                m_graph.varArgChild(node, 1)->mergeFlags(NodeBytecodeUsesAsArrayIndex);
                 m_graph.varArgChild(node, 2)->mergeFlags(NodeBytecodeUsesAsValue);
             } else if (node->numChildren() == 4) {
-                m_graph.varArgChild(node, 1)->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
-                m_graph.varArgChild(node, 2)->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
+                m_graph.varArgChild(node, 1)->mergeFlags(NodeBytecodeUsesAsArrayIndex);
+                m_graph.varArgChild(node, 2)->mergeFlags(NodeBytecodeUsesAsArrayIndex);
                 m_graph.varArgChild(node, 3)->mergeFlags(NodeBytecodeUsesAsValue);
             }
             break;
@@ -345,6 +398,7 @@ private:
                 flags |= NodeBytecodeUsesAsNumber;
             if (!m_allowNestedOverflowingAdditions)
                 flags |= NodeBytecodeUsesAsNumber;
+            flags |= NodeBytecodeNeedsNaNOrInfinity;
 
             node->child1()->mergeFlags(flags);
             node->child2()->mergeFlags(flags);
@@ -359,6 +413,7 @@ private:
                 flags |= NodeBytecodeUsesAsNumber;
             if (!m_allowNestedOverflowingAdditions)
                 flags |= NodeBytecodeUsesAsNumber;
+            flags |= NodeBytecodeNeedsNaNOrInfinity;
 
             node->child1()->mergeFlags(flags);
             node->child2()->mergeFlags(flags);
@@ -366,7 +421,7 @@ private:
         }
 
         case ArithClz32: {
-            flags &= ~(NodeBytecodeUsesAsNumber | NodeBytecodeNeedsNegZero | NodeBytecodeUsesAsOther | ~NodeBytecodeUsesAsArrayIndex);
+            flags &= ~(NodeBytecodeUsesAsNumber | NodeBytecodeNeedsNegZero | NodeBytecodeNeedsNaNOrInfinity | NodeBytecodeUsesAsOther | NodeBytecodePrefersArrayIndex);
             flags |= NodeBytecodeUsesAsInt;
             node->child1()->mergeFlags(flags);
             break;
@@ -380,6 +435,7 @@ private:
                 flags |= NodeBytecodeUsesAsNumber;
             if (!m_allowNestedOverflowingAdditions)
                 flags |= NodeBytecodeUsesAsNumber;
+            flags |= NodeBytecodeNeedsNaNOrInfinity;
 
             node->child1()->mergeFlags(flags);
             node->child2()->mergeFlags(flags);
@@ -387,6 +443,7 @@ private:
         }
 
         case ArithNegate: {
+            // negation does not care about NaN, Infinity, -Infinity are converted into 0 if the result is evaluated under the integer context.
             flags &= ~NodeBytecodeUsesAsOther;
 
             node->child1()->mergeFlags(flags);
@@ -401,6 +458,7 @@ private:
                 flags |= NodeBytecodeUsesAsNumber;
             if (!m_allowNestedOverflowingAdditions)
                 flags |= NodeBytecodeUsesAsNumber;
+            flags |= NodeBytecodeNeedsNaNOrInfinity;
 
             node->child1()->mergeFlags(flags);
             break;
@@ -421,7 +479,7 @@ private:
 
             node->mergeFlags(flags);
 
-            flags |= NodeBytecodeUsesAsNumber | NodeBytecodeNeedsNegZero;
+            flags |= NodeBytecodeUsesAsNumber | NodeBytecodeNeedsNegZero | NodeBytecodeNeedsNaNOrInfinity;
             flags &= ~NodeBytecodeUsesAsOther;
 
             node->child1()->mergeFlags(flags);
@@ -431,7 +489,13 @@ private:
 
         case ValueDiv:
         case ArithDiv: {
-            flags |= NodeBytecodeUsesAsNumber | NodeBytecodeNeedsNegZero;
+            // ArithDiv / ValueDiv need to have NodeBytecodeUsesAsNumber even if it is used in the context of integer.
+            // For example,
+            //     ((@x / @y) + @z) | 0
+            // In this context, (@x / @y) can have integer context at first, but the result can be different if div
+            // generates NaN. Div and Mod are operations that can produce NaN / Infinity though only taking binary Int32 operands.
+            // Thus, we always need to check for overflow since it can affect downstream calculations.
+            flags |= NodeBytecodeUsesAsNumber | NodeBytecodeNeedsNegZero | NodeBytecodeNeedsNaNOrInfinity;
             flags &= ~NodeBytecodeUsesAsOther;
 
             node->child1()->mergeFlags(flags);
@@ -441,7 +505,7 @@ private:
 
         case ValueMod:
         case ArithMod: {
-            flags |= NodeBytecodeUsesAsNumber;
+            flags |= NodeBytecodeUsesAsNumber | NodeBytecodeNeedsNegZero | NodeBytecodeNeedsNaNOrInfinity;
             flags &= ~NodeBytecodeUsesAsOther;
 
             node->child1()->mergeFlags(flags);
@@ -449,25 +513,33 @@ private:
             break;
         }
 
+        case MultiGetByVal:
         case EnumeratorGetByVal:
-        case GetByVal: {
+        case GetByVal:
+        case GetByValMegamorphic: {
             m_graph.varArgChild(node, 0)->mergeFlags(NodeBytecodeUsesAsValue);
-            m_graph.varArgChild(node, 1)->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
+            m_graph.varArgChild(node, 1)->mergeFlags(NodeBytecodeUsesAsArrayIndex);
             break;
         }
 
         case NewTypedArray:
-        case NewArrayWithSize: {
+        case NewTypedArrayBuffer:
+        case NewArrayWithSize:
+        case NewArrayWithConstantSize:
+        case NewArrayWithSpecies:
+        case NewArrayWithSizeAndStructure: {
             // Negative zero is not observable. NaN versus undefined are only observable
             // in that you would get a different exception message. So, like, whatever: we
             // claim here that NaN v. undefined is observable.
-            node->child1()->mergeFlags(NodeBytecodeUsesAsInt | NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeUsesAsArrayIndex);
+            node->child1()->mergeFlags(NodeBytecodeUsesAsArrayIndex);
             break;
         }
 
         case ToString:
         case CallStringConstructor: {
-            node->child1()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther);
+            if (typeFilterFor(node->child1().useKind()) & SpecOther)
+                node->child1()->mergeFlags(NodeBytecodeUsesAsOther);
+            node->child1()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeNeedsNaNOrInfinity);
             break;
         }
 
@@ -487,15 +559,17 @@ private:
         case CompareBelowEq:
         case CompareEq:
         case CompareStrictEq: {
-            node->child1()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther);
-            node->child2()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther);
+            node->child1()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeNeedsNaNOrInfinity);
+            node->child2()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeNeedsNaNOrInfinity);
             break;
         }
 
+        case EnumeratorPutByVal:
         case PutByValDirect:
-        case PutByVal: {
+        case PutByVal:
+        case PutByValMegamorphic: {
             m_graph.varArgChild(node, 0)->mergeFlags(NodeBytecodeUsesAsValue);
-            m_graph.varArgChild(node, 1)->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeUsesAsInt | NodeBytecodeUsesAsArrayIndex);
+            m_graph.varArgChild(node, 1)->mergeFlags(NodeBytecodeUsesAsArrayIndex);
             m_graph.varArgChild(node, 2)->mergeFlags(NodeBytecodeUsesAsValue);
             break;
         }
@@ -508,20 +582,20 @@ private:
                 // then -0 and 0 are treated the same.  We don't need NodeBytecodeUsesAsOther
                 // because if all of the cases are integers then NaN and undefined are
                 // treated the same (i.e. they will take default).
-                node->child1()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsInt);
+                node->child1()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsInt | NodeBytecodeNeedsNaNOrInfinity);
                 break;
             case SwitchChar: {
                 // We don't need NodeBytecodeNeedsNegZero because if the cases are all strings
                 // then -0 and 0 are treated the same.  We don't need NodeBytecodeUsesAsOther
                 // because if all of the cases are single-character strings then NaN
                 // and undefined are treated the same (i.e. they will take default).
-                node->child1()->mergeFlags(NodeBytecodeUsesAsNumber);
+                node->child1()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeNeedsNaNOrInfinity);
                 break;
             }
             case SwitchString:
                 // We don't need NodeBytecodeNeedsNegZero because if the cases are all strings
                 // then -0 and 0 are treated the same.
-                node->child1()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther);
+                node->child1()->mergeFlags(NodeBytecodeUsesAsNumber | NodeBytecodeUsesAsOther | NodeBytecodeNeedsNaNOrInfinity);
                 break;
             case SwitchCell:
                 // There is currently no point to being clever here since this is used for switching
@@ -533,8 +607,52 @@ private:
         }
 
         case Identity:
-            // This would be trivial to handle but we just assert that we cannot see these yet.
-            RELEASE_ASSERT_NOT_REACHED();
+            ASSERT(m_graph.afterFixup());
+            node->child1()->mergeFlags(flags);
+            break;
+
+        case Int52Rep: {
+            ASSERT(m_graph.afterFixup());
+            auto& edge = node->child1();
+            if (edge->hasDoubleResult()) {
+                if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
+                    edge.setUseKind(DoubleRepRealUse);
+                else
+                    edge.setUseKind(DoubleRepAnyIntUse);
+            } else if (!edge->shouldSpeculateInt32ForArithmetic()) {
+                if (bytecodeCanIgnoreNegativeZero(node->arithNodeFlags()))
+                    edge.setUseKind(RealNumberUse);
+                else
+                    edge.setUseKind(AnyIntUse);
+            }
+            // The results of these nodes are pure unboxed integers. Then, we
+            // should definitely tell their children that you will be used as an integer.
+            flags |= NodeBytecodeUsesAsInt;
+            node->child1()->mergeFlags(flags);
+            break;
+        }
+
+        case ValueToInt32:
+        case DoubleAsInt32:
+            ASSERT(m_graph.afterFixup());
+            // The results of these nodes are pure unboxed integers. Then, we
+            // should definitely tell their children that you will be used as an integer.
+            flags |= NodeBytecodeUsesAsInt;
+            node->child1()->mergeFlags(flags);
+            break;
+
+        case DoubleRep:
+        case PurifyNaN:
+            ASSERT(m_graph.afterFixup());
+            // The result of the node is pure unboxed floating point values.
+            node->child1()->mergeFlags(NodeBytecodeUsesAsNumber);
+            break;
+
+        case BooleanToNumber:
+            ASSERT(m_graph.afterFixup());
+            // The result of BooleanToNumber can be either an unboxed integer or a JSValue.
+            if (node->child1().useKind() == BooleanUse)
+                node->child1()->mergeFlags(NodeBytecodeUsesAsInt);
             break;
 
         // Note: ArithSqrt, ArithUnary and other math intrinsics don't have special
@@ -549,16 +667,15 @@ private:
         }
     }
 
-    Graph& m_graph;
     bool m_allowNestedOverflowingAdditions;
 
     BlockMap<Operands<NodeFlags>> m_flagsAtHead;
     Operands<NodeFlags> m_currentFlags;
 };
 
-void performBackwardsPropagation(Graph& graph)
+bool performBackwardsPropagation(Graph& graph)
 {
-    BackwardsPropagationPhase(graph).run();
+    return runPhase<BackwardsPropagationPhase>(graph);
 }
 
 } } // namespace JSC::DFG

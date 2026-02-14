@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -50,7 +50,7 @@ import javafx.event.EventType;
  * indirectly as on track pad - the mouse cursor location is usually used
  * as the gesture coordinates).
  * <p>
- * The gesture's {@code ROTATE} events are surounded by {@code ROTATION_STARTED}
+ * The gesture's {@code ROTATE} events are surrounded by {@code ROTATION_STARTED}
  * and {@code ROTATION_FINISHED} events. If rotation inertia is active on the
  * given platform, some {@code ROTATE} events with {@code isInertia()} returning
  * {@code true} can come after {@code ROTATION_FINISHED}.
@@ -65,26 +65,26 @@ public final class RotateEvent extends GestureEvent {
      * Common supertype for all rotate event types.
      */
     public static final EventType<RotateEvent> ANY =
-            new EventType<RotateEvent>(GestureEvent.ANY, "ANY_ROTATE");
+            new EventType<>(GestureEvent.ANY, "ANY_ROTATE");
 
     /**
      * This event occurs when user performs a rotating gesture such as
      * dragging two fingers around each other.
      */
     public static final EventType<RotateEvent> ROTATE =
-            new EventType<RotateEvent>(RotateEvent.ANY, "ROTATE");
+            new EventType<>(RotateEvent.ANY, "ROTATE");
 
     /**
      * This event occurs when a rotating gesture is detected.
      */
     public static final EventType<RotateEvent> ROTATION_STARTED =
-            new EventType<RotateEvent>(RotateEvent.ANY, "ROTATION_STARTED");
+            new EventType<>(RotateEvent.ANY, "ROTATION_STARTED");
 
     /**
      * This event occurs when a rotating gesture ends.
      */
     public static final EventType<RotateEvent> ROTATION_FINISHED =
-            new EventType<RotateEvent>(RotateEvent.ANY, "ROTATION_FINISHED");
+            new EventType<>(RotateEvent.ANY, "ROTATION_FINISHED");
 
     /**
      * Constructs new RotateEvent event.
@@ -161,6 +161,7 @@ public final class RotateEvent extends GestureEvent {
                 altDown, metaDown, direct, inertia, angle, totalAngle, pickResult);
     }
 
+    @SuppressWarnings("doclint:missing")
     private final double angle;
 
     /**
@@ -173,6 +174,7 @@ public final class RotateEvent extends GestureEvent {
         return angle;
     }
 
+    @SuppressWarnings("doclint:missing")
     private final double totalAngle;
 
     /**

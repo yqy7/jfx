@@ -26,13 +26,14 @@
 #include "config.h"
 #include "JSIDBSerializationGlobalObject.h"
 
+#include "JSDOMGlobalObjectInlines.h"
 #include "WebCoreJSClientData.h"
 
 namespace WebCore {
 
 using namespace JSC;
 
-const ClassInfo JSIDBSerializationGlobalObject::s_info = { "JSIDBSerializationGlobalObject", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSIDBSerializationGlobalObject) };
+const ClassInfo JSIDBSerializationGlobalObject::s_info = { "JSIDBSerializationGlobalObject"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JSIDBSerializationGlobalObject) };
 
 inline JSIDBSerializationGlobalObject::JSIDBSerializationGlobalObject(VM& vm, Structure* structure, Ref<DOMWrapperWorld>&& impl)
     : Base(vm, structure, WTFMove(impl))
@@ -54,7 +55,7 @@ void JSIDBSerializationGlobalObject::finishCreation(VM& vm)
 
 GCClient::IsoSubspace* JSIDBSerializationGlobalObject::subspaceForImpl(VM& vm)
 {
-    return &static_cast<JSVMClientData*>(vm.clientData)->idbSerializationSpace();
+    return &downcast<JSVMClientData>(vm.clientData)->idbSerializationSpace();
 }
 
 void JSIDBSerializationGlobalObject::destroy(JSCell* cell)

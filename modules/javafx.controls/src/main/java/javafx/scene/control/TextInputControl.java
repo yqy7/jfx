@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,6 @@ import javafx.beans.DefaultProperty;
 import javafx.beans.InvalidationListener;
 import javafx.beans.Observable;
 import javafx.beans.binding.IntegerBinding;
-import javafx.beans.binding.StringBinding;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.ObjectPropertyBase;
@@ -120,6 +119,37 @@ public abstract class TextInputControl extends Control {
         public int length();
     }
 
+    /**
+     * Package private base implementation of Content.
+     */
+    abstract static class ContentBase implements Content {
+        private ExpressionHelper<String> helper;
+
+        @Override
+        public void addListener(ChangeListener<? super String> changeListener) {
+            helper = ExpressionHelper.addListener(helper, this, changeListener);
+        }
+
+        @Override
+        public void removeListener(ChangeListener<? super String> changeListener) {
+            helper = ExpressionHelper.removeListener(helper, changeListener);
+        }
+
+        @Override
+        public void addListener(InvalidationListener listener) {
+            helper = ExpressionHelper.addListener(helper, this, listener);
+        }
+
+        @Override
+        public void removeListener(InvalidationListener listener) {
+            helper = ExpressionHelper.removeListener(helper, listener);
+        }
+
+        protected final void fireValueChangedEvent() {
+            ExpressionHelper.fireValueChangedEvent(helper);
+        }
+    }
+
     private boolean blockSelectedTextUpdate;
 
     /* *************************************************************************
@@ -182,6 +212,13 @@ public abstract class TextInputControl extends Control {
             } else {
                 int start = sel.getStart();
                 int end = sel.getEnd();
+                int length = txt.length();
+                if (end > start + length) {
+                    end = length;
+                }
+                if (start > length - 1) {
+                    start = end = 0;
+                }
                 selectedText.set(txt.substring(start, end));
             }
         }
@@ -212,7 +249,7 @@ public abstract class TextInputControl extends Control {
                 public void applyStyle(StyleOrigin newOrigin, Font value) {
 
                     //
-                    // RT-20727 - if CSS is setting the font, then make sure invalidate doesn't call NodeHelper.reapplyCSS
+                    // JDK-8127428 - if CSS is setting the font, then make sure invalidate doesn't call NodeHelper.reapplyCSS
                     //
                     try {
                         // super.applyStyle calls set which might throw if value is bound.
@@ -239,7 +276,7 @@ public abstract class TextInputControl extends Control {
 
                 @Override
                 protected void invalidated() {
-                    // RT-20727 - if font is changed by calling setFont, then
+                    // JDK-8127428 - if font is changed by calling setFont, then
                     // css might need to be reapplied since font size affects
                     // calculated values for styles with relative values
                     if(fontSetByCss == false) {
@@ -277,19 +314,15 @@ public abstract class TextInputControl extends Control {
      * @defaultValue An empty String
      * @since JavaFX 2.2
      */
-    private StringProperty promptText = new SimpleStringProperty(this, "promptText", "") {
-        @Override protected void invalidated() {
-            // Strip out newlines
-            String txt = get();
-            if (txt != null && txt.contains("\n")) {
-                txt = txt.replace("\n", "");
-                set(txt);
-            }
+    private StringProperty promptText;
+    public final StringProperty promptTextProperty() {
+        if (promptText == null) {
+            promptText = new SimpleStringProperty(this, "promptText", "");
         }
-    };
-    public final StringProperty promptTextProperty() { return promptText; }
-    public final String getPromptText() { return promptText.get(); }
-    public final void setPromptText(String value) { promptText.set(value); }
+        return promptText;
+    }
+    public final String getPromptText() { return promptText == null ? "" : promptText.get();  }
+    public final void setPromptText(String value) { promptTextProperty().set(value); }
 
 
     /**
@@ -299,7 +332,7 @@ public abstract class TextInputControl extends Control {
      * @defaultValue null
      * @since JavaFX 8u40
      */
-    private final ObjectProperty<TextFormatter<?>> textFormatter = new ObjectPropertyBase<TextFormatter<?>>() {
+    private final ObjectProperty<TextFormatter<?>> textFormatter = new ObjectPropertyBase<>() {
 
         private TextFormatter<?> oldFormatter = null;
 
@@ -383,7 +416,7 @@ public abstract class TextInputControl extends Control {
     /**
      * The current selection.
      */
-    private ReadOnlyObjectWrapper<IndexRange> selection = new ReadOnlyObjectWrapper<IndexRange>(this, "selection", new IndexRange(0, 0));
+    private ReadOnlyObjectWrapper<IndexRange> selection = new ReadOnlyObjectWrapper<>(this, "selection", new IndexRange(0, 0));
     public final IndexRange getSelection() { return selection.getValue(); }
     public final ReadOnlyObjectProperty<IndexRange> selectionProperty() { return selection.getReadOnlyProperty(); }
 
@@ -773,8 +806,7 @@ public abstract class TextInputControl extends Control {
         int pos = wordIterator.preceding(Utils.clamp(0, getCaretPosition(), textLength));
 
         // Skip the non-word region, then move/select to the beginning of the word.
-        while (pos != BreakIterator.DONE &&
-               !Character.isLetterOrDigit(text.charAt(Utils.clamp(0, pos, textLength-1)))) {
+        while (pos != BreakIterator.DONE && !isLetterOrDigit(text, pos)) {
             pos = wordIterator.preceding(Utils.clamp(0, pos, textLength));
         }
 
@@ -1250,7 +1282,7 @@ public abstract class TextInputControl extends Control {
      *         new lines by the TextField)
      */
     private int replaceText(int start, int end, String value, int anchor, int caretPosition) {
-        // RT-16566: Need to take into account stripping of chars into the
+        // JDK-8120290: Need to take into account stripping of chars into the
         // final anchor & caret position
         blockSelectedTextUpdate = true;
         try {
@@ -1295,7 +1327,7 @@ public abstract class TextInputControl extends Control {
     }
 
     /**
-     * If the field is currently being edited, this call will set text to the last commited value.
+     * If the field is currently being edited, this call will set text to the last committed value.
      * @since JavaFX 8u40
      */
     public final void cancelEdit() {
@@ -1592,7 +1624,7 @@ public abstract class TextInputControl extends Control {
 
     private static class StyleableProperties {
         private static final FontCssMetaData<TextInputControl> FONT =
-            new FontCssMetaData<TextInputControl>("-fx-font", Font.getDefault()) {
+            new FontCssMetaData<>("-fx-font", Font.getDefault()) {
 
             @Override
             public boolean isSettable(TextInputControl n) {
@@ -1608,7 +1640,7 @@ public abstract class TextInputControl extends Control {
         private static final List<CssMetaData<? extends Styleable, ?>> STYLEABLES;
         static {
             final List<CssMetaData<? extends Styleable, ?>> styleables =
-                new ArrayList<CssMetaData<? extends Styleable, ?>>(Control.getClassCssMetaData());
+                new ArrayList<>(Control.getClassCssMetaData());
             styleables.add(FONT);
             STYLEABLES = Collections.unmodifiableList(styleables);
         }
@@ -1706,4 +1738,15 @@ public abstract class TextInputControl extends Control {
         }
     }
 
+    private static boolean isLetterOrDigit(String text, int ix) {
+        if (ix < 0) {
+            // should not happen
+            return false;
+        } else if (ix >= text.length()) {
+            return false;
+        }
+        // ignore the case when 'c' is a high surrogate without the low surrogate
+        int c = Character.codePointAt(text, ix);
+        return Character.isLetterOrDigit(c);
+    }
 }

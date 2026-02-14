@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,36 +25,28 @@
 
 package test.javafx.scene.control;
 
-import com.sun.javafx.scene.control.behavior.FocusTraversalInputMap;
-import com.sun.javafx.scene.control.behavior.ListViewBehavior;
-import com.sun.javafx.scene.control.inputmap.InputMap;
-import com.sun.javafx.scene.control.inputmap.InputMap.KeyMapping;
-import com.sun.javafx.scene.control.inputmap.KeyBinding;
-import com.sun.javafx.tk.Toolkit;
-import com.sun.javafx.util.Utils;
-
-import test.com.sun.javafx.scene.control.infrastructure.ControlSkinFactory;
-import test.com.sun.javafx.scene.control.infrastructure.KeyModifier;
-import test.com.sun.javafx.scene.control.infrastructure.MouseEventFirer;
-import javafx.css.PseudoClass;
-
-import test.com.sun.javafx.scene.control.infrastructure.KeyEventFirer;
-import test.com.sun.javafx.scene.control.infrastructure.StageLoader;
-import javafx.scene.control.skin.ComboBoxListViewSkin;
-
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static test.com.sun.javafx.scene.control.infrastructure.ControlTestUtils.assertStyleClassContains;
-import static org.junit.Assert.*;
-import static org.junit.Assert.assertEquals;
-
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
-
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.css.PseudoClass;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.scene.Node;
@@ -74,6 +66,7 @@ import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
+import javafx.scene.control.skin.ComboBoxListViewSkin;
 import javafx.scene.control.skin.VirtualFlow;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.BorderPane;
@@ -84,11 +77,22 @@ import javafx.scene.shape.Circle;
 import javafx.stage.Stage;
 import javafx.util.Callback;
 import javafx.util.StringConverter;
-
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.scene.control.behavior.FocusTraversalInputMap;
+import com.sun.javafx.scene.control.behavior.ListViewBehavior;
+import com.sun.javafx.scene.control.inputmap.InputMap;
+import com.sun.javafx.scene.control.inputmap.InputMap.KeyMapping;
+import com.sun.javafx.scene.control.inputmap.KeyBinding;
+import com.sun.javafx.tk.Toolkit;
+import com.sun.javafx.util.Utils;
+import test.com.sun.javafx.scene.control.infrastructure.ControlSkinFactory;
+import test.com.sun.javafx.scene.control.infrastructure.KeyEventFirer;
+import test.com.sun.javafx.scene.control.infrastructure.KeyModifier;
+import test.com.sun.javafx.scene.control.infrastructure.MouseEventFirer;
+import test.com.sun.javafx.scene.control.infrastructure.StageLoader;
 
 public class ComboBoxTest {
     private ComboBox<String> comboBox;
@@ -117,7 +121,8 @@ public class ComboBoxTest {
      *                                                                   *
      ********************************************************************/
 
-    @Before public void setup() {
+    @BeforeEach
+    public void setup() {
         Thread.currentThread().setUncaughtExceptionHandler((thread, throwable) -> {
             if (throwable instanceof RuntimeException) {
                 throw (RuntimeException)throwable;
@@ -126,12 +131,13 @@ public class ComboBoxTest {
             }
         });
 
-        comboBox = new ComboBox<String>();
+        comboBox = new ComboBox<>();
         comboBox.setSkin(new ComboBoxListViewSkin<>(comboBox));
         sm = comboBox.getSelectionModel();
     }
 
-    @After public void cleanup() {
+    @AfterEach
+    public void cleanup() {
         if (sl != null) {
             sl.dispose();
         }
@@ -201,78 +207,78 @@ public class ComboBoxTest {
     }
 
     @Test public void singleArgConstructorSetsTheStyleClass() {
-        final ComboBox<String> b2 = new ComboBox<String>(FXCollections.observableArrayList("Hi"));
+        final ComboBox<String> b2 = new ComboBox<>(FXCollections.observableArrayList("Hi"));
         assertStyleClassContains(b2, "combo-box");
     }
 
     @Test public void singleArgConstructorSetsNonNullSelectionModel() {
-        final ComboBox<String> b2 = new ComboBox<String>(FXCollections.observableArrayList("Hi"));
+        final ComboBox<String> b2 = new ComboBox<>(FXCollections.observableArrayList("Hi"));
         assertNotNull(b2.getSelectionModel());
     }
 
     @Test public void singleArgConstructorAllowsNullItems() {
-        final ComboBox<String> b2 = new ComboBox<String>(null);
+        final ComboBox<String> b2 = new ComboBox<>(null);
         assertNull(b2.getItems());
     }
 
     @Test public void singleArgConstructorTakesItems() {
         ObservableList<String> items = FXCollections.observableArrayList("Hi");
-        final ComboBox<String> b2 = new ComboBox<String>(items);
+        final ComboBox<String> b2 = new ComboBox<>(items);
         assertSame(items, b2.getItems());
     }
 
     @Test public void singleArgConstructor_selectedItemIsNull() {
-        final ComboBox<String> b2 = new ComboBox<String>(FXCollections.observableArrayList("Hi"));
+        final ComboBox<String> b2 = new ComboBox<>(FXCollections.observableArrayList("Hi"));
         assertNull(b2.getSelectionModel().getSelectedItem());
     }
 
     @Test public void singleArgConstructor_selectedIndexIsNegativeOne() {
-        final ComboBox<String> b2 = new ComboBox<String>(FXCollections.observableArrayList("Hi"));
+        final ComboBox<String> b2 = new ComboBox<>(FXCollections.observableArrayList("Hi"));
         assertEquals(-1, b2.getSelectionModel().getSelectedIndex());
     }
 
     @Test public void singleArgConstructor_valueIsNull() {
-        final ComboBox<String> b2 = new ComboBox<String>(FXCollections.observableArrayList("Hi"));
+        final ComboBox<String> b2 = new ComboBox<>(FXCollections.observableArrayList("Hi"));
         assertNull(b2.getValue());
     }
 
     @Test public void singleArgConstructor_editableIsFalse() {
-        final ComboBox<String> b2 = new ComboBox<String>(FXCollections.observableArrayList("Hi"));
+        final ComboBox<String> b2 = new ComboBox<>(FXCollections.observableArrayList("Hi"));
         assertFalse(b2.isEditable());
     }
 
     @Test public void singleArgConstructor_showingIsFalse() {
-        final ComboBox<String> b2 = new ComboBox<String>(FXCollections.observableArrayList("Hi"));
+        final ComboBox<String> b2 = new ComboBox<>(FXCollections.observableArrayList("Hi"));
         assertFalse(b2.isShowing());
     }
 
     @Test public void singleArgConstructor_promptTextIsEmptyString() {
-        final ComboBox<String> b2 = new ComboBox<String>(FXCollections.observableArrayList("Hi"));
+        final ComboBox<String> b2 = new ComboBox<>(FXCollections.observableArrayList("Hi"));
         assertNull(b2.getPromptText());
     }
 
     @Test public void singleArgConstructor_placeholderIsNull() {
-        final ComboBox<String> b2 = new ComboBox<String>(FXCollections.observableArrayList("Hi"));
+        final ComboBox<String> b2 = new ComboBox<>(FXCollections.observableArrayList("Hi"));
         assertNull(b2.getPlaceholder());
     }
 
     @Test public void singleArgConstructor_armedIsFalse() {
-        final ComboBox<String> b2 = new ComboBox<String>(FXCollections.observableArrayList("Hi"));
+        final ComboBox<String> b2 = new ComboBox<>(FXCollections.observableArrayList("Hi"));
         assertEquals(false, b2.isArmed());
     }
 
     @Test public void singleArgConstructor_converterIsNotNull() {
-        final ComboBox<String> b2 = new ComboBox<String>(FXCollections.observableArrayList("Hi"));
+        final ComboBox<String> b2 = new ComboBox<>(FXCollections.observableArrayList("Hi"));
         assertNotNull(b2.getConverter());
     }
 
     @Test public void singleArgConstructor_cellFactoryIsNull() {
-        final ComboBox<String> b2 = new ComboBox<String>(FXCollections.observableArrayList("Hi"));
+        final ComboBox<String> b2 = new ComboBox<>(FXCollections.observableArrayList("Hi"));
         assertNull(b2.getCellFactory());
     }
 
     @Test public void singleArgConstructor_visibleRowFactoryIs10() {
-        final ComboBox<String> b2 = new ComboBox<String>(FXCollections.observableArrayList("Hi"));
+        final ComboBox<String> b2 = new ComboBox<>(FXCollections.observableArrayList("Hi"));
         assertEquals(10, b2.getVisibleRowCount());
     }
 
@@ -364,7 +370,7 @@ public class ComboBoxTest {
 
     @Test public void selectionModelCanBeBound() {
         SingleSelectionModel<String> sm = ComboBoxShim.<String>get_ComboBoxSelectionModel(comboBox);
-        ObjectProperty<SingleSelectionModel<String>> other = new SimpleObjectProperty<SingleSelectionModel<String>>(sm);
+        ObjectProperty<SingleSelectionModel<String>> other = new SimpleObjectProperty<>(sm);
         comboBox.selectionModelProperty().bind(other);
         assertSame(sm, sm);
     }
@@ -486,9 +492,11 @@ public class ComboBoxTest {
         assertEquals(null, sm.getSelectedItem());
     }
 
-    @Test(expected=NullPointerException.class)
+    @Test
     public void selectionModelComboBoxReferenceCanNotBeNull() {
-        ComboBoxShim.<String>get_ComboBoxSelectionModel(null);
+        assertThrows(NullPointerException.class, () -> {
+            ComboBoxShim.<String>get_ComboBoxSelectionModel(null);
+        });
     }
 
     @Test public void ensureGetModelItemOutOfBoundsWorks_1() {
@@ -576,7 +584,7 @@ public class ComboBoxTest {
         assertEquals("Apple", comboBox.getValue());
 
         sm.select(-1);
-        assertNull("Expected null, actual value: " + comboBox.getValue(), comboBox.getValue());
+        assertNull(comboBox.getValue(), "Expected null, actual value: " + comboBox.getValue());
     }
 
     @Test public void ensureValueIsCorrectWhenItemsIsAddedToWithExistingSelection() {
@@ -652,6 +660,48 @@ public class ComboBoxTest {
         assertEquals("pineapple", comboBox.getValue());
     }
 
+    @Test public void ensureEditorValueDoesNotChangeWhenCurrentEditorValueIsAddedToItemsList() {
+        @SuppressWarnings("unchecked")
+        var listView = (ListView<String>)((ComboBoxListViewSkin<String>)comboBox.getSkin()).getPopupContent();
+        comboBox.setEditable(true);
+        comboBox.getItems().setAll("a", "b", "c");
+        comboBox.getSelectionModel().select(1);
+        assertEquals("b", comboBox.getEditor().getText());
+        assertEquals("b", comboBox.getValue());
+        assertEquals("b", listView.getSelectionModel().getSelectedItem());
+        assertEquals(1, listView.getSelectionModel().getSelectedIndex());
+
+        comboBox.getEditor().setText("d");
+        comboBox.getItems().add(0, comboBox.getEditor().getText());
+        assertEquals(List.of("d", "a", "b", "c"), comboBox.getItems());
+        assertEquals(0, comboBox.getSelectionModel().getSelectedIndex());
+        assertEquals(0, listView.getSelectionModel().getSelectedIndex());
+        assertEquals("d", comboBox.getSelectionModel().getSelectedItem());
+        assertEquals("d", listView.getSelectionModel().getSelectedItem());
+        assertEquals("d", comboBox.getEditor().getText());
+        assertEquals("d", comboBox.getValue());
+
+        comboBox.getEditor().setText("e");
+        comboBox.getItems().addAll(0, List.of(comboBox.getEditor().getText(), "f"));
+        assertEquals(List.of("e", "f", "d", "a", "b", "c"), comboBox.getItems());
+        assertEquals(0, comboBox.getSelectionModel().getSelectedIndex());
+        assertEquals(0, listView.getSelectionModel().getSelectedIndex());
+        assertEquals("e", comboBox.getSelectionModel().getSelectedItem());
+        assertEquals("e", listView.getSelectionModel().getSelectedItem());
+        assertEquals("e", comboBox.getEditor().getText());
+        assertEquals("e", comboBox.getValue());
+
+        comboBox.getEditor().setText("h");
+        comboBox.getItems().addAll(0, List.of("g", comboBox.getEditor().getText(), "i"));
+        assertEquals(List.of("g", "h", "i", "e", "f", "d", "a", "b", "c"), comboBox.getItems());
+        assertEquals(1, comboBox.getSelectionModel().getSelectedIndex());
+        assertEquals(1, listView.getSelectionModel().getSelectedIndex());
+        assertEquals("h", comboBox.getSelectionModel().getSelectedItem());
+        assertEquals("h", listView.getSelectionModel().getSelectedItem());
+        assertEquals("h", comboBox.getEditor().getText());
+        assertEquals("h", comboBox.getValue());
+    }
+
     /*********************************************************************
      * Tests for default values                                         *
      ********************************************************************/
@@ -720,11 +770,13 @@ public class ComboBoxTest {
         assertEquals("42", sc.toString(Integer.valueOf(42)));
     }
 
-    @Test(expected=ClassCastException.class)
+    @Test
     public void defaultConverterCanHandleIncorrectType_2() {
-        ComboBox<Integer> cb = new ComboBox<Integer>();
-        StringConverter<Integer> sc = cb.getConverter();
-        Integer value = sc.fromString("42");
+        assertThrows(ClassCastException.class, () -> {
+            ComboBox<Integer> cb = new ComboBox<>();
+            StringConverter<Integer> sc = cb.getConverter();
+            Integer value = sc.fromString("42");
+        });
     }
 
     @Test public void defaultConverterCanHandleNullValues() {
@@ -881,17 +933,17 @@ public class ComboBoxTest {
     @Test public void checkPromptTextPropertyBind() {
         StringProperty strPr = new SimpleStringProperty("value");
         comboBox.promptTextProperty().bind(strPr);
-        assertTrue("PromptText cannot be bound", comboBox.getPromptText().equals("value"));
+        assertTrue(comboBox.getPromptText().equals("value"), "PromptText cannot be bound");
         strPr.setValue("newvalue");
-        assertTrue("PromptText cannot be bound", comboBox.getPromptText().equals("newvalue"));
+        assertTrue(comboBox.getPromptText().equals("newvalue"), "PromptText cannot be bound");
     }
 
     @Test public void checkValuePropertyBind() {
         StringProperty strPr = new SimpleStringProperty("value");
         comboBox.valueProperty().bind(strPr);
-        assertTrue("value cannot be bound", comboBox.getValue().equals("value"));
+        assertTrue(comboBox.getValue().equals("value"), "value cannot be bound");
         strPr.setValue("newvalue");
-        assertTrue("value cannot be bound", comboBox.getValue().equals("newvalue"));
+        assertTrue(comboBox.getValue().equals("newvalue"), "value cannot be bound");
     }
 
 
@@ -926,7 +978,7 @@ public class ComboBoxTest {
         comboBox.setValue("Orange");
         assertEquals("Orange", comboBox.getValue());
         assertEquals("Orange", comboBox.getSelectionModel().getSelectedItem());
-        assertTrue("Selected Index: " + sm.getSelectedIndex(), sm.isSelected(1));
+        assertTrue(sm.isSelected(1), "Selected Index: " + sm.getSelectedIndex());
     }
 
     @Test public void test_rt19227() {
@@ -937,7 +989,7 @@ public class ComboBoxTest {
         assertTrue(sm.isSelected(2));
     }
 
-    @Ignore("JDK-8091127 Test not working as the heights being returned are not accurate")
+    @Disabled("JDK-8091127 Test not working as the heights being returned are not accurate")
     @Test public void test_rt20106() {
         comboBox.getItems().addAll("0","1","2","3","4","5","6","7","8","9");
 
@@ -949,12 +1001,11 @@ public class ComboBoxTest {
 
         comboBox.setVisibleRowCount(5);
         double initialHeight = getListView().getHeight();
-        assertFalse("initialHeight: " + initialHeight, Double.compare(0.0, initialHeight) == 0);
+        assertFalse(Double.compare(0.0, initialHeight) == 0, "initialHeight: " + initialHeight);
 
         comboBox.setVisibleRowCount(0);
         double smallHeight =    getListView().getHeight();
-        assertTrue("smallHeight: " + smallHeight + ", initialHeight: " + initialHeight,
-                smallHeight != initialHeight && smallHeight < initialHeight);
+        assertTrue(smallHeight != initialHeight && smallHeight < initialHeight, "smallHeight: " + smallHeight + ", initialHeight: " + initialHeight);
 
         comboBox.setVisibleRowCount(7);
         double biggerHeight = getListView().getHeight();
@@ -972,20 +1023,20 @@ public class ComboBoxTest {
         assertTrue(count == 0);
 
         comboBox.valueProperty().bind(tf.textProperty());   // count++ here
-        assertTrue("count: " + count, count == 1);
+        assertTrue(count == 1, "count: " + count);
 
         tf.setText("Text1");                                // count++ here
-        assertTrue("count: " + count, count == 2);
+        assertTrue(count == 2, "count: " + count);
 
         comboBox.valueProperty().unbind();                  // no count++ here
-        assertTrue("count: " + count, count == 2);
+        assertTrue(count == 2, "count: " + count);
 
         comboBox.valueProperty().bindBidirectional(tf.textProperty());  // count++ here
         tf.setText("Text2");
-        assertTrue("count: " + count, count == 3);
+        assertTrue(count == 3, "count: " + count);
     }
 
-    @Ignore("Test not working as the skin is not being properly instantiated")
+    @Disabled("Test not working as the skin is not being properly instantiated")
     @Test public void test_rt20100() {
         comboBox.getItems().addAll("0","1","2","3","4","5","6","7","8","9");
 
@@ -1112,7 +1163,7 @@ public class ComboBoxTest {
             "Option 1", "Option 2", "Option 3"
         );
 
-        ComboBox<String> comboBox = new ComboBox<String>();
+        ComboBox<String> comboBox = new ComboBox<>();
         comboBox.setItems(strings);
         comboBox.setEditable(true);
         comboBox.valueProperty().addListener((ov, t, t1) -> {
@@ -1128,11 +1179,17 @@ public class ComboBoxTest {
 
         comboBox.requestFocus();
 
-        new KeyEventFirer(comboBox).doKeyPress(KeyCode.ENTER);
+        var kFirer = new KeyEventFirer(comboBox);
+        // Open selection
+        kFirer.doKeyPress(KeyCode.DOWN, KeyModifier.ALT);
+        // Select first
+        kFirer.doKeyPress(KeyCode.DOWN);
+        // Commit selection
+        kFirer.doKeyPress(KeyCode.ENTER);
     }
 
     @Test public void test_rt31479() {
-        ComboBox<String> comboBox = new ComboBox<String>();
+        ComboBox<String> comboBox = new ComboBox<>();
 
         sl = new StageLoader(comboBox);
 
@@ -1202,7 +1259,7 @@ public class ComboBoxTest {
     @Test public void test_rt34573() {
         final ComboBox<String> comboBox = new ComboBox<>();
 
-        final ListCell<String> customCell = new ListCellShim<String>() {
+        final ListCell<String> customCell = new ListCellShim<>() {
             @Override public void updateItem(String item, boolean empty) {
                 super.updateItem(item, empty);
                 setText(item);
@@ -1225,7 +1282,7 @@ public class ComboBoxTest {
     @Test public void test_rt34566() {
         final ComboBox<String> comboBox = new ComboBox<>();
 
-        final ListCell<String> customCell = new ListCellShim<String>() {
+        final ListCell<String> customCell = new ListCellShim<>() {
             @Override public void updateItem(String item, boolean empty) {
                 super.updateItem(item, empty);
                 setText(item);
@@ -1254,6 +1311,30 @@ public class ComboBoxTest {
         assertEquals("A", comboBox.getButtonCell().getText());
         assertEquals(0, comboBox.getButtonCell().getIndex());
         assertFalse(customCell.getPseudoClassStates().contains(empty));
+    }
+
+    @Test
+    public void testPromptTextRestoredAfterSetValueNull() {
+        String promptText = "Select Value";
+        comboBox.setPromptText(promptText);
+        comboBox.getItems().addAll("0", "1", "2", "3");
+
+        SingleSelectionModel<String> sm = comboBox.getSelectionModel();
+        sl = new StageLoader(comboBox);
+        ListCell<String> buttonCell = (ListCell<String>) getDisplayNode();
+
+        assertEquals(promptText, buttonCell.getText(), "Initial button cell text should be the promptText");
+
+        // Select an item
+        sm.select(2);
+        Toolkit.getToolkit().firePulse();
+        assertNotEquals(promptText, buttonCell.getText(), "After selecting an item the button must not show the promptText");
+
+        // Clear the value
+        comboBox.setValue(null);
+        Toolkit.getToolkit().firePulse();
+
+        assertEquals(promptText, buttonCell.getText(), "Button cell should show promptText after clearing value");
     }
 
     private int test_rt34603_count = 0;
@@ -1288,7 +1369,7 @@ public class ComboBoxTest {
     @Test public void test_rt35586() {
         assertEquals(0, test_rt35586_count);
 
-        final ComboBox<String> cb = new ComboBox<String>();
+        final ComboBox<String> cb = new ComboBox<>();
         cb.setEditable(true);
         cb.setOnAction(event -> {
             test_rt35586_count++;
@@ -1336,7 +1417,7 @@ public class ComboBoxTest {
     }
 
     @Test public void test_rt35840() {
-        final ComboBox<String> cb = new ComboBox<String>();
+        final ComboBox<String> cb = new ComboBox<>();
         cb.setEditable(true);
         sl = new StageLoader(cb);
         cb.requestFocus();
@@ -1952,14 +2033,12 @@ public class ComboBoxTest {
         // cb2.isFocused() returns true as expected, the scene focus owner is
         // not the ComboBox, but the FakeFocusTextField inside it
         cb1Keyboard.doKeyPress(KeyCode.TAB, KeyModifier.SHIFT);
-        assertTrue("Expect cb2 to be focused, but actual focus owner is: " + scene.getFocusOwner(),
-                cb2.isFocused());
-        // Updated with fix for RT-34602: The TextField now never gets
+        assertTrue(cb2.isFocused(), "Expect cb2 to be focused, but actual focus owner is: " + scene.getFocusOwner());
+        // Updated with fix for JDK-8090788: The TextField now never gets
         // focus (it's just faking it).
         // assertEquals("Expect cb2 TextField to be focused, but actual focus owner is: " + scene.getFocusOwner(),
         //         cb2.getEditor(), scene.getFocusOwner());
-        assertEquals("Expect cb2 to be focused, but actual focus owner is: " + scene.getFocusOwner(),
-                     cb2, scene.getFocusOwner());
+        assertEquals(cb2, scene.getFocusOwner(), "Expect cb2 to be focused, but actual focus owner is: " + scene.getFocusOwner());
 
         // This is where the second half of the bug appears, as we are stuck in
         // the FakeFocusTextField of cb2, we never make it to cb1
@@ -2152,7 +2231,7 @@ public class ComboBoxTest {
         // but in index (last - 2).
         int expected = last - 2;
         assertEquals("5", sm.getSelectedItem());
-        assertEquals("selected index after disjoint removes above", expected, sm.getSelectedIndex());
+        assertEquals(expected, sm.getSelectedIndex(), "selected index after disjoint removes above");
     }
 
     /**
@@ -2199,8 +2278,8 @@ public class ComboBoxTest {
 
         // disjoint remove of 2 elements above the last selected
         items.removeAll(items.get(1), items.get(3));
-        assertEquals("sanity: selectedIndex must be shifted by -2", last - 2, sm.getSelectedIndex());
-        assertEquals("must fire single event on removes above", 1, rt_40012_count);
+        assertEquals(last - 2, sm.getSelectedIndex(), "sanity: selectedIndex must be shifted by -2");
+        assertEquals(1, rt_40012_count, "must fire single event on removes above");
     }
 
     /**
@@ -2222,8 +2301,8 @@ public class ComboBoxTest {
 
         // disjoint remove of 2 elements above the last selected
         items.removeAll(items.get(1), items.get(3));
-        assertEquals("sanity: selectedItem unchanged", lastItem, sm.getSelectedItem());
-        assertEquals("must not fire on unchanged selected item", 0, rt_40012_count);
+        assertEquals(lastItem, sm.getSelectedItem(), "sanity: selectedItem unchanged");
+        assertEquals(0, rt_40012_count, "must not fire on unchanged selected item");
     }
 
     @Test public void test_jdk_8150946_testCommit_valid() {
@@ -2310,6 +2389,69 @@ public class ComboBoxTest {
 
         tk.firePulse();
 
-        assertEquals("ComboBox skinProperty changed more than once, which is not expected.", 1, skinChangedCount);
+        assertEquals(1, skinChangedCount, "ComboBox skinProperty changed more than once, which is not expected.");
+    }
+
+    //JDK-8279140
+    @Test
+    public void testSelectionOnItemChangeUsingSetAllThroughPropertyBinding() {
+        ObservableList<String> comboBoxItemsList = FXCollections.observableArrayList();
+        ObjectProperty<String> selectedValue = new SimpleObjectProperty<>();
+
+        List<String> strings1 = List.of("A", "B", "C");
+        List<String> strings2 = List.of("D", "E", "F");
+
+        comboBox = new ComboBox<>();
+        comboBox.setItems(comboBoxItemsList);
+
+        selectedValue.addListener((obs, oldValue, newValue) -> {
+            if ("D".equals(newValue) || "A".equals(newValue)) {
+                List<String> newContent = "A".equals(newValue) ? strings1 : strings2;
+                comboBoxItemsList.setAll(newContent);
+            }
+        });
+
+        comboBox.valueProperty().bindBidirectional(selectedValue);
+
+        selectedValue.set("A");
+        assertEquals("A", comboBox.getSelectionModel().getSelectedItem());
+        assertEquals("A", selectedValue.get());
+
+        selectedValue.set("D");
+        assertEquals("D", comboBox.getSelectionModel().getSelectedItem());
+        assertEquals("D", selectedValue.get());
+    }
+
+    //JDK-8279139
+    @Test
+    public void testSelectionOnItemChangeUsingSetAllOnButtonPress() {
+        ObservableList<String> comboBoxItemsList = FXCollections.observableArrayList();
+
+        List<String> strings1 = List.of("A", "B", "C");
+        List<String> strings2 = List.of("D", "B", "F");
+
+        comboBox = new ComboBox<>();
+        comboBox.setItems(comboBoxItemsList);
+        comboBox.setValue("B");
+
+        comboBoxItemsList.setAll(strings2);
+        assertEquals("B", comboBox.getSelectionModel().getSelectedItem());
+        comboBoxItemsList.setAll(strings1);
+        assertEquals("B", comboBox.getSelectionModel().getSelectedItem());
+
+        Button button = new Button("Change content");
+        button.setOnAction(e -> {
+            if (comboBoxItemsList.equals(strings1)) {
+                comboBoxItemsList.setAll(strings2);
+            } else {
+                comboBoxItemsList.setAll(strings1);
+            }
+        });
+
+        MouseEventFirer mouse = new MouseEventFirer(button);
+        mouse.fireMousePressAndRelease();
+        assertEquals("B", comboBox.getSelectionModel().getSelectedItem());
+        mouse.fireMousePressAndRelease();
+        assertEquals("B", comboBox.getSelectionModel().getSelectedItem());
     }
 }

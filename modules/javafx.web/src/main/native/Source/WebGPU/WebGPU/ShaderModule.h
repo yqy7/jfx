@@ -25,50 +25,123 @@
 
 #pragma once
 
+#import "ASTInterpolateAttribute.h"
 #import "WGSL.h"
+#import <variant>
 #import <wtf/FastMalloc.h>
 #import <wtf/Ref.h>
 #import <wtf/RefCounted.h>
+#import <wtf/TZoneMalloc.h>
 #import <wtf/text/StringHash.h>
 #import <wtf/text/WTFString.h>
 
+struct WGPUShaderModuleImpl {
+};
+
+namespace WGSL {
+namespace AST {
+class Function;
+}
+struct Type;
+}
+
 namespace WebGPU {
 
+class Device;
 class PipelineLayout;
 
-class ShaderModule : public RefCounted<ShaderModule> {
-    WTF_MAKE_FAST_ALLOCATED;
+// https://gpuweb.github.io/gpuweb/#gpushadermodule
+class ShaderModule : public WGPUShaderModuleImpl, public RefCounted<ShaderModule> {
+    WTF_MAKE_TZONE_ALLOCATED(ShaderModule);
+
+    using CheckResult = Variant<WGSL::SuccessfulCheck, WGSL::FailedCheck, std::monostate>;
 public:
-    static Ref<ShaderModule> create(std::variant<WGSL::SuccessfulCheck, WGSL::FailedCheck>&& checkResult, HashMap<String, Ref<PipelineLayout>>&& pipelineLayoutHints, HashMap<String, WGSL::Reflection::EntryPointInformation>&& entryPointInformation, id <MTLLibrary> library)
+    static Ref<ShaderModule> create(Variant<WGSL::SuccessfulCheck, WGSL::FailedCheck>&& checkResult, HashMap<String, Ref<PipelineLayout>>&& pipelineLayoutHints, HashMap<String, WGSL::Reflection::EntryPointInformation>&& entryPointInformation, id<MTLLibrary> library, Device& device)
     {
-        return adoptRef(*new ShaderModule(WTFMove(checkResult), WTFMove(pipelineLayoutHints), WTFMove(entryPointInformation), library));
+        return adoptRef(*new ShaderModule(WTFMove(checkResult), WTFMove(pipelineLayoutHints), WTFMove(entryPointInformation), library, device));
+    }
+    static Ref<ShaderModule> createInvalid(Device& device, CheckResult&& checkResult = std::monostate { })
+    {
+        return adoptRef(*new ShaderModule(device, WTFMove(checkResult)));
     }
 
     ~ShaderModule();
 
-    void getCompilationInfo(WTF::Function<void(WGPUCompilationInfoRequestStatus, const WGPUCompilationInfo*)>&& callback);
-    void setLabel(const char*);
+    void getCompilationInfo(CompletionHandler<void(WGPUCompilationInfoRequestStatus, const WGPUCompilationInfo&)>&& callback);
+    void setLabel(String&&);
+
+    bool isValid() const { return std::holds_alternative<WGSL::SuccessfulCheck>(m_checkResult); }
 
     static WGSL::PipelineLayout convertPipelineLayout(const PipelineLayout&);
-    static id <MTLLibrary> createLibrary(id <MTLDevice>, const String& msl, NSString *label);
+    static id<MTLLibrary> createLibrary(id<MTLDevice>, const String& msl, String&& label, NSError **, WGSL::DeviceState&&);
 
-    const WGSL::AST* ast() const;
+    WGSL::ShaderModule* ast() const;
 
     const PipelineLayout* pipelineLayoutHint(const String&) const;
     const WGSL::Reflection::EntryPointInformation* entryPointInformation(const String&) const;
-    id <MTLLibrary> library() const { return m_library; }
+    id<MTLLibrary> library() const { return m_library; }
+
+    Device& device() const { return m_device; }
+    const String& defaultVertexEntryPoint() const;
+    const String& defaultFragmentEntryPoint() const;
+    const String& defaultComputeEntryPoint() const;
+
+    using VertexStageIn = HashMap<uint32_t, WGPUVertexFormat, DefaultHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>>;
+    using FragmentOutputs = HashMap<uint32_t, MTLDataType, DefaultHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>>;
+    struct VertexOutputFragmentInput {
+        MTLDataType dataType { MTLDataTypeNone };
+        std::optional<WGSL::AST::Interpolation> interpolation { std::nullopt };
+    };
+    using VertexOutputs = HashMap<uint32_t, VertexOutputFragmentInput, DefaultHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>>;
+    using FragmentInputs = VertexOutputs;
+    const FragmentOutputs* fragmentReturnTypeForEntryPoint(const String&) const;
+    const FragmentInputs* fragmentInputsForEntryPoint(const String&) const;
+    const VertexStageIn* stageInTypesForEntryPoint(const String&) const;
+    const VertexOutputs* vertexReturnTypeForEntryPoint(const String&) const;
+    bool usesFrontFacingInInput(const String&) const;
+    bool usesSampleIndexInInput(const String&) const;
+    bool usesSampleMaskInInput(const String&) const;
+    bool usesSampleMaskInOutput(const String&) const;
+    bool usesFragDepth(const String&) const;
 
 private:
-    ShaderModule(std::variant<WGSL::SuccessfulCheck, WGSL::FailedCheck>&&, HashMap<String, Ref<PipelineLayout>>&&, HashMap<String, WGSL::Reflection::EntryPointInformation>&&, id <MTLLibrary>);
+    ShaderModule(Variant<WGSL::SuccessfulCheck, WGSL::FailedCheck>&&, HashMap<String, Ref<PipelineLayout>>&&, HashMap<String, WGSL::Reflection::EntryPointInformation>&&, id<MTLLibrary>, Device&);
+    ShaderModule(Device&, CheckResult&&);
 
-    const std::variant<WGSL::SuccessfulCheck, WGSL::FailedCheck> m_checkResult;
+    CheckResult convertCheckResult(Variant<WGSL::SuccessfulCheck, WGSL::FailedCheck>&&);
+
+    const CheckResult m_checkResult;
     const HashMap<String, Ref<PipelineLayout>> m_pipelineLayoutHints;
     const HashMap<String, WGSL::Reflection::EntryPointInformation> m_entryPointInformation;
-    id <MTLLibrary> m_library { nil }; // This is only non-null if we could compile the module early.
+    const id<MTLLibrary> m_library { nil }; // This is only non-null if we could compile the module early.
+    void populateFragmentInputs(const WGSL::Type&, ShaderModule::FragmentInputs&, const String&);
+    FragmentInputs parseFragmentInputs(const WGSL::AST::Function&);
+    void populateOutputState(const String&, WGSL::Builtin);
+
+    ShaderModule::FragmentOutputs parseFragmentReturnType(const WGSL::Type&, const String&);
+
+    const Ref<Device> m_device;
+    // FIXME: https://bugs.webkit.org/show_bug.cgi?id=250441 - this needs to be populated from the compiler
+    HashMap<String, String> m_constantIdentifiersToNames;
+    HashMap<String, FragmentOutputs> m_fragmentReturnTypeForEntryPoint;
+    HashMap<String, FragmentInputs> m_fragmentInputsForEntryPoint;
+    HashMap<String, VertexOutputs> m_vertexReturnTypeForEntryPoint;
+    HashMap<String, VertexStageIn> m_stageInTypesForEntryPoint;
+
+    String m_defaultVertexEntryPoint;
+    String m_defaultFragmentEntryPoint;
+    String m_defaultComputeEntryPoint;
+
+    struct ShaderModuleState {
+        bool usesFrontFacingInInput { false };
+        bool usesSampleIndexInInput { false };
+        bool usesSampleMaskInInput { false };
+        bool usesSampleMaskInOutput { false };
+        bool usesFragDepth { false };
+    };
+    const ShaderModuleState* shaderModuleState(const String&) const;
+    ShaderModuleState& populateShaderModuleState(const String&);
+    HashMap<String, ShaderModuleState> m_usageInformationPerEntryPoint;
 };
 
 } // namespace WebGPU
-
-struct WGPUShaderModuleImpl {
-    Ref<WebGPU::ShaderModule> shaderModule;
-};

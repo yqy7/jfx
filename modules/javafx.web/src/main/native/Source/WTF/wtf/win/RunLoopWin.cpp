@@ -31,6 +31,8 @@
 namespace WTF {
 
 static const UINT PerformWorkMessage = WM_USER + 1;
+static const UINT SetTimerMessage = WM_USER + 2;
+static const UINT KillTimerMessage = WM_USER + 3;
 static const LPCWSTR kRunLoopMessageWindowClassName = L"RunLoopMessageWindow";
 
 LRESULT CALLBACK RunLoop::RunLoopWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -55,8 +57,21 @@ LRESULT RunLoop::wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case PerformWorkMessage:
         performWork();
         return 0;
+    case SetTimerMessage:
+        ::SetTimer(hWnd, wParam, lParam, nullptr);
+        return 0;
+    case KillTimerMessage:
+        ::KillTimer(hWnd, wParam);
+        return 0;
     case WM_TIMER:
-        bitwise_cast<RunLoop::TimerBase*>(wParam)->timerFired();
+        RunLoop::TimerBase* timer = nullptr;
+        {
+            Locker locker { m_loopLock };
+            if (m_liveTimers.contains(wParam))
+                timer = std::bit_cast<RunLoop::TimerBase*>(wParam);
+        }
+        if (timer != nullptr)
+            timer->timerFired();
         return 0;
     }
 
@@ -74,18 +89,9 @@ void RunLoop::run()
     }
 }
 
-void RunLoop::iterate()
-{
-    MSG message;
-    while (::PeekMessage(&message, nullptr, 0, 0, PM_REMOVE)) {
-        ::TranslateMessage(&message);
-        ::DispatchMessage(&message);
-    }
-}
-
 void RunLoop::setWakeUpCallback(WTF::Function<void()>&& function)
 {
-    RunLoop::current().m_wakeUpCallback = WTFMove(function);
+    RunLoop::currentSingleton().m_wakeUpCallback = WTFMove(function);
 }
 
 void RunLoop::stop()
@@ -99,20 +105,16 @@ void RunLoop::stop()
 
 void RunLoop::registerRunLoopMessageWindowClass()
 {
-    static std::once_flag onceKey;
-    std::call_once(onceKey, [&] {
-        WNDCLASS windowClass = { };
-        windowClass.lpfnWndProc     = RunLoop::RunLoopWndProc;
-        windowClass.cbWndExtra      = sizeof(RunLoop*);
-        windowClass.lpszClassName   = kRunLoopMessageWindowClassName;
-        bool result = ::RegisterClass(&windowClass);
-        RELEASE_ASSERT(result);
-    });
+    WNDCLASS windowClass = { };
+    windowClass.lpfnWndProc = RunLoop::RunLoopWndProc;
+    windowClass.cbWndExtra = sizeof(RunLoop*);
+    windowClass.lpszClassName = kRunLoopMessageWindowClassName;
+    bool result = ::RegisterClass(&windowClass);
+    RELEASE_ASSERT(result);
 }
 
 RunLoop::RunLoop()
 {
-    registerRunLoopMessageWindowClass();
     m_runLoopMessageWindow = ::CreateWindow(kRunLoopMessageWindowClassName, nullptr, 0,
         CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, HWND_MESSAGE, nullptr, nullptr, this);
     RELEASE_ASSERT(::IsWindow(m_runLoopMessageWindow));
@@ -120,6 +122,7 @@ RunLoop::RunLoop()
 
 RunLoop::~RunLoop()
 {
+    ::DestroyWindow(m_runLoopMessageWindow);
 }
 
 void RunLoop::wakeUp()
@@ -135,12 +138,13 @@ void RunLoop::wakeUp()
 RunLoop::CycleResult RunLoop::cycle(RunLoopMode)
 {
     MSG message;
-    if (!::GetMessage(&message, nullptr, 0, 0))
-        return CycleResult::Stop;
+    while (::PeekMessage(&message, nullptr, 0, 0, PM_REMOVE)) {
+        if (message.message == WM_QUIT)
+            return CycleResult::Stop;
 
-    ::TranslateMessage(&message);
-    ::DispatchMessage(&message);
-
+        ::TranslateMessage(&message);
+        ::DispatchMessage(&message);
+    }
     return CycleResult::Continue;
 }
 
@@ -156,16 +160,17 @@ void RunLoop::TimerBase::timerFired()
 
         if (!m_isRepeating) {
             m_isActive = false;
-            ::KillTimer(m_runLoop->m_runLoopMessageWindow, bitwise_cast<uintptr_t>(this));
+            ::KillTimer(m_runLoop->m_runLoopMessageWindow, std::bit_cast<uintptr_t>(this));
         } else
-            m_nextFireDate = MonotonicTime::now() + m_interval;
+            m_nextFireDate = MonotonicTime::timePointFromNow(m_interval);
     }
 
     fired();
 }
 
-RunLoop::TimerBase::TimerBase(RunLoop& runLoop)
-    : m_runLoop(runLoop)
+RunLoop::TimerBase::TimerBase(Ref<RunLoop>&& runLoop, ASCIILiteral description)
+    : m_runLoop(WTFMove(runLoop))
+    , m_description(description)
 {
 }
 
@@ -180,8 +185,9 @@ void RunLoop::TimerBase::start(Seconds interval, bool repeat)
     m_isRepeating = repeat;
     m_isActive = true;
     m_interval = interval;
-    m_nextFireDate = MonotonicTime::now() + m_interval;
-    ::SetTimer(m_runLoop->m_runLoopMessageWindow, bitwise_cast<uintptr_t>(this), interval.millisecondsAs<UINT>(), nullptr);
+    m_nextFireDate = MonotonicTime::timePointFromNow(m_interval);
+    m_runLoop->m_liveTimers.add(std::bit_cast<uintptr_t>(this));
+    ::PostMessage(m_runLoop->m_runLoopMessageWindow, SetTimerMessage, std::bit_cast<uintptr_t>(this), interval.millisecondsAs<UINT>());
 }
 
 void RunLoop::TimerBase::stop()
@@ -191,7 +197,8 @@ void RunLoop::TimerBase::stop()
         return;
 
     m_isActive = false;
-    ::KillTimer(m_runLoop->m_runLoopMessageWindow, bitwise_cast<uintptr_t>(this));
+    m_runLoop->m_liveTimers.remove(std::bit_cast<uintptr_t>(this));
+    ::PostMessage(m_runLoop->m_runLoopMessageWindow, KillTimerMessage, std::bit_cast<uintptr_t>(this), 0LL);
 }
 
 bool RunLoop::TimerBase::isActiveWithLock() const

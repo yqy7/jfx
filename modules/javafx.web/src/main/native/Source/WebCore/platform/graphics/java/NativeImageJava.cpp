@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,48 +40,35 @@
 
 namespace WebCore {
 
-IntSize NativeImage::size() const
+IntSize PlatformImageNativeImageBackend::size() const
 {
-    if (!m_platformImage || !m_platformImage->getImage()) {
-        return {};
-    }
-
-    JNIEnv* env = WTF::GetJavaEnv();
-    static jmethodID midGetSize = env->GetMethodID(
-        PG_GetImageFrameClass(env),
-        "getSize",
-        "()[I");
-    ASSERT(midGetSize);
-    JLocalRef<jintArray> jsize((jintArray)env->CallObjectMethod(
-                        jobject(*m_platformImage->getImage().get()),
-                        midGetSize));
-    if (!jsize) {
-        return {};
-    }
-
-    jint* size = (jint*)env->GetPrimitiveArrayCritical((jintArray)jsize, 0);
-    IntSize frameSize(size[0], size[1]);
-    env->ReleasePrimitiveArrayCritical(jsize, size, 0);
-    return frameSize;
+    if (!m_platformImage) return { };
+    // read from Native Image , no need to call jni
+    FloatSize f_size = m_platformImage->size();
+    return IntSize(f_size.width(), f_size.height());
 }
 
-bool NativeImage::hasAlpha() const
+bool PlatformImageNativeImageBackend::hasAlpha() const
 {
     // FIXME-java: Get alpha details from ImageMetadata class
     return true;
 }
 
-Color NativeImage::singlePixelSolidColor() const
+std::optional<Color> NativeImage::singlePixelSolidColor() const
 {
     return {};
 }
 
+Headroom PlatformImageNativeImageBackend::headroom() const
+{
+    return Headroom::None;
+}
 void NativeImage::clearSubimages()
 {
     notImplemented();
 }
 
-DestinationColorSpace NativeImage::colorSpace() const //TBD
+DestinationColorSpace PlatformImageNativeImageBackend::colorSpace() const //TBD
 {
     notImplemented();
     return DestinationColorSpace::SRGB();

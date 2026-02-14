@@ -29,7 +29,7 @@ namespace JSC {
 
 STATIC_ASSERT_IS_TRIVIALLY_DESTRUCTIBLE(StringObject);
 
-const ClassInfo StringObject::s_info = { "String", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(StringObject) };
+const ClassInfo StringObject::s_info = { "String"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(StringObject) };
 
 StringObject::StringObject(VM& vm, Structure* structure)
     : Base(vm, structure)
@@ -39,7 +39,7 @@ StringObject::StringObject(VM& vm, Structure* structure)
 void StringObject::finishCreation(VM& vm, JSString* string)
 {
     Base::finishCreation(vm);
-    ASSERT(inherits(vm, info()));
+    ASSERT(inherits(info()));
     setInternalValue(vm, string);
     ASSERT_WITH_MESSAGE(type() == StringObjectType || type() == DerivedStringObjectType, "Instance inheriting StringObject should have DerivedStringObjectType");
 }
@@ -70,7 +70,7 @@ bool StringObject::put(JSCell* cell, JSGlobalObject* globalObject, PropertyName 
 
     if (propertyName == vm.propertyNames->length)
         return typeError(globalObject, scope, slot.isStrictMode(), ReadonlyPropertyWriteError);
-    if (UNLIKELY(slot.thisValue() != thisObject))
+    if (slot.thisValue() != thisObject) [[unlikely]]
         RELEASE_AND_RETURN(scope, JSObject::put(cell, globalObject, propertyName, value, slot));
     if (std::optional<uint32_t> index = parseIndex(propertyName))
         RELEASE_AND_RETURN(scope, putByIndex(cell, globalObject, index.value(), value, slot.isStrictMode()));

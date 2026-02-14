@@ -197,7 +197,7 @@ audio_chain_new (AudioChain * prev, GstAudioConverter * convert)
 {
   AudioChain *chain;
 
-  chain = g_slice_new0 (AudioChain);
+  chain = g_new0 (AudioChain, 1);
   chain->prev = prev;
 
   if (convert->current_layout == GST_AUDIO_LAYOUT_NON_INTERLEAVED) {
@@ -229,7 +229,7 @@ audio_chain_free (AudioChain * chain)
   if (chain->make_func_notify)
     chain->make_func_notify (chain->make_func_data);
   g_free (chain->tmp);
-  g_slice_free (AudioChain, chain);
+  g_free (chain);
 }
 
 static gpointer *
@@ -263,7 +263,6 @@ audio_chain_get_samples (AudioChain * chain, gsize * avail)
   return res;
 }
 
-/*
 static guint
 get_opt_uint (GstAudioConverter * convert, const gchar * opt, guint def)
 {
@@ -272,7 +271,6 @@ get_opt_uint (GstAudioConverter * convert, const gchar * opt, guint def)
     res = def;
   return res;
 }
-*/
 
 static gint
 get_opt_enum (GstAudioConverter * convert, const gchar * opt, GType type,
@@ -292,6 +290,7 @@ get_opt_value (GstAudioConverter * convert, const gchar * opt)
 
 #define DEFAULT_OPT_RESAMPLER_METHOD GST_AUDIO_RESAMPLER_METHOD_BLACKMAN_NUTTALL
 #define DEFAULT_OPT_DITHER_METHOD GST_AUDIO_DITHER_NONE
+#define DEFAULT_OPT_DITHER_THRESHOLD 20
 #define DEFAULT_OPT_NOISE_SHAPING_METHOD GST_AUDIO_NOISE_SHAPING_NONE
 #define DEFAULT_OPT_QUANTIZATION 1
 
@@ -301,6 +300,8 @@ get_opt_value (GstAudioConverter * convert, const gchar * opt)
 #define GET_OPT_DITHER_METHOD(c) get_opt_enum(c, \
     GST_AUDIO_CONVERTER_OPT_DITHER_METHOD, GST_TYPE_AUDIO_DITHER_METHOD, \
     DEFAULT_OPT_DITHER_METHOD)
+#define GET_OPT_DITHER_THRESHOLD(c) get_opt_uint(c, \
+    GST_AUDIO_CONVERTER_OPT_DITHER_THRESHOLD, DEFAULT_OPT_DITHER_THRESHOLD)
 #define GET_OPT_NOISE_SHAPING_METHOD(c) get_opt_enum(c, \
     GST_AUDIO_CONVERTER_OPT_NOISE_SHAPING_METHOD, GST_TYPE_AUDIO_NOISE_SHAPING_METHOD, \
     DEFAULT_OPT_NOISE_SHAPING_METHOD)
@@ -310,11 +311,12 @@ get_opt_value (GstAudioConverter * convert, const gchar * opt)
     GST_AUDIO_CONVERTER_OPT_MIX_MATRIX)
 
 static gboolean
-copy_config (GQuark field_id, const GValue * value, gpointer user_data)
+copy_config (const GstIdStr * fieldname, const GValue * value,
+    gpointer user_data)
 {
   GstAudioConverter *convert = user_data;
 
-  gst_structure_id_set_value (convert->config, field_id, value);
+  gst_structure_id_str_set_value (convert->config, fieldname, value);
 
   return TRUE;
 }
@@ -365,7 +367,7 @@ gst_audio_converter_update_config (GstAudioConverter * convert,
     gst_audio_resampler_update (convert->resampler, in_rate, out_rate, config);
 
   if (config) {
-    gst_structure_foreach (config, copy_config, convert);
+    gst_structure_foreach_id_str (config, copy_config, convert);
     gst_structure_free (config);
   }
 
@@ -785,8 +787,13 @@ check_mix_matrix (guint in_channels, guint out_channels, const GValue * value)
       const GValue *itm;
 
       itm = gst_value_array_get_value (row, i);
-      if (!G_VALUE_HOLDS_FLOAT (itm)) {
-        GST_ERROR ("Invalid mix matrix element type, should be float");
+      if (!G_VALUE_HOLDS_FLOAT (itm) &&
+          !G_VALUE_HOLDS_DOUBLE (itm) &&
+          !G_VALUE_HOLDS_INT (itm) &&
+          !G_VALUE_HOLDS_INT64 (itm) &&
+          !G_VALUE_HOLDS_UINT (itm) && !G_VALUE_HOLDS_UINT64 (itm)) {
+        GST_ERROR
+            ("Invalid mix matrix element type, should be float or double or integer");
         goto fail;
       }
     }
@@ -816,7 +823,21 @@ mix_matrix_from_g_value (guint in_channels, guint out_channels,
       gfloat coefficient;
 
       itm = gst_value_array_get_value (row, i);
-      coefficient = g_value_get_float (itm);
+      if (G_VALUE_HOLDS_FLOAT (itm))
+        coefficient = g_value_get_float (itm);
+      else if (G_VALUE_HOLDS_DOUBLE (itm))
+        coefficient = g_value_get_double (itm);
+      else if (G_VALUE_HOLDS_INT (itm))
+        coefficient = g_value_get_int (itm);
+      else if (G_VALUE_HOLDS_INT64 (itm))
+        coefficient = g_value_get_int64 (itm);
+      else if (G_VALUE_HOLDS_UINT (itm))
+        coefficient = g_value_get_uint (itm);
+      else if (G_VALUE_HOLDS_UINT64 (itm))
+        coefficient = g_value_get_uint64 (itm);
+      else
+        g_assert_not_reached ();
+
       matrix[i][j] = coefficient;
     }
   }
@@ -951,9 +972,11 @@ chain_quantize (GstAudioConverter * convert, AudioChain * prev)
   gint in_depth, out_depth;
   gboolean in_int, out_int;
   GstAudioDitherMethod dither;
+  guint dither_threshold;
   GstAudioNoiseShapingMethod ns;
 
   dither = GET_OPT_DITHER_METHOD (convert);
+  dither_threshold = GET_OPT_DITHER_THRESHOLD (convert);
   ns = GET_OPT_NOISE_SHAPING_METHOD (convert);
 
   cur_finfo = gst_audio_format_get_info (convert->current_format);
@@ -969,7 +992,7 @@ chain_quantize (GstAudioConverter * convert, AudioChain * prev)
    * as DA converters only can do a SNR up to 20 bits in reality.
    * Also don't dither or apply noise shaping if target depth is larger than
    * source depth. */
-  if (out_depth > 20 || (in_int && out_depth >= in_depth)) {
+  if (out_depth > dither_threshold || (in_int && out_depth >= in_depth)) {
     dither = GST_AUDIO_DITHER_NONE;
     ns = GST_AUDIO_NOISE_SHAPING_NONE;
     GST_INFO ("using no dither and noise shaping");
@@ -1317,7 +1340,7 @@ converter_resample (GstAudioConverter * convert,
  * @config contains extra configuration options, see `GST_AUDIO_CONVERTER_OPT_*`
  * parameters for details about the options and values.
  *
- * Returns: a #GstAudioConverter or %NULL if conversion is not possible.
+ * Returns: (nullable): a #GstAudioConverter or %NULL if conversion is not possible.
  */
 GstAudioConverter *
 gst_audio_converter_new (GstAudioConverterFlags flags, GstAudioInfo * in_info,
@@ -1344,14 +1367,14 @@ gst_audio_converter_new (GstAudioConverterFlags flags, GstAudioInfo * in_info,
       && !opt_matrix)
     goto unpositioned;
 
-  convert = g_slice_new0 (GstAudioConverter);
+  convert = g_new0 (GstAudioConverter, 1);
 
   convert->flags = flags;
   convert->in = *in_info;
   convert->out = *out_info;
 
   /* default config */
-  convert->config = gst_structure_new_empty ("GstAudioConverter");
+  convert->config = gst_structure_new_static_str_empty ("GstAudioConverter");
   if (config)
     gst_audio_converter_update_config (convert, 0, 0, config);
 
@@ -1478,7 +1501,7 @@ gst_audio_converter_free (GstAudioConverter * convert)
 
   gst_structure_free (convert->config);
 
-  g_slice_free (GstAudioConverter, convert);
+  g_free (convert);
 }
 
 /**

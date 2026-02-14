@@ -39,6 +39,7 @@
 #include "B3HoistLoopInvariantValues.h"
 #include "B3InferSwitches.h"
 #include "B3LegalizeMemoryOffsets.h"
+#include "B3LowerInt64.h"
 #include "B3LowerMacros.h"
 #include "B3LowerMacrosAfterOptimizations.h"
 #include "B3LowerToAir.h"
@@ -46,7 +47,6 @@
 #include "B3OptimizeAssociativeExpressionTrees.h"
 #include "B3Procedure.h"
 #include "B3ReduceDoubleToFloat.h"
-#include "B3ReduceLoopStrength.h"
 #include "B3ReduceStrength.h"
 #include "B3Validate.h"
 #include "CompilerTimingScope.h"
@@ -55,7 +55,7 @@ namespace JSC { namespace B3 {
 
 void prepareForGeneration(Procedure& procedure)
 {
-    CompilerTimingScope timingScope("Total B3+Air", "prepareForGeneration");
+    CompilerTimingScope timingScope("Total B3+Air"_s, "prepareForGeneration"_s);
 
     generateToAir(procedure);
     Air::prepareForGeneration(procedure.code());
@@ -68,9 +68,9 @@ void generate(Procedure& procedure, CCallHelpers& jit)
 
 void generateToAir(Procedure& procedure)
 {
-    CompilerTimingScope timingScope("Total B3", "generateToAir");
+    CompilerTimingScope timingScope("Total B3"_s, "generateToAir"_s);
 
-    if (shouldDumpIR(procedure, B3Mode) && !shouldDumpIRAtEachPhase(B3Mode)) {
+    if ((shouldDumpIR(procedure, B3Mode) || Options::dumpGraphAfterParsing()) && !shouldDumpIRAtEachPhase(B3Mode)) {
         dataLog(tierName, "Initial B3:\n");
         dataLog(procedure);
     }
@@ -84,15 +84,12 @@ void generateToAir(Procedure& procedure)
     if (procedure.optLevel() >= 2) {
         reduceDoubleToFloat(procedure);
         reduceStrength(procedure);
-        // FIXME: Re-enable B3 hoistLoopInvariantValues
-        // https://bugs.webkit.org/show_bug.cgi?id=212651
         if (Options::useB3HoistLoopInvariantValues())
             hoistLoopInvariantValues(procedure);
         if (eliminateCommonSubexpressions(procedure))
             eliminateCommonSubexpressions(procedure);
         eliminateDeadCode(procedure);
         inferSwitches(procedure);
-        reduceLoopStrength(procedure);
         if (Options::useB3TailDup())
             duplicateTails(procedure);
         fixSSA(procedure);
@@ -114,14 +111,17 @@ void generateToAir(Procedure& procedure)
         // FIXME: Add more optimizations here.
         // https://bugs.webkit.org/show_bug.cgi?id=150507
     }
+#if USE(JSVALUE32_64)
+    lowerInt64(procedure);
+#endif
 
     lowerMacrosAfterOptimizations(procedure);
     legalizeMemoryOffsets(procedure);
     moveConstants(procedure);
     legalizeMemoryOffsets(procedure);
+    eliminateDeadCode(procedure);
     if (Options::useB3CanonicalizePrePostIncrements() && procedure.optLevel() >= 2)
         canonicalizePrePostIncrements(procedure);
-    eliminateDeadCode(procedure);
 
     // FIXME: We should run pureCSE here to clean up some platform specific changes from the previous phases.
     // https://bugs.webkit.org/show_bug.cgi?id=164873
@@ -137,6 +137,8 @@ void generateToAir(Procedure& procedure)
     }
 
     lowerToAir(procedure);
+    if (shouldDumpIR(procedure, B3Mode))
+        procedure.setShouldDumpIR();
     procedure.freeUnneededB3ValuesAfterLowering();
 }
 

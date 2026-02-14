@@ -2,7 +2,7 @@
  * Copyright (C) 2004, 2005, 2006, 2007 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2004, 2005 Rob Buis <buis@kde.org>
  * Copyright (C) 2005 Eric Seidel <eric@webkit.org>
- * Copyright (C) 2021-2022 Apple Inc.  All rights reserved.
+ * Copyright (C) 2021-2023 Apple Inc.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -27,9 +27,13 @@
 
 namespace WebCore {
 
-class FEFlood : public FilterEffect {
+class FEFlood final : public FilterEffect {
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(FEFlood);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(FEFlood);
 public:
-    WEBCORE_EXPORT static Ref<FEFlood> create(const Color& floodColor, float floodOpacity);
+    WEBCORE_EXPORT static Ref<FEFlood> create(const Color& floodColor, float floodOpacity, DestinationColorSpace = DestinationColorSpace::SRGB());
+
+    bool operator==(const FEFlood&) const;
 
     const Color& floodColor() const { return m_floodColor; }
     bool setFloodColor(const Color&);
@@ -37,21 +41,20 @@ public:
     float floodOpacity() const { return m_floodOpacity; }
     bool setFloodOpacity(float);
 
-#if !USE(CG)
+#if !USE(CG) && !USE(SKIA)
     // feFlood does not perform color interpolation of any kind, so the result is always in the current
     // color space regardless of the value of color-interpolation-filters.
     void setOperatingColorSpace(const DestinationColorSpace&) override { }
 #endif
 
-    template<class Encoder> void encode(Encoder&) const;
-    template<class Decoder> static std::optional<Ref<FEFlood>> decode(Decoder&);
-
 private:
-    FEFlood(const Color& floodColor, float floodOpacity);
+    FEFlood(const Color& floodColor, float floodOpacity, DestinationColorSpace = DestinationColorSpace::SRGB());
+
+    bool operator==(const FilterEffect& other) const override { return areEqual<FEFlood>(*this, other); }
 
     unsigned numberOfEffectInputs() const override { return 0; }
 
-    FloatRect calculateImageRect(const Filter&, const FilterImageVector& inputs, const FloatRect& primitiveSubregion) const override;
+    FloatRect calculateImageRect(const Filter&, std::span<const FloatRect> inputImageRects, const FloatRect& primitiveSubregion) const override;
 
     std::unique_ptr<FilterEffectApplier> createSoftwareApplier() const override;
 
@@ -61,29 +64,6 @@ private:
     float m_floodOpacity;
 };
 
-template<class Encoder>
-void FEFlood::encode(Encoder& encoder) const
-{
-    encoder << m_floodColor;
-    encoder << m_floodOpacity;
-}
-
-template<class Decoder>
-std::optional<Ref<FEFlood>> FEFlood::decode(Decoder& decoder)
-{
-    std::optional<Color> floodColor;
-    decoder >> floodColor;
-    if (!floodColor)
-        return std::nullopt;
-
-    std::optional<float> floodOpacity;
-    decoder >> floodOpacity;
-    if (!floodOpacity)
-        return std::nullopt;
-
-    return FEFlood::create(*floodColor, *floodOpacity);
-}
-
 } // namespace WebCore
 
-SPECIALIZE_TYPE_TRAITS_FILTER_EFFECT(FEFlood)
+SPECIALIZE_TYPE_TRAITS_FILTER_FUNCTION(FEFlood)

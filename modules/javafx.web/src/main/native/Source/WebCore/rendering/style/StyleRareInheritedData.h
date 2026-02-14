@@ -2,8 +2,9 @@
  * Copyright (C) 2000 Lars Knoll (knoll@kde.org)
  *           (C) 2000 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2003-2023 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Graham Dennis (graham.dennis@gmail.com)
+ * Copyright (C) 2025 Samuel Weinig <sam@webkit.org>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,32 +25,57 @@
 
 #pragma once
 
-#include "Color.h"
 #include "Length.h"
 #include "RenderStyleConstants.h"
+#include "StyleBlockEllipsis.h"
+#include "StyleColor.h"
+#include "StyleCursor.h"
 #include "StyleCustomPropertyData.h"
+#include "StyleLineBoxContain.h"
+#include "StyleDynamicRangeLimit.h"
+#include "StyleHyphenateCharacter.h"
+#include "StyleHyphenateLimitEdge.h"
+#include "StyleHyphenateLimitLines.h"
+#include "StyleListStyleType.h"
+#include "StyleQuotes.h"
+#include "StyleScrollbarColor.h"
+#include "StyleStrokeMiterlimit.h"
+#include "StyleStrokeWidth.h"
+#include "StyleTextEdge.h"
+#include "StyleTextEmphasisStyle.h"
+#include "StyleTextIndent.h"
+#include "StyleTextShadow.h"
+#include "StyleTextUnderlineOffset.h"
+#include "StyleWebKitLineGrid.h"
+#include "StyleWebKitOverflowScrolling.h"
+#include "StyleWebKitTextStrokeWidth.h"
+#include "StyleWebKitTouchCallout.h"
 #include "TabSize.h"
-#include "TextDecorationThickness.h"
-#include "TextUnderlineOffset.h"
 #include "TouchAction.h"
 #include <wtf/DataRef.h>
+#include <wtf/FixedVector.h>
 #include <wtf/OptionSet.h>
 #include <wtf/RefCounted.h>
 #include <wtf/text/AtomString.h>
 
+#if HAVE(CORE_MATERIAL)
+#include "AppleVisualEffect.h"
+#endif
+
 #if ENABLE(TEXT_AUTOSIZING)
-#include "TextSizeAdjustment.h"
+#include "StyleTextSizeAdjust.h"
 #endif
 
 #if ENABLE(DARK_MODE_CSS)
 #include "StyleColorScheme.h"
 #endif
 
+namespace WTF {
+class TextStream;
+}
+
 namespace WebCore {
 
-class CursorList;
-class QuotesData;
-class ShadowData;
 class StyleFilterData;
 class StyleImage;
 
@@ -58,153 +84,150 @@ class StyleImage;
 // actually uses one of these properties.
 DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(StyleRareInheritedData);
 class StyleRareInheritedData : public RefCounted<StyleRareInheritedData> {
-    WTF_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(StyleRareInheritedData);
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(StyleRareInheritedData, StyleRareInheritedData);
 public:
     static Ref<StyleRareInheritedData> create() { return adoptRef(*new StyleRareInheritedData); }
     Ref<StyleRareInheritedData> copy() const;
     ~StyleRareInheritedData();
 
-    bool operator==(const StyleRareInheritedData& o) const;
-    bool operator!=(const StyleRareInheritedData& o) const
-    {
-        return !(*this == o);
-    }
+    bool operator==(const StyleRareInheritedData&) const;
+
+#if !LOG_DISABLED
+    void dumpDifferences(TextStream&, const StyleRareInheritedData&) const;
+#endif
 
     bool hasColorFilters() const;
 
+    float usedZoom;
+
     RefPtr<StyleImage> listStyleImage;
-    AtomString listStyleStringValue;
 
-    Color textStrokeColor;
-    float textStrokeWidth;
-    Color textFillColor;
-    Color textEmphasisColor;
+    Style::WebkitTextStrokeWidth textStrokeWidth;
+    Style::Color textStrokeColor;
+    Style::Color textFillColor;
+    Style::Color textEmphasisColor;
 
-    Color visitedLinkTextStrokeColor;
-    Color visitedLinkTextFillColor;
-    Color visitedLinkTextEmphasisColor;
+    Style::Color visitedLinkTextStrokeColor;
+    Style::Color visitedLinkTextFillColor;
+    Style::Color visitedLinkTextEmphasisColor;
 
-    Color caretColor;
-    Color visitedLinkCaretColor;
+    Style::Color caretColor;
+    Style::Color visitedLinkCaretColor;
 
-    Color accentColor;
+    Style::Color accentColor;
 
-    std::unique_ptr<ShadowData> textShadow; // Our text shadow information for shadowed text drawing.
+    Style::ScrollbarColor scrollbarColor;
 
-    RefPtr<CursorList> cursorData;
-    Length indent;
-    float effectiveZoom;
+    Style::DynamicRangeLimit dynamicRangeLimit;
 
-    TextUnderlineOffset textUnderlineOffset;
-    TextDecorationThickness textDecorationThickness;
+    Style::TextShadows textShadow;
+
+    // The `cursor` property's state is stored broken up into two parts:
+    //  - the cursor's `predefined` state is stored in `RenderStyle::InheritedFlags::cursor`.
+    //  - the cursor's `images` state is stored here in `StyleRareInheritedData::cursorImages`.
+    Style::Cursor::Images cursorImages;
+
+    Style::TextEmphasisStyle textEmphasisStyle;
+    Style::TextIndent textIndent;
+    Style::TextUnderlineOffset textUnderlineOffset;
+
+    TextEdge textBoxEdge;
+    TextEdge lineFitEdge;
 
     Length wordSpacing;
+    Style::StrokeMiterlimit miterLimit;
 
-    DataRef<StyleCustomPropertyData> customProperties;
+    DataRef<Style::CustomPropertyData> customProperties;
 
-    // Paged media properties.
     unsigned short widows;
     unsigned short orphans;
-    unsigned hasAutoWidows : 1;
-    unsigned hasAutoOrphans : 1;
+    PREFERRED_TYPE(bool) unsigned hasAutoWidows : 1;
+    PREFERRED_TYPE(bool) unsigned hasAutoOrphans : 1;
 
-    unsigned textSecurity : 2; // TextSecurity
-    unsigned userModify : 2; // UserModify (editing)
-    unsigned wordBreak : 2; // WordBreak
-    unsigned overflowWrap : 2; // OverflowWrap
-    unsigned nbspMode : 1; // NBSPMode
-    unsigned lineBreak : 3; // LineBreak
-    unsigned userSelect : 2; // UserSelect
-    unsigned colorSpace : 1; // ColorSpace
-    unsigned speakAs : 4; // ESpeakAs
-    unsigned hyphens : 2; // Hyphens
-    unsigned textCombine : 1; // text-combine-upright
-    unsigned textEmphasisFill : 1; // TextEmphasisFill
-    unsigned textEmphasisMark : 3; // TextEmphasisMark
-    unsigned textEmphasisPosition : 4; // TextEmphasisPosition
-    unsigned textOrientation : 2; // TextOrientation
-    unsigned textIndentLine : 1; // TextIndentLine
-    unsigned textIndentType : 1; // TextIndentType
-    unsigned lineBoxContain: 7; // OptionSet<LineBoxContain>
-    // CSS Image Values Level 3
-    unsigned imageOrientation : 1; // ImageOrientation
-    unsigned imageRendering : 3; // ImageRendering
-    unsigned lineSnap : 2; // LineSnap
-    unsigned lineAlign : 1; // LineAlign
-#if ENABLE(OVERFLOW_SCROLLING_TOUCH)
-    unsigned useTouchOverflowScrolling: 1;
+    PREFERRED_TYPE(TextSecurity) unsigned textSecurity : 2;
+    PREFERRED_TYPE(UserModify) unsigned userModify : 2;
+    PREFERRED_TYPE(WordBreak) unsigned wordBreak : 3;
+    PREFERRED_TYPE(OverflowWrap) unsigned overflowWrap : 2;
+    PREFERRED_TYPE(NBSPMode) unsigned nbspMode : 1;
+    PREFERRED_TYPE(LineBreak) unsigned lineBreak : 3;
+    PREFERRED_TYPE(UserSelect) unsigned userSelect : 2;
+    PREFERRED_TYPE(ColorSpace) unsigned colorSpace : 1;
+    PREFERRED_TYPE(OptionSet<SpeakAs>) unsigned speakAs : 4 { 0 };
+    PREFERRED_TYPE(Hyphens) unsigned hyphens : 2;
+    PREFERRED_TYPE(TextCombine) unsigned textCombine : 1;
+    PREFERRED_TYPE(TextEmphasisPosition) unsigned textEmphasisPosition : 4;
+    PREFERRED_TYPE(TextUnderlinePosition) unsigned textUnderlinePosition : 4;
+    PREFERRED_TYPE(OptionSet<Style::LineBoxContain>) unsigned lineBoxContain: 7;
+    PREFERRED_TYPE(ImageOrientation) unsigned imageOrientation : 1;
+    PREFERRED_TYPE(ImageRendering) unsigned imageRendering : 3;
+    PREFERRED_TYPE(LineSnap) unsigned lineSnap : 2;
+    PREFERRED_TYPE(LineAlign) unsigned lineAlign : 1;
+#if ENABLE(WEBKIT_OVERFLOW_SCROLLING_CSS_PROPERTY)
+    PREFERRED_TYPE(Style::WebkitOverflowScrolling) unsigned webkitOverflowScrolling: 1;
 #endif
-#if ENABLE(CSS_IMAGE_RESOLUTION)
-    unsigned imageResolutionSource : 1; // ImageResolutionSource
-    unsigned imageResolutionSnap : 1; // ImageResolutionSnap
+    PREFERRED_TYPE(TextAlignLast) unsigned textAlignLast : 3;
+    PREFERRED_TYPE(TextJustify) unsigned textJustify : 2;
+    PREFERRED_TYPE(TextDecorationSkipInk) unsigned textDecorationSkipInk : 2;
+    PREFERRED_TYPE(MathStyle) unsigned mathStyle : 1;
+    PREFERRED_TYPE(RubyPosition) unsigned rubyPosition : 2;
+    PREFERRED_TYPE(RubyAlign) unsigned rubyAlign : 2;
+    PREFERRED_TYPE(RubyOverhang) unsigned rubyOverhang : 1;
+    PREFERRED_TYPE(TextZoom) unsigned textZoom: 1;
+#if ENABLE(WEBKIT_TOUCH_CALLOUT_CSS_PROPERTY)
+    PREFERRED_TYPE(Style::WebkitTouchCallout) unsigned webkitTouchCallout : 1;
 #endif
-#if ENABLE(CSS3_TEXT)
-    unsigned textAlignLast : 3; // TextAlignLast
-    unsigned textJustify : 2; // TextJustify
+    PREFERRED_TYPE(OptionSet<HangingPunctuation>) unsigned hangingPunctuation : 4;
+    PREFERRED_TYPE(PaintOrder) unsigned paintOrder : 3;
+    PREFERRED_TYPE(LineCap) unsigned capStyle : 2;
+    PREFERRED_TYPE(LineJoin) unsigned joinStyle : 2;
+    PREFERRED_TYPE(bool) unsigned hasSetStrokeWidth : 1;
+    PREFERRED_TYPE(bool) unsigned hasSetStrokeColor : 1;
+    PREFERRED_TYPE(bool) unsigned hasAutoCaretColor : 1;
+    PREFERRED_TYPE(bool) unsigned hasVisitedLinkAutoCaretColor : 1;
+    PREFERRED_TYPE(bool) unsigned hasAutoAccentColor : 1;
+    PREFERRED_TYPE(bool) unsigned effectiveInert : 1;
+    PREFERRED_TYPE(bool) unsigned isInSubtreeWithBlendMode : 1;
+    PREFERRED_TYPE(bool) unsigned isForceHidden : 1;
+    PREFERRED_TYPE(ContentVisibility) unsigned usedContentVisibility : 2;
+    PREFERRED_TYPE(bool) unsigned autoRevealsWhenFound : 1;
+    PREFERRED_TYPE(bool) unsigned insideDefaultButton : 1;
+    PREFERRED_TYPE(bool) unsigned insideDisabledSubmitButton : 1;
+#if HAVE(CORE_MATERIAL)
+    PREFERRED_TYPE(AppleVisualEffect) unsigned usedAppleVisualEffectForSubtree : 4;
 #endif
-    unsigned textDecorationSkipInk : 2; // TextDecorationSkipInk
-    unsigned textUnderlinePosition : 2; // TextUnderlinePosition
-    unsigned rubyPosition : 2; // RubyPosition
-    unsigned textZoom: 1; // TextZoom
 
-#if PLATFORM(IOS_FAMILY)
-    unsigned touchCalloutEnabled : 1;
-#endif
-
-    unsigned hangingPunctuation : 4;
-
-    unsigned paintOrder : 3; // PaintOrder
-    unsigned capStyle : 2; // LineCap
-    unsigned joinStyle : 2; // LineJoin
-    unsigned hasSetStrokeWidth : 1;
-    unsigned hasSetStrokeColor : 1;
-
-    unsigned mathStyle : 1;
-
-    unsigned hasAutoCaretColor : 1;
-    unsigned hasVisitedLinkAutoCaretColor : 1;
-
-    unsigned hasAutoAccentColor : 1;
-
-    unsigned effectiveInert : 1;
-
-    unsigned isInSubtreeWithBlendMode : 1;
-
-    OptionSet<TouchAction> effectiveTouchActions;
+    OptionSet<TouchAction> usedTouchActions;
     OptionSet<EventListenerRegionType> eventListenerRegionTypes;
 
-    Length strokeWidth;
-    Color strokeColor;
-    Color visitedLinkStrokeColor;
-    float miterLimit;
+    Style::StrokeWidth strokeWidth;
+    Style::Color strokeColor;
+    Style::Color visitedLinkStrokeColor;
 
-    AtomString hyphenationString;
-    short hyphenationLimitBefore;
-    short hyphenationLimitAfter;
-    short hyphenationLimitLines;
+    Style::HyphenateCharacter hyphenateCharacter;
+    Style::HyphenateLimitEdge hyphenateLimitBefore;
+    Style::HyphenateLimitEdge hyphenateLimitAfter;
+    Style::HyphenateLimitLines hyphenateLimitLines;
 
-    AtomString textEmphasisCustomMark;
-    RefPtr<QuotesData> quotes;
+#if ENABLE(DARK_MODE_CSS)
+    Style::ColorScheme colorScheme;
+#endif
+
+    Style::Quotes quotes;
+
     DataRef<StyleFilterData> appleColorFilter;
 
-    AtomString lineGrid;
+    Style::WebkitLineGrid lineGrid;
     TabSize tabSize;
 
 #if ENABLE(TEXT_AUTOSIZING)
-    TextSizeAdjustment textSizeAdjust;
-#endif
-
-#if ENABLE(CSS_IMAGE_RESOLUTION)
-    float imageResolution;
+    Style::TextSizeAdjust textSizeAdjust;
 #endif
 
 #if ENABLE(TOUCH_EVENTS)
-    Color tapHighlightColor;
+    Style::Color tapHighlightColor;
 #endif
-
-#if ENABLE(DARK_MODE_CSS)
-    StyleColorScheme colorScheme;
-#endif
+    Style::ListStyleType listStyleType;
+    Style::BlockEllipsis blockEllipsis;
 
 private:
     StyleRareInheritedData();

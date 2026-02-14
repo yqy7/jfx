@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2017 Yusuke Suzuki <utatane.tea@gmail.com>
- * Copyright (C) 2017-2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,35 +37,41 @@
 #include "WasmFunctionCodeBlockGenerator.h"
 #include "WasmGeneratorTraits.h"
 #include "WasmModuleInformation.h"
-#include "WasmSignatureInlines.h"
+#include "WasmTypeDefinitionInlines.h"
+#include <wtf/text/MakeString.h>
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 namespace JSC {
 
-void BytecodeDumperBase::printLocationAndOp(InstructionStream::Offset location, const char* op)
+template<typename InstructionStreamType>
+void BytecodeDumperBase<InstructionStreamType>::printLocationAndOp(typename InstructionStreamType::Offset location, const char* op)
 {
     m_currentLocation = location;
     m_out.printf("[%4u] %-18s ", location, op);
 }
 
-void BytecodeDumperBase::dumpValue(VirtualRegister reg)
+template<typename InstructionStreamType>
+void BytecodeDumperBase<InstructionStreamType>::dumpValue(VirtualRegister reg)
 {
     m_out.printf("%s", registerName(reg).data());
 }
 
+template<typename InstructionStreamType>
 template<typename Traits>
-void BytecodeDumperBase::dumpValue(GenericBoundLabel<Traits> label)
+void BytecodeDumperBase<InstructionStreamType>::dumpValue(GenericBoundLabel<Traits> label)
 {
     int target = label.target();
     if (!target)
         target = outOfLineJumpOffset(m_currentLocation);
-    InstructionStream::Offset targetOffset = target + m_currentLocation;
+    auto targetOffset = target + m_currentLocation;
     m_out.print(target, "(->", targetOffset, ")");
 }
 
-template void BytecodeDumperBase::dumpValue(GenericBoundLabel<JSGeneratorTraits>);
+template void BytecodeDumperBase<JSInstructionStream>::dumpValue(GenericBoundLabel<JSGeneratorTraits>);
 
 #if ENABLE(WEBASSEMBLY)
-template void BytecodeDumperBase::dumpValue(GenericBoundLabel<Wasm::GeneratorTraits>);
+template void BytecodeDumperBase<WasmInstructionStream>::dumpValue(GenericBoundLabel<Wasm::GeneratorTraits>);
 #endif // ENABLE(WEBASSEMBLY)
 
 template<class Block>
@@ -78,7 +84,7 @@ CString BytecodeDumper<Block>::registerName(VirtualRegister r) const
 }
 
 template <class Block>
-int BytecodeDumper<Block>::outOfLineJumpOffset(InstructionStream::Offset offset) const
+int BytecodeDumper<Block>::outOfLineJumpOffset(JSInstructionStream::Offset offset) const
 {
     return m_block->outOfLineJumpOffset(offset);
 }
@@ -86,19 +92,21 @@ int BytecodeDumper<Block>::outOfLineJumpOffset(InstructionStream::Offset offset)
 template<class Block>
 CString BytecodeDumper<Block>::constantName(VirtualRegister reg) const
 {
+    if (reg.toConstantIndex() >= (int) block()->constantRegisters().size())
+        return toCString("INVALID_CONSTANT(", reg, ")");
     auto value = block()->getConstant(reg);
     return toCString(value, "(", reg, ")");
 }
 
 template<class Block>
-void BytecodeDumper<Block>::dumpBytecode(const InstructionStream::Ref& it, const ICStatusMap&)
+void BytecodeDumper<Block>::dumpBytecode(const JSInstructionStream::Ref& it, const ICStatusMap&)
 {
     ::JSC::dumpBytecode(this, it.offset(), it.ptr());
     this->m_out.print("\n");
 }
 
 template<class Block>
-void BytecodeDumper<Block>::dumpBytecode(Block* block, PrintStream& out, const InstructionStream::Ref& it, const ICStatusMap& statusMap)
+void BytecodeDumper<Block>::dumpBytecode(Block* block, PrintStream& out, const JSInstructionStream::Ref& it, const ICStatusMap& statusMap)
 {
     BytecodeDumper dumper(block, out);
     dumper.dumpBytecode(it, statusMap);
@@ -179,14 +187,23 @@ void CodeBlockBytecodeDumper<Block>::dumpSwitchJumpTables()
         unsigned i = 0;
         do {
             this->m_out.printf("  %1d = {\n", i);
-            const auto& switchJumpTable = this->block()->unlinkedSwitchJumpTable(i);
+            const auto& unlinkedTable = this->block()->unlinkedSwitchJumpTable(i);
             int entry = 0;
-            auto end = switchJumpTable.m_branchOffsets.end();
-            for (auto iter = switchJumpTable.m_branchOffsets.begin(); iter != end; ++iter, ++entry) {
+            auto end = unlinkedTable.m_branchOffsets.end();
+            if (unlinkedTable.isList()) {
+                for (auto iter = unlinkedTable.m_branchOffsets.begin(); iter != end;) {
+                    int32_t value = *iter++;
+                    int32_t target = *iter++;
+                    this->m_out.printf("\t\t%4d => %04d\n", value, target);
+                }
+            } else {
+            for (auto iter = unlinkedTable.m_branchOffsets.begin(); iter != end; ++iter, ++entry) {
                 if (!*iter)
                     continue;
-                this->m_out.printf("\t\t%4d => %04d\n", entry + switchJumpTable.m_min, *iter);
+                this->m_out.printf("\t\t%4d => %04d\n", entry + unlinkedTable.m_min, *iter);
+                }
             }
+            this->m_out.printf("\t\tdefault => %04d\n", unlinkedTable.m_defaultOffset);
             this->m_out.printf("      }\n");
             ++i;
         } while (i < count);
@@ -201,8 +218,10 @@ void CodeBlockBytecodeDumper<Block>::dumpStringSwitchJumpTables()
         unsigned i = 0;
         do {
             this->m_out.printf("  %1d = {\n", i);
-            for (const auto& entry : this->block()->unlinkedStringSwitchJumpTable(i).m_offsetTable)
+            auto& unlinkedTable = this->block()->unlinkedStringSwitchJumpTable(i);
+            for (const auto& entry : unlinkedTable.m_offsetTable)
                 this->m_out.printf("\t\t\"%s\" => %04d\n", entry.key->utf8().data(), entry.value.m_branchOffset);
+            this->m_out.printf("\t\tdefault => %04d\n", unlinkedTable.m_defaultOffset);
             this->m_out.printf("      }\n");
             ++i;
         } while (i < count);
@@ -210,7 +229,7 @@ void CodeBlockBytecodeDumper<Block>::dumpStringSwitchJumpTables()
 }
 
 template <typename Block>
-static void dumpHeader(Block* block, const InstructionStream& instructions, PrintStream& out)
+static void dumpHeader(Block* block, const JSInstructionStream& instructions, PrintStream& out)
 {
     size_t instructionCount = 0;
     size_t wide16InstructionCount = 0;
@@ -252,7 +271,7 @@ static void dumpFooter(Dumper& dumper)
 }
 
 template<class Block>
-void CodeBlockBytecodeDumper<Block>::dumpBlock(Block* block, const InstructionStream& instructions, PrintStream& out, const ICStatusMap& statusMap)
+void CodeBlockBytecodeDumper<Block>::dumpBlock(Block* block, const JSInstructionStream& instructions, PrintStream& out, const ICStatusMap& statusMap)
 {
     dumpHeader(block, instructions, out);
 
@@ -266,7 +285,7 @@ void CodeBlockBytecodeDumper<Block>::dumpBlock(Block* block, const InstructionSt
 }
 
 template<class Block>
-void CodeBlockBytecodeDumper<Block>::dumpGraph(Block* block, const InstructionStream& instructions, BytecodeGraph& graph, PrintStream& out, const ICStatusMap& icStatusMap)
+void CodeBlockBytecodeDumper<Block>::dumpGraph(Block* block, const JSInstructionStream& instructions, BytecodeGraph& graph, PrintStream& out, const ICStatusMap& icStatusMap)
 {
     dumpHeader(block, instructions, out);
 
@@ -274,8 +293,7 @@ void CodeBlockBytecodeDumper<Block>::dumpGraph(Block* block, const InstructionSt
 
     out.printf("\n");
 
-    Vector<Vector<unsigned>> predecessors;
-    predecessors.resize(graph.size());
+    Vector<Vector<unsigned>> predecessors(graph.size());
     for (auto& block : graph) {
         if (block.isEntryBlock() || block.isExitBlock())
             continue;
@@ -285,7 +303,7 @@ void CodeBlockBytecodeDumper<Block>::dumpGraph(Block* block, const InstructionSt
         }
     }
 
-    for (BytecodeBasicBlock& block : graph) {
+    for (auto& block : graph) {
         if (block.isEntryBlock() || block.isExitBlock())
             continue;
 
@@ -317,11 +335,14 @@ void CodeBlockBytecodeDumper<Block>::dumpGraph(Block* block, const InstructionSt
     out.printf("\n");
 }
 
+template class BytecodeDumperBase<JSInstructionStream>;
 template class BytecodeDumper<CodeBlock>;
 template class CodeBlockBytecodeDumper<UnlinkedCodeBlockGenerator>;
 template class CodeBlockBytecodeDumper<CodeBlock>;
 
 #if ENABLE(WEBASSEMBLY)
+
+template class BytecodeDumperBase<WasmInstructionStream>;
 
 namespace Wasm {
 
@@ -331,7 +352,7 @@ void BytecodeDumper::dumpBlock(FunctionCodeBlockGenerator* block, const ModuleIn
     size_t wide16InstructionCount = 0;
     size_t wide32InstructionCount = 0;
 
-    for (auto it = block->instructions().begin(); it != block->instructions().end(); it += it->size<WasmOpcodeTraits>()) {
+    for (auto it = block->instructions().begin(); it != block->instructions().end(); it += it->size()) {
         if (it->isWide16())
             ++wide16InstructionCount;
         else if (it->isWide32())
@@ -343,9 +364,9 @@ void BytecodeDumper::dumpBlock(FunctionCodeBlockGenerator* block, const ModuleIn
     out.print(makeString(IndexOrName(functionIndexSpace, moduleInformation.nameSection->get(functionIndexSpace))));
 
     const auto& function = moduleInformation.functions[block->functionIndex()];
-    SignatureIndex signatureIndex = moduleInformation.internalFunctionSignatureIndices[block->functionIndex()];
-    const Signature& signature = SignatureInformation::get(signatureIndex);
-    out.print(" : ", signature, "\n");
+    TypeIndex typeIndex = moduleInformation.internalFunctionTypeIndices[block->functionIndex()];
+    const auto& typeDefinition = TypeInformation::get(typeIndex);
+    out.print(" : ", typeDefinition, "\n");
     out.print("wasm size: ", function.data.size(), " bytes\n");
 
     out.printf(
@@ -359,12 +380,13 @@ void BytecodeDumper::dumpBlock(FunctionCodeBlockGenerator* block, const ModuleIn
         block->numCalleeLocals());
 
     BytecodeDumper dumper(block, out);
-    for (auto it = block->instructions().begin(); it != block->instructions().end(); it += it->size<WasmOpcodeTraits>()) {
+    for (auto it = block->instructions().begin(); it != block->instructions().end(); it += it->size()) {
         dumpWasm(&dumper, it.offset(), it.ptr());
         out.print("\n");
     }
 
     dumper.dumpConstants();
+    dumper.dumpExceptionHandlers();
 
     out.printf("\n");
 }
@@ -383,6 +405,19 @@ void BytecodeDumper::dumpConstants()
     }
 }
 
+void BytecodeDumper::dumpExceptionHandlers()
+{
+    if (unsigned count = this->block()->numberOfExceptionHandlers()) {
+        this->m_out.printf("\nException Handlers:\n");
+        unsigned i = 0;
+        do {
+            const auto& handler = this->block()->exceptionHandler(i);
+            this->m_out.printf("\t %d: { start: [%4d] end: [%4d] target: [%4d] tryDepth: [%4d] exceptionIndexOrDelegateTarget: [%4d] } %s\n", i + 1, handler.m_start, handler.m_end, handler.m_target, handler.m_tryDepth, handler.m_exceptionIndexOrDelegateTarget, handler.typeName().characters());
+            ++i;
+        } while (i < count);
+    }
+}
+
 CString BytecodeDumper::constantName(VirtualRegister index) const
 {
     FunctionCodeBlockGenerator* block = this->block();
@@ -398,16 +433,22 @@ CString BytecodeDumper::formatConstant(Type type, uint64_t constant) const
     case TypeKind::I64:
         return toCString(constant);
     case TypeKind::F32:
-        return toCString(bitwise_cast<float>(static_cast<int32_t>(constant)));
+        return toCString(std::bit_cast<float>(static_cast<int32_t>(constant)));
         break;
     case TypeKind::F64:
-        return toCString(bitwise_cast<double>(constant));
+        return toCString(std::bit_cast<double>(constant));
+        break;
+    case TypeKind::V128:
+        return toCString(constant);
         break;
     default: {
-        if (isFuncref(type) || isExternref(type)) {
+        // This is necessary to handle all cases, since when typed function
+        // references are enabled, if type.isFuncref() is true, then
+        // isRefType(type) is false (likewise for externref)
+        if (isRefType(type) || type.isFuncref() || type.isExternref()) {
             if (JSValue::decode(constant) == jsNull())
-                return "null";
-            return toCString(RawPointer(bitwise_cast<void*>(constant)));
+                return "null"_s;
+            return toCString(RawHex(constant));
         }
 
         RELEASE_ASSERT_NOT_REACHED();
@@ -416,7 +457,22 @@ CString BytecodeDumper::formatConstant(Type type, uint64_t constant) const
     }
 }
 
+CString BytecodeDumper::registerName(VirtualRegister r) const
+{
+    if (r.isConstant())
+        return constantName(r);
+
+    return toCString(r);
+}
+
+int BytecodeDumper::outOfLineJumpOffset(WasmInstructionStream::Offset offset) const
+{
+    return m_block->outOfLineJumpOffset(offset);
+}
+
 } // namespace Wasm
 
 #endif // ENABLE(WEBASSEMBLY)
 }
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

@@ -29,6 +29,7 @@
 #include "CompositionUnderline.h"
 #include "KeypressCommand.h"
 #include "PlatformEvent.h"
+#include <wtf/TZoneMalloc.h>
 #include <wtf/WindowsExtras.h>
 #include <wtf/text/WTFString.h>
 
@@ -48,10 +49,10 @@ OBJC_CLASS WebEvent;
 namespace WebCore {
 
     class PlatformKeyboardEvent : public PlatformEvent {
-        WTF_MAKE_FAST_ALLOCATED;
+        WTF_MAKE_TZONE_ALLOCATED(PlatformKeyboardEvent);
     public:
         PlatformKeyboardEvent()
-            : PlatformEvent(PlatformEvent::KeyDown)
+            : PlatformEvent(PlatformEvent::Type::KeyDown)
         {
         }
 
@@ -129,7 +130,7 @@ namespace WebCore {
 #endif
 
 #if PLATFORM(WIN)
-        PlatformKeyboardEvent(HWND, WPARAM, LPARAM, Type, bool);
+        WEBCORE_EXPORT PlatformKeyboardEvent(HWND, WPARAM, LPARAM, Type, bool);
 #endif
 
 #if PLATFORM(GTK)
@@ -139,7 +140,6 @@ namespace WebCore {
         static String keyIdentifierForGdkKeyCode(unsigned);
         static int windowsKeyCodeForGdkKeyCode(unsigned);
         static String singleCharacterString(unsigned);
-        static bool modifiersContainCapsLock(unsigned);
 #endif
 
 #if PLATFORM(JAVA)

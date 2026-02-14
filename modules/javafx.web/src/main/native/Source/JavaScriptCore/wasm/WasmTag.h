@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2021-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,33 +27,46 @@
 
 #if ENABLE(WEBASSEMBLY)
 
-#include "WasmSignature.h"
+#include "WasmTypeDefinition.h"
+#include <wtf/TZoneMalloc.h>
 
 namespace JSC { namespace Wasm {
 
 class Tag final : public ThreadSafeRefCounted<Tag> {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(Tag);
     WTF_MAKE_NONCOPYABLE(Tag);
 public:
-    static Ref<Tag> create(const Signature& signature) { return adoptRef(*new Tag(signature)); }
+    static Ref<Tag> create(Ref<const TypeDefinition>&& type) { return adoptRef(*new Tag(WTFMove(type))); }
 
-    SignatureArgCount parameterCount() const { return m_signature->argumentCount(); }
-    Type parameter(SignatureArgCount i) const { return m_signature->argument(i); }
+    FunctionArgCount parameterCount() const { return m_type->as<FunctionSignature>()->argumentCount(); }
+
+    size_t parameterBufferSize() const
+    {
+        size_t result = 0;
+        for (size_t i = 0; i < parameterCount(); i ++)
+            result += m_type->as<FunctionSignature>()->argumentType(i).kind == TypeKind::V128 ? 2 : 1;
+        return result;
+    }
+
+    Type parameter(FunctionArgCount i) const { return m_type->as<FunctionSignature>()->argumentType(i); }
+    TypeIndex typeIndex() const { return m_type->index(); }
 
     // Since (1) we do not copy Wasm::Tag and (2) we always allocate Wasm::Tag from heap, we can use
     // pointer comparison for identity check.
     bool operator==(const Tag& other) const { return this == &other; }
-    bool operator!=(const Tag& other) const { return this != &other; }
 
-    const Signature& signature() const { return m_signature.get(); }
+    const FunctionSignature& type() const { return *m_type->as<FunctionSignature>(); }
+
+    static Tag& jsExceptionTag();
 
 private:
-    Tag(const Signature& signature)
-        : m_signature(Ref { signature })
+    Tag(Ref<const TypeDefinition>&& type)
+        : m_type(WTFMove(type))
     {
+        ASSERT(m_type->is<FunctionSignature>());
     }
 
-    Ref<const Signature> m_signature;
+    Ref<const TypeDefinition> m_type;
 };
 
 } } // namespace JSC::Wasm

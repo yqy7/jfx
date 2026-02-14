@@ -35,11 +35,14 @@ class Instance;
 
 namespace WebCore {
 
+class PluginReplacement;
+class PluginViewBase;
 class RenderWidget;
-class Widget;
+class VoidCallback;
 
 class HTMLPlugInElement : public HTMLFrameOwnerElement {
-    WTF_MAKE_ISO_ALLOCATED(HTMLPlugInElement);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(HTMLPlugInElement);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(HTMLPlugInElement);
 public:
     virtual ~HTMLPlugInElement();
 
@@ -48,7 +51,7 @@ public:
     JSC::Bindings::Instance* bindingsInstance();
 
     enum class PluginLoadingPolicy { DoNotLoad, Load };
-    WEBCORE_EXPORT Widget* pluginWidget(PluginLoadingPolicy = PluginLoadingPolicy::Load) const;
+    WEBCORE_EXPORT PluginViewBase* pluginWidget(PluginLoadingPolicy = PluginLoadingPolicy::Load) const;
 
     enum DisplayState {
         Playing,
@@ -62,23 +65,17 @@ public:
     void setIsCapturingMouseEvents(bool capturing) { m_isCapturingMouseEvents = capturing; }
 
 #if PLATFORM(IOS_FAMILY)
-    bool willRespondToMouseMoveEvents() final { return false; }
+    bool willRespondToMouseMoveEvents() const final { return false; }
 #endif
-    bool willRespondToMouseClickEvents() final;
+    bool willRespondToMouseClickEventsWithEditability(Editability) const final;
 
     virtual bool isPlugInImageElement() const = 0;
 
-    bool isUserObservable() const;
-
-    WEBCORE_EXPORT bool isBelowSizeThreshold() const;
-
-    // Return whether or not the replacement content for blocked plugins is accessible to the user.
-    WEBCORE_EXPORT bool setReplacement(RenderEmbeddedObject::PluginUnavailabilityReason, const String& unavailabilityDescription);
-
-    WEBCORE_EXPORT bool isReplacementObscured();
+    WEBCORE_EXPORT void pluginDestroyedWithPendingPDFTestCallback(RefPtr<VoidCallback>&&);
+    WEBCORE_EXPORT RefPtr<VoidCallback> takePendingPDFTestCallback();
 
 protected:
-    HTMLPlugInElement(const QualifiedName& tagName, Document&);
+    HTMLPlugInElement(const QualifiedName& tagName, Document&, OptionSet<TypeFlag> = { });
 
     bool canContainRangeEndPoint() const override { return false; }
     void willDetachRenderers() override;
@@ -87,10 +84,14 @@ protected:
 
     virtual bool useFallbackContent() const { return false; }
 
+    InsertedIntoAncestorResult insertedIntoAncestor(InsertionType, ContainerNode& parentOfInsertedTree) override;
+    void removedFromAncestor(RemovalType, ContainerNode& oldParentOfRemovedTree) override;
+
     void defaultEventHandler(Event&) final;
 
-    virtual bool requestObject(const String& url, const String& mimeType, const Vector<String>& paramNames, const Vector<String>& paramValues);
+    virtual bool requestObject(const String& url, const String& mimeType, const Vector<AtomString>& paramNames, const Vector<AtomString>& paramValues);
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) override;
+    bool isReplaced(const RenderStyle* = nullptr) const final;
     void didAddUserAgentShadowRoot(ShadowRoot&) final;
 
     // This will load the plugin if necessary.
@@ -102,14 +103,17 @@ private:
 
     bool supportsFocus() const final;
 
-    bool isKeyboardFocusable(KeyboardEvent*) const final;
+    bool isKeyboardFocusable(const FocusEventData&) const final;
     bool isPluginElement() const final;
     bool canLoadScriptURL(const URL&) const final;
 
     RefPtr<JSC::Bindings::Instance> m_instance;
     Timer m_swapRendererTimer;
+    RefPtr<PluginReplacement> m_pluginReplacement;
     bool m_isCapturingMouseEvents { false };
     DisplayState m_displayState { Playing };
+
+    RefPtr<VoidCallback> m_pendingPDFTestCallback;
 };
 
 } // namespace WebCore

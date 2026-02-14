@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,17 +30,18 @@ import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
 import javafx.beans.property.SimpleBooleanProperty;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import test.javafx.beans.InvalidationListenerMock;
 import test.javafx.beans.value.ChangeListenerMock;
 import javafx.beans.value.ObservableBooleanValueStub;
 import javafx.beans.value.ObservableObjectValueStub;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class ReadOnlyBooleanWrapperTest {
 
@@ -56,14 +57,14 @@ public class ReadOnlyBooleanWrapperTest {
     private ChangeListenerMock<Boolean> internalChangeListener;
     private ChangeListenerMock<Boolean> publicChangeListener;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         property = new ReadOnlyBooleanWrapperMock();
         readOnlyProperty = property.getReadOnlyProperty();
         internalInvalidationListener = new InvalidationListenerMock();
         publicInvalidationListener = new InvalidationListenerMock();
-        internalChangeListener = new ChangeListenerMock<Boolean>(UNDEFINED);
-        publicChangeListener = new ChangeListenerMock<Boolean>(UNDEFINED);
+        internalChangeListener = new ChangeListenerMock<>(UNDEFINED);
+        publicChangeListener = new ChangeListenerMock<>(UNDEFINED);
     }
 
     private void attachInvalidationListeners() {
@@ -91,13 +92,13 @@ public class ReadOnlyBooleanWrapperTest {
     public void testConstructor_NoArguments() {
         final ReadOnlyBooleanWrapper p1 = new ReadOnlyBooleanWrapper();
         assertEquals(DEFAULT, p1.get());
-        assertEquals((Boolean)DEFAULT, p1.getValue());
+        assertEquals(DEFAULT, p1.getValue());
         assertFalse(property.isBound());
         assertEquals(null, p1.getBean());
         assertEquals("", p1.getName());
         final ReadOnlyBooleanProperty r1 = p1.getReadOnlyProperty();
         assertEquals(DEFAULT, r1.get());
-        assertEquals((Boolean)DEFAULT, r1.getValue());
+        assertEquals(DEFAULT, r1.getValue());
         assertEquals(null, r1.getBean());
         assertEquals("", r1.getName());
     }
@@ -106,13 +107,13 @@ public class ReadOnlyBooleanWrapperTest {
     public void testConstructor_InitialValue() {
         final ReadOnlyBooleanWrapper p1 = new ReadOnlyBooleanWrapper(VALUE_1);
         assertEquals(VALUE_1, p1.get());
-        assertEquals((Boolean)VALUE_1, p1.getValue());
+        assertEquals(VALUE_1, p1.getValue());
         assertFalse(property.isBound());
         assertEquals(null, p1.getBean());
         assertEquals("", p1.getName());
         final ReadOnlyBooleanProperty r1 = p1.getReadOnlyProperty();
         assertEquals(VALUE_1, r1.get());
-        assertEquals((Boolean)VALUE_1, r1.getValue());
+        assertEquals(VALUE_1, r1.getValue());
         assertEquals(null, r1.getBean());
         assertEquals("", r1.getName());
     }
@@ -123,13 +124,13 @@ public class ReadOnlyBooleanWrapperTest {
         final String name = "My name";
         final ReadOnlyBooleanWrapper p1 = new ReadOnlyBooleanWrapper(bean, name);
         assertEquals(DEFAULT, p1.get());
-        assertEquals((Boolean)DEFAULT, p1.getValue());
+        assertEquals(DEFAULT, p1.getValue());
         assertFalse(property.isBound());
         assertEquals(bean, p1.getBean());
         assertEquals(name, p1.getName());
         final ReadOnlyBooleanProperty r1 = p1.getReadOnlyProperty();
         assertEquals(DEFAULT, r1.get());
-        assertEquals((Boolean)DEFAULT, r1.getValue());
+        assertEquals(DEFAULT, r1.getValue());
         assertEquals(bean, r1.getBean());
         assertEquals(name, r1.getName());
     }
@@ -140,13 +141,13 @@ public class ReadOnlyBooleanWrapperTest {
         final String name = "My name";
         final ReadOnlyBooleanWrapper p1 = new ReadOnlyBooleanWrapper(bean, name, VALUE_1);
         assertEquals(VALUE_1, p1.get());
-        assertEquals((Boolean)VALUE_1, p1.getValue());
+        assertEquals(VALUE_1, p1.getValue());
         assertFalse(property.isBound());
         assertEquals(bean, p1.getBean());
         assertEquals(name, p1.getName());
         final ReadOnlyBooleanProperty r1 = p1.getReadOnlyProperty();
         assertEquals(VALUE_1, r1.get());
-        assertEquals((Boolean)VALUE_1, r1.getValue());
+        assertEquals(VALUE_1, r1.getValue());
         assertEquals(bean, r1.getBean());
         assertEquals(name, r1.getName());
     }
@@ -319,12 +320,15 @@ public class ReadOnlyBooleanWrapperTest {
         publicChangeListener.check(readOnlyProperty, VALUE_2, VALUE_1, 2);
     }
 
-    @Test(expected=RuntimeException.class)
+    @Test
     public void testSetBoundValue() {
-        final BooleanProperty v = new SimpleBooleanProperty(VALUE_1);
-        property.bind(v);
-        property.set(VALUE_1);
+        assertThrows(RuntimeException.class, () -> {
+            final BooleanProperty v = new SimpleBooleanProperty(VALUE_1);
+            property.bind(v);
+            property.set(VALUE_1);
+        });
     }
+
 
     @Test
     public void testLazyBind_primitive() {
@@ -441,7 +445,7 @@ public class ReadOnlyBooleanWrapperTest {
     @Test
     public void testLazyBind_generic() {
         attachInvalidationListeners();
-        final ObservableObjectValueStub<Boolean> v = new ObservableObjectValueStub<Boolean>(VALUE_1);
+        final ObservableObjectValueStub<Boolean> v = new ObservableObjectValueStub<>(VALUE_1);
 
         property.bind(v);
         assertEquals(VALUE_1, property.get());
@@ -481,7 +485,7 @@ public class ReadOnlyBooleanWrapperTest {
     @Test
     public void testInternalEagerBind_generic() {
         attachInternalChangeListener();
-        final ObservableObjectValueStub<Boolean> v = new ObservableObjectValueStub<Boolean>(VALUE_1);
+        final ObservableObjectValueStub<Boolean> v = new ObservableObjectValueStub<>(VALUE_1);
 
         property.bind(v);
         assertEquals(VALUE_1, property.get());
@@ -517,7 +521,7 @@ public class ReadOnlyBooleanWrapperTest {
     @Test
     public void testPublicEagerBind_generic() {
         attachPublicChangeListener();
-        final ObservableObjectValueStub<Boolean> v = new ObservableObjectValueStub<Boolean>(VALUE_1);
+        final ObservableObjectValueStub<Boolean> v = new ObservableObjectValueStub<>(VALUE_1);
 
         property.bind(v);
         assertEquals(VALUE_1, property.get());
@@ -550,10 +554,13 @@ public class ReadOnlyBooleanWrapperTest {
         publicChangeListener.check(readOnlyProperty, VALUE_2, VALUE_1, 1);
     }
 
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testBindToNull() {
-        property.bind(null);
+        assertThrows(NullPointerException.class, () -> {
+            property.bind(null);
+        });
     }
+
 
     @Test
     public void testRebind() {

@@ -34,15 +34,24 @@
 
 #include <utility>
 #include <wtf/CrossThreadCopier.h>
+#include <wtf/text/MakeString.h>
 #include <wtf/text/StringView.h>
+
+#if USE(CF) && !PLATFORM(JAVA)
+#include <wtf/cf/VectorCF.h>
+#endif
 
 namespace WebCore {
 
-HTTPHeaderMap::HTTPHeaderMap()
+HTTPHeaderMap::HTTPHeaderMap() = default;
+
+HTTPHeaderMap::HTTPHeaderMap(CommonHeadersVector&& commonHeaders, UncommonHeadersVector&& uncommonHeaders)
+    : m_commonHeaders(WTFMove(commonHeaders))
+    , m_uncommonHeaders(WTFMove(uncommonHeaders))
 {
 }
 
-HTTPHeaderMap HTTPHeaderMap::isolatedCopy() const
+HTTPHeaderMap HTTPHeaderMap::isolatedCopy() const &
 {
     HTTPHeaderMap map;
     map.m_commonHeaders = crossThreadCopy(m_commonHeaders);
@@ -50,7 +59,15 @@ HTTPHeaderMap HTTPHeaderMap::isolatedCopy() const
     return map;
 }
 
-String HTTPHeaderMap::get(const String& name) const
+HTTPHeaderMap HTTPHeaderMap::isolatedCopy() &&
+{
+    HTTPHeaderMap map;
+    map.m_commonHeaders = crossThreadCopy(WTFMove(m_commonHeaders));
+    map.m_uncommonHeaders = crossThreadCopy(WTFMove(m_uncommonHeaders));
+    return map;
+}
+
+String HTTPHeaderMap::get(StringView name) const
 {
     HTTPHeaderName headerName;
     if (findHTTPHeaderName(name, headerName))
@@ -59,7 +76,7 @@ String HTTPHeaderMap::get(const String& name) const
     return getUncommonHeader(name);
 }
 
-String HTTPHeaderMap::getUncommonHeader(const String& name) const
+String HTTPHeaderMap::getUncommonHeader(StringView name) const
 {
     auto index = m_uncommonHeaders.findIf([&](auto& header) {
         return equalIgnoringASCIICase(header.key, name);
@@ -67,18 +84,17 @@ String HTTPHeaderMap::getUncommonHeader(const String& name) const
     return index != notFound ? m_uncommonHeaders[index].value : String();
 }
 
-#if USE(CF)
+#if USE(CF) && !PLATFORM(JAVA)
 
 void HTTPHeaderMap::set(CFStringRef name, const String& value)
 {
     // Fast path: avoid constructing a temporary String in the common header case.
-    if (auto* nameCharacters = CFStringGetCStringPtr(name, kCFStringEncodingASCII)) {
-        unsigned length = CFStringGetLength(name);
+    if (auto asciiCharacters = CFStringGetASCIICStringSpan(name); asciiCharacters.data()) {
         HTTPHeaderName headerName;
-        if (findHTTPHeaderName(StringView(nameCharacters, length), headerName))
+        if (findHTTPHeaderName(StringView(asciiCharacters), headerName))
             set(headerName, value);
         else
-            setUncommonHeader(String(nameCharacters, length), value);
+            setUncommonHeader(String(asciiCharacters), value);
 
         return;
     }
@@ -101,6 +117,11 @@ void HTTPHeaderMap::set(const String& name, const String& value)
 
 void HTTPHeaderMap::setUncommonHeader(const String& name, const String& value)
 {
+#if ASSERT_ENABLED
+    HTTPHeaderName headerName;
+    ASSERT(!findHTTPHeaderName(name, headerName));
+#endif
+
     auto index = m_uncommonHeaders.findIf([&](auto& header) {
         return equalIgnoringASCIICase(header.key, name);
     });
@@ -117,13 +138,23 @@ void HTTPHeaderMap::add(const String& name, const String& value)
         add(headerName, value);
         return;
     }
+    addUncommonHeader(name, value);
+}
+
+void HTTPHeaderMap::addUncommonHeader(const String& name, const String& value)
+{
+#if ASSERT_ENABLED
+    HTTPHeaderName headerName;
+    ASSERT(!findHTTPHeaderName(name, headerName));
+#endif
+
     auto index = m_uncommonHeaders.findIf([&](auto& header) {
         return equalIgnoringASCIICase(header.key, name);
     });
     if (index == notFound)
         m_uncommonHeaders.append(UncommonHeader { name, value });
     else
-        m_uncommonHeaders[index].value = makeString(m_uncommonHeaders[index].value, ", ", value);
+        m_uncommonHeaders[index].value = makeString(m_uncommonHeaders[index].value, ", "_s, value);
 }
 
 void HTTPHeaderMap::append(const String& name, const String& value)
@@ -207,7 +238,7 @@ void HTTPHeaderMap::add(HTTPHeaderName name, const String& value)
         return header.key == name;
     });
     if (index != notFound)
-        m_commonHeaders[index].value = makeString(m_commonHeaders[index].value, ", ", value);
+        m_commonHeaders[index].value = makeString(m_commonHeaders[index].value, ", "_s, value);
     else
         m_commonHeaders.append(CommonHeader { name, value });
 }

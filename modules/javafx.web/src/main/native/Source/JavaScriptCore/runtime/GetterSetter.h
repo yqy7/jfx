@@ -93,8 +93,8 @@ public:
         return result;
     }
 
-    bool isGetterNull() const { return !!jsDynamicCast<NullGetterFunction*>(m_getter.get()->vm(), m_getter.get()); }
-    bool isSetterNull() const { return !!jsDynamicCast<NullSetterFunction*>(m_setter.get()->vm(), m_setter.get()); }
+    bool isGetterNull() const { return !!jsDynamicCast<NullGetterFunction*>(m_getter.get()); }
+    bool isSetterNull() const { return !!jsDynamicCast<NullSetterFunction*>(m_setter.get()); }
 
     JSObject* setter() const { return m_setter.get(); }
 
@@ -108,17 +108,14 @@ public:
     JSValue callGetter(JSGlobalObject*, JSValue thisValue);
     bool callSetter(JSGlobalObject*, JSValue thisValue, JSValue, bool shouldThrow);
 
-    static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
-    {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(GetterSetterType, StructureFlags), info());
-    }
+    inline static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
-    static ptrdiff_t offsetOfGetter()
+    static constexpr ptrdiff_t offsetOfGetter()
     {
         return OBJECT_OFFSETOF(GetterSetter, m_getter);
     }
 
-    static ptrdiff_t offsetOfSetter()
+    static constexpr ptrdiff_t offsetOfSetter()
     {
         return OBJECT_OFFSETOF(GetterSetter, m_setter);
     }

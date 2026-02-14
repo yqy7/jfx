@@ -43,10 +43,6 @@ OBJC_CLASS NSString;
 #include <WebCore/COMPtr.h>
 #include <oleacc.h>
 typedef COMPtr<IAccessible> PlatformUIElement;
-#elif ENABLE(ACCESSIBILITY) && PLATFORM(GTK)
-#include "AccessibilityNotificationHandlerAtk.h"
-#include <atk/atk.h>
-typedef AtkObject* PlatformUIElement;
 #else
 typedef void* PlatformUIElement;
 #endif
@@ -61,12 +57,16 @@ public:
 #endif
 
 #if PLATFORM(COCOA)
+#ifdef __OBJC__
     id platformUIElement() const { return m_element.get(); }
+#endif
 #endif
 
 #if !PLATFORM(COCOA)
     PlatformUIElement platformUIElement() const { return m_element; }
 #endif
+
+    bool hasPlatformUIElement() const { return !!m_element; }
 
     static JSObjectRef makeJSAccessibilityUIElement(JSContextRef, const AccessibilityUIElement&);
 
@@ -77,8 +77,6 @@ public:
     void getChildren(Vector<AccessibilityUIElement>&);
     void getChildrenWithRange(Vector<AccessibilityUIElement>&, unsigned location, unsigned length);
 
-    bool hasDocumentRoleAncestor() const;
-    bool hasWebApplicationAncestor() const;
     bool isInDescriptionListDetail() const;
     bool isInDescriptionListTerm() const;
     bool isInCell() const;
@@ -137,7 +135,11 @@ public:
     JSRetainPtr<JSStringRef> accessibilityValue() const;
     void setValue(JSStringRef);
     JSRetainPtr<JSStringRef> helpText() const;
+    JSRetainPtr<JSStringRef> liveRegionRelevant() const;
+    JSRetainPtr<JSStringRef> liveRegionStatus() const;
     JSRetainPtr<JSStringRef> orientation() const;
+    double pageX();
+    double pageY();
     double x();
     double y();
     double width();
@@ -149,6 +151,9 @@ public:
     JSRetainPtr<JSStringRef> valueDescription();
     int insertionPointLineNumber();
     JSRetainPtr<JSStringRef> selectedTextRange();
+    JSRetainPtr<JSStringRef> textInputMarkedRange() const;
+    bool isAtomicLiveRegion() const;
+    bool isBusy() const;
     bool isEnabled();
     bool isRequired() const;
 
@@ -180,8 +185,6 @@ public:
     int hierarchicalLevel() const;
     double clickPointX();
     double clickPointY();
-    JSRetainPtr<JSStringRef> documentEncoding();
-    JSRetainPtr<JSStringRef> documentURI();
     JSRetainPtr<JSStringRef> url();
     JSRetainPtr<JSStringRef> classList() const;
     JSRetainPtr<JSStringRef> domIdentifier() const;
@@ -203,6 +206,7 @@ public:
     int columnCount();
     void rowHeaders(Vector<AccessibilityUIElement>& elements) const;
     void columnHeaders(Vector<AccessibilityUIElement>& elements) const;
+    JSValueRef selectedCells(JSContextRef) const;
 
     // Tree/Outline specific attributes
     AccessibilityUIElement selectedRowAtIndex(unsigned);
@@ -215,8 +219,12 @@ public:
     AccessibilityUIElement ariaFlowToElementAtIndex(unsigned);
     AccessibilityUIElement ariaControlsElementAtIndex(unsigned);
 
-    // ARIA Drag and Drop
-    bool ariaIsGrabbed() const;
+#if PLATFORM(COCOA)
+    JSRetainPtr<JSStringRef> customContent() const;
+#endif
+
+    // Drag and drop
+    bool isGrabbed() const;
     // A space concatentated string of all the drop effects.
     JSRetainPtr<JSStringRef> ariaDropEffects() const;
 
@@ -237,7 +245,6 @@ public:
 #endif
 
 #if PLATFORM(IOS_FAMILY)
-    void elementsForRange(unsigned location, unsigned length, Vector<AccessibilityUIElement>& elements);
     JSRetainPtr<JSStringRef> stringForSelection();
     void increaseTextSelection();
     void decreaseTextSelection();
@@ -248,17 +255,14 @@ public:
     bool scrollPageLeft();
     bool scrollPageRight();
 
-    bool hasContainedByFieldsetTrait();
+    bool hasTextEntryTrait();
     AccessibilityUIElement fieldsetAncestorElement();
     JSRetainPtr<JSStringRef> attributedStringForElement();
-#endif
 
-#if PLATFORM(GTK)
-    // Text-specific
-    JSRetainPtr<JSStringRef> characterAtOffset(int offset);
-    JSRetainPtr<JSStringRef> wordAtOffset(int offset);
-    JSRetainPtr<JSStringRef> lineAtOffset(int offset);
-    JSRetainPtr<JSStringRef> sentenceAtOffset(int offset);
+    bool isDeletion();
+    bool isInsertion();
+    bool isFirstItemInSuggestion();
+    bool isLastItemInSuggestion();
 #endif
 
     // Table-specific
@@ -298,6 +302,7 @@ public:
     bool setSelectedTextMarkerRange(AccessibilityTextMarkerRange*);
     bool replaceTextInRange(JSStringRef, int position, int length);
     bool insertText(JSStringRef);
+    AccessibilityTextMarkerRange textInputMarkedTextMarkerRange() const;
 
     JSRetainPtr<JSStringRef> stringForTextMarkerRange(AccessibilityTextMarkerRange*);
     JSRetainPtr<JSStringRef> attributedStringForTextMarkerRange(AccessibilityTextMarkerRange*);
@@ -306,7 +311,10 @@ public:
     bool attributedStringForTextMarkerRangeContainsAttribute(JSStringRef, AccessibilityTextMarkerRange*);
     int indexForTextMarker(AccessibilityTextMarker*);
     bool isTextMarkerValid(AccessibilityTextMarker*);
+    bool isTextMarkerNull(AccessibilityTextMarker*);
     AccessibilityTextMarker textMarkerForIndex(int);
+    JSRetainPtr<JSStringRef> textMarkerDebugDescription(AccessibilityTextMarker*);
+    JSRetainPtr<JSStringRef> textMarkerRangeDebugDescription(AccessibilityTextMarkerRange*);
 
     void scrollToMakeVisible();
     void scrollToMakeVisibleWithSubFocus(int x, int y, int width, int height);
@@ -330,6 +338,8 @@ public:
     bool isTextArea() const;
     bool isSearchField() const;
 
+    bool isMarkAnnotation() const;
+
     AccessibilityTextMarkerRange textMarkerRangeMatchesTextNearMarkers(JSStringRef, AccessibilityTextMarker*, AccessibilityTextMarker*);
 #endif // PLATFORM(IOS_FAMILY)
 
@@ -346,8 +356,9 @@ public:
     JSRetainPtr<JSStringRef> mathPrescriptsDescription() const;
 #endif
 
-private:
     static JSClassRef getJSClass();
+
+private:
 
 #if !PLATFORM(COCOA)
     PlatformUIElement m_element;
@@ -356,9 +367,5 @@ private:
 #if PLATFORM(COCOA)
     RetainPtr<id> m_element;
     RetainPtr<id> m_notificationHandler;
-#endif
-
-#if ENABLE(ACCESSIBILITY) && PLATFORM(GTK)
-    RefPtr<AccessibilityNotificationHandler> m_notificationHandler;
 #endif
 };

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2009, 2010 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008, 2009, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -274,7 +274,7 @@ void StorageAreaSync::openDatabase(OpenDatabaseParamType openingStrategy)
 
 void StorageAreaSync::migrateItemTableIfNeeded()
 {
-    if (!m_database.tableExists("ItemTable"))
+    if (!m_database.tableExists("ItemTable"_s))
         return;
 
     {
@@ -291,7 +291,7 @@ void StorageAreaSync::migrateItemTableIfNeeded()
         "INSERT INTO ItemTable2 SELECT * from ItemTable"_s,
         "DROP TABLE ItemTable"_s,
         "ALTER TABLE ItemTable2 RENAME TO ItemTable"_s,
-        ASCIILiteral::null(),
+        { },
     };
 
     SQLiteTransaction transaction(m_database, false);

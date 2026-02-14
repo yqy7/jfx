@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -199,7 +199,7 @@ static void videodecoder_dispose(GObject* object)
 {
     VideoDecoder *decoder = VIDEODECODER(object);
 
-    basedecoder_close_decoder(decoder);
+    basedecoder_close_decoder(BASEDECODER(decoder));
 
     G_OBJECT_CLASS(parent_class)->dispose(object);
 }
@@ -545,7 +545,7 @@ static gboolean videodecoder_convert_frame(VideoDecoder *decoder)
         return FALSE;
 
     int ret = decoder->sws_scale_func(decoder->sws_context,
-                                      base->frame->data,
+                                      (const uint8_t * const*)base->frame->data,
                                       base->frame->linesize,
                                       0,
                                       base->frame->height,
@@ -554,7 +554,11 @@ static gboolean videodecoder_convert_frame(VideoDecoder *decoder)
     if (ret < 0)
         return FALSE;
 
+#if NO_REORDERED_OPAQUE
+    decoder->dest_frame->pts = base->frame->pts;
+#else // NO_REORDERED_OPAQUE
     decoder->dest_frame->reordered_opaque = base->frame->reordered_opaque;
+#endif // NO_REORDERED_OPAQUE
 
     return TRUE;
 }
@@ -679,7 +683,9 @@ static GstFlowReturn videodecoder_chain(GstPad *pad, GstObject *parent, GstBuffe
     GstMapInfo     info2;
     gboolean       unmap_buf = FALSE;
     gboolean       set_frame_values = TRUE;
-    int64_t        reordered_opaque = AV_NOPTS_VALUE;
+    int64_t        pts = AV_NOPTS_VALUE;
+    unsigned int   out_buf_size = 0;
+    gboolean       copy_error = FALSE;
     uint8_t*       data0 = NULL;
     uint8_t*       data1 = NULL;
     uint8_t*       data2 = NULL;
@@ -709,12 +715,36 @@ static GstFlowReturn videodecoder_chain(GstPad *pad, GstObject *parent, GstBuffe
         if (av_new_packet(&decoder->packet, info.size) == 0)
         {
             memcpy(decoder->packet.data, info.data, info.size);
+#if NO_REORDERED_OPAQUE
+            if (GST_BUFFER_TIMESTAMP_IS_VALID(buf))
+                decoder->packet.pts = (int64_t)GST_BUFFER_TIMESTAMP(buf);
+            else
+                decoder->packet.pts = AV_NOPTS_VALUE;
+#else // NO_REORDERED_OPAQUE
             if (GST_BUFFER_TIMESTAMP_IS_VALID(buf))
                 base->context->reordered_opaque = GST_BUFFER_TIMESTAMP(buf);
             else
                 base->context->reordered_opaque = AV_NOPTS_VALUE;
+#endif // NO_REORDERED_OPAQUE
+#if USE_SEND_RECEIVE
+            num_dec = avcodec_send_packet(base->context, &decoder->packet);
+            if (num_dec == 0)
+            {
+                num_dec = avcodec_receive_frame(base->context, base->frame);
+                if (num_dec == 0)
+                    decoder->frame_finished = 1;
+                else
+                    decoder->frame_finished = 0;
+            }
+#else
             num_dec = avcodec_decode_video2(base->context, base->frame, &decoder->frame_finished, &decoder->packet);
+#endif
+
+#if PACKET_UNREF
+            av_packet_unref(&decoder->packet);
+#else
             av_free_packet(&decoder->packet);
+#endif
         }
         else
         {
@@ -727,12 +757,31 @@ static GstFlowReturn videodecoder_chain(GstPad *pad, GstObject *parent, GstBuffe
         av_init_packet(&decoder->packet);
         decoder->packet.data = info.data;
         decoder->packet.size = info.size;
+#if NO_REORDERED_OPAQUE
+        if (GST_BUFFER_TIMESTAMP_IS_VALID(buf))
+            decoder->packet.pts = (int64_t)GST_BUFFER_TIMESTAMP(buf);
+        else
+            decoder->packet.pts = AV_NOPTS_VALUE;
+#else // NO_REORDERED_OPAQUE
         if (GST_BUFFER_TIMESTAMP_IS_VALID(buf))
             base->context->reordered_opaque = GST_BUFFER_TIMESTAMP(buf);
         else
             base->context->reordered_opaque = AV_NOPTS_VALUE;
+#endif // NO_REORDERED_OPAQUE
 
+#if USE_SEND_RECEIVE
+        num_dec = avcodec_send_packet(base->context, &decoder->packet);
+        if (num_dec == 0)
+        {
+            num_dec = avcodec_receive_frame(base->context, base->frame);
+            if (num_dec == 0)
+                decoder->frame_finished = 1;
+            else
+                decoder->frame_finished = 0;
+        }
+#else
         num_dec = avcodec_decode_video2(base->context, base->frame, &decoder->frame_finished, &decoder->packet);
+#endif
     }
 
     if (num_dec < 0)
@@ -765,7 +814,11 @@ static GstFlowReturn videodecoder_chain(GstPad *pad, GstObject *parent, GstBuffe
                     goto _exit;
                 }
 
-                reordered_opaque = decoder->dest_frame->reordered_opaque;
+#if NO_REORDERED_OPAQUE
+                pts = decoder->dest_frame->pts;
+#else // NO_REORDERED_OPAQUE
+                pts = decoder->dest_frame->reordered_opaque;
+#endif // NO_REORDERED_OPAQUE
                 data0 = decoder->dest_frame->data[0];
                 data1 = decoder->dest_frame->data[1];
                 data2 = decoder->dest_frame->data[2];
@@ -775,7 +828,11 @@ static GstFlowReturn videodecoder_chain(GstPad *pad, GstObject *parent, GstBuffe
 
             if (set_frame_values)
             {
-                reordered_opaque = base->frame->reordered_opaque;
+#if NO_REORDERED_OPAQUE
+                pts = base->frame->pts;
+#else // NO_REORDERED_OPAQUE
+                pts = base->frame->reordered_opaque;
+#endif // NO_REORDERED_OPAQUE
                 data0 = base->frame->data[0];
                 data1 = base->frame->data[1];
                 data2 = base->frame->data[2];
@@ -794,10 +851,14 @@ static GstFlowReturn videodecoder_chain(GstPad *pad, GstObject *parent, GstBuffe
             }
             else
             {
+#if USE_FRAME_NUM
+                GST_BUFFER_OFFSET(outbuf) = base->context->frame_num;
+#else // USE_FRAME_NUM
                 GST_BUFFER_OFFSET(outbuf) = base->context->frame_number;
-                if (reordered_opaque != AV_NOPTS_VALUE)
+#endif // USE_FRAME_NUM
+                if (pts != AV_NOPTS_VALUE)
                 {
-                    GST_BUFFER_TIMESTAMP(outbuf) = reordered_opaque;
+                    GST_BUFFER_TIMESTAMP(outbuf) = pts;
                     GST_BUFFER_DURATION(outbuf) = GST_BUFFER_DURATION(buf); // Duration for video usually same
                 }
 
@@ -811,11 +872,58 @@ static GstFlowReturn videodecoder_chain(GstPad *pad, GstObject *parent, GstBuffe
                 }
 
                 // Copy image by parts from different arrays.
-                memcpy(info2.data,                     data0, decoder->u_offset);
-                memcpy(info2.data + decoder->u_offset, data1, decoder->uv_blocksize);
-                memcpy(info2.data + decoder->v_offset, data2, decoder->uv_blocksize);
+                if (decoder->frame_size > (unsigned int)info2.maxsize) // maxsize should be same or more due to alignment
+                {
+                    gst_buffer_unmap(outbuf, &info2);
+                    // INLINE - gst_buffer_unref()
+                    gst_buffer_unref(outbuf);
+                    gst_element_message_full(GST_ELEMENT(decoder), GST_MESSAGE_ERROR, GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_NO_SPACE_LEFT,
+                                     g_strdup("Wrong buffer size"), NULL, ("videodecoder.c"), ("videodecoder_chain"), 0);
+                    goto _exit;
+                }
+
+                out_buf_size = decoder->frame_size;
+                if (out_buf_size >= decoder->u_offset)
+                {
+                    memcpy(info2.data, data0, decoder->u_offset);
+                    out_buf_size -= decoder->u_offset;
+                    if (out_buf_size >= decoder->uv_blocksize &&
+                        decoder->uv_blocksize <= decoder->frame_size &&
+                        decoder->u_offset <= (decoder->frame_size - decoder->uv_blocksize))
+                    {
+                        memcpy(info2.data + decoder->u_offset, data1, decoder->uv_blocksize);
+                        out_buf_size -= decoder->uv_blocksize;
+                        if (out_buf_size >= decoder->uv_blocksize &&
+                            decoder->uv_blocksize <= decoder->frame_size &&
+                            decoder->v_offset <= (decoder->frame_size - decoder->uv_blocksize))
+                        {
+                            memcpy(info2.data + decoder->v_offset, data2, decoder->uv_blocksize);
+                        }
+                        else
+                        {
+                            copy_error = TRUE;
+                        }
+                    }
+                    else
+                    {
+                        copy_error = TRUE;
+                    }
+                }
+                else
+                {
+                    copy_error = TRUE;
+                }
 
                 gst_buffer_unmap(outbuf, &info2);
+
+                if (copy_error)
+                {
+                    // INLINE - gst_buffer_unref()
+                    gst_buffer_unref(outbuf);
+                    gst_element_message_full(GST_ELEMENT(decoder), GST_MESSAGE_ERROR, GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_NO_SPACE_LEFT,
+                                     g_strdup("Copy data failed"), NULL, ("videodecoder.c"), ("videodecoder_chain"), 0);
+                    goto _exit;
+                }
 
                 GST_BUFFER_OFFSET_END(outbuf) = GST_BUFFER_OFFSET_NONE;
 
@@ -830,7 +938,9 @@ static GstFlowReturn videodecoder_chain(GstPad *pad, GstObject *parent, GstBuffe
 
 
 #ifdef VERBOSE_DEBUG
-                g_print("videodecoder: pushing buffer ts=%.4f sec", (double)GST_BUFFER_TIMESTAMP(outbuf)/GST_SECOND);
+                g_print("videodecoder: pushing buffer ts=%.4f, duration=%.4f\n",
+                    GST_BUFFER_TIMESTAMP_IS_VALID(outbuf) ? (double)GST_BUFFER_TIMESTAMP(outbuf)/GST_SECOND : -1.0,
+                    GST_BUFFER_DURATION_IS_VALID(outbuf) ? (double)GST_BUFFER_DURATION(outbuf)/GST_SECOND : -1.0);
 #endif
                 result = gst_pad_push(base->srcpad, outbuf);
 #ifdef VERBOSE_DEBUG

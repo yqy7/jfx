@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,8 +36,6 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.charset.Charset;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.BitSet;
 import java.util.HashSet;
 import java.util.Set;
@@ -48,16 +46,13 @@ import java.util.Set;
 class VNCScreen extends HeadlessScreen {
 
     private ServerSocketChannel server;
-    private Set<ClientConnection> clients = new HashSet<ClientConnection>();
+    private Set<ClientConnection> clients = new HashSet<>();
 
     VNCScreen() {
         super(1024, 600, 32);
         try {
             server = ServerSocketChannel.open();
-            @SuppressWarnings("removal")
-            int vncPort = AccessController.doPrivileged(
-                    (PrivilegedAction<Integer>)
-                            () -> Integer.getInteger("vnc.port", 5901));
+            int vncPort = Integer.getInteger("vnc.port", 5901);
             server.bind(new InetSocketAddress(vncPort));
             Thread t = new Thread(new ConnectionAccepter());
             t.setDaemon(true);

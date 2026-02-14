@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -52,7 +52,7 @@ public class J2DPipeline extends GraphicsPipeline {
     }
 
     private final HashMap<Integer, J2DResourceFactory> factories =
-            new HashMap<Integer, J2DResourceFactory>(1);
+            new HashMap<>(1);
 
     @Override
     public int getAdapterOrdinal(Screen screen) {
@@ -97,7 +97,7 @@ public class J2DPipeline extends GraphicsPipeline {
 
     @Override
     public void dispose() {
-        // TODO: implement (RT-27375)
+        // TODO: implement (JDK-8092378)
         super.dispose();
     }
 
@@ -108,6 +108,7 @@ public class J2DPipeline extends GraphicsPipeline {
      */
     private FontFactory j2DFontFactory;
 
+    @Override
     public FontFactory getFontFactory() {
         if (j2DFontFactory == null) {
             FontFactory fontFactory = super.getFontFactory();

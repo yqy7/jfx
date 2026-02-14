@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple, Inc. All Rights Reserved.
+ * Copyright (C) 2016-2025 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
 #pragma once
 
 #include "LoadableScript.h"
+#include "LoadableScriptError.h"
 #include <wtf/TypeCasts.h>
 
 namespace WebCore {
@@ -37,31 +38,30 @@ class LoadableModuleScript final : public LoadableScript {
 public:
     virtual ~LoadableModuleScript();
 
-    static Ref<LoadableModuleScript> create(const AtomString& nonce, const AtomString& integrity, ReferrerPolicy, const AtomString& crossOriginMode, const String& charset, const AtomString& initiatorName, bool isInUserAgentShadowTree);
+    static Ref<LoadableModuleScript> create(const AtomString& nonce, const AtomString& integrity, ReferrerPolicy, RequestPriority, const AtomString& crossOriginMode, const AtomString& charset, const AtomString& initiatorType, bool isInUserAgentShadowTree);
 
     bool isLoaded() const final;
-    std::optional<Error> error() const final;
+    bool hasError() const final;
+    std::optional<Error> takeError() final;
     bool wasCanceled() const final;
 
-    bool isClassicScript() const final { return false; }
-    bool isModuleScript() const final { return true; }
+    ScriptType scriptType() const final { return ScriptType::Module; }
 
     void execute(ScriptElement&) final;
-
-    void setError(Error&&);
 
     void notifyLoadCompleted(UniquedStringImpl&);
     void notifyLoadFailed(LoadableScript::Error&&);
     void notifyLoadWasCanceled();
 
     UniquedStringImpl* moduleKey() const { return m_moduleKey.get(); }
+    RefPtr<UniquedStringImpl> protectedModuleKey() const { return m_moduleKey; }
 
     ModuleFetchParameters& parameters() { return m_parameters.get(); }
 
 private:
-    LoadableModuleScript(const AtomString& nonce, const AtomString& integrity, ReferrerPolicy, const AtomString& crossOriginMode, const String& charset, const AtomString& initiatorName, bool isInUserAgentShadowTree);
+    LoadableModuleScript(const AtomString& nonce, const AtomString& integrity, ReferrerPolicy, RequestPriority, const AtomString& crossOriginMode, const AtomString& charset, const AtomString& initiatorType, bool isInUserAgentShadowTree);
 
-    Ref<ModuleFetchParameters> m_parameters;
+    const Ref<ModuleFetchParameters> m_parameters;
     RefPtr<UniquedStringImpl> m_moduleKey;
     std::optional<LoadableScript::Error> m_error;
     bool m_wasCanceled { false };

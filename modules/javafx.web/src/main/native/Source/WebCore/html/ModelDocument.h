@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,11 +32,14 @@
 namespace WebCore {
 
 class ModelDocument final : public HTMLDocument {
-    WTF_MAKE_ISO_ALLOCATED(ModelDocument);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(ModelDocument);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(ModelDocument);
 public:
-    static Ref<ModelDocument> create(Frame* frame, const Settings& settings, const URL& url)
+    static Ref<ModelDocument> create(LocalFrame* frame, const Settings& settings, const URL& url)
     {
-        return adoptRef(*new ModelDocument(frame, settings, url));
+        auto document = adoptRef(*new ModelDocument(frame, settings, url));
+        document->addToContextsMap();
+        return document;
     }
 
     virtual ~ModelDocument() = default;
@@ -44,7 +47,7 @@ public:
     String outgoingReferrer() const { return m_outgoingReferrer; }
 
 private:
-    ModelDocument(Frame*, const Settings&, const URL&);
+    ModelDocument(LocalFrame*, const Settings&, const URL&);
 
     Ref<DocumentParser> createParser() override;
 
@@ -55,7 +58,11 @@ private:
 
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::ModelDocument)
     static bool isType(const WebCore::Document& document) { return document.isModelDocument(); }
-    static bool isType(const WebCore::Node& node) { return is<WebCore::Document>(node) && isType(downcast<WebCore::Document>(node)); }
+    static bool isType(const WebCore::Node& node)
+    {
+        auto* document = dynamicDowncast<WebCore::Document>(node);
+        return document && isType(*document);
+    }
 SPECIALIZE_TYPE_TRAITS_END()
 
 #endif // ENABLE(MODEL_ELEMENT)

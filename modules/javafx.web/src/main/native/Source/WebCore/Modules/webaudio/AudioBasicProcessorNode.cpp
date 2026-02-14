@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, Google Inc. All rights reserved.
+ * Copyright (C) 2010 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,11 +33,11 @@
 #include "AudioNodeInput.h"
 #include "AudioNodeOutput.h"
 #include "AudioProcessor.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(AudioBasicProcessorNode);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(AudioBasicProcessorNode);
 
 AudioBasicProcessorNode::AudioBasicProcessorNode(BaseAudioContext& context, NodeType type)
     : AudioNode(context, type)
@@ -47,6 +47,8 @@ AudioBasicProcessorNode::AudioBasicProcessorNode(BaseAudioContext& context, Node
 
     // The subclass must create m_processor.
 }
+
+AudioBasicProcessorNode::~AudioBasicProcessorNode() = default;
 
 void AudioBasicProcessorNode::initialize()
 {
@@ -72,16 +74,16 @@ void AudioBasicProcessorNode::uninitialize()
 
 void AudioBasicProcessorNode::process(size_t framesToProcess)
 {
-    AudioBus* destinationBus = output(0)->bus();
+    AudioBus& destinationBus = output(0)->bus();
 
     if (!isInitialized() || !processor() || processor()->numberOfChannels() != numberOfChannels())
-        destinationBus->zero();
+        destinationBus.zero();
     else {
-        AudioBus* sourceBus = input(0)->bus();
+        AudioBus& sourceBus = input(0)->bus();
 
         // FIXME: if we take "tail time" into account, then we can avoid calling processor()->process() once the tail dies down.
         if (!input(0)->isConnected())
-            sourceBus->zero();
+            sourceBus.zero();
 
         processor()->process(sourceBus, destinationBus, framesToProcess);
     }
@@ -99,7 +101,7 @@ void AudioBasicProcessorNode::processOnlyAudioParams(size_t framesToProcess)
 void AudioBasicProcessorNode::pullInputs(size_t framesToProcess)
 {
     // Render input stream - suggest to the input to render directly into output bus for in-place processing in process() if possible.
-    input(0)->pull(output(0)->bus(), framesToProcess);
+    input(0)->pull(&output(0)->bus(), framesToProcess);
 }
 
 // As soon as we know the channel count of our input, we can lazily initialize.

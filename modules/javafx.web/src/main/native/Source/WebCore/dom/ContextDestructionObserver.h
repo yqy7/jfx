@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,9 @@
 
 #pragma once
 
+#include <wtf/Forward.h>
+#include <wtf/WeakPtr.h>
+
 namespace WebCore {
 
 class ScriptExecutionContext;
@@ -34,7 +37,8 @@ class ContextDestructionObserver {
 public:
     WEBCORE_EXPORT virtual void contextDestroyed();
 
-    ScriptExecutionContext* scriptExecutionContext() const { return m_scriptExecutionContext; }
+    inline ScriptExecutionContext* scriptExecutionContext() const; // Defined in ContextDestructionObserverInlines.h.
+    inline RefPtr<ScriptExecutionContext> protectedScriptExecutionContext() const; // Defined in ContextDestructionObserverInlines.h.
 
 protected:
     WEBCORE_EXPORT explicit ContextDestructionObserver(ScriptExecutionContext*);
@@ -42,7 +46,7 @@ protected:
     void observeContext(ScriptExecutionContext*);
 
 private:
-    ScriptExecutionContext* m_scriptExecutionContext;
+    WeakPtr<ScriptExecutionContext> m_scriptExecutionContext;
 };
 
 } // namespace WebCore

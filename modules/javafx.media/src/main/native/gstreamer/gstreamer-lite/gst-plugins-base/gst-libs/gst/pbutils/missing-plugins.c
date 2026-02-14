@@ -52,16 +52,19 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>            /* getpid on UNIX */
 #endif
-#ifdef HAVE_PROCESS_H
-# include <process.h>           /* getpid on win32 */
-#endif
 
-#include "gst/gst-i18n-plugin.h"
+#include <glib/gi18n-lib.h>
 
 #include "pbutils.h"
 #include "pbutils-private.h"
 
 #include <string.h>
+
+#ifdef G_OS_WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <processthreadsapi.h>
+#endif
 
 #ifndef GST_DISABLE_GST_DEBUG
 #define GST_CAT_DEFAULT gst_pb_utils_missing_plugins_ensure_debug_category()
@@ -84,6 +87,22 @@ gst_pb_utils_missing_plugins_ensure_debug_category (void)
 }
 #endif /* GST_DISABLE_GST_DEBUG */
 
+/* use glib's abstraction once it's landed
+ * https://gitlab.gnome.org/GNOME/glib/-/merge_requests/2475 */
+#ifdef G_OS_WIN32
+static inline DWORD
+_gst_getpid (void)
+{
+  return GetCurrentProcessId ();
+}
+#else
+static inline pid_t
+_gst_getpid (void)
+{
+  return getpid ();
+}
+#endif
+
 #define GST_DETAIL_STRING_MARKER "gstreamer"
 
 typedef enum
@@ -102,11 +121,11 @@ static const struct
   const gchar type_string[12];
 } missing_type_mapping[] = {
   {
-  GST_MISSING_TYPE_URISOURCE, "urisource"}, {
-  GST_MISSING_TYPE_URISINK, "urisink"}, {
-  GST_MISSING_TYPE_ELEMENT, "element"}, {
-  GST_MISSING_TYPE_DECODER, "decoder"}, {
-  GST_MISSING_TYPE_ENCODER, "encoder"}
+      GST_MISSING_TYPE_URISOURCE, "urisource"}, {
+      GST_MISSING_TYPE_URISINK, "urisink"}, {
+      GST_MISSING_TYPE_ELEMENT, "element"}, {
+      GST_MISSING_TYPE_DECODER, "decoder"}, {
+      GST_MISSING_TYPE_ENCODER, "encoder"}
 };
 
 static GstMissingType
@@ -186,7 +205,7 @@ copy_and_clean_caps (const GstCaps * caps)
  * that a source element for a particular URI protocol is missing. This
  * function is mainly for use in plugins.
  *
- * Returns: (transfer full): a new #GstMessage, or NULL on error
+ * Returns: (transfer full): a new #GstMessage
  */
 GstMessage *
 gst_missing_uri_source_message_new (GstElement * element,
@@ -219,7 +238,7 @@ gst_missing_uri_source_message_new (GstElement * element,
  * that a sink element for a particular URI protocol is missing. This
  * function is mainly for use in plugins.
  *
- * Returns: (transfer full): a new #GstMessage, or NULL on error
+ * Returns: (transfer full): a new #GstMessage
  */
 GstMessage *
 gst_missing_uri_sink_message_new (GstElement * element, const gchar * protocol)
@@ -251,7 +270,7 @@ gst_missing_uri_sink_message_new (GstElement * element, const gchar * protocol)
  * that a certain required element is missing. This function is mainly for
  * use in plugins.
  *
- * Returns: (transfer full): a new #GstMessage, or NULL on error
+ * Returns: (transfer full): a new #GstMessage
  */
 GstMessage *
 gst_missing_element_message_new (GstElement * element,
@@ -283,7 +302,7 @@ gst_missing_element_message_new (GstElement * element,
  * that a decoder element for a particular set of (fixed) caps is missing.
  * This function is mainly for use in plugins.
  *
- * Returns: (transfer full): a new #GstMessage, or NULL on error
+ * Returns: (transfer full): a new #GstMessage
  */
 GstMessage *
 gst_missing_decoder_message_new (GstElement * element,
@@ -323,7 +342,7 @@ gst_missing_decoder_message_new (GstElement * element,
  * that an encoder element for a particular set of (fixed) caps is missing.
  * This function is mainly for use in plugins.
  *
- * Returns: (transfer full): a new #GstMessage, or NULL on error
+ * Returns: (transfer full): a new #GstMessage
  */
 GstMessage *
 gst_missing_encoder_message_new (GstElement * element,
@@ -414,7 +433,7 @@ missing_structure_get_caps_detail (const GstStructure * s, GstCaps ** p_caps)
  * This function is mainly for applications that call external plugin
  * installation mechanisms using one of the two above-mentioned functions.
  *
- * Returns: a newly-allocated detail string, or NULL on error. Free string
+ * Returns: (nullable): a newly-allocated detail string, or NULL on error. Free string
  *          with g_free() when not needed any longer.
  */
 gchar *
@@ -450,7 +469,7 @@ gst_missing_plugin_message_get_installer_detail (GstMessage * msg)
   if (progname) {
     g_string_append_printf (str, "%s|", progname);
   } else {
-    g_string_append_printf (str, "pid/%lu|", (gulong) getpid ());
+    g_string_append_printf (str, "pid/%lu|", (gulong) _gst_getpid ());
   }
 
   desc = gst_missing_plugin_message_get_description (msg);
@@ -500,6 +519,49 @@ error:
 }
 
 /**
+ * gst_missing_plugin_message_set_stream_id:
+ * @msg: A missing-plugin #GstMessage of type #GST_MESSAGE_ELEMENT
+ * @stream_id: The stream id for which an element is missing
+ *
+ * Set the stream-id of the stream for which an element is missing.
+ *
+ * Since: 1.26
+ */
+void
+gst_missing_plugin_message_set_stream_id (GstMessage * msg,
+    const gchar * stream_id)
+{
+  const GstStructure *structure;
+
+  g_return_if_fail (gst_is_missing_plugin_message (msg));
+
+  structure = gst_message_get_structure (msg);
+  gst_structure_set ((GstStructure *) structure, "stream-id", G_TYPE_STRING,
+      stream_id, NULL);
+}
+
+/**
+ * gst_missing_plugin_message_get_stream_id:
+ * @msg: A missing-plugin #GstMessage of type #GST_MESSAGE_ELEMENT
+ *
+ * Get the stream-id of the stream for which an element is missing.
+ *
+ * Since: 1.26
+ *
+ * Returns: (nullable): The stream-id or %NULL if none is specified.
+ */
+const gchar *
+gst_missing_plugin_message_get_stream_id (GstMessage * msg)
+{
+  const GstStructure *structure;
+
+  g_return_val_if_fail (gst_is_missing_plugin_message (msg), NULL);
+
+  structure = gst_message_get_structure (msg);
+  return gst_structure_get_string (structure, "stream-id");
+}
+
+/**
  * gst_missing_plugin_message_get_description:
  * @msg: a missing-plugin #GstMessage of type #GST_MESSAGE_ELEMENT
  *
@@ -511,7 +573,7 @@ error:
  * describing a missing plugin, given a previously collected missing-plugin
  * message
  *
- * Returns: a newly-allocated description string, or NULL on error. Free
+ * Returns: a newly-allocated description string. Free
  *          string with g_free() when not needed any longer.
  */
 gchar *
@@ -642,7 +704,7 @@ gst_installer_detail_new (gchar * description, const gchar * type,
   if (progname) {
     g_string_append_printf (s, "%s|", progname);
   } else {
-    g_string_append_printf (s, "pid/%lu|", (gulong) getpid ());
+    g_string_append_printf (s, "pid/%lu|", (gulong) _gst_getpid ());
   }
 
   if (description) {
@@ -672,7 +734,7 @@ gst_installer_detail_new (gchar * description, const gchar * type,
  * the case where the application knows exactly what kind of plugin it is
  * missing.
  *
- * Returns: a newly-allocated detail string, or NULL on error. Free string
+ * Returns: (transfer full): a newly-allocated detail string. Free string
  *          with g_free() when not needed any longer.
  */
 gchar *
@@ -700,7 +762,7 @@ gst_missing_uri_source_installer_detail_new (const gchar * protocol)
  * the case where the application knows exactly what kind of plugin it is
  * missing.
  *
- * Returns: a newly-allocated detail string, or NULL on error. Free string
+ * Returns: (transfer full): a newly-allocated detail string. Free string
  *          with g_free() when not needed any longer.
  */
 gchar *
@@ -728,7 +790,7 @@ gst_missing_uri_sink_installer_detail_new (const gchar * protocol)
  * the case where the application knows exactly what kind of plugin it is
  * missing.
  *
- * Returns: a newly-allocated detail string, or NULL on error. Free string
+ * Returns: (transfer full): a newly-allocated detail string. Free string
  *          with g_free() when not needed any longer.
  */
 gchar *
@@ -755,7 +817,7 @@ gst_missing_element_installer_detail_new (const gchar * factory_name)
  * the case where the application knows exactly what kind of plugin it is
  * missing.
  *
- * Returns: a newly-allocated detail string, or NULL on error. Free string
+ * Returns: (transfer full): a newly-allocated detail string. Free string
  *          with g_free() when not needed any longer.
  */
 gchar *
@@ -793,7 +855,7 @@ gst_missing_decoder_installer_detail_new (const GstCaps * decode_caps)
  * the case where the application knows exactly what kind of plugin it is
  * missing.
  *
- * Returns: a newly-allocated detail string, or NULL on error. Free string
+ * Returns: (transfer full): a newly-allocated detail string. Free string
  *          with g_free() when not needed any longer.
  */
 gchar *

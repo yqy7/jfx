@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,11 +26,24 @@
 #include "config.h"
 #include "GPU.h"
 
+#include "GPUPresentationContext.h"
+#include "GPUPresentationContextDescriptor.h"
+#include "JSDOMPromiseDeferred.h"
 #include "JSGPUAdapter.h"
+#include "JSWGSLLanguageFeatures.h"
+#include "WGSLLanguageFeatures.h"
 
 namespace WebCore {
 
-static PAL::WebGPU::RequestAdapterOptions convertToBacking(const std::optional<GPURequestAdapterOptions>& options)
+GPU::GPU(Ref<WebGPU::GPU>&& backing)
+    : m_backing(WTFMove(backing))
+    , m_wgslLanguageFeatures(WGSLLanguageFeatures::create())
+{
+}
+
+GPU::~GPU() = default;
+
+static WebGPU::RequestAdapterOptions convertToBacking(const std::optional<GPURequestAdapterOptions>& options)
 {
     if (!options)
         return { std::nullopt, false };
@@ -38,29 +51,41 @@ static PAL::WebGPU::RequestAdapterOptions convertToBacking(const std::optional<G
     return options->convertToBacking();
 }
 
-void GPU::setBacking(PAL::WebGPU::GPU& backing)
-{
-    m_backing = &backing;
-    while (!m_pendingRequestAdapterArguments.isEmpty()) {
-        auto arguments = m_pendingRequestAdapterArguments.takeFirst();
-        requestAdapter(arguments.options, WTFMove(arguments.promise));
-    }
-}
+struct GPU::PendingRequestAdapterArguments {
+    std::optional<GPURequestAdapterOptions> options;
+    RequestAdapterPromise promise;
+};
 
 void GPU::requestAdapter(const std::optional<GPURequestAdapterOptions>& options, RequestAdapterPromise&& promise)
 {
-    if (!m_backing) {
-        m_pendingRequestAdapterArguments.append({ options, WTFMove(promise) });
-        return;
-    }
-
-    m_backing->requestAdapter(convertToBacking(options), [promise = WTFMove(promise)] (RefPtr<PAL::WebGPU::Adapter>&& adapter) mutable {
+    m_backing->requestAdapter(convertToBacking(options), [promise = WTFMove(promise)](RefPtr<WebGPU::Adapter>&& adapter) mutable {
         if (!adapter) {
-            promise.reject(nullptr);
+            promise.resolve(nullptr);
             return;
         }
         promise.resolve(GPUAdapter::create(adapter.releaseNonNull()).ptr());
     });
 }
 
+GPUTextureFormat GPU::getPreferredCanvasFormat() const
+{
+    return GPUTextureFormat::Bgra8unorm;
 }
+
+RefPtr<GPUPresentationContext> GPU::createPresentationContext(const GPUPresentationContextDescriptor& presentationContextDescriptor)
+{
+    RefPtr context = m_backing->createPresentationContext(presentationContextDescriptor.convertToBacking());
+    if (!context)
+        return nullptr;
+    return GPUPresentationContext::create(context.releaseNonNull());
+}
+
+RefPtr<GPUCompositorIntegration> GPU::createCompositorIntegration()
+{
+    RefPtr integration = m_backing->createCompositorIntegration();
+    if (!integration)
+        return nullptr;
+    return GPUCompositorIntegration::create(integration.releaseNonNull());
+}
+
+} // namespace WebCore

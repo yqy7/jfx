@@ -25,27 +25,37 @@
 #include "config.h"
 #include "FEComposite.h"
 
-//#if !PLATFORM(JAVA) || HAVE(ARM_NEON_INTRINSICS)
+#include "FECompositeNeonArithmeticApplier.h"
 #include "FECompositeSoftwareApplier.h"
-//#endif
+#include "FECompositeSoftwareArithmeticApplier.h"
 #include "Filter.h"
 #include <wtf/text/TextStream.h>
 
 namespace WebCore {
 
-Ref<FEComposite> FEComposite::create(const CompositeOperationType& type, float k1, float k2, float k3, float k4)
+Ref<FEComposite> FEComposite::create(const CompositeOperationType& type, float k1, float k2, float k3, float k4, DestinationColorSpace colorSpace)
 {
-    return adoptRef(*new FEComposite(type, k1, k2, k3, k4));
+    return adoptRef(*new FEComposite(type, k1, k2, k3, k4, colorSpace));
 }
 
-FEComposite::FEComposite(const CompositeOperationType& type, float k1, float k2, float k3, float k4)
-    : FilterEffect(FilterEffect::Type::FEComposite)
+FEComposite::FEComposite(const CompositeOperationType& type, float k1, float k2, float k3, float k4, DestinationColorSpace colorSpace)
+    : FilterEffect(FilterEffect::Type::FEComposite, colorSpace)
     , m_type(type)
     , m_k1(k1)
     , m_k2(k2)
     , m_k3(k3)
     , m_k4(k4)
 {
+}
+
+bool FEComposite::operator==(const FEComposite& other) const
+{
+    return FilterEffect::operator==(other)
+        && m_type == other.m_type
+        && m_k1 == other.m_k1
+        && m_k2 == other.m_k2
+        && m_k3 == other.m_k3
+        && m_k4 == other.m_k4;
 }
 
 bool FEComposite::setOperation(CompositeOperationType type)
@@ -88,57 +98,63 @@ bool FEComposite::setK4(float k4)
     return true;
 }
 
-FloatRect FEComposite::calculateImageRect(const Filter& filter, const FilterImageVector& inputs, const FloatRect& primitiveSubregion) const
+FloatRect FEComposite::calculateImageRect(const Filter& filter, std::span<const FloatRect> inputImageRects, const FloatRect& primitiveSubregion) const
 {
     switch (m_type) {
-    case FECOMPOSITE_OPERATOR_IN:
-    case FECOMPOSITE_OPERATOR_ATOP:
+    case CompositeOperationType::FECOMPOSITE_OPERATOR_IN:
+    case CompositeOperationType::FECOMPOSITE_OPERATOR_ATOP:
         // For In and Atop the first FilterImage just influences the result of the
         // second FilterImage. So just use the rect of the second FilterImage here.
-        return filter.clipToMaxEffectRect(inputs[1]->imageRect(), primitiveSubregion);
+        return filter.clipToMaxEffectRect(inputImageRects[1], primitiveSubregion);
 
-    case FECOMPOSITE_OPERATOR_ARITHMETIC:
+    case CompositeOperationType::FECOMPOSITE_OPERATOR_ARITHMETIC:
         // Arithmetic may influnce the entire filter primitive region. So we can't
         // optimize the paint region here.
         return filter.maxEffectRect(primitiveSubregion);
 
     default:
         // Take the union of both input effects.
-        return FilterEffect::calculateImageRect(filter, inputs, primitiveSubregion);
+        return FilterEffect::calculateImageRect(filter, inputImageRects, primitiveSubregion);
     }
 }
 
 std::unique_ptr<FilterEffectApplier> FEComposite::createSoftwareApplier() const
 {
+    if (m_type != CompositeOperationType::FECOMPOSITE_OPERATOR_ARITHMETIC)
     return FilterEffectApplier::create<FECompositeSoftwareApplier>(*this);
+#if HAVE(ARM_NEON_INTRINSICS)
+    return FilterEffectApplier::create<FECompositeNeonArithmeticApplier>(*this);
+#else
+    return FilterEffectApplier::create<FECompositeSoftwareArithmeticApplier>(*this);
+#endif
 }
 
 static TextStream& operator<<(TextStream& ts, const CompositeOperationType& type)
 {
     switch (type) {
-    case FECOMPOSITE_OPERATOR_UNKNOWN:
-        ts << "UNKNOWN";
+    case CompositeOperationType::FECOMPOSITE_OPERATOR_UNKNOWN:
+        ts << "UNKNOWN"_s;
         break;
-    case FECOMPOSITE_OPERATOR_OVER:
-        ts << "OVER";
+    case CompositeOperationType::FECOMPOSITE_OPERATOR_OVER:
+        ts << "OVER"_s;
         break;
-    case FECOMPOSITE_OPERATOR_IN:
-        ts << "IN";
+    case CompositeOperationType::FECOMPOSITE_OPERATOR_IN:
+        ts << "IN"_s;
         break;
-    case FECOMPOSITE_OPERATOR_OUT:
-        ts << "OUT";
+    case CompositeOperationType::FECOMPOSITE_OPERATOR_OUT:
+        ts << "OUT"_s;
         break;
-    case FECOMPOSITE_OPERATOR_ATOP:
-        ts << "ATOP";
+    case CompositeOperationType::FECOMPOSITE_OPERATOR_ATOP:
+        ts << "ATOP"_s;
         break;
-    case FECOMPOSITE_OPERATOR_XOR:
-        ts << "XOR";
+    case CompositeOperationType::FECOMPOSITE_OPERATOR_XOR:
+        ts << "XOR"_s;
         break;
-    case FECOMPOSITE_OPERATOR_ARITHMETIC:
-        ts << "ARITHMETIC";
+    case CompositeOperationType::FECOMPOSITE_OPERATOR_ARITHMETIC:
+        ts << "ARITHMETIC"_s;
         break;
-    case FECOMPOSITE_OPERATOR_LIGHTER:
-        ts << "LIGHTER";
+    case CompositeOperationType::FECOMPOSITE_OPERATOR_LIGHTER:
+        ts << "LIGHTER"_s;
         break;
     }
     return ts;
@@ -146,14 +162,14 @@ static TextStream& operator<<(TextStream& ts, const CompositeOperationType& type
 
 TextStream& FEComposite::externalRepresentation(TextStream& ts, FilterRepresentation representation) const
 {
-    ts << indent << "[feComposite";
+    ts << indent << "[feComposite"_s;
     FilterEffect::externalRepresentation(ts, representation);
 
-    ts << " operation=\"" << m_type << "\"";
-    if (m_type == FECOMPOSITE_OPERATOR_ARITHMETIC)
-        ts << " k1=\"" << m_k1 << "\" k2=\"" << m_k2 << "\" k3=\"" << m_k3 << "\" k4=\"" << m_k4 << "\"";
+    ts << " operation=\""_s << m_type << '"';
+    if (m_type == CompositeOperationType::FECOMPOSITE_OPERATOR_ARITHMETIC)
+        ts << " k1=\""_s << m_k1 << "\" k2=\""_s << m_k2 << "\" k3=\""_s << m_k3 << "\" k4=\""_s << m_k4 << '"';
 
-    ts << "]\n";
+    ts << "]\n"_s;
     return ts;
 }
 

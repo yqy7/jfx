@@ -32,24 +32,36 @@ namespace WebCore {
 
 class CSSOffsetRotateValue final : public CSSValue {
 public:
-    static Ref<CSSOffsetRotateValue> create(RefPtr<CSSPrimitiveValue>&& modifier, RefPtr<CSSPrimitiveValue>&& angle)
+    static Ref<CSSOffsetRotateValue> create(RefPtr<CSSValue>&& modifier, RefPtr<CSSValue>&& angle)
     {
-        return adoptRef(*new CSSOffsetRotateValue(WTFMove(modifier), WTFMove(angle)));
+        return adoptRef(*new CSSOffsetRotateValue(downcast<CSSPrimitiveValue>(WTFMove(modifier)), downcast<CSSPrimitiveValue>(WTFMove(angle))));
     }
 
-    String customCSSText() const;
+    String customCSSText(const CSS::SerializationContext&) const;
 
     CSSPrimitiveValue* modifier() const { return m_modifier.get(); }
     CSSPrimitiveValue* angle() const { return m_angle.get(); }
 
-    static Ref<CSSOffsetRotateValue> initialValue();
     bool isInitialValue() const;
 
     bool equals(const CSSOffsetRotateValue&) const;
 
+    IterationStatus customVisitChildren(NOESCAPE const Function<IterationStatus(CSSValue&)>& func) const
+    {
+        if (m_modifier) {
+            if (func(*m_modifier) == IterationStatus::Done)
+                return IterationStatus::Done;
+        }
+        if (m_angle) {
+            if (func(*m_angle) == IterationStatus::Done)
+                return IterationStatus::Done;
+        }
+        return IterationStatus::Continue;
+    }
+
 private:
     CSSOffsetRotateValue(RefPtr<CSSPrimitiveValue>&& modifier, RefPtr<CSSPrimitiveValue>&& angle)
-        : CSSValue(OffsetRotateClass)
+        : CSSValue(ClassType::OffsetRotate)
         , m_modifier(WTFMove(modifier))
         , m_angle(WTFMove(angle))
     {

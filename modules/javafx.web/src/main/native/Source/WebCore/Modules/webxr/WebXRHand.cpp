@@ -29,11 +29,11 @@
 #if ENABLE(WEBXR) && ENABLE(WEBXR_HANDS)
 
 #include "WebXRInputSource.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(WebXRHand);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(WebXRHand);
 
 Ref<WebXRHand> WebXRHand::create(const WebXRInputSource& inputSource)
 {
@@ -43,14 +43,26 @@ Ref<WebXRHand> WebXRHand::create(const WebXRInputSource& inputSource)
 WebXRHand::WebXRHand(const WebXRInputSource& inputSource)
     : m_inputSource(inputSource)
 {
+    RefPtr session = this->session();
+    RefPtr document = session ? downcast<Document>(session->scriptExecutionContext()) : nullptr;
+    if (!document)
+        return;
+
+    size_t jointCount = static_cast<size_t>(XRHandJoint::Count);
+    m_joints = Vector<Ref<WebXRJointSpace>>(jointCount, [&](size_t i) {
+        return WebXRJointSpace::create(*document, *this, static_cast<XRHandJoint>(i));
+    });
 }
 
 WebXRHand::~WebXRHand() = default;
 
 RefPtr<WebXRJointSpace> WebXRHand::get(const XRHandJoint& key)
 {
-    UNUSED_PARAM(key);
-    return nullptr;
+    size_t jointIndex = static_cast<size_t>(key);
+    if (jointIndex >= m_joints.size())
+        return nullptr;
+
+    return m_joints[jointIndex].ptr();
 }
 
 WebXRHand::Iterator::Iterator(WebXRHand& hand)
@@ -60,17 +72,42 @@ WebXRHand::Iterator::Iterator(WebXRHand& hand)
 
 std::optional<KeyValuePair<XRHandJoint, RefPtr<WebXRJointSpace>>> WebXRHand::Iterator::next()
 {
-    if (m_index > m_hand->m_joints.size())
+    if (m_index >= m_hand->m_joints.size())
         return std::nullopt;
 
-    return std::nullopt;
+    size_t index = m_index++;
+    return KeyValuePair<XRHandJoint, RefPtr<WebXRJointSpace>> { static_cast<XRHandJoint>(index), m_hand->m_joints[index].ptr() };
 }
 
 WebXRSession* WebXRHand::session()
 {
     if (!m_inputSource)
         return nullptr;
-    return m_inputSource.get()->session();
+
+    return m_inputSource->session();
+}
+
+void WebXRHand::updateFromInputSource(const PlatformXR::FrameData::InputSource& inputSource)
+{
+    if (!inputSource.handJoints) {
+        m_hasMissingPoses = true;
+        return;
+    }
+
+    auto& handJoints = *(inputSource.handJoints);
+    if (handJoints.size() != m_joints.size()) {
+        m_hasMissingPoses = true;
+        return;
+    }
+
+    bool hasMissingPoses = false;
+    for (size_t i = 0; i < handJoints.size(); ++i) {
+        if (!handJoints[i])
+            hasMissingPoses = true;
+
+        m_joints[i]->updateFromJoint(handJoints[i]);
+    }
+    m_hasMissingPoses = hasMissingPoses;
 }
 
 }

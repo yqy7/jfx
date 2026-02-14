@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2024 Samuel Weinig <sam@webkit.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,19 +26,29 @@
 #include "config.h"
 #include "CSSMathValue.h"
 
-#if ENABLE(CSS_TYPED_OM)
-
-#include <wtf/IsoMallocInlines.h>
+#include "CSSCalcTree.h"
+#include "CSSCalcValue.h"
+#include "CSSPrimitiveValue.h"
+#include "Length.h"
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(CSSMathValue);
-
-CSSMathValue::CSSMathValue(CSSMathOperator mathOperator)
-    : m_operator(mathOperator)
+RefPtr<CSSValue> CSSMathValue::toCSSValue() const
 {
+    auto node = toCalcTreeNode();
+    if (!node)
+        return nullptr;
+
+    auto type = CSSCalc::getType(*node);
+    auto category = type.calculationCategory();
+    if (!category)
+        return nullptr;
+
+    return CSSPrimitiveValue::create(CSSCalcValue::create(*category, CSS::All, CSSCalc::Tree {
+        .root = WTFMove(*node),
+        .type = type,
+        .stage = CSSCalc::Stage::Specified,
+    }));
 }
 
 } // namespace WebCore
-
-#endif

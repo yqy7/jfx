@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,7 +42,7 @@ import javafx.collections.WeakListChangeListener;
  * @param <F> the upper bound of the type of the source list
  * @since JavaFX 8.0
  */
-public abstract class TransformationList<E, F> extends ObservableListBase<E> implements ObservableList<E> {
+public abstract class TransformationList<E, F> extends ObservableListBase<E> {
 
     /**
      * Contains the source list of this transformation list.
@@ -59,7 +59,6 @@ public abstract class TransformationList<E, F> extends ObservableListBase<E> imp
      * Creates a new Transformation list wrapped around the source list.
      * @param source the wrapped list
      */
-    @SuppressWarnings("unchecked")
     protected TransformationList(ObservableList<? extends F> source) {
         if (source == null) {
             throw new NullPointerException();
@@ -91,8 +90,8 @@ public abstract class TransformationList<E, F> extends ObservableListBase<E> imp
             return true;
         }
         List<?> currentSource = source;
-        while(currentSource instanceof TransformationList) {
-            currentSource = ((TransformationList)currentSource).source;
+        while (currentSource instanceof TransformationList<?, ?> transformationList) {
+            currentSource = transformationList.source;
             if (currentSource == list) {
                 return true;
             }
@@ -119,6 +118,7 @@ public abstract class TransformationList<E, F> extends ObservableListBase<E> imp
      * Maps the index of this list's element to an index in the direct source list.
      * @param index the index in this list
      * @return the index of the element's origin in the source list
+     * @throws IndexOutOfBoundsException if the index is out of range ({@code index < 0 || index >= size()})
      * @see #getSource()
      */
     public abstract int getSourceIndex(int index);
@@ -131,6 +131,7 @@ public abstract class TransformationList<E, F> extends ObservableListBase<E> imp
      * @param list a list from the transformation chain
      * @param index the index of an element in this list
      * @return the index of the element's origin in the provided list
+     * @throws IndexOutOfBoundsException if the index is out of range ({@code index < 0 || index >= size()})
      * @see #isInTransformationChain(javafx.collections.ObservableList)
      */
     public final int getSourceIndexFor(ObservableList<?> list, int index) {
@@ -140,8 +141,7 @@ public abstract class TransformationList<E, F> extends ObservableListBase<E> imp
         }
         List<?> currentSource = source;
         int idx = getSourceIndex(index);
-        while(currentSource != list && currentSource instanceof TransformationList) {
-            final TransformationList tSource = (TransformationList)currentSource;
+        while (currentSource != list && currentSource instanceof TransformationList<?, ?> tSource) {
             idx = tSource.getSourceIndex(idx);
             currentSource = tSource.source;
         }
@@ -153,6 +153,8 @@ public abstract class TransformationList<E, F> extends ObservableListBase<E> imp
      * @param index the index in the source list
      * @return the index of the element in this list if it is contained
      * in this list or negative value otherwise
+     * @throws IndexOutOfBoundsException if the index is out of range
+     * ({@code index < 0 || index >= getSource().size()})
      * @see #getSource()
      * @see #getSourceIndex(int)
      *

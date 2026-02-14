@@ -34,6 +34,9 @@
 #include <wtf/RefPtr.h>
 #include <wtf/URL.h>
 
+namespace JSC {
+class ScriptFetchParameters;
+}
 namespace WebCore {
 
 class ModuleScriptLoaderClient;
@@ -41,23 +44,22 @@ class CachedScript;
 class DeferredPromise;
 class Document;
 class JSDOMGlobalObject;
-class ModuleFetchParameters;
 
 class CachedModuleScriptLoader final : public ModuleScriptLoader, private CachedResourceClient {
 public:
-    static Ref<CachedModuleScriptLoader> create(ModuleScriptLoaderClient&, DeferredPromise&, CachedScriptFetcher&, RefPtr<ModuleFetchParameters>&&);
+    static Ref<CachedModuleScriptLoader> create(ModuleScriptLoaderClient&, DeferredPromise&, CachedScriptFetcher&, RefPtr<JSC::ScriptFetchParameters>&&);
 
     virtual ~CachedModuleScriptLoader();
 
-    bool load(Document&, URL&& sourceURL);
+    bool load(Document&, URL&& sourceURL, std::optional<ServiceWorkersMode>);
 
     CachedScript* cachedScript() { return m_cachedScript.get(); }
     CachedScriptFetcher& scriptFetcher() { return static_cast<CachedScriptFetcher&>(ModuleScriptLoader::scriptFetcher()); }
 
 private:
-    CachedModuleScriptLoader(ModuleScriptLoaderClient&, DeferredPromise&, CachedScriptFetcher&, RefPtr<ModuleFetchParameters>&&);
+    CachedModuleScriptLoader(ModuleScriptLoaderClient&, DeferredPromise&, CachedScriptFetcher&, RefPtr<JSC::ScriptFetchParameters>&&);
 
-    void notifyFinished(CachedResource&, const NetworkLoadMetrics&) final;
+    void notifyFinished(CachedResource&, const NetworkLoadMetrics&, LoadWillContinueInAnotherProcess) final;
 
     CachedResourceHandle<CachedScript> m_cachedScript;
     URL m_sourceURL;

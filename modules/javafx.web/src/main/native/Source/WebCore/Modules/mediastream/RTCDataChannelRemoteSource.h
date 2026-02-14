@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,18 +31,19 @@
 #include "RTCDataChannelIdentifier.h"
 #include "RTCDataChannelRemoteSourceConnection.h"
 #include "RTCError.h"
+#include <wtf/TZoneMalloc.h>
 #include <wtf/UniqueRef.h>
 
 namespace WebCore {
 
 class RTCDataChannelRemoteSource : public RTCDataChannelHandlerClient {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED_EXPORT(RTCDataChannelRemoteSource, WEBCORE_EXPORT);
 public:
     WEBCORE_EXPORT RTCDataChannelRemoteSource(RTCDataChannelIdentifier, UniqueRef<RTCDataChannelHandler>&&, Ref<RTCDataChannelRemoteSourceConnection>&&);
     ~RTCDataChannelRemoteSource();
 
     void sendStringData(const CString& text) { m_handler->sendStringData(text); }
-    void sendRawData(const uint8_t* data, size_t size) { m_handler->sendRawData(data, size); }
+    void sendRawData(std::span<const uint8_t> data) { m_handler->sendRawData(data); }
     void close() { m_handler->close(); }
 
 private:
@@ -50,13 +51,14 @@ private:
     // RTCDataChannelHandlerClient
     void didChangeReadyState(RTCDataChannelState state) final { m_connection->didChangeReadyState(m_identifier, state); }
     void didReceiveStringData(const String& text) final { m_connection->didReceiveStringData(m_identifier, text); }
-    void didReceiveRawData(const uint8_t* data, size_t size) final { m_connection->didReceiveRawData(m_identifier, data, size); }
+    void didReceiveRawData(std::span<const uint8_t> data) final { m_connection->didReceiveRawData(m_identifier, data); }
     void didDetectError(Ref<RTCError>&& error) final { m_connection->didDetectError(m_identifier, error->errorDetail(), error->message()); }
     void bufferedAmountIsDecreasing(size_t amount) final { m_connection->bufferedAmountIsDecreasing(m_identifier, amount); }
+    size_t bufferedAmount() const final { return 0; }
 
     RTCDataChannelIdentifier m_identifier;
-    UniqueRef<RTCDataChannelHandler> m_handler;
-    Ref<RTCDataChannelRemoteSourceConnection> m_connection;
+    const UniqueRef<RTCDataChannelHandler> m_handler;
+    const Ref<RTCDataChannelRemoteSourceConnection> m_connection;
 };
 
 } // namespace WebCore

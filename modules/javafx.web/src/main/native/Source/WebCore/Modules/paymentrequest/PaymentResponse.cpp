@@ -36,12 +36,12 @@
 #include "PaymentRequest.h"
 #include <JavaScriptCore/JSONObject.h>
 #include <JavaScriptCore/ThrowScope.h>
-#include <wtf/IsoMallocInlines.h>
 #include <wtf/RunLoop.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(PaymentResponse);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(PaymentResponse);
 
 PaymentResponse::PaymentResponse(ScriptExecutionContext* context, PaymentRequest& request)
     : ActiveDOMObject { context }
@@ -58,8 +58,8 @@ void PaymentResponse::finishConstruction()
 
 PaymentResponse::~PaymentResponse()
 {
-    ASSERT(!hasPendingActivity());
-    ASSERT(!hasRetryPromise());
+    ASSERT(!hasPendingActivity() || isContextStopped());
+    ASSERT(!hasRetryPromise() || isContextStopped());
 }
 
 void PaymentResponse::setDetailsFunction(DetailsFunction&& detailsFunction)
@@ -70,13 +70,19 @@ void PaymentResponse::setDetailsFunction(DetailsFunction&& detailsFunction)
 
 void PaymentResponse::complete(Document& document, std::optional<PaymentComplete>&& result, std::optional<PaymentCompleteDetails>&& details, DOMPromiseDeferred<void>&& promise)
 {
-    if (m_state == State::Stopped || !m_request) {
-        promise.reject(Exception { AbortError });
+    if (m_state == State::Stopped) {
+        promise.reject(Exception { ExceptionCode::AbortError });
+        return;
+    }
+
+    RefPtr request = m_request.get();
+    if (!request) {
+        promise.reject(Exception { ExceptionCode::AbortError });
         return;
     }
 
     if (m_state == State::Completed || m_retryPromise) {
-        promise.reject(Exception { InvalidStateError });
+        promise.reject(Exception { ExceptionCode::InvalidStateError });
         return;
     }
 
@@ -87,13 +93,13 @@ void PaymentResponse::complete(Document& document, std::optional<PaymentComplete
 
             serializedData = JSONStringify(document.globalObject(), data.get(), 0);
             if (throwScope.exception()) {
-                promise.reject(Exception { ExistingExceptionError });
+                promise.reject(Exception { ExceptionCode::ExistingExceptionError });
                 return;
             }
         }
     }
 
-    auto exception = m_request->complete(document, WTFMove(result), WTFMove(serializedData));
+    auto exception = request->complete(document, WTFMove(result), WTFMove(serializedData));
     if (!exception.hasException()) {
         ASSERT(hasPendingActivity());
         ASSERT(m_state == State::Created);
@@ -105,20 +111,26 @@ void PaymentResponse::complete(Document& document, std::optional<PaymentComplete
 
 void PaymentResponse::retry(PaymentValidationErrors&& errors, DOMPromiseDeferred<void>&& promise)
 {
-    if (m_state == State::Stopped || !m_request) {
-        promise.reject(Exception { AbortError });
+    if (m_state == State::Stopped) {
+        promise.reject(Exception { ExceptionCode::AbortError });
+        return;
+    }
+
+    RefPtr request = m_request.get();
+    if (!request) {
+        promise.reject(Exception { ExceptionCode::AbortError });
         return;
     }
 
     if (m_state == State::Completed || m_retryPromise) {
-        promise.reject(Exception { InvalidStateError });
+        promise.reject(Exception { ExceptionCode::InvalidStateError });
         return;
     }
 
     ASSERT(hasPendingActivity());
     ASSERT(m_state == State::Created);
 
-    auto exception = m_request->retry(WTFMove(errors));
+    auto exception = request->retry(WTFMove(errors));
     if (exception.hasException()) {
         promise.reject(exception.releaseException());
         return;
@@ -140,15 +152,16 @@ void PaymentResponse::settleRetryPromise(ExceptionOr<void>&& result)
         return;
 
     ASSERT(hasPendingActivity());
-    ASSERT(m_state == State::Created);
+    ASSERT(m_state == State::Created || m_state == State::Stopped);
     m_retryPromise->settle(WTFMove(result));
     m_retryPromise = nullptr;
 }
 
 void PaymentResponse::stop()
 {
-    settleRetryPromise(Exception { AbortError });
-    m_pendingActivity = nullptr;
+    queueTaskKeepingObjectAlive(*this, TaskSource::Payment, [pendingActivity = std::exchange(m_pendingActivity, nullptr)](auto& response) {
+        response.settleRetryPromise(Exception { ExceptionCode::AbortError });
+    });
     m_state = State::Stopped;
 }
 

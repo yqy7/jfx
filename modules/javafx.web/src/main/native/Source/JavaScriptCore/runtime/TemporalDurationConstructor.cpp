@@ -44,7 +44,7 @@ static JSC_DECLARE_HOST_FUNCTION(temporalDurationConstructorFuncCompare);
 
 namespace JSC {
 
-const ClassInfo TemporalDurationConstructor::s_info = { "Function", &Base::s_info, &temporalDurationConstructorTable, nullptr, CREATE_METHOD_TABLE(TemporalDurationConstructor) };
+const ClassInfo TemporalDurationConstructor::s_info = { "Function"_s, &Base::s_info, &temporalDurationConstructorTable, nullptr, CREATE_METHOD_TABLE(TemporalDurationConstructor) };
 
 /* Source for TemporalDurationConstructor.lut.h
 @begin temporalDurationConstructorTable
@@ -92,11 +92,15 @@ JSC_DEFINE_HOST_FUNCTION(constructTemporalDuration, (JSGlobalObject* globalObjec
     ISO8601::Duration result;
     auto count = std::min<size_t>(callFrame->argumentCount(), numberOfTemporalUnits);
     for (size_t i = 0; i < count; i++) {
-        result[i] = callFrame->uncheckedArgument(i).toIntegerOrInfinity(globalObject);
+        JSValue value = callFrame->uncheckedArgument(i);
+        if (value.isUndefined())
+            continue;
+
+        result[i] = value.toNumber(globalObject) + 0.0;
         RETURN_IF_EXCEPTION(scope, { });
 
-        if (!std::isfinite(result[i]))
-            return throwVMRangeError(globalObject, scope, "Temporal.Duration properties must be finite"_s);
+        if (!isInteger(result[i]))
+            return throwVMRangeError(globalObject, scope, "Temporal.Duration properties must be integers"_s);
     }
 
     RELEASE_AND_RETURN(scope, JSValue::encode(TemporalDuration::tryCreateIfValid(globalObject, WTFMove(result), structure)));
@@ -107,7 +111,7 @@ JSC_DEFINE_HOST_FUNCTION(callTemporalDuration, (JSGlobalObject* globalObject, Ca
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "Duration"));
+    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "Duration"_s));
 }
 
 JSC_DEFINE_HOST_FUNCTION(temporalDurationConstructorFuncFrom, (JSGlobalObject* globalObject, CallFrame* callFrame))

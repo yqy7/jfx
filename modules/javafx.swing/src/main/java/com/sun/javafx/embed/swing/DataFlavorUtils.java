@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -52,7 +52,7 @@ final class DataFlavorUtils {
 
     static DataFlavor[] getDataFlavors(String[] mimeTypes) {
         final ArrayList<DataFlavor> flavors =
-            new ArrayList<DataFlavor>(mimeTypes.length);
+            new ArrayList<>(mimeTypes.length);
         for (String mime : mimeTypes) {
             DataFlavor flavor = null;
             try {
@@ -144,7 +144,7 @@ final class DataFlavorUtils {
         }
 
         if (flavor.isFlavorJavaFileListType()) {
-            // RT-12663
+            // JDK-8101336
             final List<File> fileList = (List<File>)swingData;
             final String[] paths = new String[fileList.size()];
             int i = 0;
@@ -196,7 +196,7 @@ final class DataFlavorUtils {
                     // type has been finalized already.
                 }
             } else {
-                Set<DataFlavor> mimeTypeFlavors = new HashSet<DataFlavor>();
+                Set<DataFlavor> mimeTypeFlavors = new HashSet<>();
 
                 // If this is text data flavor use DataFlavor representing
                 // a Java Unicode String class. This is what FX expects from

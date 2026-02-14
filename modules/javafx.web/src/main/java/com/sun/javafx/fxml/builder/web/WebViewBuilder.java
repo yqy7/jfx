@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
 
 package com.sun.javafx.fxml.builder.web;
 
-// TODO: remove this class as part of fixing RT-40037.
+// TODO: remove this class as part of fixing JDK-8089907.
 
 import javafx.util.Builder;
 import javafx.util.Callback;
@@ -62,6 +62,7 @@ public final class WebViewBuilder
      * Creates an instance of the {@link WebView} class
      * based on the properties set on this builder.
      */
+    @Override
     public WebView build() {
         WebView x = new WebView();
         applyTo(x);

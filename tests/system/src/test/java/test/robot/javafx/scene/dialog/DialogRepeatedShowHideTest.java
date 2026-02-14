@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,8 @@
 
 package test.robot.javafx.scene.dialog;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.scene.Scene;
@@ -32,22 +34,20 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
+import javafx.scene.input.MouseButton;
 import javafx.scene.robot.Robot;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.stage.WindowEvent;
-import javafx.scene.input.MouseButton;
-
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import test.util.Util;
 
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
 //see JDK8193502
+@Timeout(value=15000, unit=TimeUnit.MILLISECONDS)
 public class DialogRepeatedShowHideTest {
     static final double DIALOG_WIDTH = 300.0d;
     static final double DIALOG_HEIGHT = DIALOG_WIDTH;
@@ -60,16 +60,14 @@ public class DialogRepeatedShowHideTest {
     static CountDownLatch dialogShownLatch;
     static CountDownLatch dialogHideLatch;
 
-    @Test(timeout = 15000)
+    @Test
     public void dialogSizeOnReShownTest() throws Exception {
         Thread.sleep(400);
         clickButton();
         hide();
         clickButton();
-        Assert.assertEquals("Dialog width should remain the same", DIALOG_WIDTH, dialog.getDialogPane().getWidth(),
-                0.0);
-        Assert.assertEquals("Dialog height should remain the same", DIALOG_HEIGHT, dialog.getDialogPane().getHeight(),
-                0.0);
+        Assertions.assertEquals(DIALOG_WIDTH, dialog.getDialogPane().getWidth(), 0.0, "Dialog width should remain the same");
+        Assertions.assertEquals(DIALOG_HEIGHT, dialog.getDialogPane().getHeight(), 0.0, "Dialog height should remain the same");
         hide();
     }
 
@@ -78,26 +76,24 @@ public class DialogRepeatedShowHideTest {
         mouseClick(button.getLayoutX() + button.getWidth() / 2, button.getLayoutY() + button.getHeight() / 2);
 
         Thread.sleep(400);
-        waitForLatch(dialogShownLatch, 10, "Failed to show Dialog");
+        Util.waitForLatch(dialogShownLatch, 10, "Failed to show Dialog");
     }
 
     private void hide() throws Exception {
         dialogHideLatch = new CountDownLatch(1);
         Platform.runLater(() -> dialog.close());
         Thread.sleep(600);
-        waitForLatch(dialogHideLatch, 10, "Failed to hide Dialog");
+        Util.waitForLatch(dialogHideLatch, 10, "Failed to hide Dialog");
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() throws Exception {
-        new Thread(() -> Application.launch(TestApp.class, (String[]) null)).start();
-        waitForLatch(startupLatch, 10, "FX runtime failed to start.");
+        Util.launch(startupLatch, TestApp.class);
     }
 
-    @AfterClass
+    @AfterAll
     public static void exit() {
-        Platform.runLater(() -> stage.hide());
-        Platform.exit();
+        Util.shutdown();
     }
 
     private void mouseClick(double x, double y) {
@@ -146,9 +142,5 @@ public class DialogRepeatedShowHideTest {
 
             return testDialog;
         }
-    }
-
-    public static void waitForLatch(CountDownLatch latch, int seconds, String msg) throws Exception {
-        Assert.assertTrue("Timeout: " + msg, latch.await(seconds, TimeUnit.SECONDS));
     }
 }

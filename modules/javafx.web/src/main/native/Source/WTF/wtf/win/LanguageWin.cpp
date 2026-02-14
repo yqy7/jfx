@@ -30,6 +30,7 @@
 #include <windows.h>
 #include <wtf/Lock.h>
 #include <wtf/Vector.h>
+#include <wtf/text/MakeString.h>
 #include <wtf/text/WTFString.h>
 #include <wtf/text/win/WCharStringExtras.h>
 
@@ -43,16 +44,15 @@ static String localeInfo(LCTYPE localeType, const String& fallback)
     int localeChars = GetLocaleInfo(langID, localeType, nullptr, 0);
     if (!localeChars)
         return fallback;
-    UChar* localeNameBuf;
+    std::span<char16_t> localeNameBuf;
     String localeName = String::createUninitialized(localeChars, localeNameBuf);
-    localeChars = GetLocaleInfo(langID, localeType, wcharFrom(localeNameBuf), localeChars);
+    localeChars = GetLocaleInfo(langID, localeType, wcharFrom(localeNameBuf.data()), localeChars);
     if (!localeChars)
         return fallback;
     if (localeName.isEmpty())
         return fallback;
 
-    localeName.truncate(localeName.length() - 1);
-    return localeName;
+    return localeName.left(localeName.length() - 1);
 }
 
 static String platformLanguage()
@@ -63,13 +63,13 @@ static String platformLanguage()
     if (!computedDefaultLanguage.isEmpty())
         return computedDefaultLanguage.isolatedCopy();
 
-    String languageName = localeInfo(LOCALE_SISO639LANGNAME, "en");
+    String languageName = localeInfo(LOCALE_SISO639LANGNAME, "en"_s);
     String countryName = localeInfo(LOCALE_SISO3166CTRYNAME, String());
 
     if (countryName.isEmpty())
         computedDefaultLanguage = languageName;
     else
-        computedDefaultLanguage = languageName + '-' + countryName;
+        computedDefaultLanguage = makeString(languageName, '-', countryName);
 
     return computedDefaultLanguage;
 }

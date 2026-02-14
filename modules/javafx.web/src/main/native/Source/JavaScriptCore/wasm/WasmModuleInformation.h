@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,14 +30,14 @@
 #include "WasmBranchHints.h"
 #include "WasmFormat.h"
 
-#include <wtf/BitVector.h>
+#include <wtf/FixedBitVector.h>
 #include <wtf/HashMap.h>
 
 namespace JSC { namespace Wasm {
 
-struct ModuleInformation : public ThreadSafeRefCounted<ModuleInformation> {
+struct ModuleInformation final : public ThreadSafeRefCounted<ModuleInformation> {
 
-    using BranchHints = HashMap<uint32_t, BranchHintMap, IntHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>>;
+    using BranchHints = UncheckedKeyHashMap<uint32_t, BranchHintMap, IntHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>>;
 
     ModuleInformation();
     ModuleInformation(const ModuleInformation&) = delete;
@@ -50,55 +50,107 @@ struct ModuleInformation : public ThreadSafeRefCounted<ModuleInformation> {
 
     JS_EXPORT_PRIVATE ~ModuleInformation();
 
-    size_t functionIndexSpaceSize() const { return importFunctionSignatureIndices.size() + internalFunctionSignatureIndices.size(); }
-    bool isImportedFunctionFromFunctionIndexSpace(size_t functionIndex) const
+    size_t functionIndexSpaceSize() const { return importFunctionTypeIndices.size() + internalFunctionTypeIndices.size(); }
+    bool isImportedFunctionFromFunctionIndexSpace(FunctionSpaceIndex functionIndex) const
     {
         ASSERT(functionIndex < functionIndexSpaceSize());
-        return functionIndex < importFunctionSignatureIndices.size();
+        return functionIndex < importFunctionTypeIndices.size();
     }
-    SignatureIndex signatureIndexFromFunctionIndexSpace(size_t functionIndex) const
+    TypeIndex typeIndexFromFunctionIndexSpace(FunctionSpaceIndex functionIndex) const
     {
         return isImportedFunctionFromFunctionIndexSpace(functionIndex)
-            ? importFunctionSignatureIndices[functionIndex]
-            : internalFunctionSignatureIndices[functionIndex - importFunctionSignatureIndices.size()];
+            ? importFunctionTypeIndices[functionIndex]
+            : internalFunctionTypeIndices[functionIndex - importFunctionTypeIndices.size()];
     }
 
-    size_t exceptionIndexSpaceSize() const { return importExceptionSignatureIndices.size() + internalExceptionSignatureIndices.size(); }
+    size_t exceptionIndexSpaceSize() const { return importExceptionTypeIndices.size() + internalExceptionTypeIndices.size(); }
     bool isImportedExceptionFromExceptionIndexSpace(size_t exceptionIndex) const
     {
         ASSERT(exceptionIndex < exceptionIndexSpaceSize());
-        return exceptionIndex < importExceptionSignatureIndices.size();
+        return exceptionIndex < importExceptionTypeIndices.size();
     }
-    SignatureIndex signatureIndexFromExceptionIndexSpace(size_t exceptionIndex) const
+    TypeIndex typeIndexFromExceptionIndexSpace(size_t exceptionIndex) const
     {
         return isImportedExceptionFromExceptionIndexSpace(exceptionIndex)
-            ? importExceptionSignatureIndices[exceptionIndex]
-            : internalExceptionSignatureIndices[exceptionIndex - importExceptionSignatureIndices.size()];
+            ? importExceptionTypeIndices[exceptionIndex]
+            : internalExceptionTypeIndices[exceptionIndex - importExceptionTypeIndices.size()];
     }
 
-    uint32_t importFunctionCount() const { return importFunctionSignatureIndices.size(); }
-    uint32_t internalFunctionCount() const { return internalFunctionSignatureIndices.size(); }
-    uint32_t importExceptionCount() const { return importExceptionSignatureIndices.size(); }
-    uint32_t internalExceptionCount() const { return internalExceptionSignatureIndices.size(); }
+    uint32_t importFunctionCount() const { return importFunctionTypeIndices.size(); }
+    uint32_t internalFunctionCount() const { return internalFunctionTypeIndices.size(); }
+    uint32_t importExceptionCount() const { return importExceptionTypeIndices.size(); }
+    uint32_t internalExceptionCount() const { return internalExceptionTypeIndices.size(); }
 
-    // Currently, our wasm implementation allows only one memory and table.
-    // If we need to remove this limitation, we would have MemoryInformation and TableInformation in the Vectors.
+    FunctionCodeIndex toCodeIndex(FunctionSpaceIndex index) const { ASSERT(importFunctionCount() <= index && index < functionIndexSpaceSize()); return FunctionCodeIndex(index - importFunctionCount()); }
+    FunctionSpaceIndex toSpaceIndex(FunctionCodeIndex index) const { ASSERT(index < internalFunctionCount()); return FunctionSpaceIndex(index + importFunctionCount()); }
+
+    // Currently, our wasm implementation allows only one memory.
+    // If we need to remove this limitation, we would have MemoryInformation in the Vectors.
     uint32_t memoryCount() const { return memory ? 1 : 0; }
     uint32_t tableCount() const { return tables.size(); }
     uint32_t elementCount() const { return elements.size(); }
-    uint32_t dataSegmentsCount() const { return numberOfDataSegments; }
+    uint32_t globalCount() const { return globals.size(); }
+    uint32_t dataSegmentsCount() const { return numberOfDataSegments.value_or(0); }
 
     const TableInformation& table(unsigned index) const { return tables[index]; }
+    const GlobalInformation& global(unsigned index) const { return globals[index]; }
 
-    const BitVector& referencedFunctions() const { return m_referencedFunctions; }
-    void addReferencedFunction(unsigned index) const { m_referencedFunctions.set(index); }
+    void initializeFunctionTrackers() const
+    {
+        size_t totalNumberOfFunctions = functionIndexSpaceSize();
+        m_referencedFunctions = FixedBitVector(totalNumberOfFunctions);
+        m_clobberingTailCalls = FixedBitVector(totalNumberOfFunctions);
+    }
 
-    bool isDeclaredFunction(uint32_t index) const { return m_declaredFunctions.contains(index); }
-    void addDeclaredFunction(uint32_t index) { m_declaredFunctions.set(index); }
+    const FixedBitVector& referencedFunctions() const { return m_referencedFunctions; }
+    bool hasReferencedFunction(FunctionSpaceIndex functionIndexSpace) const { return m_referencedFunctions.test(functionIndexSpace); }
+    void addReferencedFunction(FunctionSpaceIndex functionIndexSpace) const { m_referencedFunctions.concurrentTestAndSet(functionIndexSpace); }
+
+    bool isDeclaredFunction(FunctionSpaceIndex index) const { return m_declaredFunctions.contains(index); }
+    void addDeclaredFunction(FunctionSpaceIndex index) { m_declaredFunctions.set(index); }
 
     bool isDeclaredException(uint32_t index) const { return m_declaredExceptions.contains(index); }
     void addDeclaredException(uint32_t index) { m_declaredExceptions.set(index); }
 
+    size_t functionWasmSizeImportSpace(FunctionSpaceIndex index) const { return functionWasmSize(toCodeIndex(index)); }
+
+    size_t functionWasmSize(FunctionCodeIndex index) const
+    {
+        ASSERT(index < internalFunctionCount());
+        ASSERT(functions[index].finishedValidating);
+        auto size = functions[index].end - functions[index].start + 1;
+        RELEASE_ASSERT(size > 1);
+        return size;
+    }
+
+    bool usesSIMDImportSpace(FunctionSpaceIndex index) const { return usesSIMD(toCodeIndex(index)); }
+    bool usesSIMD(FunctionCodeIndex index) const
+    {
+        ASSERT(index < internalFunctionCount());
+        ASSERT(functions[index].finishedValidating);
+
+        // See also: B3Procedure::usesSIMD().
+        if (!Options::useWasmSIMD())
+            return false;
+        if (Options::forceAllFunctionsToUseSIMD())
+            return true;
+        // The LLInt discovers this value.
+        ASSERT(Options::useWasmLLInt() || Options::useWasmIPInt());
+
+        return functions[index].usesSIMD;
+    }
+    void markUsesSIMD(FunctionCodeIndex index) { ASSERT(index < internalFunctionCount()); ASSERT(!functions[index].finishedValidating); functions[index].usesSIMD = true; }
+
+    bool usesExceptions(FunctionCodeIndex index) const { ASSERT(index < internalFunctionCount()); ASSERT(functions[index].finishedValidating); return functions[index].usesExceptions; }
+    void markUsesExceptions(FunctionCodeIndex index) { ASSERT(index < internalFunctionCount()); ASSERT(!functions[index].finishedValidating); functions[index].usesExceptions = true; }
+    bool usesAtomics(FunctionCodeIndex index) const { ASSERT(index < internalFunctionCount()); ASSERT(functions[index].finishedValidating); return functions[index].usesAtomics; }
+    void markUsesAtomics(FunctionCodeIndex index) { ASSERT(index < internalFunctionCount()); ASSERT(!functions[index].finishedValidating); functions[index].usesAtomics = true; }
+
+    void doneSeeingFunction(FunctionCodeIndex index) { ASSERT(index < internalFunctionCount()); ASSERT(!functions[index].finishedValidating); functions[index].finishedValidating = true; }
+
+    uint32_t typeCount() const { return typeSignatures.size(); }
+
+    bool hasGCObjectTypes() const { return m_hasGCObjectTypes; }
     bool hasMemoryImport() const { return memory.isImport(); }
 
     BranchHint getBranchHint(uint32_t functionOffset, uint32_t branchOffset) const
@@ -109,14 +161,30 @@ struct ModuleInformation : public ThreadSafeRefCounted<ModuleInformation> {
             : it->value.getBranchHint(branchOffset);
     }
 
+    // FIXME: This should probably be FunctionCodeIndex as calling an import always clobbers the instance.
+    const FixedBitVector& clobberingTailCalls() const { return m_clobberingTailCalls; }
+    bool callCanClobberInstance(FunctionSpaceIndex functionIndexSpace) const { return m_clobberingTailCalls.test(functionIndexSpace); }
+    void addClobberingTailCall(FunctionSpaceIndex functionIndexSpace) { m_clobberingTailCalls.concurrentTestAndSet(functionIndexSpace); }
+
+    void setTotalFunctionSize(size_t totalFunctionSize)
+    {
+        m_totalFunctionSize = totalFunctionSize;
+    }
+    size_t totalFunctionSize() const { return m_totalFunctionSize; }
+
+    // FIXME: These should probably be FixedVectors.
     Vector<Import> imports;
-    Vector<SignatureIndex> importFunctionSignatureIndices;
-    Vector<SignatureIndex> internalFunctionSignatureIndices;
-    Vector<SignatureIndex> importExceptionSignatureIndices;
-    Vector<SignatureIndex> internalExceptionSignatureIndices;
-    Vector<Ref<Signature>> usedSignatures;
+    Vector<TypeIndex> importFunctionTypeIndices;
+    Vector<TypeIndex> internalFunctionTypeIndices;
+    Vector<TypeIndex> importExceptionTypeIndices;
+    Vector<TypeIndex> internalExceptionTypeIndices;
+    Vector<Ref<TypeDefinition>> typeSignatures;
+    Vector<Ref<TypeDefinition>> recursionGroups;
 
     MemoryInformation memory;
+    bool m_hasGCObjectTypes { false };
+    mutable Atomic<bool> m_usesLegacyExceptions { false };
+    mutable Atomic<bool> m_usesModernExceptions { false };
 
     Vector<FunctionData> functions;
 
@@ -131,11 +199,16 @@ struct ModuleInformation : public ThreadSafeRefCounted<ModuleInformation> {
     Vector<CustomSection> customSections;
     Ref<NameSection> nameSection;
     BranchHints branchHints;
-    uint32_t numberOfDataSegments { 0 };
+    std::optional<uint32_t> numberOfDataSegments;
+    Vector<RefPtr<const RTT>> rtts;
+    Vector<Vector<uint8_t>> constantExpressions;
+    Name sourceMappingURL;
 
     BitVector m_declaredFunctions;
     BitVector m_declaredExceptions;
-    mutable BitVector m_referencedFunctions;
+    mutable FixedBitVector m_referencedFunctions;
+    mutable FixedBitVector m_clobberingTailCalls;
+    size_t m_totalFunctionSize { 0 };
 };
 
 

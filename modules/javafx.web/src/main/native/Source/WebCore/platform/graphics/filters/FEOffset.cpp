@@ -31,53 +31,66 @@
 
 namespace WebCore {
 
-Ref<FEOffset> FEOffset::create(float dx, float dy)
+Ref<FEOffset> FEOffset::create(float dx, float dy, DestinationColorSpace colorSpace)
 {
-    return adoptRef(*new FEOffset(dx, dy));
+    return adoptRef(*new FEOffset(dx, dy, colorSpace));
 }
 
-FEOffset::FEOffset(float dx, float dy)
-    : FilterEffect(FilterEffect::Type::FEOffset)
+FEOffset::FEOffset(float dx, float dy, DestinationColorSpace colorSpace)
+    : FilterEffect(FilterEffect::Type::FEOffset, colorSpace)
     , m_dx(dx)
     , m_dy(dy)
 {
 }
 
-void FEOffset::setDx(float dx)
+bool FEOffset::operator==(const FEOffset& other) const
 {
+    return FilterEffect::operator==(other)
+        && m_dx == other.m_dx
+        && m_dy == other.m_dy;
+}
+
+bool FEOffset::setDx(float dx)
+{
+    if (m_dx == dx)
+        return false;
     m_dx = dx;
+    return true;
 }
 
-void FEOffset::setDy(float dy)
+bool FEOffset::setDy(float dy)
 {
+    if (m_dy == dy)
+        return false;
     m_dy = dy;
+    return true;
 }
 
-FloatRect FEOffset::calculateImageRect(const Filter& filter, const FilterImageVector& inputs, const FloatRect& primitiveSubregion) const
+FloatRect FEOffset::calculateImageRect(const Filter& filter, std::span<const FloatRect> inputImageRects, const FloatRect& primitiveSubregion) const
 {
-    auto imageRect = inputs[0]->imageRect();
+    auto imageRect = inputImageRects[0];
     imageRect.move(filter.resolvedSize({ m_dx, m_dy }));
     return filter.clipToMaxEffectRect(imageRect, primitiveSubregion);
 }
 
-IntOutsets FEOffset::outsets(const Filter& filter) const
+IntOutsets FEOffset::calculateOutsets(const FloatSize& offset)
 {
-    auto offset = expandedIntSize(filter.resolvedSize({ m_dx, m_dy }));
+    auto adjustedOffset = expandedIntSize(offset);
 
     IntOutsets outsets;
-    if (offset.height() < 0)
-        outsets.setTop(-offset.height());
+    if (adjustedOffset.height() < 0)
+        outsets.setTop(-adjustedOffset.height());
     else
-        outsets.setBottom(offset.height());
-    if (offset.width() < 0)
-        outsets.setLeft(-offset.width());
+        outsets.setBottom(adjustedOffset.height());
+    if (adjustedOffset.width() < 0)
+        outsets.setLeft(-adjustedOffset.width());
     else
-        outsets.setRight(offset.width());
+        outsets.setRight(adjustedOffset.width());
 
     return outsets;
 }
 
-bool FEOffset::resultIsAlphaImage(const FilterImageVector& inputs) const
+bool FEOffset::resultIsAlphaImage(std::span<const Ref<FilterImage>> inputs) const
 {
     return inputs[0]->isAlphaImage();
 }
@@ -89,12 +102,12 @@ std::unique_ptr<FilterEffectApplier> FEOffset::createSoftwareApplier() const
 
 TextStream& FEOffset::externalRepresentation(TextStream& ts, FilterRepresentation representation) const
 {
-    ts << indent << "[feOffset";
+    ts << indent << "[feOffset"_s;
     FilterEffect::externalRepresentation(ts, representation);
 
-    ts << " dx=\"" << dx() << "\" dy=\"" << dy() << "\"";
+    ts << " dx=\""_s << dx() << "\" dy=\""_s << dy() << '"';
 
-    ts << "]\n";
+    ts << "]\n"_s;
     return ts;
 }
 

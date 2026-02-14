@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2020 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2025 Apple Inc. All rights reserved.
  * Copyright (C) 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,6 +32,7 @@
 #if ENABLE(VIDEO)
 
 #include "HTMLDivElement.h"
+#include "IntRect.h"
 #include "MediaControllerInterface.h"
 #include "TextTrackRepresentation.h"
 #include <wtf/LoggerHelper.h>
@@ -49,15 +50,18 @@ class MediaControlTextTrackContainerElement final
     , private LoggerHelper
 #endif
 {
-    WTF_MAKE_ISO_ALLOCATED(MediaControlTextTrackContainerElement);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(MediaControlTextTrackContainerElement);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(MediaControlTextTrackContainerElement);
 public:
     static Ref<MediaControlTextTrackContainerElement> create(Document&, HTMLMediaElement&);
 
-    enum class ForceUpdate { Yes, No };
+    enum class ForceUpdate : bool { No, Yes };
     void updateSizes(ForceUpdate force = ForceUpdate::No);
     void updateDisplay();
 
+    TextTrackRepresentation* textTrackRepresentation() const { return m_textTrackRepresentation.get(); }
     void updateTextTrackRepresentationImageIfNeeded();
+    void requiresTextTrackRepresentationChanged();
 
     void enteredFullscreen();
     void exitedFullscreen();
@@ -69,7 +73,7 @@ private:
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) override;
 
     // TextTrackRepresentationClient
-    RefPtr<Image> createTextTrackRepresentationImage() override;
+    RefPtr<NativeImage> createTextTrackRepresentationImage() override;
     void textTrackRepresentationBoundsChanged(const IntRect&) override;
 
     void updateTextTrackRepresentationIfNeeded();
@@ -87,11 +91,11 @@ private:
 
 #if !RELEASE_LOG_DISABLED
     const Logger& logger() const final;
-    const void* logIdentifier() const final;
+    uint64_t logIdentifier() const final;
     WTFLogChannel& logChannel() const final;
-    const char* logClassName() const final { return "MediaControlTextTrackContainerElement"; }
+    ASCIILiteral logClassName() const final { return "MediaControlTextTrackContainerElement"_s; }
     mutable RefPtr<Logger> m_logger;
-    mutable const void* m_logIdentifier { nullptr };
+    mutable uint64_t m_logIdentifier { 0 };
 #endif
 
     std::unique_ptr<TextTrackRepresentation> m_textTrackRepresentation;

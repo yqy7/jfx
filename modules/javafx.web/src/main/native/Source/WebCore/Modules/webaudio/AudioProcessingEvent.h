@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, Google Inc. All rights reserved.
+ * Copyright (C) 2010 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,7 +34,7 @@ class AudioBuffer;
 struct AudioProcessingEventInit;
 
 class AudioProcessingEvent final : public Event {
-    WTF_MAKE_ISO_ALLOCATED(AudioProcessingEvent);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(AudioProcessingEvent);
 public:
     static Ref<AudioProcessingEvent> create(RefPtr<AudioBuffer>&& inputBuffer, RefPtr<AudioBuffer>&& outputBuffer, double playbackTime)
     {
@@ -48,8 +48,6 @@ public:
     AudioBuffer* inputBuffer() { return m_inputBuffer.get(); }
     AudioBuffer* outputBuffer() { return m_outputBuffer.get(); }
     double playbackTime() const { return m_playbackTime; }
-
-    EventInterface eventInterface() const override;
 
 private:
     AudioProcessingEvent(RefPtr<AudioBuffer>&& inputBuffer, RefPtr<AudioBuffer>&& outputBuffer, double playbackTime);

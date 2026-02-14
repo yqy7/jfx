@@ -25,7 +25,6 @@
 
 #pragma once
 
-#include "ExceptionOr.h"
 #include "IDBCursorDirection.h"
 #include "IDBCursorInfo.h"
 #include "IDBKeyPath.h"
@@ -33,7 +32,6 @@
 #include "IDBValue.h"
 #include "JSValueInWrappedObject.h"
 #include <JavaScriptCore/Strong.h>
-#include <variant>
 #include <wtf/WeakPtr.h>
 
 namespace WebCore {
@@ -42,16 +40,17 @@ class IDBGetResult;
 class IDBIndex;
 class IDBObjectStore;
 class IDBTransaction;
+template<typename> class ExceptionOr;
 
 class IDBCursor : public ScriptWrappable, public RefCounted<IDBCursor> {
-    WTF_MAKE_ISO_ALLOCATED(IDBCursor);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(IDBCursor);
 public:
     static Ref<IDBCursor> create(IDBObjectStore&, const IDBCursorInfo&);
     static Ref<IDBCursor> create(IDBIndex&, const IDBCursorInfo&);
 
     virtual ~IDBCursor();
 
-    using Source = std::variant<RefPtr<IDBObjectStore>, RefPtr<IDBIndex>>;
+    using Source = Variant<RefPtr<IDBObjectStore>, RefPtr<IDBIndex>>;
 
     const Source& source() const;
     IDBCursorDirection direction() const;
@@ -100,7 +99,7 @@ private:
 
     IDBCursorInfo m_info;
     Source m_source;
-    WeakPtr<IDBRequest> m_request;
+    WeakPtr<IDBRequest, WeakPtrImplWithEventTargetData> m_request;
 
     bool m_gotValue { false };
 

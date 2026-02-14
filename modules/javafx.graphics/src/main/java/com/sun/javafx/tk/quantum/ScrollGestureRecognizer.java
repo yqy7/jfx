@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,14 +28,10 @@ package com.sun.javafx.tk.quantum;
 import com.sun.glass.events.KeyEvent;
 import com.sun.glass.events.TouchEvent;
 
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.HashMap;
 import java.util.Map;
 import javafx.util.Duration;
-import javafx.event.EventType;
 import javafx.scene.input.ScrollEvent;
-import javafx.animation.Animation;
 import javafx.animation.Interpolator;
 import javafx.animation.KeyFrame;
 import javafx.animation.KeyValue;
@@ -50,18 +46,14 @@ class ScrollGestureRecognizer implements GestureRecognizer {
     private static double MAX_INITIAL_VELOCITY = 1000;
     private static double SCROLL_INERTIA_MILLIS = 1500;
     static {
-        @SuppressWarnings("removal")
-        var dummy = AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            String s = System.getProperty("com.sun.javafx.gestures.scroll.threshold");
-            if (s != null) {
-                SCROLL_THRESHOLD = Double.valueOf(s);
-            }
-            s = System.getProperty("com.sun.javafx.gestures.scroll.inertia");
-            if (s != null) {
-                SCROLL_INERTIA_ENABLED = Boolean.valueOf(s);
-            }
-            return null;
-        });
+        String s = System.getProperty("com.sun.javafx.gestures.scroll.threshold");
+        if (s != null) {
+            SCROLL_THRESHOLD = Double.valueOf(s);
+        }
+        s = System.getProperty("com.sun.javafx.gestures.scroll.inertia");
+        if (s != null) {
+            SCROLL_INERTIA_ENABLED = Boolean.valueOf(s);
+        }
     }
 
     private ViewScene scene;
@@ -73,8 +65,7 @@ class ScrollGestureRecognizer implements GestureRecognizer {
     private double scrollStartTime = 0;
     private double lastTouchEventTime = 0;
 
-    private Map<Long, TouchPointTracker> trackers =
-            new HashMap<Long, TouchPointTracker>();
+    private Map<Long, TouchPointTracker> trackers = new HashMap<>();
 
     private int modifiers;
     private boolean direct;
@@ -263,70 +254,58 @@ class ScrollGestureRecognizer implements GestureRecognizer {
         }
     }
 
-    @SuppressWarnings("removal")
     private void sendScrollStartedEvent(double xAbs, double yAbs, int touchCount) {
-        AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            if (scene.sceneListener != null) {
-                scene.sceneListener.scrollEvent(ScrollEvent.SCROLL_STARTED,
-                    0, 0,
-                    0, 0,
-                    1 /*xMultiplier*/, 1 /*yMultiplier*/,
-                    touchCount,
-                    0 /*scrollTextX*/, 0 /*scrollTextY*/,
-                    0 /*defaultTextX*/, 0 /*defaultTextY*/,
-                    centerX, centerY, xAbs, yAbs,
-                    (modifiers & KeyEvent.MODIFIER_SHIFT) != 0,
-                    (modifiers & KeyEvent.MODIFIER_CONTROL) != 0,
-                    (modifiers & KeyEvent.MODIFIER_ALT) != 0,
-                    (modifiers & KeyEvent.MODIFIER_WINDOWS) != 0,
-                    direct, false /*inertia*/);
-            }
-            return null;
-        }, scene.getAccessControlContext());
+        if (scene.sceneListener != null) {
+            scene.sceneListener.scrollEvent(ScrollEvent.SCROLL_STARTED,
+                0, 0,
+                0, 0,
+                1 /*xMultiplier*/, 1 /*yMultiplier*/,
+                touchCount,
+                0 /*scrollTextX*/, 0 /*scrollTextY*/,
+                0 /*defaultTextX*/, 0 /*defaultTextY*/,
+                centerX, centerY, xAbs, yAbs,
+                (modifiers & KeyEvent.MODIFIER_SHIFT) != 0,
+                (modifiers & KeyEvent.MODIFIER_CONTROL) != 0,
+                (modifiers & KeyEvent.MODIFIER_ALT) != 0,
+                (modifiers & KeyEvent.MODIFIER_WINDOWS) != 0,
+                direct, false /*inertia*/);
+        }
     }
 
-    @SuppressWarnings("removal")
     private void sendScrollEvent(boolean isInertia, double xAbs, double yAbs, int touchCount) {
-        AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            if (scene.sceneListener != null) {
-                scene.sceneListener.scrollEvent(ScrollEvent.SCROLL,
-                    deltaX, deltaY,
-                    totalDeltaX, totalDeltaY,
-                    1 /*xMultiplier*/, 1 /*yMultiplier*/,
-                    touchCount,
-                    0 /*scrollTextX*/, 0 /*scrollTextY*/,
-                    0 /*defaultTextX*/, 0 /*defaultTextY*/,
-                    centerX, centerY, xAbs, yAbs,
-                    (modifiers & KeyEvent.MODIFIER_SHIFT) != 0,
-                    (modifiers & KeyEvent.MODIFIER_CONTROL) != 0,
-                    (modifiers & KeyEvent.MODIFIER_ALT) != 0,
-                    (modifiers & KeyEvent.MODIFIER_WINDOWS) != 0,
-                    direct, isInertia);
-            }
-            return null;
-        }, scene.getAccessControlContext());
+        if (scene.sceneListener != null) {
+            scene.sceneListener.scrollEvent(ScrollEvent.SCROLL,
+                deltaX, deltaY,
+                totalDeltaX, totalDeltaY,
+                1 /*xMultiplier*/, 1 /*yMultiplier*/,
+                touchCount,
+                0 /*scrollTextX*/, 0 /*scrollTextY*/,
+                0 /*defaultTextX*/, 0 /*defaultTextY*/,
+                centerX, centerY, xAbs, yAbs,
+                (modifiers & KeyEvent.MODIFIER_SHIFT) != 0,
+                (modifiers & KeyEvent.MODIFIER_CONTROL) != 0,
+                (modifiers & KeyEvent.MODIFIER_ALT) != 0,
+                (modifiers & KeyEvent.MODIFIER_WINDOWS) != 0,
+                direct, isInertia);
+        }
     }
 
-    @SuppressWarnings("removal")
     private void sendScrollFinishedEvent(double xAbs, double yAbs, int touchCount) {
-        AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            if (scene.sceneListener != null) {
-                scene.sceneListener.scrollEvent(ScrollEvent.SCROLL_FINISHED,
-                    0, 0,
-                    totalDeltaX, totalDeltaY,
-                    1 /*xMultiplier*/, 1 /*yMultiplier*/,
-                    touchCount,
-                    0 /*scrollTextX*/, 0 /*scrollTextY*/,
-                    0 /*defaultTextX*/, 0 /*defaultTextY*/,
-                    centerX, centerY, xAbs, yAbs,
-                    (modifiers & KeyEvent.MODIFIER_SHIFT) != 0,
-                    (modifiers & KeyEvent.MODIFIER_CONTROL) != 0,
-                    (modifiers & KeyEvent.MODIFIER_ALT) != 0,
-                    (modifiers & KeyEvent.MODIFIER_WINDOWS) != 0,
-                    direct, false /*inertia*/);
-            }
-            return null;
-        }, scene.getAccessControlContext());
+        if (scene.sceneListener != null) {
+            scene.sceneListener.scrollEvent(ScrollEvent.SCROLL_FINISHED,
+                0, 0,
+                totalDeltaX, totalDeltaY,
+                1 /*xMultiplier*/, 1 /*yMultiplier*/,
+                touchCount,
+                0 /*scrollTextX*/, 0 /*scrollTextY*/,
+                0 /*defaultTextX*/, 0 /*defaultTextY*/,
+                centerX, centerY, xAbs, yAbs,
+                (modifiers & KeyEvent.MODIFIER_SHIFT) != 0,
+                (modifiers & KeyEvent.MODIFIER_CONTROL) != 0,
+                (modifiers & KeyEvent.MODIFIER_ALT) != 0,
+                (modifiers & KeyEvent.MODIFIER_WINDOWS) != 0,
+                direct, false /*inertia*/);
+        }
     }
 
     public void params(int modifiers, boolean direct) {

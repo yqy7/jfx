@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,15 +26,22 @@ package com.sun.glass.ui.gtk;
 
 import com.sun.glass.ui.Cursor;
 import com.sun.glass.events.WindowEvent;
+import com.sun.glass.ui.HeaderButtonMetrics;
 import com.sun.glass.ui.Pixels;
 import com.sun.glass.ui.Screen;
 import com.sun.glass.ui.View;
 import com.sun.glass.ui.Window;
+import com.sun.glass.ui.HeaderButtonOverlay;
+import java.lang.annotation.Native;
 
 class GtkWindow extends Window {
 
     public GtkWindow(Window owner, Screen screen, int styleMask) {
         super(owner, screen, styleMask);
+
+        if (isExtendedWindow()) {
+            prefHeaderButtonHeightProperty().subscribe(this::onPrefHeaderButtonHeightChanged);
+        }
     }
 
     @Override
@@ -47,6 +54,9 @@ class GtkWindow extends Window {
     protected native boolean _setView(long ptr, View view);
 
     @Override
+    protected native void _updateViewSize(long ptr);
+
+    @Override
     protected boolean _setMenubar(long ptr, long menubarPtr) {
         //TODO is it needed?
         return true;
@@ -55,8 +65,6 @@ class GtkWindow extends Window {
     private native void minimizeImpl(long ptr, boolean minimize);
 
     private native void maximizeImpl(long ptr, boolean maximize, boolean wasMaximized);
-
-    private native void setBoundsImpl(long ptr, int x, int y, boolean xSet, boolean ySet, int w, int h, int cw, int ch);
 
     private native void setVisibleImpl(long ptr, boolean visible);
 
@@ -90,6 +98,8 @@ class GtkWindow extends Window {
     @Override
     protected native void _setEnabled(long ptr, boolean enabled);
 
+    private native boolean _setSystemMinimumSize(long ptr, int width, int height);
+
     @Override
     protected native boolean _setMinimumSize(long ptr, int width, int height);
 
@@ -105,16 +115,9 @@ class GtkWindow extends Window {
     @Override
     protected native void _toBack(long ptr);
 
-    @Override
-    protected native void _enterModal(long ptr);
-
-    @Override
-    protected native void _enterModalWithWindow(long dialog, long window);
-
-    @Override
-    protected native void _exitModal(long ptr);
-
     protected native long _getNativeWindowImpl(long ptr);
+
+    private native void _showSystemMenu(long ptr, int x, int y);
 
     private native boolean isVisible(long ptr);
 
@@ -139,14 +142,7 @@ class GtkWindow extends Window {
         return maximize;
     }
 
-    private native void _showOrHideChildren(long ptr, boolean show);
-
     protected void notifyStateChanged(final int state) {
-        if (state == WindowEvent.MINIMIZE) {
-            _showOrHideChildren(getNativeHandle(), false);
-        } else if (state == WindowEvent.RESTORE) {
-            _showOrHideChildren(getNativeHandle(), true);
-        }
         switch (state) {
             case WindowEvent.MINIMIZE:
             case WindowEvent.MAXIMIZE:
@@ -181,27 +177,10 @@ class GtkWindow extends Window {
         return _getNativeWindowImpl(super.getNativeWindow());
     }
 
-    private native void _setGravity(long ptr, float xGravity, float yGravity);
-
     @Override
-    protected void _setBounds(long ptr, int x, int y, boolean xSet, boolean ySet, int w, int h, int cw, int ch, float xGravity, float yGravity) {
-        _setGravity(ptr, xGravity, yGravity);
-        setBoundsImpl(ptr, x, y, xSet, ySet, w, h, cw, ch);
-
-        if ((w <= 0) && (cw > 0) || (h <= 0) && (ch > 0)) {
-            final int[] extarr = new int[4];
-            getFrameExtents(ptr, extarr);
-
-            // TODO: ((w <= 0) && (cw <= 0)) || ((h <= 0) && (ch <= 0))
-            notifyResize(WindowEvent.RESIZE,
-                         ((w <= 0) && (cw > 0)) ? cw + extarr[0] + extarr[1]
-                                                : w,
-                         ((h <= 0) && (ch > 0)) ? ch + extarr[2] + extarr[3]
-                                                : h);
-        }
-    }
-
-    private native void getFrameExtents(long ptr, int[] extarr);
+    protected native void _setBounds(long ptr, int x, int y, boolean xSet, boolean ySet,
+                                       int w, int h, int cw, int ch,
+                                       float xGravity, float yGravity);
 
     @Override
     protected void _requestInput(long ptr, String text, int type, double width, double height,
@@ -220,5 +199,103 @@ class GtkWindow extends Window {
     public long getRawHandle() {
         long ptr = super.getRawHandle();
         return ptr == 0L ? 0L : _getNativeWindowImpl(ptr);
+    }
+
+    /**
+     * Opens a system menu at the specified coordinates.
+     *
+     * @param x the X coordinate in physical pixels
+     * @param y the Y coordinate in physical pixels
+     */
+    public void showSystemMenu(int x, int y) {
+        _showSystemMenu(super.getRawHandle(), x, y);
+    }
+
+    /**
+     * Creates or disposes the {@link HeaderButtonOverlay} when the preferred header button height has changed.
+     * <p>
+     * If the preferred height is zero, the overlay is disposed; if the preferred height is non-zero, the
+     * {@link #headerButtonOverlay} and {@link #headerButtonMetrics} properties will hold the overlay and
+     * its metrics.
+     *
+     * @param height the preferred header button height
+     */
+    private void onPrefHeaderButtonHeightChanged(Number height) {
+        // Return early if we can keep the existing overlay instance.
+        if (height.doubleValue() != 0 && headerButtonOverlay.get() != null) {
+            return;
+        }
+
+        if (headerButtonOverlay.get() instanceof HeaderButtonOverlay overlay) {
+            overlay.dispose();
+        }
+
+        if (height.doubleValue() == 0) {
+            headerButtonOverlay.set(null);
+            headerButtonMetrics.set(HeaderButtonMetrics.EMPTY);
+        } else {
+            HeaderButtonOverlay overlay = createHeaderButtonOverlay();
+            overlay.metricsProperty().subscribe(headerButtonMetrics::set);
+            headerButtonOverlay.set(overlay);
+        }
+    }
+
+    /**
+     * Creates a new {@code HeaderButtonOverlay} instance.
+     */
+    private HeaderButtonOverlay createHeaderButtonOverlay() {
+        var overlay = new HeaderButtonOverlay(
+            PlatformThemeObserver.getInstance().stylesheetProperty(),
+            isModal() || getOwner() != null, isUtilityWindow(),
+            (getStyleMask() & RIGHT_TO_LEFT) != 0);
+
+        // Set the system-defined absolute minimum size to the size of the window buttons area,
+        // regardless of whether the application has specified a smaller minimum size.
+        overlay.metricsProperty().subscribe(metrics -> {
+            int w = (int)(metrics.totalInsetWidth() * platformScaleX);
+            int h = (int)(metrics.maxInsetHeight() * platformScaleY);
+            _setSystemMinimumSize(super.getRawHandle(), w, h);
+        });
+
+        overlay.prefButtonHeightProperty().bind(prefHeaderButtonHeightProperty());
+        return overlay;
+    }
+
+    @Native private static final int HT_UNSPECIFIED = 0;
+    @Native private static final int HT_CAPTION = 1;
+    @Native private static final int HT_CLIENT = 2;
+
+    /**
+     * Classifies the window region at the specified physical coordinate.
+     * <p>
+     * This method is called from native code.
+     *
+     * @param x the X coordinate in physical pixels
+     * @param y the Y coordinate in physical pixels
+     */
+    @SuppressWarnings("unused")
+    private int nonClientHitTest(int x, int y) {
+        // A full-screen window has no draggable area.
+        if (view == null || view.isInFullscreen() || !isExtendedWindow()) {
+            return HT_CLIENT;
+        }
+
+        double wx = x / platformScaleX;
+        double wy = y / platformScaleY;
+
+        if (headerButtonOverlay.get() instanceof HeaderButtonOverlay overlay && overlay.buttonAt(wx, wy) != null) {
+            return HT_CLIENT;
+        }
+
+        View.EventHandler eventHandler = view.getEventHandler();
+        if (eventHandler == null) {
+            return HT_CLIENT;
+        }
+
+        return switch (eventHandler.pickHeaderArea(wx, wy)) {
+            case UNSPECIFIED -> HT_UNSPECIFIED;
+            case DRAGBAR -> HT_CAPTION;
+            case null, default -> HT_CLIENT;
+        };
     }
 }

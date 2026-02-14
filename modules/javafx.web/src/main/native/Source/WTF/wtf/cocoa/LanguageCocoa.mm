@@ -32,16 +32,17 @@
 #import <wtf/cocoa/RuntimeApplicationChecksCocoa.h>
 #import <wtf/cocoa/VectorCocoa.h>
 #import <wtf/spi/cocoa/NSLocaleSPI.h>
+#import <wtf/text/TextStream.h>
 #import <wtf/text/WTFString.h>
 
 namespace WTF {
 
 size_t indexOfBestMatchingLanguageInList(const String& language, const Vector<String>& languageList, bool& exactMatch)
 {
-    auto matchedLanguages = retainPtr([NSLocale matchedLanguagesFromAvailableLanguages:createNSArray(languageList).get() forPreferredLanguages:@[ static_cast<NSString *>(language) ]]);
+    auto matchedLanguages = retainPtr([NSLocale matchedLanguagesFromAvailableLanguages:createNSArray(languageList).get() forPreferredLanguages:@[ language.createNSString().get() ]]);
     if (![matchedLanguages count]) {
         exactMatch = false;
-        return languageList.size();
+        return notFound;
     }
 
     String firstMatchedLanguage = [matchedLanguages firstObject];
@@ -53,10 +54,21 @@ size_t indexOfBestMatchingLanguageInList(const String& language, const Vector<St
     return index;
 }
 
+LocaleComponents parseLocale(const String& localeIdentifier)
+{
+    auto locale = retainPtr([NSLocale localeWithLocaleIdentifier:localeIdentifier.createNSString().get()]);
+
+    return {
+        locale.get().languageCode,
+        locale.get().scriptCode,
+        locale.get().countryCode
+    };
+}
+
 bool canMinimizeLanguages()
 {
     static const bool result = []() -> bool {
-        return linkedOnOrAfter(SDKVersion::FirstThatMinimizesLanguages) && [NSLocale respondsToSelector:@selector(minimizedLanguagesFromLanguages:)];
+        return linkedOnOrAfterSDKWithBehavior(SDKAlignedBehavior::MinimizesLanguages) && [NSLocale respondsToSelector:@selector(minimizedLanguagesFromLanguages:)];
     }();
     return result;
 }
@@ -71,6 +83,16 @@ RetainPtr<CFArrayRef> minimizedLanguagesFromLanguages(CFArrayRef languages)
 ALLOW_NEW_API_WITHOUT_GUARDS_BEGIN
     return (__bridge CFArrayRef)[NSLocale minimizedLanguagesFromLanguages:(__bridge NSArray<NSString *> *)languages];
 ALLOW_NEW_API_WITHOUT_GUARDS_END
+}
+
+void overrideUserPreferredLanguages(const Vector<String>& override)
+{
+    LOG_WITH_STREAM(Language, stream << "Languages are being overridden to: " << override);
+    NSDictionary *existingArguments = [[NSUserDefaults standardUserDefaults] volatileDomainForName:NSArgumentDomain];
+    auto newArguments = adoptNS([existingArguments mutableCopy]);
+    [newArguments setValue:createNSArray(override).get() forKey:@"AppleLanguages"];
+    [[NSUserDefaults standardUserDefaults] setVolatileDomain:newArguments.get() forName:NSArgumentDomain];
+    languageDidChange();
 }
 
 }

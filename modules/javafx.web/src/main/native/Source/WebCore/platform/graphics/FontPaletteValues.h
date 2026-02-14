@@ -27,7 +27,6 @@
 
 #include "Color.h"
 #include "Gradient.h"
-#include <variant>
 #include <wtf/HashFunctions.h>
 #include <wtf/Vector.h>
 #include <wtf/text/AtomString.h>
@@ -63,11 +62,6 @@ struct FontPaletteIndex {
         if (type == Type::Integer)
             return integer == other.integer;
         return true;
-    }
-
-    bool operator!=(const FontPaletteIndex& other) const
-    {
-        return !(*this == other);
     }
 
     enum class Type : uint8_t {
@@ -117,11 +111,6 @@ public:
     bool operator==(const FontPaletteValues& other) const
     {
         return m_basePalette == other.m_basePalette && m_overrideColors == other.m_overrideColors;
-    }
-
-    bool operator!=(const FontPaletteValues& other) const
-    {
-        return !(*this == other);
     }
 
 private:

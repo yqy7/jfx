@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
- * Copyright (C) 2004, 2005, 2006 Apple Inc.  All rights reserved.
+ * Copyright (C) 2004-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,13 +29,20 @@
 
 #include "AffineTransform.h"
 #include "BitmapImage.h"
+#include "DeprecatedGlobalSettings.h"
 #include "GraphicsContext.h"
+#include "ImageAdapter.h"
 #include "ImageObserver.h"
 #include "Length.h"
 #include "MIMETypeRegistry.h"
+#include "NativeImage.h"
 #include "SVGImage.h"
+#if !PLATFORM(JAVA)
+#include "ShareableBitmap.h"
+#endif
 #include "SharedBuffer.h"
 #include <math.h>
+#include <wtf/CompletionHandler.h>
 #include <wtf/MainThread.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/URL.h>
@@ -55,11 +62,42 @@ Image::Image(ImageObserver* observer)
 
 Image::~Image() = default;
 
+RefPtr<ImageObserver> Image::imageObserver() const
+{
+    return m_imageObserver.get();
+}
+
+void Image::setImageObserver(RefPtr<ImageObserver>&& observer)
+{
+    m_imageObserver = observer.get();
+}
+
+ImageAdapter& Image::adapter()
+{
+    if (!m_adapter)
+        m_adapter = makeUnique<ImageAdapter>(*this);
+    return *m_adapter;
+}
+
+void Image::invalidateAdapter()
+{
+    if (!m_adapter)
+        return;
+    m_adapter->invalidate();
+}
+
 Image& Image::nullImage()
 {
     ASSERT(isMainThread());
     static Image& nullImage = BitmapImage::create().leakRef();
     return nullImage;
+}
+
+static bool isPDFResource(const String& mimeType, const URL& url)
+{
+    if (mimeType.isEmpty())
+        return url.path().endsWithIgnoringASCIICase(".pdf"_s);
+    return MIMETypeRegistry::isPDFMIMEType(mimeType);
 }
 
 RefPtr<Image> Image::create(ImageObserver& observer)
@@ -69,12 +107,14 @@ RefPtr<Image> Image::create(ImageObserver& observer)
     ASSERT(isMainThread());
 
     auto mimeType = observer.mimeType();
-    if (mimeType == "image/svg+xml")
-        return SVGImage::create(observer);
+    if (mimeType == "image/svg+xml"_s)
+        return SVGImage::create(&observer);
 
     auto url = observer.sourceUrl();
-    if (isPDFResource(mimeType, url) || isPostScriptResource(mimeType, url)) {
+    if (isPDFResource(mimeType, url)) {
 #if USE(CG) && !USE(WEBKIT_IMAGE_DECODERS)
+        if (!DeprecatedGlobalSettings::arePDFImagesEnabled())
+            return nullptr;
         return PDFDocumentImage::create(&observer);
 #else
         return nullptr;
@@ -83,26 +123,32 @@ RefPtr<Image> Image::create(ImageObserver& observer)
 
     return BitmapImage::create(&observer);
 }
+#if USE(CG)
+std::optional<Ref<Image>> Image::create(RefPtr<ShareableBitmap>&& bitmap)
+{
+    if (!bitmap)
+        return std::nullopt;
+    RefPtr image = bitmap->createImage();
+    if (!image)
+        return std::nullopt;
+    return image.releaseNonNull();
+}
+#endif
 
 bool Image::supportsType(const String& type)
 {
     return MIMETypeRegistry::isSupportedImageMIMEType(type);
 }
 
-bool Image::isPDFResource(const String& mimeType, const URL& url)
+void Image::subresourcesAreFinished(Document*, CompletionHandler<void()>&& completionHandler)
 {
-    if (mimeType.isEmpty())
-        return url.path().endsWithIgnoringASCIICase(".pdf");
-    return MIMETypeRegistry::isPDFMIMEType(mimeType);
+    completionHandler();
 }
 
-bool Image::isPostScriptResource(const String& mimeType, const URL& url)
+RefPtr<FragmentedSharedBuffer> Image::protectedData() const
 {
-    if (mimeType.isEmpty())
-        return url.path().endsWithIgnoringASCIICase(".ps");
-    return MIMETypeRegistry::isPostScriptMIMEType(mimeType);
+    return m_encodedImageData;
 }
-
 
 EncodedDataStatus Image::setData(RefPtr<FragmentedSharedBuffer>&& data, bool allDataReceived)
 {
@@ -141,29 +187,46 @@ void Image::fillWithSolidColor(GraphicsContext& ctxt, const FloatRect& dstRect, 
     ctxt.setCompositeOperation(previousOperator);
 }
 
-void Image::drawPattern(GraphicsContext& ctxt, const FloatRect& destRect, const FloatRect& tileRect, const AffineTransform& patternTransform,  const FloatPoint& phase, const FloatSize& spacing, const ImagePaintingOptions& options)
+RefPtr<NativeImage> Image::nativeImage(const DestinationColorSpace&)
 {
-    auto tileImage = preTransformedNativeImageForCurrentFrame(options.orientation() == ImageOrientation::FromImage);
+    return nullptr;
+}
+
+RefPtr<NativeImage> Image::nativeImageAtIndex(unsigned)
+{
+    return nativeImage();
+}
+
+RefPtr<NativeImage> Image::currentNativeImage()
+{
+    return nativeImage();
+}
+
+RefPtr<NativeImage> Image::currentPreTransformedNativeImage(ImageOrientation)
+{
+    return currentNativeImage();
+}
+
+void Image::drawPattern(GraphicsContext& ctxt, const FloatRect& destRect, const FloatRect& tileRect, const AffineTransform& patternTransform, const FloatPoint& phase, const FloatSize& spacing, ImagePaintingOptions options)
+{
+    RefPtr tileImage = currentPreTransformedNativeImage(options.orientation());
     if (!tileImage)
         return;
 
     ctxt.drawPattern(*tileImage, destRect, tileRect, patternTransform, phase, spacing, options);
 
-    if (imageObserver())
-        imageObserver()->didDraw(*this);
+    if (auto observer = imageObserver())
+        observer->didDraw(*this);
 }
 
-ImageDrawResult Image::drawTiled(GraphicsContext& ctxt, const FloatRect& destRect, const FloatPoint& srcPoint, const FloatSize& scaledTileSize, const FloatSize& spacing, const ImagePaintingOptions& options)
+ImageDrawResult Image::drawTiled(GraphicsContext& ctxt, const FloatRect& destRect, const FloatPoint& srcPoint, const FloatSize& scaledTileSize, const FloatSize& spacing, ImagePaintingOptions options)
 {
-    Color color = singlePixelSolidColor();
-    if (color.isValid()) {
-        fillWithSolidColor(ctxt, destRect, color, options.compositeOperator());
+    if (auto color = singlePixelSolidColor()) {
+        fillWithSolidColor(ctxt, destRect, *color, options.compositeOperator());
         return ImageDrawResult::DidDraw;
     }
 
-#if !PLATFORM(JAVA)
-    ASSERT(!isBitmapImage() || notSolidColor());
-#endif
+    ASSERT_IMPLIES(isBitmapImage(), !hasSolidColor());
 
     FloatSize intrinsicTileSize = size();
     if (hasRelativeWidth())
@@ -259,11 +322,10 @@ ImageDrawResult Image::drawTiled(GraphicsContext& ctxt, const FloatRect& destRec
 }
 
 // FIXME: Merge with the other drawTiled eventually, since we need a combination of both for some things.
-ImageDrawResult Image::drawTiled(GraphicsContext& ctxt, const FloatRect& dstRect, const FloatRect& srcRect, const FloatSize& tileScaleFactor, TileRule hRule, TileRule vRule, const ImagePaintingOptions& options)
+ImageDrawResult Image::drawTiled(GraphicsContext& ctxt, const FloatRect& dstRect, const FloatRect& srcRect, const FloatSize& tileScaleFactor, TileRule hRule, TileRule vRule, ImagePaintingOptions options)
 {
-    Color color = singlePixelSolidColor();
-    if (color.isValid()) {
-        fillWithSolidColor(ctxt, dstRect, color, options.compositeOperator());
+    if (auto color = singlePixelSolidColor()) {
+        fillWithSolidColor(ctxt, dstRect, *color, options.compositeOperator());
         return ImageDrawResult::DidDraw;
     }
 
@@ -275,16 +337,17 @@ ImageDrawResult Image::drawTiled(GraphicsContext& ctxt, const FloatRect& dstRect
     bool centerOnGapVertically = false;
     switch (hRule) {
     case RoundTile: {
-        int numItems = std::max<int>(floorf(dstRect.width() / srcRect.width()), 1);
+        float scaledSourceWidth = srcRect.width() * tileScale.width();
+        int numItems = std::max<int>(floorf(dstRect.width() / scaledSourceWidth), 1);
         tileScale.setWidth(dstRect.width() / (srcRect.width() * numItems));
         break;
     }
     case SpaceTile: {
-        int numItems = floorf(dstRect.width() / srcRect.width());
+        float scaledSourceWidth = srcRect.width() * tileScale.width();
+        int numItems = floorf(dstRect.width() / scaledSourceWidth);
         if (!numItems)
             return ImageDrawResult::DidNothing;
-        spacing.setWidth((dstRect.width() - srcRect.width() * numItems) / (numItems + 1));
-        tileScale.setWidth(1);
+        spacing.setWidth((dstRect.width() - scaledSourceWidth * numItems) / (numItems + 1));
         centerOnGapHorizonally = !(numItems & 1);
         break;
     }
@@ -295,16 +358,17 @@ ImageDrawResult Image::drawTiled(GraphicsContext& ctxt, const FloatRect& dstRect
 
     switch (vRule) {
     case RoundTile: {
-        int numItems = std::max<int>(floorf(dstRect.height() / srcRect.height()), 1);
+        float scaledSourceHeight = srcRect.height() * tileScale.height();
+        int numItems = std::max<int>(floorf(dstRect.height() / scaledSourceHeight), 1);
         tileScale.setHeight(dstRect.height() / (srcRect.height() * numItems));
         break;
         }
     case SpaceTile: {
-        int numItems = floorf(dstRect.height() / srcRect.height());
+        float scaledSourceHeight = srcRect.height() * tileScale.height();
+        int numItems = floorf(dstRect.height() / scaledSourceHeight);
         if (!numItems)
             return ImageDrawResult::DidNothing;
-        spacing.setHeight((dstRect.height() - srcRect.height() * numItems) / (numItems + 1));
-        tileScale.setHeight(1);
+        spacing.setHeight((dstRect.height() - scaledSourceHeight * numItems) / (numItems + 1));
         centerOnGapVertically = !(numItems & 1);
         break;
     }
@@ -345,6 +409,11 @@ void Image::computeIntrinsicDimensions(Length& intrinsicWidth, Length& intrinsic
     intrinsicHeight = Length(intrinsicRatio.height(), LengthType::Fixed);
 }
 
+FloatSize Image::sourceSize(ImageOrientation orientation) const
+{
+    return size(orientation);
+}
+
 void Image::startAnimationAsynchronously()
 {
     if (!m_animationStartTimer)
@@ -358,16 +427,28 @@ DestinationColorSpace Image::colorSpace()
 {
     return DestinationColorSpace::SRGB();
 }
+#if USE(CG)
+RefPtr<ShareableBitmap> Image::toShareableBitmap() const
+{
+    RefPtr bitmap = ShareableBitmap::create({ IntSize(size()) });
+    std::unique_ptr graphicsContext = bitmap->createGraphicsContext();
+    if (!graphicsContext)
+        return nullptr;
+
+    graphicsContext->drawImage(const_cast<Image&>(*this), IntPoint());
+    return bitmap;
+}
+#endif
 
 void Image::dump(TextStream& ts) const
 {
     if (isAnimated())
-        ts.dumpProperty("animated", isAnimated());
+        ts.dumpProperty("animated"_s, isAnimated());
 
     if (isNull())
-        ts.dumpProperty("is-null-image", true);
+        ts.dumpProperty("is-null-image"_s, true);
 
-    ts.dumpProperty("size", size());
+    ts.dumpProperty("size"_s, size());
 }
 
 TextStream& operator<<(TextStream& ts, const Image& image)
@@ -375,35 +456,41 @@ TextStream& operator<<(TextStream& ts, const Image& image)
     TextStream::GroupScope scope(ts);
 
     if (image.isBitmapImage())
-        ts << "bitmap image";
+        ts << "bitmap image"_s;
     else if (image.isCrossfadeGeneratedImage())
-        ts << "crossfade image";
+        ts << "crossfade image"_s;
     else if (image.isNamedImageGeneratedImage())
-        ts << "named image";
+        ts << "named image"_s;
     else if (image.isGradientImage())
-        ts << "gradient image";
+        ts << "gradient image"_s;
     else if (image.isSVGImage())
-        ts << "svg image";
+        ts << "svg image"_s;
+    else if (image.isSVGResourceImage())
+        ts << "svg resource image"_s;
     else if (image.isSVGImageForContainer())
-        ts << "svg image for container";
+        ts << "svg image for container"_s;
     else if (image.isPDFDocumentImage())
-        ts << "pdf image";
+        ts << "pdf image"_s;
 
     image.dump(ts);
     return ts;
 }
 
-#if !PLATFORM(COCOA) && !PLATFORM(GTK) && !PLATFORM(WIN) && !PLATFORM(JAVA)
-
-void BitmapImage::invalidatePlatformData()
+bool Image::animationPending() const
 {
+    return m_animationStartTimer && m_animationStartTimer->isActive();
 }
 
-Ref<Image> Image::loadPlatformResource(const char* resource)
+bool Image::gSystemAllowsAnimationControls = false;
+
+void Image::setSystemAllowsAnimationControls(bool allowsControls)
 {
-    WTFLogAlways("WARNING: trying to load platform resource '%s'", resource);
-    return BitmapImage::create();
+    gSystemAllowsAnimationControls = allowsControls;
 }
 
-#endif // !PLATFORM(COCOA) && !PLATFORM(GTK) && !PLATFORM(WIN)
+std::optional<Color> Image::singlePixelSolidColor() const
+{
+    return std::nullopt;
 }
+
+} // namespace WebCore

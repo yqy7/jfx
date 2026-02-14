@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2012 Nokia Corporation and/or its subsidiary(-ies)
+ * Copyright (C) 2025 Samuel Weinig <sam@webkit.org>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,33 +21,30 @@
 #include "config.h"
 #include "CSSBorderImage.h"
 
+#include "CSSPropertyParserConsumer+Background.h"
 #include "CSSValueList.h"
 
 namespace WebCore {
 
-Ref<CSSValueList> createBorderImageValue(RefPtr<CSSValue>&& image, RefPtr<CSSValue>&& imageSlice, RefPtr<CSSValue>&& borderSlice, RefPtr<CSSValue>&& outset, RefPtr<CSSValue>&& repeat)
+Ref<CSSValueList> createBorderImageValue(CSS::BorderImageComponents&& components)
 {
-    auto list = CSSValueList::createSpaceSeparated();
-    if (image)
-        list.get().append(*image);
-
-    if (borderSlice || outset) {
-        auto listSlash = CSSValueList::createSlashSeparated();
-        if (imageSlice)
-            listSlash.get().append(imageSlice.releaseNonNull());
-
-        if (borderSlice)
-            listSlash.get().append(borderSlice.releaseNonNull());
-
-        if (outset)
-            listSlash.get().append(outset.releaseNonNull());
-
-        list.get().append(WTFMove(listSlash));
-    } else if (imageSlice)
-        list.get().append(imageSlice.releaseNonNull());
-    if (repeat)
-        list.get().append(repeat.releaseNonNull());
-    return list;
+    CSSValueListBuilder list;
+    if (components.source)
+        list.append(components.source.releaseNonNull());
+    if (components.width || components.outset) {
+        CSSValueListBuilder listSlash;
+        if (components.slice)
+            listSlash.append(components.slice.releaseNonNull());
+        if (components.width)
+            listSlash.append(components.width.releaseNonNull());
+        if (components.outset)
+            listSlash.append(components.outset.releaseNonNull());
+        list.append(CSSValueList::createSlashSeparated(WTFMove(listSlash)));
+    } else if (components.slice)
+        list.append(components.slice.releaseNonNull());
+    if (components.repeat)
+        list.append(components.repeat.releaseNonNull());
+    return CSSValueList::createSpaceSeparated(WTFMove(list));
 }
 
 } // namespace WebCore

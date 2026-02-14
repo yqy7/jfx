@@ -25,7 +25,6 @@
 
 #pragma once
 
-#include "ExecutableToCodeBlockEdge.h"
 #include "GlobalExecutable.h"
 
 namespace JSC {
@@ -56,22 +55,26 @@ public:
 
     static void destroy(JSCell*);
 
-    ProgramCodeBlock* codeBlock()
+    ProgramCodeBlock* codeBlock() const
     {
-        return bitwise_cast<ProgramCodeBlock*>(ExecutableToCodeBlockEdge::unwrap(m_programCodeBlock.get()));
+        return std::bit_cast<ProgramCodeBlock*>(Base::codeBlock());
     }
 
-    Ref<JITCode> generatedJITCode()
+    UnlinkedProgramCodeBlock* unlinkedCodeBlock() const
+    {
+        return std::bit_cast<UnlinkedProgramCodeBlock*>(Base::unlinkedCodeBlock());
+    }
+
+    Ref<JSC::JITCode> generatedJITCode()
     {
         return generatedJITCodeForCall();
     }
 
-    static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue proto)
-    {
-        return Structure::create(vm, globalObject, proto, TypeInfo(ProgramExecutableType, StructureFlags), info());
-    }
+    inline static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
     DECLARE_INFO;
+
+    DECLARE_VISIT_CHILDREN;
 
     TemplateObjectMap& ensureTemplateObjectMap(VM&);
 
@@ -81,10 +84,6 @@ private:
 
     ProgramExecutable(JSGlobalObject*, const SourceCode&);
 
-    DECLARE_VISIT_CHILDREN;
-
-    WriteBarrier<UnlinkedProgramCodeBlock> m_unlinkedProgramCodeBlock;
-    WriteBarrier<ExecutableToCodeBlockEdge> m_programCodeBlock;
     std::unique_ptr<TemplateObjectMap> m_templateObjectMap;
 };
 

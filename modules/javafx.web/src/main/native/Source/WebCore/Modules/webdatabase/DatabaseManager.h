@@ -26,7 +26,6 @@
 #pragma once
 
 #include "DatabaseDetails.h"
-#include "ExceptionOr.h"
 #include <wtf/Assertions.h>
 #include <wtf/HashSet.h>
 #include <wtf/Lock.h>
@@ -41,7 +40,8 @@ class DatabaseTaskSynchronizer;
 class Document;
 class Exception;
 class SecurityOrigin;
-struct SecurityOriginData;
+class SecurityOriginData;
+template<typename> class ExceptionOr;
 
 class DatabaseManager {
     WTF_MAKE_NONCOPYABLE(DatabaseManager);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,15 +28,13 @@ package com.sun.javafx.font;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Properties;
 
-class FontConfigManager {
+public class FontConfigManager {
 
     static boolean debugFonts = false;
     static boolean useFontConfig = true;
@@ -44,18 +42,12 @@ class FontConfigManager {
     static boolean useEmbeddedFontSupport = false;
 
     static {
-        @SuppressWarnings("removal")
-        var dummy = AccessController.doPrivileged(
-                (PrivilegedAction<Void>) () -> {
-                    String dbg = System.getProperty("prism.debugfonts", "");
-                    debugFonts = "true".equals(dbg);
-                    String ufc = System.getProperty("prism.useFontConfig", "true");
-                    useFontConfig = "true".equals(ufc);
-                    String emb = System.getProperty("prism.embeddedfonts", "");
-                    useEmbeddedFontSupport = "true".equals(emb);
-                    return null;
-                }
-        );
+        String dbg = System.getProperty("prism.debugfonts", "");
+        debugFonts = "true".equals(dbg);
+        String ufc = System.getProperty("prism.useFontConfig", "true");
+        useFontConfig = "true".equals(ufc);
+        String emb = System.getProperty("prism.embeddedfonts", "");
+        useEmbeddedFontSupport = "true".equals(emb);
     }
 
     /* These next three classes are just data structures.
@@ -348,13 +340,7 @@ class FontConfigManager {
         private static boolean fontDirFromJRE = false;
 
         static {
-            @SuppressWarnings("removal")
-            var dummy = AccessController.doPrivileged(
-                    (PrivilegedAction<Void>) () -> {
-                        initEmbeddedFonts();
-                    return null;
-                    }
-            );
+            initEmbeddedFonts();
         }
 
         private static void initEmbeddedFonts() {
@@ -399,11 +385,8 @@ class FontConfigManager {
         }
 
 
-        @SuppressWarnings("removal")
         private static boolean exists(final File f) {
-            return AccessController.doPrivileged(
-                    (PrivilegedAction<Boolean>) () -> f.exists()
-            );
+            return f.exists();
         }
 
         // this mapping is used in the embedded world when
@@ -478,8 +461,7 @@ class FontConfigManager {
                 String fcFamily = fonts[f].fcFamily;
                 String styleStr = getStyleStr(fonts[f].style);
                 String key = fcFamily+"."+styleStr+".";
-                ArrayList<FontConfigFont> allFonts =
-                      new ArrayList<FontConfigFont>();
+                ArrayList<FontConfigFont> allFonts = new ArrayList<>();
                 int i=0;
                 while (true) {
                     String file = props.getProperty(key+i+".file");
@@ -545,24 +527,18 @@ class FontConfigManager {
              Locale locale)
         {
             final Properties props = new Properties();
-            @SuppressWarnings("removal")
-            var dummy = AccessController.doPrivileged(
-                    (PrivilegedAction<Void>) () -> {
-                        try {
-                            String lFile = fontDir+"/allfonts.properties";
-                            FileInputStream fis = new FileInputStream(lFile);
-                            props.load(fis);
-                            fis.close();
-                        } catch (IOException ioe) {
-                            props.clear();
-                            if (debugFonts) {
-                                System.err.println(ioe);
-                                System.err.println("Fall back to opening the files");
-                            }
-                        }
-                        return null;
-                    }
-            );
+            try {
+                String lFile = fontDir+"/allfonts.properties";
+                FileInputStream fis = new FileInputStream(lFile);
+                props.load(fis);
+                fis.close();
+            } catch (IOException ioe) {
+                props.clear();
+                if (debugFonts) {
+                    System.err.println(ioe);
+                    System.err.println("Fall back to opening the files");
+                }
+            }
 
             if (!props.isEmpty()) {
                 int maxFont = Integer.MAX_VALUE;
@@ -594,7 +570,7 @@ class FontConfigManager {
                     ArrayList<String> familyArr =
                         familyToFontListMap.get(familyLC);
                     if (familyArr == null) {
-                        familyArr = new ArrayList<String>(4);
+                        familyArr = new ArrayList<>(4);
                         familyToFontListMap.put(familyLC, familyArr);
                     }
                     familyArr.add(font);

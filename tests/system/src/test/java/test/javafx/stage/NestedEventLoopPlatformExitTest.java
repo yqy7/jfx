@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,11 +33,13 @@ import javafx.scene.Group;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
 import javafx.stage.WindowEvent;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import test.util.Util;
 
+@Timeout(value=20000, unit=TimeUnit.MILLISECONDS)
 public class NestedEventLoopPlatformExitTest {
 
     // Used to launch the application before running any test
@@ -58,25 +60,23 @@ public class NestedEventLoopPlatformExitTest {
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() throws InterruptedException {
-        // Start the Application
-        new Thread(() -> Application.launch(TestApp.class, (String[])null)).start();
-        Assert.assertTrue (launchLatch.await(15, TimeUnit.SECONDS));
+        Util.launch(launchLatch, TestApp.class);
     }
 
     // Verify that Platform.exit can be called while the NestedEventLoop is
     // running
-    @Test(timeout = 20000)
+    @Test
     public void testPlatformExitWithNestedEventLoop() {
         Util.runAndWait(
             () -> {
                 final long nestedLoopEventKey = 1024L;
-                Assert.assertFalse(Platform.isNestedLoopRunning());
+                Assertions.assertFalse(Platform.isNestedLoopRunning());
                 Platform.enterNestedEventLoop(nestedLoopEventKey);
             },
             () -> {
-                Assert.assertTrue(Platform.isNestedLoopRunning());
+                Assertions.assertTrue(Platform.isNestedLoopRunning());
                 Platform.exit();
             }
         );

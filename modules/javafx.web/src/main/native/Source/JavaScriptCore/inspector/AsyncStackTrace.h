@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,9 +31,10 @@
 
 namespace Inspector {
 
+class ScriptCallFrame;
 class ScriptCallStack;
 
-class JS_EXPORT_PRIVATE AsyncStackTrace : public RefCounted<AsyncStackTrace> {
+class AsyncStackTrace : public RefCounted<AsyncStackTrace> {
 public:
     enum class State : uint8_t {
         Pending,
@@ -47,13 +48,22 @@ public:
     bool isPending() const;
     bool isLocked() const;
 
+    JS_EXPORT_PRIVATE const ScriptCallFrame& at(size_t) const;
+    JS_EXPORT_PRIVATE size_t size() const;
+    JS_EXPORT_PRIVATE bool topCallFrameIsBoundary() const;
+    bool truncated() const { return m_truncated; }
+
+    const RefPtr<AsyncStackTrace>& parentStackTrace() const { return m_parent; }
+
     void willDispatchAsyncCall(size_t maxDepth);
     void didDispatchAsyncCall();
     void didCancelAsyncCall();
 
-    Ref<Protocol::Console::StackTrace> buildInspectorObject() const;
+    // May be nullptr if the async stack trace doesn't contain any actionable information.
+    // For example, if each parentStackTrace is just the boundary frame with nothing else in it.
+    RefPtr<Protocol::Console::StackTrace> buildInspectorObject() const;
 
-    ~AsyncStackTrace();
+    JS_EXPORT_PRIVATE ~AsyncStackTrace();
 
 private:
     AsyncStackTrace(Ref<ScriptCallStack>&&, bool, RefPtr<AsyncStackTrace>);
@@ -61,7 +71,7 @@ private:
     void truncate(size_t maxDepth);
     void remove();
 
-    Ref<ScriptCallStack> m_callStack;
+    const Ref<ScriptCallStack> m_callStack;
     RefPtr<AsyncStackTrace> m_parent;
     unsigned m_childCount { 0 };
     State m_state { State::Pending };

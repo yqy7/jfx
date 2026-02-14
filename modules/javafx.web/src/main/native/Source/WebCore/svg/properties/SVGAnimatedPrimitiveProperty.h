@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2019 Apple Inc.  All rights reserved.
+ * Copyright (C) 2018-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include "ExceptionOr.h"
 #include "SVGAnimatedProperty.h"
 #include "SVGSharedPrimitiveProperty.h"
 
@@ -120,18 +121,16 @@ public:
     // Controlling the instance animation.
     void instanceStartAnimation(SVGAttributeAnimator& animator, SVGAnimatedProperty& animated) override
     {
-        if (isAnimating())
-            return;
-        m_animVal = static_cast<SVGAnimatedPrimitiveProperty&>(animated).m_animVal;
+        if (!isAnimating())
+            m_animVal = static_cast<SVGAnimatedPrimitiveProperty&>(animated).m_animVal;
         SVGAnimatedProperty::instanceStartAnimation(animator, animated);
     }
 
     void instanceStopAnimation(SVGAttributeAnimator& animator) override
     {
-        if (!isAnimating())
-            return;
-        m_animVal = nullptr;
         SVGAnimatedProperty::instanceStopAnimation(animator);
+        if (!isAnimating())
+            m_animVal = nullptr;
     }
 
 protected:
@@ -154,7 +153,7 @@ protected:
         return m_animVal;
     }
 
-    Ref<SVGSharedPrimitiveProperty<PropertyType>> m_baseVal;
+    const Ref<SVGSharedPrimitiveProperty<PropertyType>> m_baseVal;
     mutable RefPtr<SVGSharedPrimitiveProperty<PropertyType>> m_animVal;
 };
 

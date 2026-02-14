@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2023 Apple Inc. All rights reserved.
  * Copyright (C) 2007 Alp Toker <alp@atoker.com>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,20 +30,29 @@
 #include "FloatRect.h"
 #include <wtf/HashFunctions.h>
 #include <wtf/Hasher.h>
+#include <wtf/StdLibExtras.h>
+#include <wtf/text/TextStream.h>
 
 namespace WebCore {
 
-Ref<Gradient> Gradient::create(Data&& data, ColorInterpolationMethod colorInterpolationMethod, GradientSpreadMethod spreadMethod, GradientColorStops&& stops)
+Ref<Gradient> Gradient::create(Data&& data, ColorInterpolationMethod colorInterpolationMethod, GradientSpreadMethod spreadMethod, GradientColorStops&& stops, std::optional<RenderingResourceIdentifier> renderingResourceIdentifier)
 {
-    return adoptRef(*new Gradient(WTFMove(data), colorInterpolationMethod, spreadMethod, WTFMove(stops)));
+    return adoptRef(*new Gradient(WTFMove(data), colorInterpolationMethod, spreadMethod, WTFMove(stops), renderingResourceIdentifier));
 }
 
-Gradient::Gradient(Data&& data, ColorInterpolationMethod colorInterpolationMethod, GradientSpreadMethod spreadMethod, GradientColorStops&& stops)
-    : m_data { WTFMove(data) }
+Gradient::Gradient(Data&& data, ColorInterpolationMethod colorInterpolationMethod, GradientSpreadMethod spreadMethod, GradientColorStops&& stops, std::optional<RenderingResourceIdentifier> renderingResourceIdentifier)
+    : RenderingResource(renderingResourceIdentifier)
+    , m_data { WTFMove(data) }
     , m_colorInterpolationMethod { colorInterpolationMethod }
     , m_spreadMethod { spreadMethod }
     , m_stops { WTFMove(stops) }
 {
+}
+
+Gradient::~Gradient()
+{
+    for (auto& observer : m_observers)
+        observer.willDestroyGradient(renderingResourceIdentifier());
 }
 
 void Gradient::adjustParametersForTiledDrawing(FloatSize& size, FloatRect& srcRect, const FloatSize& spacing)
@@ -120,4 +129,29 @@ unsigned Gradient::hash() const
     return m_cachedHash;
 }
 
+TextStream& operator<<(TextStream& ts, const Gradient& gradient)
+{
+    WTF::switchOn(gradient.data(),
+        [&] (const Gradient::LinearData& data) {
+            ts.dumpProperty("p0"_s, data.point0);
+            ts.dumpProperty("p1"_s, data.point1);
+        },
+        [&] (const Gradient::RadialData& data) {
+            ts.dumpProperty("p0"_s, data.point0);
+            ts.dumpProperty("p1"_s, data.point1);
+            ts.dumpProperty("start-radius"_s, data.startRadius);
+            ts.dumpProperty("end-radius"_s, data.endRadius);
+            ts.dumpProperty("aspect-ratio"_s, data.aspectRatio);
+        },
+        [&] (const Gradient::ConicData& data) {
+            ts.dumpProperty("p0"_s, data.point0);
+            ts.dumpProperty("angle-radians"_s, data.angleRadians);
+        }
+    );
+    ts.dumpProperty("color-interpolation-method"_s, gradient.colorInterpolationMethod());
+    ts.dumpProperty("spread-method"_s, gradient.spreadMethod());
+    ts.dumpProperty("stops"_s, gradient.stops());
+    return ts;
 }
+
+} // namespace WebCore

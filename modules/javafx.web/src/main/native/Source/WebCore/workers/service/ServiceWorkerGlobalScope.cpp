@@ -26,18 +26,22 @@
 #include "config.h"
 #include "ServiceWorkerGlobalScope.h"
 
-#if ENABLE(SERVICE_WORKER)
-
 #include "Document.h"
 #include "EventLoop.h"
 #include "EventNames.h"
+#include "EventTargetInlines.h"
+#include "EventTargetInterfaces.h"
 #include "ExtendableEvent.h"
-#include "Frame.h"
+#include "FetchEvent.h"
 #include "FrameLoader.h"
-#include "FrameLoaderClient.h"
 #include "JSDOMPromiseDeferred.h"
+#include "LocalFrame.h"
+#include "LocalFrameLoaderClient.h"
+#include "Logging.h"
 #include "NotificationEvent.h"
+#include "PushEvent.h"
 #include "SWContextManager.h"
+#include "SWServer.h"
 #include "ServiceWorker.h"
 #include "ServiceWorkerClient.h"
 #include "ServiceWorkerClients.h"
@@ -46,51 +50,86 @@
 #include "ServiceWorkerWindowClient.h"
 #include "WebCoreJSClientData.h"
 #include "WorkerNavigator.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(ServiceWorkerGlobalScope);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(ServiceWorkerGlobalScope);
 
-Ref<ServiceWorkerGlobalScope> ServiceWorkerGlobalScope::create(ServiceWorkerContextData&& contextData, ServiceWorkerData&& workerData, const WorkerParameters& params, Ref<SecurityOrigin>&& origin, ServiceWorkerThread& thread, Ref<SecurityOrigin>&& topOrigin, IDBClient::IDBConnectionProxy* connectionProxy, SocketProvider* socketProvider, std::unique_ptr<NotificationClient>&& notificationClient, PAL::SessionID sessionID)
+Ref<ServiceWorkerGlobalScope> ServiceWorkerGlobalScope::create(ServiceWorkerContextData&& contextData, ServiceWorkerData&& workerData, const WorkerParameters& params, Ref<SecurityOrigin>&& origin, ServiceWorkerThread& thread, Ref<SecurityOrigin>&& topOrigin, IDBClient::IDBConnectionProxy* connectionProxy, SocketProvider* socketProvider, std::unique_ptr<NotificationClient>&& notificationClient, std::unique_ptr<WorkerClient>&& workerClient)
 {
-    auto scope = adoptRef(*new ServiceWorkerGlobalScope { WTFMove(contextData), WTFMove(workerData), params, WTFMove(origin), thread, WTFMove(topOrigin), connectionProxy, socketProvider, WTFMove(notificationClient), sessionID });
+    auto scope = adoptRef(*new ServiceWorkerGlobalScope { WTFMove(contextData), WTFMove(workerData), params, WTFMove(origin), thread, WTFMove(topOrigin), connectionProxy, socketProvider, WTFMove(notificationClient), WTFMove(workerClient) });
+    scope->addToContextsMap();
     scope->applyContentSecurityPolicyResponseHeaders(params.contentSecurityPolicyResponseHeaders);
     scope->notifyServiceWorkerPageOfCreationIfNecessary();
     return scope;
 }
 
-ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(ServiceWorkerContextData&& contextData, ServiceWorkerData&& workerData, const WorkerParameters& params, Ref<SecurityOrigin>&& origin, ServiceWorkerThread& thread, Ref<SecurityOrigin>&& topOrigin, IDBClient::IDBConnectionProxy* connectionProxy, SocketProvider* socketProvider, std::unique_ptr<NotificationClient>&& notificationClient, PAL::SessionID sessionID)
-    : WorkerGlobalScope(WorkerThreadType::ServiceWorker, params, WTFMove(origin), thread, WTFMove(topOrigin), connectionProxy, socketProvider)
+ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(ServiceWorkerContextData&& contextData, ServiceWorkerData&& workerData, const WorkerParameters& params, Ref<SecurityOrigin>&& origin, ServiceWorkerThread& thread, Ref<SecurityOrigin>&& topOrigin, IDBClient::IDBConnectionProxy* connectionProxy, SocketProvider* socketProvider, std::unique_ptr<NotificationClient>&& notificationClient, std::unique_ptr<WorkerClient>&& workerClient)
+    : WorkerGlobalScope(WorkerThreadType::ServiceWorker, params, WTFMove(origin), thread, WTFMove(topOrigin), connectionProxy, socketProvider, WTFMove(workerClient))
     , m_contextData(WTFMove(contextData))
-    , m_registration(ServiceWorkerRegistration::getOrCreate(*this, navigator().serviceWorker(), WTFMove(m_contextData.registration)))
+    , m_registration(ServiceWorkerRegistration::getOrCreate(*this, protectedNavigator()->serviceWorker(), WTFMove(m_contextData.registration)))
     , m_serviceWorker(ServiceWorker::getOrCreate(*this, WTFMove(workerData)))
     , m_clients(ServiceWorkerClients::create())
-    , m_sessionID(sessionID)
     , m_notificationClient(WTFMove(notificationClient))
+    , m_userGestureTimer(*this, &ServiceWorkerGlobalScope::resetUserGesture)
 {
 }
 
 ServiceWorkerGlobalScope::~ServiceWorkerGlobalScope()
 {
+    // We need to remove from the contexts map very early in the destructor so that calling postTask() on this WorkerGlobalScope from another thread is safe.
+    removeFromContextsMap();
+
     // NotificationClient might have some interactions pending with the main thread,
     // so it should also be destroyed there.
     callOnMainThread([notificationClient = WTFMove(m_notificationClient)] { });
 }
 
+void ServiceWorkerGlobalScope::dispatchPushEvent(PushEvent& pushEvent)
+{
+#if ENABLE(DECLARATIVE_WEB_PUSH)
+    ASSERT(!m_declarativePushEvent && !m_pushEvent);
+#else
+    ASSERT(!m_pushEvent);
+#endif
+
+    m_pushEvent = pushEvent;
+    m_lastPushEventTime = MonotonicTime::now();
+    dispatchEvent(pushEvent);
+    m_pushEvent = nullptr;
+}
+
+#if ENABLE(DECLARATIVE_WEB_PUSH)
+void ServiceWorkerGlobalScope::dispatchDeclarativePushEvent(PushEvent& event)
+{
+    ASSERT(!m_declarativePushEvent && !m_pushEvent);
+    m_declarativePushEvent = event;
+    m_lastPushEventTime = MonotonicTime::now();
+    dispatchEvent(event);
+}
+
+void ServiceWorkerGlobalScope::clearDeclarativePushEvent()
+{
+    ASSERT(m_declarativePushEvent);
+    m_declarativePushEvent = nullptr;
+}
+#endif
+
 void ServiceWorkerGlobalScope::notifyServiceWorkerPageOfCreationIfNecessary()
 {
-    auto serviceWorkerPage = this->serviceWorkerPage();
+    RefPtr serviceWorkerPage = this->serviceWorkerPage();
     if (!serviceWorkerPage)
         return;
 
     ASSERT(isMainThread());
     serviceWorkerPage->setServiceWorkerGlobalScope(*this);
 
-    Vector<Ref<DOMWrapperWorld>> worlds;
-    static_cast<JSVMClientData*>(vm().clientData)->getAllWorlds(worlds);
-    for (auto& world : worlds)
-        serviceWorkerPage->mainFrame().loader().client().dispatchServiceWorkerGlobalObjectAvailable(world);
+    if (RefPtr localMainFrame = dynamicDowncast<LocalFrame>(serviceWorkerPage->mainFrame())) {
+        // FIXME: We currently do not support non-normal worlds in service workers.
+        Ref normalWorld = downcast<JSVMClientData>(vm().clientData)->normalWorldSingleton();
+        localMainFrame->loader().client().dispatchServiceWorkerGlobalObjectAvailable(normalWorld);
+    }
 }
 
 Page* ServiceWorkerGlobalScope::serviceWorkerPage()
@@ -99,17 +138,18 @@ Page* ServiceWorkerGlobalScope::serviceWorkerPage()
         return nullptr;
 
     RELEASE_ASSERT(isMainThread());
-    auto* serviceWorkerPageDocument = Document::allDocumentsMap().get(*m_contextData.serviceWorkerPageIdentifier);
-    return serviceWorkerPageDocument ? serviceWorkerPageDocument->page() : nullptr;
+    return Page::serviceWorkerPage(*m_contextData.serviceWorkerPageIdentifier);
 }
 
 void ServiceWorkerGlobalScope::skipWaiting(Ref<DeferredPromise>&& promise)
 {
+    RELEASE_LOG(ServiceWorker, "ServiceWorkerGlobalScope::skipWaiting for worker %" PRIu64, thread().identifier().toUInt64());
+
     uint64_t requestIdentifier = ++m_lastRequestIdentifier;
     m_pendingSkipWaitingPromises.add(requestIdentifier, WTFMove(promise));
 
     callOnMainThread([workerThread = Ref { thread() }, requestIdentifier]() mutable {
-        if (auto* connection = SWContextManager::singleton().connection()) {
+        if (RefPtr connection = SWContextManager::singleton().connection()) {
             auto identifier = workerThread->identifier();
             connection->skipWaiting(identifier, [workerThread = WTFMove(workerThread), requestIdentifier] {
                 workerThread->runLoop().postTask([requestIdentifier](auto& context) {
@@ -124,9 +164,9 @@ void ServiceWorkerGlobalScope::skipWaiting(Ref<DeferredPromise>&& promise)
     });
 }
 
-EventTargetInterface ServiceWorkerGlobalScope::eventTargetInterface() const
+enum EventTargetInterfaceType ServiceWorkerGlobalScope::eventTargetInterface() const
 {
-    return ServiceWorkerGlobalScopeEventTargetInterfaceType;
+    return EventTargetInterfaceType::ServiceWorkerGlobalScope;
 }
 
 ServiceWorkerThread& ServiceWorkerGlobalScope::thread()
@@ -134,21 +174,17 @@ ServiceWorkerThread& ServiceWorkerGlobalScope::thread()
     return static_cast<ServiceWorkerThread&>(WorkerGlobalScope::thread());
 }
 
-ServiceWorkerClient* ServiceWorkerGlobalScope::serviceWorkerClient(ScriptExecutionContextIdentifier identifier)
+void ServiceWorkerGlobalScope::prepareForDestruction()
 {
-    return m_clientMap.get(identifier);
-}
+    // Make sure we destroy fetch events objects before the VM goes away, since their
+    // destructor may access the VM.
+    m_extendedEvents.clear();
 
-void ServiceWorkerGlobalScope::addServiceWorkerClient(ServiceWorkerClient& client)
-{
-    auto result = m_clientMap.add(client.identifier(), &client);
-    ASSERT_UNUSED(result, result.isNewEntry);
-}
+    auto ongoingFetchTasks = std::exchange(m_ongoingFetchTasks, { });
+    for (auto& task : ongoingFetchTasks.values())
+        task.client->contextIsStopping();
 
-void ServiceWorkerGlobalScope::removeServiceWorkerClient(ServiceWorkerClient& client)
-{
-    auto isRemoved = m_clientMap.remove(client.identifier());
-    ASSERT_UNUSED(isRemoved, isRemoved);
+    WorkerGlobalScope::prepareForDestruction();
 }
 
 // https://w3c.github.io/ServiceWorker/#update-service-worker-extended-events-set-algorithm
@@ -176,7 +212,7 @@ void ServiceWorkerGlobalScope::updateExtendedEventsSet(ExtendableEvent* newEvent
         return;
 
     callOnMainThread([threadIdentifier = thread().identifier(), hasPendingEvents] {
-        if (auto* connection = SWContextManager::singleton().connection())
+        if (RefPtr connection = SWContextManager::singleton().connection())
             connection->setServiceWorkerHasPendingEvents(threadIdentifier, hasPendingEvents);
     });
 }
@@ -190,7 +226,7 @@ const ServiceWorkerContextData::ImportedScript* ServiceWorkerGlobalScope::script
 void ServiceWorkerGlobalScope::setScriptResource(const URL& url, ServiceWorkerContextData::ImportedScript&& script)
 {
     callOnMainThread([threadIdentifier = thread().identifier(), url = url.isolatedCopy(), script = script.isolatedCopy()] {
-        if (auto* connection = SWContextManager::singleton().connection())
+        if (RefPtr connection = SWContextManager::singleton().connection())
             connection->setScriptResource(threadIdentifier, url, script);
     });
 
@@ -215,28 +251,120 @@ void ServiceWorkerGlobalScope::didSaveScriptsToDisk(ScriptBuffer&& script, HashM
     }
 }
 
-#if ENABLE(NOTIFICATION_EVENT)
-void ServiceWorkerGlobalScope::postTaskToFireNotificationEvent(NotificationEventType eventType, Notification& notification, const String& action)
+void ServiceWorkerGlobalScope::recordUserGesture()
 {
-    thread().runLoop().postTaskForMode([eventType, protectedNotification = Ref { notification }, action = action.isolatedCopy()](auto& scope) {
-        scope.eventLoop().queueTask(TaskSource::DOMManipulation, [&scope, protectedScope = Ref { scope }, eventType, protectedNotification, action] {
-            AtomString eventName;
-            switch (eventType) {
-            case NotificationEventType::Click:
-                eventName = eventNames().notificationclickEvent;
-                break;
-            case NotificationEventType::Close:
-                eventName = eventNames().notificationcloseEvent;
-                break;
-            }
-
-            auto event = NotificationEvent::create(eventName, protectedNotification.ptr(), action, ExtendableEvent::IsTrusted::Yes);
-            downcast<ServiceWorkerGlobalScope>(scope).dispatchEvent(event);
-        });
-    }, WorkerRunLoop::defaultMode());
+    m_isProcessingUserGesture = true;
+    m_userGestureTimer.startOneShot(userGestureLifetime);
 }
-#endif
+
+bool ServiceWorkerGlobalScope::didFirePushEventRecently() const
+{
+    return MonotonicTime::now() <= m_lastPushEventTime + SWServer::defaultTerminationDelay;
+}
+
+void ServiceWorkerGlobalScope::addConsoleMessage(MessageSource source, MessageLevel level, const String& message, unsigned long requestIdentifier)
+{
+    if (m_consoleMessageReportingEnabled) {
+        callOnMainThread([threadIdentifier = thread().identifier(), source, level, message = message.isolatedCopy(), requestIdentifier] {
+            if (RefPtr connection = SWContextManager::singleton().connection())
+                connection->reportConsoleMessage(threadIdentifier, source, level, message, requestIdentifier);
+        });
+    }
+    WorkerGlobalScope::addConsoleMessage(source, level, message, requestIdentifier);
+}
+
+CookieStore& ServiceWorkerGlobalScope::cookieStore()
+{
+    if (!m_cookieStore)
+        m_cookieStore = CookieStore::create(this);
+    return *m_cookieStore;
+}
+
+void ServiceWorkerGlobalScope::addFetchTask(FetchKey key, Ref<ServiceWorkerFetch::Client>&& client)
+{
+    ASSERT(!m_ongoingFetchTasks.contains(key));
+    m_ongoingFetchTasks.add(key, FetchTask { WTFMove(client), nullptr });
+}
+
+void ServiceWorkerGlobalScope::addFetchEvent(FetchKey key, FetchEvent& event)
+{
+    ASSERT(m_ongoingFetchTasks.contains(key));
+    auto iterator = m_ongoingFetchTasks.find(key);
+
+    bool isHandled = WTF::switchOn(iterator->value.navigationPreload, [] (std::nullptr_t) {
+        return false;
+    }, [] (Ref<FetchEvent>&) {
+        ASSERT_NOT_REACHED();
+        return false;
+    }, [&event] (UniqueRef<ResourceResponse>& response) {
+        event.navigationPreloadIsReady(WTFMove(response.get()));
+        return true;
+    }, [&event] (UniqueRef<ResourceError>& error) {
+        event.navigationPreloadFailed(WTFMove(error.get()));
+        return true;
+    });
+
+    if (isHandled)
+        iterator->value.navigationPreload = nullptr;
+    else
+        iterator->value.navigationPreload = Ref { event };
+}
+
+void ServiceWorkerGlobalScope::removeFetchTask(FetchKey key)
+{
+    m_ongoingFetchTasks.remove(key);
+}
+
+RefPtr<ServiceWorkerFetch::Client> ServiceWorkerGlobalScope::fetchTask(FetchKey key)
+{
+    auto iterator = m_ongoingFetchTasks.find(key);
+    return iterator != m_ongoingFetchTasks.end() ? iterator->value.client.get() : nullptr;
+}
+
+RefPtr<ServiceWorkerFetch::Client> ServiceWorkerGlobalScope::takeFetchTask(FetchKey key)
+{
+    return m_ongoingFetchTasks.take(key).client;
+}
+
+bool ServiceWorkerGlobalScope::hasFetchTask() const
+{
+    return !m_ongoingFetchTasks.isEmpty();
+}
+
+void ServiceWorkerGlobalScope::navigationPreloadFailed(FetchKey key, ResourceError&& error)
+{
+    auto iterator = m_ongoingFetchTasks.find(key);
+    if (iterator == m_ongoingFetchTasks.end())
+        return;
+
+    if (std::holds_alternative<Ref<FetchEvent>>(iterator->value.navigationPreload)) {
+        std::get<Ref<FetchEvent>>(iterator->value.navigationPreload)->navigationPreloadFailed(WTFMove(error));
+        iterator->value.navigationPreload = nullptr;
+        return;
+    }
+
+    iterator->value.navigationPreload = makeUniqueRef<ResourceError>(WTFMove(error));
+}
+
+void ServiceWorkerGlobalScope::navigationPreloadIsReady(FetchKey key, ResourceResponse&& response)
+{
+    auto iterator = m_ongoingFetchTasks.find(key);
+    if (iterator == m_ongoingFetchTasks.end())
+        return;
+
+    if (std::holds_alternative<Ref<FetchEvent>>(iterator->value.navigationPreload)) {
+        std::get<Ref<FetchEvent>>(iterator->value.navigationPreload)->navigationPreloadIsReady(WTFMove(response));
+        iterator->value.navigationPreload = nullptr;
+        return;
+    }
+
+    iterator->value.navigationPreload = makeUniqueRef<ResourceResponse>(WTFMove(response));
+}
+
+void ServiceWorkerGlobalScope::storeEventTypesToHandle()
+{
+    m_hasFetchEventHandler = hasEventListeners(eventNames().fetchEvent);
+}
+
 
 } // namespace WebCore
-
-#endif // ENABLE(SERVICE_WORKER)

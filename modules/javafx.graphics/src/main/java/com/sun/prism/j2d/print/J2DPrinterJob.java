@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -89,25 +89,19 @@ import com.sun.prism.impl.PrismSettings;
 import com.sun.prism.j2d.PrismPrintGraphics;
 
 import java.lang.reflect.Constructor;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 
 public class J2DPrinterJob implements PrinterJobImpl {
 
     static {
-        @SuppressWarnings("removal")
-        var dummy = AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            String libName = "prism_common";
+        String libName = "prism_common";
 
-            if (PrismSettings.verbose) {
-                System.out.println("Loading Prism common native library ...");
-            }
-            NativeLibLoader.loadLibrary(libName);
-            if (PrismSettings.verbose) {
-                System.out.println("\tsucceeded.");
-            }
-            return null;
-        });
+        if (PrismSettings.verbose) {
+            System.out.println("Loading Prism common native library ...");
+        }
+        NativeLibLoader.loadLibrary(libName);
+        if (PrismSettings.verbose) {
+            System.out.println("\tsucceeded.");
+        }
     }
 
     javafx.print.PrinterJob fxPrinterJob;
@@ -120,28 +114,23 @@ public class J2DPrinterJob implements PrinterJobImpl {
     private volatile Object elo = null;
 
     private static Class onTopClass = null;
-    @SuppressWarnings("removal")
     PrintRequestAttribute getAlwaysOnTop(final long id) {
-        return AccessController.doPrivileged(
-            (PrivilegedAction<PrintRequestAttribute>) () -> {
-
-            PrintRequestAttribute alwaysOnTop = null;
-            try {
-                if (onTopClass == null) {
-                    onTopClass =
-                        Class.forName("javax.print.attribute.standard.DialogOwner");
-                }
-                if (id == 0) {
-                    Constructor<PrintRequestAttribute>
-                         cons = onTopClass.getConstructor();
-                    alwaysOnTop = cons.newInstance();
-                } else {
-                    alwaysOnTop = getAlwaysOnTop(onTopClass, id);
-                }
-            } catch (Throwable t) {
+        PrintRequestAttribute alwaysOnTop = null;
+        try {
+            if (onTopClass == null) {
+                onTopClass =
+                    Class.forName("javax.print.attribute.standard.DialogOwner");
             }
-            return alwaysOnTop;
-        });
+            if (id == 0) {
+                Constructor<PrintRequestAttribute>
+                        cons = onTopClass.getConstructor();
+                alwaysOnTop = cons.newInstance();
+            } else {
+                alwaysOnTop = getAlwaysOnTop(onTopClass, id);
+            }
+        } catch (Throwable t) {
+        }
+        return alwaysOnTop;
     }
 
     private static native
@@ -175,9 +164,10 @@ public class J2DPrinterJob implements PrinterJobImpl {
         Application.invokeAndWait(() -> stage.setEnabled(state));
     }
 
+    @Override
     public boolean showPrintDialog(Window owner) {
 
-        if (jobRunning || jobDone) {
+        if (jobRunning || jobDone || jobCanceled) {
             return false;
         }
 
@@ -225,6 +215,7 @@ public class J2DPrinterJob implements PrinterJobImpl {
 
     private class PrintDialogRunnable implements Runnable {
 
+        @Override
         public void run() {
             boolean rv = false;
             try {
@@ -251,8 +242,9 @@ public class J2DPrinterJob implements PrinterJobImpl {
         return rvbool;
     }
 
+    @Override
     public boolean showPageDialog(Window owner) {
-        if (jobRunning || jobDone) {
+        if (jobRunning || jobDone || jobCanceled) {
             return false;
         }
         if (GraphicsEnvironment.isHeadless()) {
@@ -300,6 +292,7 @@ public class J2DPrinterJob implements PrinterJobImpl {
 
     private class PageDialogRunnable implements Runnable {
 
+        @Override
         public void run() {
             PageFormat pf = null;
             try {
@@ -370,7 +363,7 @@ public class J2DPrinterJob implements PrinterJobImpl {
                 settings.setPageRanges(range);
             } else if (members.length > 0) {
                 try {
-                    ArrayList<PageRange> prList = new ArrayList<PageRange>();
+                    ArrayList<PageRange> prList = new ArrayList<>();
                     int last = 0;
                     for (int i=0; i<members.length;i++) {
                         int s = members[i][0];
@@ -512,10 +505,10 @@ public class J2DPrinterJob implements PrinterJobImpl {
                 bm = pWid - mpaX - mpaW;
                 break;
             }
-            if (Math.abs(lm) < 0.01) lm = 0;
-            if (Math.abs(rm) < 0.01) rm = 0;
-            if (Math.abs(tm) < 0.01) tm = 0;
-            if (Math.abs(bm) < 0.01) bm = 0;
+            if (lm < 0.01) lm = 0;
+            if (rm < 0.01) rm = 0;
+            if (tm < 0.01) tm = 0;
+            if (bm < 0.01) bm = 0;
             newLayout = fxPrinter.createPageLayout(paper, orient,
                                                    lm, rm, tm, bm);
         }
@@ -544,6 +537,7 @@ public class J2DPrinterJob implements PrinterJobImpl {
         return fxPrinter; // current printer.
     }
 
+    @Override
     public void setPrinterImpl(PrinterImpl impl) {
         j2dPrinter = (J2DPrinter)impl;
         fxPrinter = j2dPrinter.getPrinter();
@@ -553,6 +547,7 @@ public class J2DPrinterJob implements PrinterJobImpl {
         }
     }
 
+    @Override
     public PrinterImpl getPrinterImpl() {
         return j2dPrinter;
     }
@@ -773,7 +768,7 @@ public class J2DPrinterJob implements PrinterJobImpl {
             (PrinterResolution)printReqAttrSet.get(PrinterResolution.class);
         if (pres != null && !ps.isAttributeValueSupported(pres, null, null)) {
             printReqAttrSet.remove(PrinterResolution.class);
-        };
+        }
 
         // Any resolution is now at least known to be supported for this device.
         PrintResolution res = settings.getPrintResolution();
@@ -790,6 +785,7 @@ public class J2DPrinterJob implements PrinterJobImpl {
         printReqAttrSet.add(pres);
     }
 
+    @Override
     public PageLayout validatePageLayout(PageLayout pageLayout) {
         boolean needsNewLayout = false;
         PrinterAttributes caps = fxPrinter.getPrinterAttributes();
@@ -812,24 +808,8 @@ public class J2DPrinterJob implements PrinterJobImpl {
     private boolean jobRunning = false;
     private boolean jobError = false;
     private boolean jobDone = false;
+    private boolean jobCanceled = false;
     private J2DPageable j2dPageable = null;
-
-    /*
-     * Permissions were already checked when creating the job,
-     * and when setting output file, but this is a final check
-     * to be made before we start the underlying native job.
-     */
-    private void checkPermissions() {
-        @SuppressWarnings("removal")
-        SecurityManager security = System.getSecurityManager();
-        if (security != null) {
-            security.checkPrintJobAccess();
-            String file = settings.getOutputFile();
-            if (file != null && !file.isEmpty()) {
-                security.checkWrite(file);
-            }
-        }
-    }
 
     /*
      * 2D uses a call back model. So the 2D PrinterJob needs to run
@@ -838,6 +818,7 @@ public class J2DPrinterJob implements PrinterJobImpl {
      * scene, as you are only supposed to update it on the FX thread
      * and the PG code can only access it during sync.
      */
+    @Override
     public boolean print(PageLayout pageLayout, Node node) {
         if (Toolkit.getToolkit().isFxUserThread()) {
             // If we are on the event thread, we need to check whether we are
@@ -847,12 +828,11 @@ public class J2DPrinterJob implements PrinterJobImpl {
             }
         }
 
-        if (jobError || jobDone) {
+        if (jobError || jobDone || jobCanceled) {
             return false;
         }
 
         if (!jobRunning) {
-            checkPermissions();
             syncSettingsToAttributes();
             PrintJobRunnable runnable = new PrintJobRunnable();
             Thread prtThread = new Thread(runnable, "Print Job Thread");
@@ -867,25 +847,32 @@ public class J2DPrinterJob implements PrinterJobImpl {
                 t.printStackTrace();
             }
             jobError = true;
-            jobDone = true;
+            if (!jobCanceled) {
+                jobDone = true;
+            }
         }
         return !jobError;
     }
 
     private class PrintJobRunnable implements Runnable {
 
+        @Override
         public void run() {
 
             try {
                 pJob2D.print(printReqAttrSet);
-                jobDone = true;
+                if (!jobCanceled) {
+                    jobDone = true;
+                }
             } catch (Throwable t) { /* subsumes declared PrinterException */
                 if (com.sun.prism.impl.PrismSettings.debug) {
                     System.err.println("print caught exception.");
                     t.printStackTrace();
                 }
                 jobError = true;
-                jobDone = true;
+                if (!jobCanceled) {
+                    jobDone = true;
+                }
             }
             /*
              * If the job ends because its reached a page range limit
@@ -904,6 +891,7 @@ public class J2DPrinterJob implements PrinterJobImpl {
             pageInfo = info;
         }
 
+        @Override
         public void run() {
             if (pageInfo.tempScene && pageInfo.root.getScene() == null) {
                 new Scene(pageInfo.root);
@@ -919,6 +907,7 @@ public class J2DPrinterJob implements PrinterJobImpl {
             pageInfo = info;
         }
 
+        @Override
         public void run() {
             pageInfo.clearScene();
         }
@@ -1030,6 +1019,7 @@ public class J2DPrinterJob implements PrinterJobImpl {
             this.rv = rv;
         }
 
+        @Override
         public void run() {
             Toolkit.getToolkit().exitNestedEventLoop(elo, rv);
         }
@@ -1066,14 +1056,15 @@ public class J2DPrinterJob implements PrinterJobImpl {
                 if (newPageInfo == null) {
                     monitor.notify(); // page is printed and no new page to print
                 }
-                while (newPageInfo == null && !jobDone && !jobError) {
+                while (newPageInfo == null && !jobDone && !jobCanceled && !jobError) {
                     try {
                         monitor.wait(1000);
                     } catch (InterruptedException e) {
                     }
                 }
             }
-            if (jobDone || jobError) {
+            // Even if the jobDone is set to true (this is also done by 'endJob()'), we need to process the last page.
+            if (jobDone && newPageInfo == null || jobCanceled || jobError) {
                 return false;
             }
             currPageInfo = newPageInfo;
@@ -1133,8 +1124,9 @@ public class J2DPrinterJob implements PrinterJobImpl {
             return nextPage;
         }
 
+        @Override
         public int print(Graphics g, PageFormat pf, int pageIndex) {
-            if (jobError || jobDone || !getPage(pageIndex)) {
+            if (jobError || jobCanceled || jobDone && !getPage(pageIndex)) {
                 return Printable.NO_SUCH_PAGE;
             }
             int x = (int)pf.getImageableX();
@@ -1166,11 +1158,13 @@ public class J2DPrinterJob implements PrinterJobImpl {
                     .freeDisposalRequestedAndCheckResources(errored);
         }
 
+        @Override
         public Printable getPrintable(int pageIndex) {
             getPage(pageIndex);
             return this;
         }
 
+        @Override
         public PageFormat getPageFormat(int pageIndex) {
             getPage(pageIndex);
             return currPageFormat;
@@ -1182,6 +1176,7 @@ public class J2DPrinterJob implements PrinterJobImpl {
          * end of the job by returning NO_SUCH_PAGE from
          * the print(..) method.
          */
+        @Override
         public int getNumberOfPages() {
             return Pageable.UNKNOWN_NUMBER_OF_PAGES;
         }
@@ -1212,7 +1207,7 @@ public class J2DPrinterJob implements PrinterJobImpl {
                 Toolkit.getToolkit().enterNestedEventLoop(elo);
                 elo = null;
             } else {
-                while (!pageDone && !jobDone && !jobError) {
+                while (!pageDone && !jobDone && !jobCanceled && !jobError) {
                     synchronized (monitor) {
                         try {
                             if (!pageDone) {
@@ -1228,8 +1223,9 @@ public class J2DPrinterJob implements PrinterJobImpl {
     } /* END J2DPageable class */
 
 
+    @Override
     public boolean endJob() {
-        if (jobRunning && !jobDone && !jobError) {
+        if (jobRunning && !jobDone && !jobCanceled && !jobError) {
             jobDone = true;
             try {
                 synchronized (monitor) {
@@ -1247,11 +1243,12 @@ public class J2DPrinterJob implements PrinterJobImpl {
         return jobDone;
     }
 
+    @Override
     public void cancelJob() {
         if (!pJob2D.isCancelled()) {
             pJob2D.cancel();
         }
-        jobDone = true;
+        jobCanceled = true;
         if (jobRunning) {
             jobRunning = false;
             try {

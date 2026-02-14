@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2011, 2015 Google Inc. All rights reserved.
- * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,20 +28,27 @@
 #include "WebCoreTestSupport.h"
 
 #include "DeprecatedGlobalSettings.h"
-#include "Frame.h"
+#include "DocumentFragment.h"
+#include "DocumentInlines.h"
+#include "FrameDestructionObserverInlines.h"
+#include "FrameInlines.h"
 #include "InternalSettings.h"
 #include "Internals.h"
 #include "JSDocument.h"
 #include "JSInternals.h"
 #include "JSServiceWorkerInternals.h"
 #include "JSWorkerGlobalScope.h"
+#include "LocalFrame.h"
 #include "LogInitialization.h"
 #include "Logging.h"
 #include "MockGamepadProvider.h"
 #include "Page.h"
+#include "ProcessWarming.h"
 #include "SWContextManager.h"
 #include "ServiceWorkerGlobalScope.h"
+#include "SincResampler.h"
 #include "WheelEventTestMonitor.h"
+#include "XMLDocument.h"
 #include <JavaScriptCore/APICast.h>
 #include <JavaScriptCore/CallFrame.h>
 #include <JavaScriptCore/IdentifierInlines.h>
@@ -58,6 +65,11 @@ namespace WebCoreTestSupport {
 using namespace JSC;
 using namespace WebCore;
 
+void initializeNames()
+{
+    ProcessWarming::initializeNames();
+}
+
 void injectInternalsObject(JSContextRef context)
 {
     JSGlobalObject* lexicalGlobalObject = toJS(context);
@@ -65,9 +77,8 @@ void injectInternalsObject(JSContextRef context)
     auto scope = DECLARE_CATCH_SCOPE(vm);
     JSLockHolder lock(vm);
     JSDOMGlobalObject* globalObject = jsCast<JSDOMGlobalObject*>(lexicalGlobalObject);
-    ScriptExecutionContext* scriptContext = globalObject->scriptExecutionContext();
-    if (is<Document>(*scriptContext)) {
-        globalObject->putDirect(vm, Identifier::fromString(vm, Internals::internalsId), toJS(lexicalGlobalObject, globalObject, Internals::create(downcast<Document>(*scriptContext))));
+    if (RefPtr document = dynamicDowncast<Document>(*globalObject->scriptExecutionContext())) {
+        globalObject->putDirect(vm, Identifier::fromString(vm, Internals::internalsId), toJS(lexicalGlobalObject, globalObject, Internals::create(*document)));
         Options::useDollarVM() = true;
         globalObject->exposeDollarVM(vm);
     }
@@ -79,24 +90,24 @@ void resetInternalsObject(JSContextRef context)
     JSGlobalObject* lexicalGlobalObject = toJS(context);
     JSLockHolder lock(lexicalGlobalObject);
     JSDOMGlobalObject* globalObject = jsCast<JSDOMGlobalObject*>(lexicalGlobalObject);
-    ScriptExecutionContext* scriptContext = globalObject->scriptExecutionContext();
-    Page* page = downcast<Document>(scriptContext)->frame()->page();
+    Ref document = downcast<Document>(*globalObject->scriptExecutionContext());
+    RefPtr page = document->frame()->page();
     Internals::resetToConsistentState(*page);
-    InternalSettings::from(page)->resetToConsistentState();
+    InternalSettings::from(page.get())->resetToConsistentState();
 }
 
-void monitorWheelEvents(WebCore::Frame& frame, bool clearLatchingState)
+void monitorWheelEvents(WebCore::LocalFrame& frame, bool clearLatchingState)
 {
-    Page* page = frame.page();
+    RefPtr page = frame.page();
     if (!page)
         return;
 
     page->startMonitoringWheelEvents(clearLatchingState);
 }
 
-void setWheelEventMonitorTestCallbackAndStartMonitoring(bool expectWheelEndOrCancel, bool expectMomentumEnd, WebCore::Frame& frame, JSContextRef context, JSObjectRef jsCallbackFunction)
+void setWheelEventMonitorTestCallbackAndStartMonitoring(bool expectWheelEndOrCancel, bool expectMomentumEnd, WebCore::LocalFrame& frame, JSContextRef context, JSObjectRef jsCallbackFunction)
 {
-    Page* page = frame.page();
+    RefPtr page = frame.page();
     if (!page || !page->isMonitoringWheelEvents())
         return;
 
@@ -110,9 +121,9 @@ void setWheelEventMonitorTestCallbackAndStartMonitoring(bool expectWheelEndOrCan
     }
 }
 
-void clearWheelEventTestMonitor(WebCore::Frame& frame)
+void clearWheelEventTestMonitor(WebCore::LocalFrame& frame)
 {
-    Page* page = frame.page();
+    RefPtr page = frame.page();
     if (!page)
         return;
 
@@ -147,11 +158,15 @@ void setAllowsAnySSLCertificate(bool allowAnySSLCertificate)
     DeprecatedGlobalSettings::setAllowsAnySSLCertificate(allowAnySSLCertificate);
 }
 
+bool allowsAnySSLCertificate()
+{
+    return DeprecatedGlobalSettings::allowsAnySSLCertificate();
+}
+
 void setLinkedOnOrAfterEverythingForTesting()
 {
 #if PLATFORM(COCOA)
-    setApplicationSDKVersion(std::numeric_limits<uint32_t>::max());
-    setLinkedOnOrAfterOverride(LinkedOnOrAfterOverride::AfterEverything);
+    enableAllSDKAlignedBehaviors();
 #endif
 }
 
@@ -180,16 +195,17 @@ void disconnectMockGamepad(unsigned gamepadIndex)
 #endif
 }
 
-void setMockGamepadDetails(unsigned gamepadIndex, const String& gamepadID, const String& mapping, unsigned axisCount, unsigned buttonCount)
+void setMockGamepadDetails(unsigned gamepadIndex, const String& gamepadID, const String& mapping, unsigned axisCount, unsigned buttonCount, bool supportsDualRumble)
 {
 #if ENABLE(GAMEPAD)
-    MockGamepadProvider::singleton().setMockGamepadDetails(gamepadIndex, gamepadID, mapping, axisCount, buttonCount);
+    MockGamepadProvider::singleton().setMockGamepadDetails(gamepadIndex, gamepadID, mapping, axisCount, buttonCount, supportsDualRumble);
 #else
     UNUSED_PARAM(gamepadIndex);
     UNUSED_PARAM(gamepadID);
     UNUSED_PARAM(mapping);
     UNUSED_PARAM(axisCount);
     UNUSED_PARAM(buttonCount);
+    UNUSED_PARAM(supportsDualRumble);
 #endif
 }
 
@@ -217,8 +233,7 @@ void setMockGamepadButtonValue(unsigned gamepadIndex, unsigned buttonIndex, doub
 
 void setupNewlyCreatedServiceWorker(uint64_t serviceWorkerIdentifier)
 {
-#if ENABLE(SERVICE_WORKER)
-    auto identifier = makeObjectIdentifier<ServiceWorkerIdentifierType>(serviceWorkerIdentifier);
+    auto identifier = AtomicObjectIdentifier<ServiceWorkerIdentifierType>(serviceWorkerIdentifier);
     SWContextManager::singleton().postTaskToServiceWorker(identifier, [identifier] (ServiceWorkerGlobalScope& globalScope) {
         auto* script = globalScope.script();
         if (!script)
@@ -228,11 +243,8 @@ void setupNewlyCreatedServiceWorker(uint64_t serviceWorkerIdentifier)
         auto& vm = globalObject.vm();
         JSLockHolder locker(vm);
         auto* contextWrapper = script->globalScopeWrapper();
-        contextWrapper->putDirect(vm, Identifier::fromString(vm, Internals::internalsId), toJS(&globalObject, contextWrapper, ServiceWorkerInternals::create(identifier)));
+        contextWrapper->putDirect(vm, Identifier::fromString(vm, Internals::internalsId), toJS(&globalObject, contextWrapper, ServiceWorkerInternals::create(globalScope, identifier)));
     });
-#else
-    UNUSED_PARAM(serviceWorkerIdentifier);
-#endif
 }
 
 #if PLATFORM(COCOA)
@@ -242,9 +254,12 @@ void setAdditionalSupportedImageTypesForTesting(const String& imageTypes)
 }
 #endif
 
-#if ENABLE(JIT_OPERATION_VALIDATION)
+#if ENABLE(JIT_OPERATION_VALIDATION) || ENABLE(JIT_OPERATION_DISASSEMBLY)
+
 extern const JSC::JITOperationAnnotation startOfJITOperationsInWebCoreTestSupport __asm("section$start$__DATA_CONST$__jsc_ops");
 extern const JSC::JITOperationAnnotation endOfJITOperationsInWebCoreTestSupport __asm("section$end$__DATA_CONST$__jsc_ops");
+
+#if ENABLE(JIT_OPERATION_VALIDATION)
 
 void populateJITOperations()
 {
@@ -252,7 +267,41 @@ void populateJITOperations()
     std::call_once(onceKey, [] {
         JSC::JITOperationList::populatePointersInEmbedder(&startOfJITOperationsInWebCoreTestSupport, &endOfJITOperationsInWebCoreTestSupport);
     });
+#if ENABLE(JIT_OPERATION_DISASSEMBLY)
+    if (JSC::Options::needDisassemblySupport()) [[unlikely]]
+        populateDisassemblyLabels();
+#endif
 }
 #endif // ENABLE(JIT_OPERATION_VALIDATION)
 
+#if ENABLE(JIT_OPERATION_DISASSEMBLY)
+void populateDisassemblyLabels()
+{
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [] {
+        JSC::JITOperationList::populateDisassemblyLabelsInEmbedder(&startOfJITOperationsInWebCoreTestSupport, &endOfJITOperationsInWebCoreTestSupport);
+    });
 }
+#endif // ENABLE(JIT_OPERATION_DISASSEMBLY)
+
+#endif // ENABLE(JIT_OPERATION_VALIDATION) || ENABLE(JIT_OPERATION_DISASSEMBLY)
+
+#if ENABLE(WEB_AUDIO)
+void testSincResamplerProcessBuffer(std::span<const float> source, std::span<float> destination, double scaleFactor)
+{
+    SincResampler::processBuffer(source, destination, scaleFactor);
+}
+#endif // ENABLE(WEB_AUDIO)
+
+bool testDocumentFragmentParseXML(const String& chunk, OptionSet<ParserContentPolicy> parserContentPolicy)
+{
+    ProcessWarming::prewarmGlobally();
+
+    auto settings = Settings::create(nullptr);
+    auto document = WebCore::XMLDocument::createXHTML(nullptr, settings, URL());
+    auto fragment = document->createDocumentFragment();
+
+    return fragment->parseXML(chunk, nullptr, parserContentPolicy);
+}
+
+} // namespace WebCoreTestSupport

@@ -32,23 +32,23 @@
 #include "EditingBehaviorType.h"
 #include "FontGenericFamilies.h"
 #include "FontLoadTimingOverride.h"
-#include "FontRenderingMode.h"
 #include "ForcedAccessibilityValue.h"
 #include "FourCC.h"
-#include "FrameFlattening.h"
 #include "HTMLParserScriptingFlagPolicy.h"
 #include "MediaPlayerEnums.h"
-#include "PDFImageCachingPolicy.h"
 #include "StorageBlockingPolicy.h"
 #include "StorageMap.h"
-#include "TextDirection.h"
 #include "TextDirectionSubmenuInclusionBehavior.h"
 #include "Timer.h"
+#include "TrustedFonts.h"
 #include "UserInterfaceDirectionPolicy.h"
+#include "WritingMode.h"
 #include <JavaScriptCore/RuntimeFlags.h>
 #include <unicode/uscript.h>
+#include <wtf/AbstractRefCounted.h>
 #include <wtf/RefCounted.h>
 #include <wtf/Seconds.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/URL.h>
 #include <wtf/Vector.h>
 
@@ -60,13 +60,14 @@ namespace WebCore {
 
 class Page;
 
-class SettingsBase {
-    WTF_MAKE_NONCOPYABLE(SettingsBase); WTF_MAKE_FAST_ALLOCATED;
+class SettingsBase : public AbstractRefCounted {
+    WTF_MAKE_TZONE_ALLOCATED(SettingsBase);
+    WTF_MAKE_NONCOPYABLE(SettingsBase);
 public:
-    void pageDestroyed() { m_page = nullptr; }
 
 #if ENABLE(MEDIA_SOURCE)
     WEBCORE_EXPORT static bool platformDefaultMediaSourceEnabled();
+    WEBCORE_EXPORT static uint64_t defaultMaximumSourceBufferSize();
 #endif
 
     static const unsigned defaultMaximumHTMLParserDOMTreeDepth = 512;
@@ -131,6 +132,9 @@ public:
 
     WEBCORE_EXPORT void resetToConsistentState();
 
+    WEBCORE_EXPORT RefPtr<Page> protectedPage() const;
+    WeakPtr<Page> page() const { return m_page; }
+
 protected:
     explicit SettingsBase(Page*);
     virtual ~SettingsBase();
@@ -144,10 +148,8 @@ protected:
     void setNeedsRelayoutAllFrames();
     void mediaTypeOverrideChanged();
     void imagesEnabledChanged();
-    void pluginsEnabledChanged();
     void userStyleSheetLocationChanged();
     void usesBackForwardCacheChanged();
-    void dnsPrefetchingEnabledChanged();
     void storageBlockingPolicyChanged();
     void backgroundShouldExtendBeyondPageChanged();
     void scrollingPerformanceTestingEnabledChanged();
@@ -162,11 +164,15 @@ protected:
 #if ENABLE(MEDIA_STREAM)
     void mockCaptureDevicesEnabledChanged();
 #endif
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
     void layerBasedSVGEngineEnabledChanged();
+#if USE(MODERN_AVCONTENTKEYSESSION)
+    void shouldUseModernAVContentKeySessionChanged();
 #endif
+    void useSystemAppearanceChanged();
+    void fontFallbackPrefersPictographsChanged();
+    void updateDisplayEDRHeadroom();
 
-    Page* m_page;
+    WeakPtr<Page> m_page;
 
     Seconds m_minimumDOMTimerInterval;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,6 @@ package test.javafx.scene;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
@@ -34,16 +33,14 @@ import javafx.scene.Scene;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import javafx.stage.WindowEvent;
-import junit.framework.Assert;
-
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
-
-import static org.junit.Assert.fail;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import test.util.Util;
 
 public class NewSceneSizeTest {
-    static CountDownLatch startupLatch;
+    static CountDownLatch startupLatch = new CountDownLatch(1);
     static volatile Stage stage;
 
     private static double scaleX, scaleY;
@@ -76,17 +73,14 @@ public class NewSceneSizeTest {
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() {
-        startupLatch = new CountDownLatch(1);
-        new Thread(() -> Application.launch(TestApp.class, (String[])null)).start();
-        try {
-            if (!startupLatch.await(15, TimeUnit.SECONDS)) {
-                fail("Timeout waiting for FX runtime to start");
-            }
-        } catch (InterruptedException ex) {
-            fail("Unexpected exception: " + ex);
-        }
+        Util.launch(startupLatch, TestApp.class);
+    }
+
+    @AfterAll
+    public static void teardown() {
+        Util.shutdown();
     }
 
     @Test
@@ -112,8 +106,8 @@ public class NewSceneSizeTest {
                     stage.setScene(scene);
                     w[fI] = (Math.ceil((300 - fI) * scaleX)) / scaleX;
                     h[fI] = (Math.ceil((200 - fI) * scaleY)) / scaleY;
-                    Assert.assertTrue(w[fI] > 1);
-                    Assert.assertTrue(h[fI] > 1);
+                    Assertions.assertTrue(w[fI] > 1);
+                    Assertions.assertTrue(h[fI] > 1);
                     stage.widthProperty().addListener(listenerW = (v, o, n) -> {
                         if (Math.abs((Double) n - w[fI]) < 0.1) {
                             stage.widthProperty().removeListener(listenerW);
@@ -133,16 +127,8 @@ public class NewSceneSizeTest {
         latch.await(5, TimeUnit.SECONDS);
         Thread.sleep(200);
         for (int i = 0; i < nTries; i++) {
-            Assert.assertEquals("Wrong scene " + i + " width", w[i],
-                                    childStage[i].getScene().getWidth(), 0.1);
-            Assert.assertEquals("Wrong scene " + i + " height", h[i],
-                                    childStage[i].getScene().getHeight(), 0.1);
+            Assertions.assertEquals(w[i], childStage[i].getScene().getWidth(), 0.1, "Wrong scene " + i + " width");
+            Assertions.assertEquals(h[i], childStage[i].getScene().getHeight(), 0.1, "Wrong scene " + i + " height");
         }
-    }
-
-    @AfterClass
-    public static void teardown() {
-        Platform.runLater(stage::hide);
-        Platform.exit();
     }
 }

@@ -30,12 +30,15 @@
 //    Requires: Node is a concrete class with:
 //        Node(SentinelTag);
 //        void setPrev(Node*);
-//        Node* prev();
+//        Node* prev() const;
 //        void setNext(Node*);
-//        Node* next();
+//        Node* next() const;
 
 #pragma once
 
+#include <iterator>
+#include <wtf/Noncopyable.h>
+#include <wtf/Nonmovable.h>
 #include <wtf/Packed.h>
 
 namespace WTF {
@@ -44,7 +47,7 @@ enum SentinelTag { Sentinel };
 
 template<typename T, typename PassedPtrTraits = RawPtrTraits<T>>
 class BasicRawSentinelNode {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(BasicRawSentinelNode);
 public:
     using PtrTraits = typename PassedPtrTraits::template RebindTraits<BasicRawSentinelNode>;
 
@@ -57,8 +60,8 @@ public:
     void setPrev(BasicRawSentinelNode* prev) { m_prev = prev; }
     void setNext(BasicRawSentinelNode* next) { m_next = next; }
 
-    T* prev() { return static_cast<T*>(PtrTraits::unwrap(m_prev)); }
-    T* next() { return static_cast<T*>(PtrTraits::unwrap(m_next)); }
+    T* prev() const { return static_cast<T*>(PtrTraits::unwrap(m_prev)); }
+    T* next() const { return static_cast<T*>(PtrTraits::unwrap(m_next)); }
 
     bool isOnList() const
     {
@@ -77,8 +80,41 @@ private:
 };
 
 template <typename T, typename RawNode = T> class SentinelLinkedList {
+    WTF_MAKE_NONCOPYABLE(SentinelLinkedList);
+    WTF_MAKE_NONMOVABLE(SentinelLinkedList);
 public:
-    typedef T* iterator;
+    template<typename RawNodeType, typename NodeType> class BaseIterator {
+        WTF_DEPRECATED_MAKE_FAST_ALLOCATED(BaseIterator);
+    public:
+        explicit BaseIterator(RawNodeType* node)
+            : m_node(node)
+        {
+        }
+
+        auto& operator*() const { return static_cast<NodeType&>(*m_node); }
+
+        auto* operator->() const { return static_cast<NodeType*>(m_node); }
+
+        BaseIterator& operator++()
+        {
+            m_node = m_node->next();
+            return *this;
+        }
+
+        BaseIterator& operator--()
+        {
+            m_node = m_node->prev();
+            return *this;
+        }
+
+        friend bool operator==(BaseIterator, BaseIterator) = default;
+
+    private:
+        RawNodeType* m_node;
+    };
+
+    using iterator = BaseIterator<RawNode, T>;
+    using const_iterator = BaseIterator<const RawNode, const T>;
 
     SentinelLinkedList()
         : m_sentinel(Sentinel)
@@ -99,8 +135,10 @@ public:
 
     bool isOnList(T*);
 
-    iterator begin();
-    iterator end();
+    iterator begin() LIFETIME_BOUND;
+    iterator end() LIFETIME_BOUND;
+    const_iterator begin() const LIFETIME_BOUND;
+    const_iterator end() const LIFETIME_BOUND;
 
     bool isEmpty() { return begin() == end(); }
 
@@ -108,8 +146,9 @@ public:
     void forEach(const Func& func)
     {
         for (iterator iter = begin(); iter != end();) {
-            iterator next = iter->next();
-            func(iter);
+            iterator next = iter;
+            ++next;
+            func(&*iter);
             iter = next;
         }
     }
@@ -139,12 +178,22 @@ template <typename T, typename PtrTraits> void BasicRawSentinelNode<T, PtrTraits
 
 template <typename T, typename RawNode> inline typename SentinelLinkedList<T, RawNode>::iterator SentinelLinkedList<T, RawNode>::begin()
 {
-    return static_cast<T*>(m_sentinel.next());
+    return iterator { m_sentinel.next() };
 }
 
 template <typename T, typename RawNode> inline typename SentinelLinkedList<T, RawNode>::iterator SentinelLinkedList<T, RawNode>::end()
 {
-    return static_cast<T*>(&m_sentinel);
+    return iterator { &m_sentinel };
+}
+
+template <typename T, typename RawNode> inline typename SentinelLinkedList<T, RawNode>::const_iterator SentinelLinkedList<T, RawNode>::begin() const
+{
+    return const_iterator { m_sentinel.next() };
+}
+
+template <typename T, typename RawNode> inline typename SentinelLinkedList<T, RawNode>::const_iterator SentinelLinkedList<T, RawNode>::end() const
+{
+    return const_iterator { &m_sentinel };
 }
 
 template <typename T, typename RawNode> inline void SentinelLinkedList<T, RawNode>::push(T* node)
@@ -252,21 +301,21 @@ inline void SentinelLinkedList<T, RawNode>::takeFrom(SentinelLinkedList<T, RawNo
     if (other.isEmpty())
         return;
 
+// These warnings can occur if takeFrom is used on a temporary local list.
+// It's ok to ignore these warnings as the "other" list is reset to the sentinel below.
+IGNORE_GCC_WARNINGS_BEGIN("dangling-pointer")
     m_sentinel.prev()->setNext(other.m_sentinel.next());
     other.m_sentinel.next()->setPrev(m_sentinel.prev());
 
     m_sentinel.setPrev(other.m_sentinel.prev());
     m_sentinel.prev()->setNext(&m_sentinel);
+IGNORE_GCC_WARNINGS_END
 
     other.m_sentinel.setNext(&other.m_sentinel);
     other.m_sentinel.setPrev(&other.m_sentinel);
 }
 
-template<typename T>
-using PackedRawSentinelNode = BasicRawSentinelNode<T, PackedPtrTraits<T>>;
-
 }
 
 using WTF::BasicRawSentinelNode;
-using WTF::PackedRawSentinelNode;
 using WTF::SentinelLinkedList;

@@ -26,7 +26,8 @@
 #pragma once
 
 #include "Token.h"
-#include <wtf/text/StringView.h>
+#include <wtf/ASCIICType.h>
+#include <wtf/text/StringParsingBuffer.h>
 #include <wtf/text/WTFString.h>
 
 namespace WGSL {
@@ -36,63 +37,55 @@ class Lexer {
 public:
     Lexer(const String& wgsl)
     {
-        if constexpr (std::is_same<T, LChar>::value) {
-            m_code = wgsl.characters8();
-            m_codeEnd = m_code + wgsl.sizeInBytes();
-        } else {
-            static_assert(std::is_same<T, UChar>::value, "The lexer expects its template parameter to be either LChar or UChar");
-            m_code = wgsl.characters16();
+        if constexpr (std::is_same<T, LChar>::value)
+            m_code = wgsl.span8();
+        else {
+            static_assert(std::is_same<T, char16_t>::value, "The lexer expects its template parameter to be either LChar or char16_t");
+            m_code = wgsl.span16();
             ASSERT(!(wgsl.sizeInBytes() % 2));
-            m_codeEnd = m_code + wgsl.sizeInBytes() / 2;
         }
 
-        m_current = (m_code != m_codeEnd) ? *m_code : 0;
+        m_current = m_code.hasCharactersRemaining() ? m_code[0] : 0;
+        m_currentPosition = { 1, 0, 0 };
     }
 
-    Token lex();
+    Vector<Token> lex();
     bool isAtEndOfFile() const;
-    SourcePosition currentPosition() const { return m_currentPosition; }
-
-    // Only public so that the UChar version of the Lexer can defer to the LChar version
-    static bool isWhiteSpace(T character);
-    static bool isIdentifierStart(T character);
-    static bool isValidIdentifierCharacter(T character);
-    static bool isDecimal(T character);
-    static bool isHexadecimal(T character);
-    static uint64_t readDecimal(T character);
-    static uint64_t readHexadecimal(T character);
 
 private:
-    unsigned currentOffset() const { return m_currentPosition.m_offset; }
-    unsigned currentTokenLength() const { return currentOffset() - m_tokenStartingPosition.m_offset; }
+    Token nextToken();
+    Token lexNumber();
+    unsigned currentOffset() const { return m_currentPosition.offset; }
+    unsigned currentTokenLength() const { return currentOffset() - m_tokenStartingPosition.offset; }
 
     Token makeToken(TokenType type)
     {
         return { type, m_tokenStartingPosition, currentTokenLength() };
     }
-    Token makeLiteralToken(TokenType type, double literalValue)
+    Token makeFloatToken(TokenType type, double floatValue)
     {
-        return { type, m_tokenStartingPosition, currentTokenLength(), literalValue };
-    }
-    Token makeIdentifierToken(StringView view)
-    {
-        return { WGSL::TokenType::Identifier, m_tokenStartingPosition, currentTokenLength(), view };
+        return { type, m_tokenStartingPosition, currentTokenLength(), floatValue };
     }
 
-    void shift();
-    T peek(unsigned);
-    void skipWhitespace();
+    Token makeIntegerToken(TokenType type, int64_t integerValue)
+    {
+        return { type, m_tokenStartingPosition, currentTokenLength(), integerValue };
+    }
 
-    // Reads [0-9]+
-    std::optional<uint64_t> parseDecimalInteger();
-    // Parse pattern (e|E)(\+|-)?[0-9]+f? if it is present, and return the exponent
-    std::optional<int64_t> parseDecimalFloatExponent();
-    // Checks whether there is an "i" or "u" coming, and return the right kind of literal token
-    Token parseIntegerLiteralSuffix(double literalValue);
+    Token makeIdentifierToken(String&& identifier)
+    {
+        return { WGSL::TokenType::Identifier, m_tokenStartingPosition, currentTokenLength(), WTFMove(identifier) };
+    }
+
+    T shift(unsigned = 1);
+    T peek(unsigned = 0);
+    void newLine();
+    bool skipBlockComments();
+    void skipLineComment();
+    bool skipWhitespaceAndComments();
 
     T m_current;
-    const T* m_code;
-    const T* m_codeEnd;
+    StringParsingBuffer<T> m_code;
     SourcePosition m_currentPosition { 0, 0, 0 };
     SourcePosition m_tokenStartingPosition { 0, 0, 0 };
 };

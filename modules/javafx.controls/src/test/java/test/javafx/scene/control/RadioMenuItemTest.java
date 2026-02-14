@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,10 +25,13 @@
 
 package test.javafx.scene.control;
 
-import static test.com.sun.javafx.scene.control.infrastructure.ControlTestUtils.*;
-
-import test.com.sun.javafx.pgstub.StubToolkit;
-import com.sun.javafx.tk.Toolkit;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static test.com.sun.javafx.scene.control.infrastructure.ControlTestUtils.assertStyleClassContains;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -36,14 +39,21 @@ import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.scene.Node;
+import javafx.scene.Scene;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuBar;
 import javafx.scene.control.RadioMenuItem;
 import javafx.scene.control.ToggleGroup;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyCombination;
 import javafx.scene.shape.Rectangle;
-import static org.junit.Assert.*;
-
-
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.tk.Toolkit;
+import test.com.sun.javafx.pgstub.StubToolkit;
+import test.com.sun.javafx.scene.control.infrastructure.KeyEventFirer;
+import test.com.sun.javafx.scene.control.infrastructure.KeyModifier;
+import test.com.sun.javafx.scene.control.infrastructure.StageLoader;
 
 /**
  *
@@ -51,13 +61,14 @@ import org.junit.Test;
  */
 public class RadioMenuItemTest {
     private ToggleGroup toggleGroup;
-    private RadioMenuItem radioMenuItem, rmi;//Empty string
+    private RadioMenuItem radioMenuItem, rmi;
     private RadioMenuItem radioMenuItemTwoArg;
     private Node node;
-    private Toolkit tk;
 
-    @Before public void setup() {
-        tk = (StubToolkit)Toolkit.getToolkit();//This step is not needed (Just to make sure StubToolkit is loaded into VM)
+    @BeforeEach
+    public void setup() {
+        assertTrue(Toolkit.getToolkit() instanceof StubToolkit);  // Ensure StubToolkit is loaded
+
         node = new Rectangle();
         toggleGroup = new ToggleGroup();
         radioMenuItem = rmi = new RadioMenuItem("one");
@@ -99,17 +110,17 @@ public class RadioMenuItemTest {
     @Test public void checkSelectedPropertyBind() {
         BooleanProperty objPr = new SimpleBooleanProperty(true);
         radioMenuItem.selectedProperty().bind(objPr);
-        assertTrue("selectedProperty cannot be bound", radioMenuItem.selectedProperty().getValue());
+        assertTrue(radioMenuItem.selectedProperty().getValue(), "selectedProperty cannot be bound");
         objPr.setValue(false);
-        assertFalse("selectedProperty cannot be bound", radioMenuItem.selectedProperty().getValue());
+        assertFalse(radioMenuItem.selectedProperty().getValue(), "selectedProperty cannot be bound");
     }
 
     @Test public void checkToggleGroupPropertyBind() {
         ObjectProperty objPr = new SimpleObjectProperty<ToggleGroup>(null);
         radioMenuItem.toggleGroupProperty().bind(objPr);
-        assertNull("toggleGroupProperty cannot be bound", radioMenuItem.toggleGroupProperty().getValue());
+        assertNull(radioMenuItem.toggleGroupProperty().getValue(), "toggleGroupProperty cannot be bound");
         objPr.setValue(toggleGroup);
-        assertSame("toggleGroupProperty cannot be bound", radioMenuItem.toggleGroupProperty().getValue(), toggleGroup);
+        assertSame(radioMenuItem.toggleGroupProperty().getValue(), toggleGroup, "toggleGroupProperty cannot be bound");
     }
 
     @Test public void selectedPropertyHasBeanReference() {
@@ -237,7 +248,7 @@ public class RadioMenuItemTest {
 
     @Test public void toggleGroupCanBeBound() {
         ToggleGroup tg = new ToggleGroup();
-        SimpleObjectProperty<ToggleGroup> other = new SimpleObjectProperty<ToggleGroup>(rmi, "toggleGroup", tg);
+        SimpleObjectProperty<ToggleGroup> other = new SimpleObjectProperty<>(rmi, "toggleGroup", tg);
         rmi.toggleGroupProperty().bind(other);
         assertSame(tg, rmi.getToggleGroup());
     }
@@ -295,5 +306,27 @@ public class RadioMenuItemTest {
 
        assertTrue(b1.isSelected());
        assertFalse(result8189677);
+    }
+
+    @Test public void testRadioMenuItemSelectionOnAccelerator() {
+       MenuBar menuBar = new MenuBar();
+       Menu menu = new Menu("Submenu");
+       menuBar.getMenus().add(menu);
+
+       ToggleGroup group = new ToggleGroup();
+       RadioMenuItem radioMenuItem = new RadioMenuItem("ONE");
+       radioMenuItem.setToggleGroup(group);
+       radioMenuItem.setAccelerator(KeyCombination.valueOf("alt+1"));
+       menu.getItems().add(radioMenuItem);
+
+       StageLoader s = new StageLoader(menuBar);
+       Scene scene = s.getStage().getScene();
+       KeyEventFirer keyboard = new KeyEventFirer(radioMenuItem, scene);
+
+       keyboard.doKeyPress(KeyCode.DIGIT1, KeyModifier.ALT);
+       assertTrue(radioMenuItem.isSelected());
+
+       keyboard.doKeyPress(KeyCode.DIGIT1, KeyModifier.ALT);
+       assertTrue(radioMenuItem.isSelected());
     }
 }

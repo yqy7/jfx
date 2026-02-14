@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,19 +26,21 @@
 #pragma once
 
 #include "Filter.h"
-#include "IntRectExtent.h"
+#include "LengthBox.h"
+#include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
 
 class FilterOperations;
+class GraphicsContext;
 class RenderElement;
-class SourceGraphic;
 
 class CSSFilter final : public Filter {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(CSSFilter);
 public:
-    static RefPtr<CSSFilter> create(RenderElement&, const FilterOperations&, RenderingMode, const FloatSize& filterScale, ClipOperation, const FloatRect& targetBoundingBox);
-    WEBCORE_EXPORT static RefPtr<CSSFilter> create(Vector<Ref<FilterFunction>>&&);
+    static RefPtr<CSSFilter> create(RenderElement&, const FilterOperations&, OptionSet<FilterRenderingMode> preferredFilterRenderingModes, const FloatSize& filterScale, const FloatRect& targetBoundingBox, const GraphicsContext& destinationContext);
+    WEBCORE_EXPORT static Ref<CSSFilter> create(Vector<Ref<FilterFunction>>&&);
+    WEBCORE_EXPORT static Ref<CSSFilter> create(Vector<Ref<FilterFunction>>&&, OptionSet<FilterRenderingMode>, const FloatSize& filterScale, const FloatRect& filterRegion);
 
     const Vector<Ref<FilterFunction>>& functions() const { return m_functions; }
 
@@ -49,17 +51,20 @@ public:
 
     FilterEffectVector effectsOfType(FilterFunction::Type) const final;
 
-    IntOutsets outsets() const final;
-
     RefPtr<FilterImage> apply(FilterImage* sourceImage, FilterResults&) final;
+    FilterStyleVector createFilterStyles(GraphicsContext&, const FilterStyle& sourceStyle) const final;
+
+    static bool isIdentity(RenderElement&, const FilterOperations&);
+    static IntOutsets calculateOutsets(RenderElement&, const FilterOperations&, const FloatRect& targetBoundingBox);
 
 private:
-    CSSFilter(RenderingMode, const FloatSize& filterScale, ClipOperation, bool hasFilterThatMovesPixels, bool hasFilterThatShouldBeRestrictedBySecurityOrigin);
+    CSSFilter(const FloatSize& filterScale, bool hasFilterThatMovesPixels, bool hasFilterThatShouldBeRestrictedBySecurityOrigin);
     CSSFilter(Vector<Ref<FilterFunction>>&&);
+    CSSFilter(Vector<Ref<FilterFunction>>&&, const FloatSize& filterScale, const FloatRect& filterRegion);
 
-    bool buildFilterFunctions(RenderElement&, const FilterOperations&, const FloatRect& targetBoundingBox);
+    bool buildFilterFunctions(RenderElement&, const FilterOperations&, OptionSet<FilterRenderingMode> preferredFilterRenderingModes, const FloatRect& targetBoundingBox, const GraphicsContext& destinationContext);
 
-    bool supportsAcceleratedRendering() const final;
+    OptionSet<FilterRenderingMode> supportedFilterRenderingModes() const final;
 
     WTF::TextStream& externalRepresentation(WTF::TextStream&, FilterRepresentation) const final;
 
@@ -67,12 +72,8 @@ private:
     bool m_hasFilterThatShouldBeRestrictedBySecurityOrigin { false };
 
     Vector<Ref<FilterFunction>> m_functions;
-
-    mutable IntOutsets m_outsets;
 };
 
 } // namespace WebCore
 
-SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::CSSFilter)
-    static bool isType(const WebCore::Filter& filter) { return filter.isCSSFilter(); }
-SPECIALIZE_TYPE_TRAITS_END()
+SPECIALIZE_TYPE_TRAITS_FILTER_FUNCTION(CSSFilter);

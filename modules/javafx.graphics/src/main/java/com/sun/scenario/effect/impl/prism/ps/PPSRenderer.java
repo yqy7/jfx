@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -75,10 +75,12 @@ public class PPSRenderer extends PrRenderer {
     private final ResourceFactoryListener listener =
         new ResourceFactoryListener()
     {
+        @Override
         public void factoryReset() {
             dispose();
         }
 
+        @Override
         public void factoryReleased() {
             dispose();
         }
@@ -265,7 +267,7 @@ public class PPSRenderer extends PrRenderer {
         InputStream pscode = shaderSource.loadSource(name);
         int maxTexCoordIndex = samplers.keySet().size()-1;
         ShaderFactory factory = (ShaderFactory)rf;
-        return factory.createShader(pscode, samplers, params,
+        return factory.createShader(name, pscode, samplers, params,
                                     maxTexCoordIndex,
                                     isPixcoordUsed, false);
     }
@@ -374,7 +376,7 @@ public class PPSRenderer extends PrRenderer {
         if (dst == null) {
             return null;
         }
-        // RT-27561
+        // JDK-8091213
         // TODO: it is wasteful to create an RTT here; eventually it would
         // be nice if we could use plain Textures as a source Filterable...
         Graphics g = dst.createGraphics();
@@ -409,8 +411,7 @@ public class PPSRenderer extends PrRenderer {
         if (!validate()) {
             return null;
         }
-        PPSDrawable dst = (PPSDrawable)
-            getCompatibleImage(xformBounds.width, xformBounds.height);
+        PPSDrawable dst = getCompatibleImage(xformBounds.width, xformBounds.height);
         if (dst != null) {
             Graphics g = dst.createGraphics();
             g.translate(-xformBounds.x, -xformBounds.y);
@@ -431,8 +432,7 @@ public class PPSRenderer extends PrRenderer {
         if (!validate()) {
             return null;
         }
-        PPSDrawable dst = (PPSDrawable)
-            getCompatibleImage(xformBounds.width, xformBounds.height);
+        PPSDrawable dst = getCompatibleImage(xformBounds.width, xformBounds.height);
         if (dst != null) {
             PPSDrawable orig = (PPSDrawable)original.getUntransformedImage();
             Graphics g = dst.createGraphics();
@@ -473,6 +473,8 @@ public class PPSRenderer extends PrRenderer {
             shaderSource = createShaderSource(rootPkg + ".impl.hw.d3d.D3DShaderSource");
         } else if (pipe.supportsShader(ShaderType.GLSL, ShaderModel.SM3)) {
             shaderSource = createShaderSource(rootPkg + ".impl.es2.ES2ShaderSource");
+        }  else if (pipe.supportsShader(ShaderType.MSL, ShaderModel.SM3)) {
+            shaderSource = createShaderSource(rootPkg + ".impl.hw.mtl.MTLShaderSource");
         } else {
             throw new InternalError("Unknown GraphicsPipeline");
         }

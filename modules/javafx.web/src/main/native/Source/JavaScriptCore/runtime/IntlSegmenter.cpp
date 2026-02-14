@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2020-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,7 +34,7 @@
 
 namespace JSC {
 
-const ClassInfo IntlSegmenter::s_info = { "Object", &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(IntlSegmenter) };
+const ClassInfo IntlSegmenter::s_info = { "Object"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(IntlSegmenter) };
 
 IntlSegmenter* IntlSegmenter::create(VM& vm, Structure* structure)
 {
@@ -51,12 +51,6 @@ Structure* IntlSegmenter::createStructure(VM& vm, JSGlobalObject* globalObject, 
 IntlSegmenter::IntlSegmenter(VM& vm, Structure* structure)
     : Base(vm, structure)
 {
-}
-
-void IntlSegmenter::finishCreation(VM& vm)
-{
-    Base::finishCreation(vm);
-    ASSERT(inherits(vm, info()));
 }
 
 // https://tc39.es/proposal-intl-segmenter/#sec-intl.segmenter
@@ -121,9 +115,15 @@ JSValue IntlSegmenter::segment(JSGlobalObject* globalObject, JSValue stringValue
 
     JSString* jsString = stringValue.toString(globalObject);
     RETURN_IF_EXCEPTION(scope, { });
-    String string = jsString->value(globalObject);
+    auto string = jsString->value(globalObject);
     RETURN_IF_EXCEPTION(scope, { });
-    auto upconvertedCharacters = Box<Vector<UChar>>::create(string.charactersWithoutNullTermination());
+    auto expectedCharacters = string->charactersWithoutNullTermination();
+    if (!expectedCharacters) {
+        throwOutOfMemoryError(globalObject, scope);
+        return { };
+    }
+
+    auto upconvertedCharacters = Box<Vector<char16_t>>::create(expectedCharacters.value());
 
     UErrorCode status = U_ZERO_ERROR;
     auto segmenter = std::unique_ptr<UBreakIterator, UBreakIteratorDeleter>(cloneUBreakIterator(m_segmenter.get(), &status));
@@ -131,7 +131,7 @@ JSValue IntlSegmenter::segment(JSGlobalObject* globalObject, JSValue stringValue
         throwTypeError(globalObject, scope, "failed to initialize Segments"_s);
         return { };
     }
-    ubrk_setText(segmenter.get(), upconvertedCharacters->data(), upconvertedCharacters->size(), &status);
+    ubrk_setText(segmenter.get(), upconvertedCharacters->span().data(), upconvertedCharacters->size(), &status);
     if (U_FAILURE(status)) {
         throwTypeError(globalObject, scope, "failed to initialize Segments"_s);
         return { };
@@ -161,7 +161,7 @@ ASCIILiteral IntlSegmenter::granularityString(Granularity granularity)
         return "sentence"_s;
     }
     ASSERT_NOT_REACHED();
-    return ASCIILiteral::null();
+    return { };
 }
 
 JSObject* IntlSegmenter::createSegmentDataObject(JSGlobalObject* globalObject, JSString* string, int32_t startIndex, int32_t endIndex, UBreakIterator& segmenter, Granularity granularity)

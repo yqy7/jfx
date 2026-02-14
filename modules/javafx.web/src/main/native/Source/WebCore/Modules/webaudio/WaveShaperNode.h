@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011, Google Inc. All rights reserved.
+ * Copyright (C) 2011 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,13 +35,13 @@
 namespace WebCore {
 
 class WaveShaperNode final : public AudioBasicProcessorNode {
-    WTF_MAKE_ISO_ALLOCATED(WaveShaperNode);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(WaveShaperNode);
 public:
     static ExceptionOr<Ref<WaveShaperNode>> create(BaseAudioContext&, const WaveShaperOptions& = { });
 
     // setCurve() is called on the main thread.
     ExceptionOr<void> setCurveForBindings(RefPtr<Float32Array>&&);
-    Float32Array* curveForBindings();
+    RefPtr<Float32Array> curveForBindings();
 
     void setOversampleForBindings(OverSampleType);
     OverSampleType oversampleForBindings() const;
@@ -53,8 +53,8 @@ private:
 
     bool propagatesSilence() const final;
 
-    WaveShaperProcessor* waveShaperProcessor() { return static_cast<WaveShaperProcessor*>(processor()); }
-    const WaveShaperProcessor* waveShaperProcessor() const { return static_cast<const WaveShaperProcessor*>(processor()); }
+    WaveShaperProcessor* waveShaperProcessor() { return downcast<WaveShaperProcessor>(processor()); }
+    const WaveShaperProcessor* waveShaperProcessor() const { return downcast<WaveShaperProcessor>(processor()); }
 };
 
 String convertEnumerationToString(WebCore::OverSampleType); // in JSOverSampleType.cpp

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,12 +25,8 @@
 
 package javafx.beans.value;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import com.sun.javafx.binding.ExpressionHelper;
 import javafx.beans.InvalidationListener;
-import javafx.beans.Observable;
 
 /**
  * A convenience class for creating implementations of {@link ObservableValue}.
@@ -40,7 +36,7 @@ import javafx.beans.Observable;
  * This implementation can handle adding and removing listeners while the
  * observers are being notified, but it is not thread-safe.
  *
- *
+ * @param <T> the observable value type
  * @since JavaFX 2.0
  */
 public abstract class ObservableValueBase<T> implements ObservableValue<T> {

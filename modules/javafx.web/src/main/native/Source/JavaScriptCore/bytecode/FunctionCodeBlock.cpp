@@ -31,11 +31,12 @@
 #include "FunctionCodeBlock.h"
 
 #include "JSCellInlines.h"
+#include "StructureInlines.h"
 
 namespace JSC {
 
 const ClassInfo FunctionCodeBlock::s_info = {
-    "FunctionCodeBlock", &Base::s_info, nullptr, nullptr,
+    "FunctionCodeBlock"_s, &Base::s_info, nullptr, nullptr,
     CREATE_METHOD_TABLE(FunctionCodeBlock)
 };
 

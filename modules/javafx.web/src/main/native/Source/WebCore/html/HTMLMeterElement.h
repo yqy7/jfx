@@ -20,15 +20,16 @@
 
 #pragma once
 
-#include "LabelableElement.h"
+#include "HTMLElement.h"
 
 namespace WebCore {
 
 class MeterValueElement;
 class RenderMeter;
 
-class HTMLMeterElement final : public LabelableElement {
-    WTF_MAKE_ISO_ALLOCATED(HTMLMeterElement);
+class HTMLMeterElement final : public HTMLElement {
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(HTMLMeterElement);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(HTMLMeterElement);
 public:
     static Ref<HTMLMeterElement> create(const QualifiedName&, Document&);
 
@@ -39,27 +40,18 @@ public:
     };
 
     double min() const;
-    void setMin(double);
-
     double max() const;
-    void setMax(double);
-
     double value() const;
-    void setValue(double);
-
     double low() const;
-    void setLow(double);
-
     double high() const;
-    void setHigh(double);
-
     double optimum() const;
-    void setOptimum(double);
 
     double valueRatio() const;
     GaugeRegion gaugeRegion() const;
 
     bool canContainRangeEndPoint() const final { return false; }
+
+    bool isDevolvableWidget() const override { return true; }
 
 private:
     HTMLMeterElement(const QualifiedName&, Document&);
@@ -67,16 +59,16 @@ private:
 
     RenderMeter* renderMeter() const;
 
-    bool supportLabels() const final { return true; }
+    bool isLabelable() const final { return true; }
 
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) final;
     bool childShouldCreateRenderer(const Node&) const final;
-    void parseAttribute(const QualifiedName&, const AtomString&) final;
+    void attributeChanged(const QualifiedName&, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason) final;
 
     void didElementStateChange();
     void didAddUserAgentShadowRoot(ShadowRoot&) final;
 
-    RefPtr<HTMLElement> m_value;
+    RefPtr<HTMLElement> m_valueElement;
 };
 
 } // namespace WebCore

@@ -25,7 +25,6 @@
 
 #pragma once
 
-#include "JSDOMWindow.h"
 #include "JSDOMWrapper.h"
 
 namespace WebCore {
@@ -33,9 +32,9 @@ namespace WebCore {
 class JSDOMWindowProperties final : public JSDOMObject {
 public:
     using Base = JSDOMObject;
-    static constexpr unsigned StructureFlags = Base::StructureFlags | JSC::GetOwnPropertySlotIsImpureForPropertyAbsence | JSC::InterceptsGetOwnPropertySlotByIndexEvenWhenLengthIsNotZero | JSC::OverridesGetOwnPropertySlot | JSC::IsImmutablePrototypeExoticObject;
+    static constexpr unsigned StructureFlags = Base::StructureFlags | JSC::GetOwnPropertySlotIsImpureForPropertyAbsence | JSC::InterceptsGetOwnPropertySlotByIndexEvenWhenLengthIsNotZero | JSC::OverridesGetOwnPropertySlot | JSC::OverridesIsExtensible | JSC::IsImmutablePrototypeExoticObject;
 
-    static constexpr bool needsDestruction = false;
+    static constexpr JSC::DestructionMode needsDestruction = JSC::DoesNotNeedDestruction;
     template<typename CellType, JSC::SubspaceAccess>
     static JSC::GCClient::IsoSubspace* subspaceFor(JSC::VM& vm)
     {

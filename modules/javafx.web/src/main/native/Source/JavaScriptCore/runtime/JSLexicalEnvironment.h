@@ -32,6 +32,8 @@
 #include "JSSymbolTableObject.h"
 #include "SymbolTable.h"
 
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
+
 namespace JSC {
 
 class LLIntOffsetsExtractor;
@@ -43,7 +45,7 @@ public:
     template<typename CellType, SubspaceAccess>
     static CompleteSubspace* subspaceFor(VM& vm)
     {
-        static_assert(!CellType::needsDestruction, "");
+        static_assert(CellType::needsDestruction == DoesNotNeedDestruction);
         return &vm.variableSizedCellSpace();
     }
 
@@ -52,7 +54,7 @@ public:
 
     WriteBarrierBase<Unknown>* variables()
     {
-        return bitwise_cast<WriteBarrierBase<Unknown>*>(bitwise_cast<char*>(this) + offsetOfVariables());
+        return std::bit_cast<WriteBarrierBase<Unknown>*>(std::bit_cast<char*>(this) + offsetOfVariables());
     }
 
     bool isValidScopeOffset(ScopeOffset offset)
@@ -94,8 +96,8 @@ public:
             new (
                 NotNull,
                 allocateCell<JSLexicalEnvironment>(vm, allocationSize(symbolTable)))
-            JSLexicalEnvironment(vm, structure, currentScope, symbolTable);
-        result->finishCreation(vm, initialValue);
+            JSLexicalEnvironment(vm, structure, currentScope, symbolTable, initialValue);
+        result->finishCreation(vm);
         return result;
     }
 
@@ -114,33 +116,28 @@ public:
 
     DECLARE_INFO;
 
-    static Structure* createStructure(VM& vm, JSGlobalObject* globalObject) { return Structure::create(vm, globalObject, jsNull(), TypeInfo(LexicalEnvironmentType, StructureFlags), info()); }
+    DECLARE_VISIT_CHILDREN;
+
+    inline static Structure* createStructure(VM&, JSGlobalObject*);
 
 protected:
-    JSLexicalEnvironment(VM&, Structure*, JSScope*, SymbolTable*);
+    JSLexicalEnvironment(VM&, Structure*, JSScope*, SymbolTable*, JSValue initialValue);
 
-    void finishCreationUninitialized(VM& vm)
-    {
-        Base::finishCreation(vm);
-    }
+    DECLARE_DEFAULT_FINISH_CREATION;
 
-    void finishCreation(VM& vm, JSValue value)
-    {
-        finishCreationUninitialized(vm);
-        ASSERT(value == jsUndefined() || value == jsTDZValue());
-        for (unsigned i = symbolTable()->scopeSize(); i--;) {
-            // Filling this with undefined/TDZEmptyValue is useful because that's what variables start out as.
-            variableAt(ScopeOffset(i)).setStartingValue(value);
-        }
-    }
-
-    DECLARE_VISIT_CHILDREN;
     static void analyzeHeap(JSCell*, HeapAnalyzer&);
 };
 
-inline JSLexicalEnvironment::JSLexicalEnvironment(VM& vm, Structure* structure, JSScope* currentScope, SymbolTable* symbolTable)
+inline JSLexicalEnvironment::JSLexicalEnvironment(VM& vm, Structure* structure, JSScope* currentScope, SymbolTable* symbolTable, JSValue initialValue)
     : Base(vm, structure, currentScope, symbolTable)
 {
+    ASSERT(initialValue == jsUndefined() || initialValue == jsTDZValue());
+    for (unsigned i = this->symbolTable()->scopeSize(); i--;) {
+        // Filling this with undefined/TDZEmptyValue is useful because that's what variables start out as.
+        variableAt(ScopeOffset(i)).setStartingValue(initialValue);
+    }
 }
 
 } // namespace JSC
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

@@ -29,19 +29,24 @@
 
 #if JSC_OBJC_API_ENABLED
 
-#import <JavaScriptCore/JSCallbackFunction.h>
+#import "JSCallbackFunction.h"
 
 #if defined(__OBJC__)
+@class JSContext;
+
 JSObjectRef objCCallbackFunctionForMethod(JSContext *, Class, Protocol *, BOOL isInstanceMethod, SEL, const char* types);
 JSObjectRef objCCallbackFunctionForBlock(JSContext *, id);
 JSObjectRef objCCallbackFunctionForInit(JSContext *, Class, Protocol *, SEL, const char* types);
 
-id tryUnwrapConstructor(JSC::VM*, JSObjectRef);
+id tryUnwrapConstructor(JSObjectRef);
 #endif
 
 namespace JSC {
 
 class ObjCCallbackFunctionImpl;
+
+#define OBJC_CALLBACK_FUNCTION_METHOD(method) \
+    WTF_VTBL_FUNCPTR_PTRAUTH_STR("ObjCCallbackFunction." #method) method
 
 class ObjCCallbackFunction : public InternalFunction {
     friend struct APICallbackFunction;
@@ -55,7 +60,7 @@ public:
     }
 
     static ObjCCallbackFunction* create(VM&, JSGlobalObject*, const String& name, std::unique_ptr<ObjCCallbackFunctionImpl>);
-    static constexpr bool needsDestruction = true;
+    static constexpr DestructionMode needsDestruction = NeedsDestruction;
     static void destroy(JSCell*);
 
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
@@ -75,10 +80,12 @@ private:
     JSObjectCallAsFunctionCallback functionCallback() { return m_functionCallback; }
     JSObjectCallAsConstructorCallback constructCallback() { return m_constructCallback; }
 
-    JSObjectCallAsFunctionCallback m_functionCallback;
-    JSObjectCallAsConstructorCallback m_constructCallback;
+    JSObjectCallAsFunctionCallback OBJC_CALLBACK_FUNCTION_METHOD(m_functionCallback);
+    JSObjectCallAsConstructorCallback OBJC_CALLBACK_FUNCTION_METHOD(m_constructCallback);
     std::unique_ptr<ObjCCallbackFunctionImpl> m_impl;
 };
+
+#undef OBJC_CALLBACK_FUNCTION_METHOD
 
 } // namespace JSC
 

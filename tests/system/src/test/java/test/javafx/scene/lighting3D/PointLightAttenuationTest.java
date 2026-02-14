@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,22 +25,16 @@
 
 package test.javafx.scene.lighting3D;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assume.assumeTrue;
-
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
-
-import javafx.application.Application;
 import javafx.application.ConditionalFeature;
 import javafx.application.Platform;
 import javafx.scene.PointLight;
 import javafx.scene.paint.Color;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import test.util.Util;
 
 public class PointLightAttenuationTest extends LightingTest {
@@ -57,15 +51,15 @@ public class PointLightAttenuationTest extends LightingTest {
         initFX();
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() throws Exception {
         startupLatch = new CountDownLatch(1);
         LightingTest.light = LIGHT;
-        new Thread(() -> Application.launch(TestApp.class, (String[]) null)).start();
-        assertTrue("Timeout waiting for FX runtime to start", startupLatch.await(15, TimeUnit.SECONDS));
+
+        Util.launch(startupLatch, TestApp.class);
     }
 
-    @Before
+    @BeforeEach
     public void setupEach() {
         assumeTrue(Platform.isSupported(ConditionalFeature.SCENE3D));
         LIGHT.setLinearAttenuation(0);
@@ -80,7 +74,7 @@ public class PointLightAttenuationTest extends LightingTest {
             var snapshot = snapshot();
             for (int x : LAMBERT_SAMPLE_DISTS) {
                 double sampledBlue = snapshot.getPixelReader().getColor(x, 0).getBlue();
-                assertEquals(FAIL_MESSAGE + " for " + x, calculateLambertTerm(x), sampledBlue, DELTA);
+                assertEquals(calculateLambertTerm(x), sampledBlue, DELTA, FAIL_MESSAGE + " for " + x);
             }
         });
     }
@@ -106,11 +100,11 @@ public class PointLightAttenuationTest extends LightingTest {
 
         var attn = calculateAttenuationFactor(LIGHT_DIST);
         var sampledBlue = snapshot.getPixelReader().getColor(0, 0).getBlue();
-        assertEquals(FAIL_MESSAGE, lambertCenter * attn, sampledBlue, DELTA);
+        assertEquals(lambertCenter * attn, sampledBlue, DELTA, FAIL_MESSAGE);
 
         attn = calculateAttenuationFactor(diagDist);
         sampledBlue = snapshot.getPixelReader().getColor(ATTN_SAMPLE_DIST, 0).getBlue();
-        assertEquals(FAIL_MESSAGE, lambertSample * attn, sampledBlue, DELTA);
+        assertEquals(lambertSample * attn, sampledBlue, DELTA, FAIL_MESSAGE);
     }
 
     @Test
@@ -121,10 +115,10 @@ public class PointLightAttenuationTest extends LightingTest {
             var snapshot = snapshot();
 
             double sampledBlue = snapshot.getPixelReader().getColor(0, 0).getBlue();
-            assertEquals(FAIL_MESSAGE + ", should be in range", 1, sampledBlue, DELTA);
+            assertEquals(1, sampledBlue, DELTA, FAIL_MESSAGE + ", should be in range");
 
             sampledBlue = snapshot.getPixelReader().getColor(ATTN_SAMPLE_DIST, 0).getBlue();
-            assertEquals(FAIL_MESSAGE + ", should be out of range", 0, sampledBlue, DELTA);
+            assertEquals(0, sampledBlue, DELTA, FAIL_MESSAGE + ", should be out of range");
         });
     }
 

@@ -27,7 +27,7 @@
 
 #if ENABLE(SPEECH_SYNTHESIS)
 
-#include <wtf/WeakPtr.h>
+#include <wtf/AbstractRefCountedAndCanMakeWeakPtr.h>
 
 namespace WebCore {
 
@@ -35,7 +35,7 @@ class PlatformSpeechSynthesisUtterance;
 class SpeechSynthesisClientObserver;
 class PlatformSpeechSynthesisVoice;
 
-class SpeechSynthesisClient : public CanMakeWeakPtr<SpeechSynthesisClient> {
+class SpeechSynthesisClient : public AbstractRefCountedAndCanMakeWeakPtr<SpeechSynthesisClient> {
 public:
     virtual ~SpeechSynthesisClient() = default;
 
@@ -51,7 +51,7 @@ public:
 
 };
 
-class SpeechSynthesisClientObserver : public CanMakeWeakPtr<SpeechSynthesisClientObserver>  {
+class SpeechSynthesisClientObserver : public AbstractRefCountedAndCanMakeWeakPtr<SpeechSynthesisClientObserver>  {
 public:
     virtual ~SpeechSynthesisClientObserver() = default;
 
@@ -60,7 +60,7 @@ public:
     virtual void didPauseSpeaking() = 0;
     virtual void didResumeSpeaking() = 0;
     virtual void speakingErrorOccurred() = 0;
-    virtual void boundaryEventOccurred(bool wordBoundary, unsigned charIndex) = 0;
+    virtual void boundaryEventOccurred(bool wordBoundary, unsigned charIndex, unsigned charLength) = 0;
     virtual void voicesChanged() = 0;
 };
 

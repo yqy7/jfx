@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,11 +26,16 @@
 #include "config.h"
 #include "RenderTreeBuilderFormControls.h"
 
+#include "RenderBlockInlines.h"
+#include "RenderBoxInlines.h"
 #include "RenderButton.h"
 #include "RenderMenuList.h"
 #include "RenderTreeBuilderBlock.h"
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(RenderTreeBuilder::FormControls);
 
 RenderTreeBuilder::FormControls::FormControls(RenderTreeBuilder& builder)
     : m_builder(builder)
@@ -49,22 +54,22 @@ void RenderTreeBuilder::FormControls::attach(RenderMenuList& parent, RenderPtr<R
     parent.didAttachChild(newChild, beforeChild);
 }
 
-RenderPtr<RenderObject> RenderTreeBuilder::FormControls::detach(RenderMenuList& parent, RenderObject& child)
+RenderPtr<RenderObject> RenderTreeBuilder::FormControls::detach(RenderMenuList& parent, RenderObject& child, RenderTreeBuilder::WillBeDestroyed willBeDestroyed)
 {
     auto* innerRenderer = parent.innerRenderer();
     if (!innerRenderer || &child == innerRenderer)
-        return m_builder.blockBuilder().detach(parent, child);
-    return m_builder.detach(*innerRenderer, child);
+        return m_builder.blockBuilder().detach(parent, child, willBeDestroyed);
+    return m_builder.detach(*innerRenderer, child, willBeDestroyed);
 }
 
-RenderPtr<RenderObject> RenderTreeBuilder::FormControls::detach(RenderButton& parent, RenderObject& child)
+RenderPtr<RenderObject> RenderTreeBuilder::FormControls::detach(RenderButton& parent, RenderObject& child, RenderTreeBuilder::WillBeDestroyed willBeDestroyed)
 {
     auto* innerRenderer = parent.innerRenderer();
     if (!innerRenderer || &child == innerRenderer || child.parent() == &parent) {
         ASSERT(&child == innerRenderer || !innerRenderer);
-        return m_builder.blockBuilder().detach(parent, child);
+        return m_builder.blockBuilder().detach(parent, child, willBeDestroyed);
     }
-    return m_builder.detach(*innerRenderer, child);
+    return m_builder.detach(*innerRenderer, child, willBeDestroyed);
 }
 
 
@@ -74,7 +79,7 @@ RenderBlock& RenderTreeBuilder::FormControls::findOrCreateParentForChild(RenderB
     if (innerRenderer)
         return *innerRenderer;
 
-    auto wrapper = parent.createAnonymousBlock(parent.style().display());
+    auto wrapper = Block::createAnonymousBlockWithStyle(parent.protectedDocument(), parent.style());
     innerRenderer = wrapper.get();
     m_builder.blockBuilder().attach(parent, WTFMove(wrapper), nullptr);
     parent.setInnerRenderer(*innerRenderer);
@@ -87,7 +92,7 @@ RenderBlock& RenderTreeBuilder::FormControls::findOrCreateParentForChild(RenderM
     if (innerRenderer)
         return *innerRenderer;
 
-    auto wrapper = parent.createAnonymousBlock();
+    auto wrapper = Block::createAnonymousBlockWithStyle(parent.protectedDocument(), parent.style());
     innerRenderer = wrapper.get();
     m_builder.blockBuilder().attach(parent, WTFMove(wrapper), nullptr);
     parent.setInnerRenderer(*innerRenderer);

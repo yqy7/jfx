@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -39,6 +39,7 @@ import java.lang.ref.WeakReference;
  * TablePositionBase can be 'disabled' to represent an entire row or column. This is
  * done by setting the unrequired property to -1 or null.
  *
+ * @param <TC> the type of the TableColumnBase
  * @see TablePosition
  * @see TreeTablePosition
  * @since JavaFX 8.0
@@ -65,7 +66,7 @@ public abstract class TablePositionBase<TC extends TableColumnBase> {
      */
     protected TablePositionBase(int row, TC tableColumn) {
         this.row = row;
-        this.tableColumnRef = new WeakReference<TC>(tableColumn);
+        this.tableColumnRef = new WeakReference<>(tableColumn);
     }
 
 
@@ -123,7 +124,7 @@ public abstract class TablePositionBase<TC extends TableColumnBase> {
         if (getClass() != obj.getClass()) {
             return false;
         }
-        @SuppressWarnings("unchecked")
+
         final TablePositionBase other = (TablePositionBase) obj;
         if (this.row != other.row) {
             return false;

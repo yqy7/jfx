@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2014 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,10 +43,7 @@ public:
         };
 
         FunctionRange() {}
-        bool operator==(const FunctionRange& other) const
-        {
-            return m_start == other.m_start && m_end == other.m_end;
-        }
+        friend bool operator==(const FunctionRange&, const FunctionRange&) = default;
         unsigned hash() const
         {
             return m_start * m_end;
@@ -62,8 +59,8 @@ public:
     Vector<std::tuple<bool, unsigned, unsigned>> getFunctionRanges(SourceID);
 
 private:
-    using RangeMap = HashMap<GenericHashKey<FunctionRange, FunctionRange::Hash>, bool>;
-    using SourceIDToRangeMap = HashMap<GenericHashKey<intptr_t>, RangeMap>;
+    using RangeMap = UncheckedKeyHashMap<GenericHashKey<FunctionRange, FunctionRange::Hash>, bool>;
+    using SourceIDToRangeMap = UncheckedKeyHashMap<GenericHashKey<intptr_t>, RangeMap>;
     SourceIDToRangeMap m_rangeMap;
 };
 

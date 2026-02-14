@@ -36,7 +36,7 @@ public:
 
     using CustomFunctionPointer = GetValueFunc;
 
-    static constexpr bool needsDestruction = true;
+    static constexpr DestructionMode needsDestruction = NeedsDestruction;
     static void destroy(JSCell*);
 
     template<typename CellType, SubspaceAccess mode>
@@ -45,11 +45,7 @@ public:
         return vm.customGetterFunctionSpace<mode>();
     }
 
-    static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
-    {
-        ASSERT(globalObject);
-        return Structure::create(vm, globalObject, prototype, TypeInfo(JSFunctionType, StructureFlags), info());
-    }
+    inline static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
     JS_EXPORT_PRIVATE static JSCustomGetterFunction* create(VM&, JSGlobalObject*, const PropertyName&, CustomFunctionPointer, std::optional<DOMAttributeAnnotation> = std::nullopt);
 
@@ -59,6 +55,12 @@ public:
     CustomFunctionPointer getter() const { return m_getter; };
     CustomFunctionPointer customFunctionPointer() const { return m_getter; };
     std::optional<DOMAttributeAnnotation> domAttribute() const { return m_domAttribute; };
+    const ClassInfo* slotBaseClassInfoIfExists() const
+    {
+        if (m_domAttribute)
+            return m_domAttribute->classInfo;
+        return nullptr;
+    }
 
 private:
     JSCustomGetterFunction(VM&, NativeExecutable*, JSGlobalObject*, Structure*, const PropertyName&, CustomFunctionPointer, std::optional<DOMAttributeAnnotation>);

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,7 +37,7 @@ typedef (BufferSource or Blob or USVString) BlobPart;
     readonly attribute long long lastModified;
 
     // https://wicg.github.io/entries-api/#file-interface
-    [EnabledAtRuntime=DirectoryUploadEnabled, ImplementedAs=relativePath] readonly attribute USVString webkitRelativePath;
+    [EnabledBySetting=DirectoryUploadEnabled, ImplementedAs=relativePath] readonly attribute USVString webkitRelativePath;
 };
 
 dictionary FilePropertyBag : BlobPropertyBag {

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2005-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,6 +28,7 @@
 
 #include "AXObjectCache.h"
 #include "CompositeEditCommand.h"
+#include "ContainerNodeInlines.h"
 #include "Document.h"
 #include "Editing.h"
 #include "RenderElement.h"
@@ -41,7 +42,6 @@ AppendNodeCommand::AppendNodeCommand(Ref<ContainerNode>&& parent, Ref<Node>&& no
     , m_node(WTFMove(node))
 {
     ASSERT(!m_node->parentNode());
-    ASSERT(m_parent->hasEditableStyle() || !m_parent->renderer());
 }
 
 void AppendNodeCommand::doApply()
@@ -61,7 +61,7 @@ void AppendNodeCommand::doUnapply()
 }
 
 #ifndef NDEBUG
-void AppendNodeCommand::getNodesInCommand(HashSet<Ref<Node>>& nodes)
+void AppendNodeCommand::getNodesInCommand(NodeSet& nodes)
 {
     addNodeAndDescendants(m_parent.ptr(), nodes);
     addNodeAndDescendants(m_node.ptr(), nodes);

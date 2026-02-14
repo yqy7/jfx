@@ -29,16 +29,21 @@
 #include "WebCoreJSClientData.h"
 #include <JavaScriptCore/BlockDirectoryInlines.h>
 #include <JavaScriptCore/HeapInlines.h>
+#include <JavaScriptCore/JSCellInlines.h>
 #include <JavaScriptCore/MarkedBlockInlines.h>
+#include <JavaScriptCore/SlotVisitorInlines.h>
 #include <JavaScriptCore/SubspaceInlines.h>
 #include <JavaScriptCore/VM.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
 using namespace JSC;
 
+WTF_MAKE_TZONE_ALLOCATED_IMPL(DOMGCOutputConstraint);
+
 DOMGCOutputConstraint::DOMGCOutputConstraint(VM& vm, JSHeapData& heapData)
-    : MarkingConstraint("Domo", "DOM Output", ConstraintVolatility::SeldomGreyed, ConstraintConcurrency::Concurrent, ConstraintParallelism::Parallel)
+    : MarkingConstraint("Domo"_s, "DOM Output"_s, ConstraintVolatility::SeldomGreyed, ConstraintConcurrency::Concurrent, ConstraintParallelism::Parallel)
     , m_vm(vm)
     , m_heapData(heapData)
     , m_lastExecutionVersion(vm.heap.mutatorExecutionVersion())
@@ -64,7 +69,7 @@ void DOMGCOutputConstraint::executeImplImpl(Visitor& visitor)
             auto func = [] (Visitor& visitor, HeapCell* heapCell, HeapCell::Kind) {
                 SetRootMarkReasonScope rootScope(visitor, RootMarkReason::DOMGCOutput);
                 JSCell* cell = static_cast<JSCell*>(heapCell);
-                cell->methodTable(visitor.vm())->visitOutputConstraints(cell, visitor);
+                cell->methodTable()->visitOutputConstraints(cell, visitor);
             };
 
             RefPtr<SharedTask<void(Visitor&)>> task = subspace.template forEachMarkedCellInParallel<Visitor>(func);

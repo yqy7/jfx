@@ -36,13 +36,8 @@
 #include <windows.h>
 #endif
 
-#if ENABLE(ACCESSIBILITY) && PLATFORM(GTK)
-#include "AccessibilityNotificationHandlerAtk.h"
-#include <atk/atk.h>
-#endif
-
 class AccessibilityController {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(AccessibilityController);
 public:
     AccessibilityController();
     ~AccessibilityController();
@@ -78,10 +73,6 @@ public:
     void winNotificationReceived(PlatformUIElement, const std::string& eventName);
 #endif
 
-#if ENABLE(ACCESSIBILITY) && PLATFORM(GTK)
-    AtkObject* childElementById(AtkObject* parent, const char* id);
-#endif
-
 private:
     static JSRetainPtr<JSClassRef> createJSClass();
 
@@ -97,10 +88,6 @@ private:
 
 #if PLATFORM(COCOA)
     RetainPtr<id> m_globalNotificationHandler;
-#endif
-
-#if ENABLE(ACCESSIBILITY) && PLATFORM(GTK)
-    RefPtr<AccessibilityNotificationHandler> m_globalNotificationHandler;
 #endif
 
     void platformResetToConsistentState();

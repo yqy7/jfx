@@ -29,14 +29,80 @@
 #if ENABLE(ASYNC_SCROLLING)
 
 #include "ScrollingStateTree.h"
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/TextStream.h>
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(ScrollingStateScrollingNode);
 
 ScrollingStateScrollingNode::ScrollingStateScrollingNode(ScrollingStateTree& stateTree, ScrollingNodeType nodeType, ScrollingNodeID nodeID)
     : ScrollingStateNode(nodeType, stateTree, nodeID)
 {
     scrollingStateTree().scrollingNodeAdded();
+}
+
+ScrollingStateScrollingNode::ScrollingStateScrollingNode(
+    ScrollingNodeType nodeType,
+    ScrollingNodeID nodeID,
+    Vector<Ref<ScrollingStateNode>>&& children,
+    OptionSet<ScrollingStateNodeProperty> changedProperties,
+    std::optional<PlatformLayerIdentifier> layerID,
+    FloatSize scrollableAreaSize,
+    FloatSize totalContentsSize,
+    FloatSize reachableContentsSize,
+    FloatPoint scrollPosition,
+    IntPoint scrollOrigin,
+    ScrollableAreaParameters&& scrollableAreaParameters,
+#if ENABLE(SCROLLING_THREAD)
+    OptionSet<SynchronousScrollingReason> synchronousScrollingReasons,
+#endif
+    RequestedScrollData&& requestedScrollData,
+    FloatScrollSnapOffsetsInfo&& snapOffsetsInfo,
+    std::optional<unsigned> currentHorizontalSnapPointIndex,
+    std::optional<unsigned> currentVerticalSnapPointIndex,
+    bool isMonitoringWheelEvents,
+    std::optional<PlatformLayerIdentifier> scrollContainerLayer,
+    std::optional<PlatformLayerIdentifier> scrolledContentsLayer,
+    std::optional<PlatformLayerIdentifier> horizontalScrollbarLayer,
+    std::optional<PlatformLayerIdentifier> verticalScrollbarLayer,
+    bool mouseIsOverContentArea,
+    MouseLocationState&& mouseLocationState,
+    ScrollbarHoverState&& scrollbarHoverState,
+    ScrollbarEnabledState&& scrollbarEnabledState,
+    UserInterfaceLayoutDirection scrollbarLayoutDirection,
+    ScrollbarWidth scrollbarWidth,
+    bool useDarkAppearanceForScrollbars,
+    RequestedKeyboardScrollData&& keyboardScrollData
+) : ScrollingStateNode(nodeType, nodeID, WTFMove(children), changedProperties, layerID)
+    , m_scrollableAreaSize(scrollableAreaSize)
+    , m_totalContentsSize(totalContentsSize)
+    , m_reachableContentsSize(reachableContentsSize)
+    , m_scrollPosition(scrollPosition)
+    , m_scrollOrigin(scrollOrigin)
+    , m_snapOffsetsInfo(WTFMove(snapOffsetsInfo))
+    , m_currentHorizontalSnapPointIndex(currentHorizontalSnapPointIndex)
+    , m_currentVerticalSnapPointIndex(currentVerticalSnapPointIndex)
+    , m_scrollContainerLayer(scrollContainerLayer)
+    , m_scrolledContentsLayer(scrolledContentsLayer)
+    , m_horizontalScrollbarLayer(horizontalScrollbarLayer)
+    , m_verticalScrollbarLayer(verticalScrollbarLayer)
+    , m_scrollbarHoverState(WTFMove(scrollbarHoverState))
+    , m_mouseLocationState(WTFMove(mouseLocationState))
+    , m_scrollbarEnabledState(WTFMove(scrollbarEnabledState))
+    , m_scrollableAreaParameters(WTFMove(scrollableAreaParameters))
+    , m_requestedScrollData(WTFMove(requestedScrollData))
+    , m_keyboardScrollData(WTFMove(keyboardScrollData))
+#if ENABLE(SCROLLING_THREAD)
+    , m_synchronousScrollingReasons(synchronousScrollingReasons)
+#endif
+    , m_scrollbarLayoutDirection(scrollbarLayoutDirection)
+    , m_scrollbarWidth(scrollbarWidth)
+    , m_useDarkAppearanceForScrollbars(useDarkAppearanceForScrollbars)
+    , m_isMonitoringWheelEvents(isMonitoringWheelEvents)
+    , m_mouseIsOverContentArea(mouseIsOverContentArea)
+{
+    // scrollingNodeAdded will be called in attachAfterDeserialization.
 }
 
 ScrollingStateScrollingNode::ScrollingStateScrollingNode(const ScrollingStateScrollingNode& stateNode, ScrollingStateTree& adoptiveTree)
@@ -48,15 +114,23 @@ ScrollingStateScrollingNode::ScrollingStateScrollingNode(const ScrollingStateScr
     , m_scrollOrigin(stateNode.scrollOrigin())
     , m_snapOffsetsInfo(stateNode.m_snapOffsetsInfo)
 #if PLATFORM(MAC)
+    , m_scrollbarHoverState(stateNode.scrollbarHoverState())
+    , m_mouseLocationState(stateNode.mouseLocationState())
+    , m_scrollbarEnabledState(stateNode.scrollbarEnabledState())
     , m_verticalScrollerImp(stateNode.verticalScrollerImp())
     , m_horizontalScrollerImp(stateNode.horizontalScrollerImp())
 #endif
     , m_scrollableAreaParameters(stateNode.scrollableAreaParameters())
     , m_requestedScrollData(stateNode.requestedScrollData())
+    , m_keyboardScrollData(stateNode.keyboardScrollData())
 #if ENABLE(SCROLLING_THREAD)
     , m_synchronousScrollingReasons(stateNode.synchronousScrollingReasons())
 #endif
+    , m_scrollbarLayoutDirection(stateNode.scrollbarLayoutDirection())
+    , m_scrollbarWidth(stateNode.scrollbarWidth())
+    , m_useDarkAppearanceForScrollbars(stateNode.useDarkAppearanceForScrollbars())
     , m_isMonitoringWheelEvents(stateNode.isMonitoringWheelEvents())
+    , m_mouseIsOverContentArea(stateNode.mouseIsOverContentArea())
 {
     scrollingStateTree().scrollingNodeAdded();
 
@@ -75,6 +149,7 @@ ScrollingStateScrollingNode::ScrollingStateScrollingNode(const ScrollingStateScr
 
 ScrollingStateScrollingNode::~ScrollingStateScrollingNode()
 {
+    if (isAttachedToScrollingStateTree())
     scrollingStateTree().scrollingNodeRemoved();
 }
 
@@ -199,16 +274,28 @@ void ScrollingStateScrollingNode::setSynchronousScrollingReasons(OptionSet<Synch
 }
 #endif
 
-void ScrollingStateScrollingNode::setRequestedScrollData(const RequestedScrollData& scrollData)
+
+void ScrollingStateScrollingNode::setKeyboardScrollData(const RequestedKeyboardScrollData& scrollData)
+{
+    m_keyboardScrollData = scrollData;
+    setPropertyChanged(Property::KeyboardScrollData);
+}
+
+void ScrollingStateScrollingNode::setRequestedScrollData(RequestedScrollData&& scrollData, CanMergeScrollData canMergeScrollData)
 {
     // Scroll position requests are imperative, not stateful, so we can't early return here.
-    m_requestedScrollData = scrollData;
+    if (hasChangedProperty(Property::RequestedScrollPosition) && canMergeScrollData == CanMergeScrollData::Yes) {
+        m_requestedScrollData.merge(WTFMove(scrollData));
+        return;
+    }
+
+    m_requestedScrollData = WTFMove(scrollData);
     setPropertyChanged(Property::RequestedScrollPosition);
 }
 
 bool ScrollingStateScrollingNode::hasScrollPositionRequest() const
 {
-    return hasChangedProperty(Property::RequestedScrollPosition) && m_requestedScrollData.requestType == ScrollRequestType::PositionUpdate;
+    return hasChangedProperty(Property::RequestedScrollPosition) && m_requestedScrollData.requestType != ScrollRequestType::CancelAnimatedScroll;
 }
 
 void ScrollingStateScrollingNode::setIsMonitoringWheelEvents(bool isMonitoringWheelEvents)
@@ -251,7 +338,6 @@ void ScrollingStateScrollingNode::setVerticalScrollbarLayer(const LayerRepresent
 {
     if (layer == m_verticalScrollbarLayer)
         return;
-
     m_verticalScrollbarLayer = layer;
     setPropertyChanged(Property::VerticalScrollbarLayer);
 }
@@ -262,79 +348,153 @@ void ScrollingStateScrollingNode::setScrollerImpsFromScrollbars(Scrollbar*, Scro
 }
 #endif
 
+void ScrollingStateScrollingNode::setMouseIsOverContentArea(bool flag)
+{
+    if (flag == m_mouseIsOverContentArea)
+        return;
+
+    m_mouseIsOverContentArea = flag;
+    setPropertyChanged(Property::ContentAreaHoverState);
+}
+
+void ScrollingStateScrollingNode::setMouseMovedInContentArea(const MouseLocationState& mouseLocationState)
+{
+    m_mouseLocationState = mouseLocationState;
+    setPropertyChanged(Property::MouseActivityState);
+}
+
+void ScrollingStateScrollingNode::setScrollbarHoverState(ScrollbarHoverState hoverState)
+{
+    if (hoverState == m_scrollbarHoverState)
+        return;
+
+    m_scrollbarHoverState = hoverState;
+    setPropertyChanged(Property::ScrollbarHoverState);
+}
+
+void ScrollingStateScrollingNode::setScrollbarEnabledState(ScrollbarOrientation orientation, bool enabled)
+{
+    if ((orientation == ScrollbarOrientation::Horizontal ? m_scrollbarEnabledState.horizontalScrollbarIsEnabled : m_scrollbarEnabledState.verticalScrollbarIsEnabled) == enabled)
+        return;
+
+    if (orientation == ScrollbarOrientation::Horizontal)
+        m_scrollbarEnabledState.horizontalScrollbarIsEnabled = enabled;
+    else
+        m_scrollbarEnabledState.verticalScrollbarIsEnabled = enabled;
+
+    setPropertyChanged(Property::ScrollbarEnabledState);
+}
+
+void ScrollingStateScrollingNode::setScrollbarLayoutDirection(UserInterfaceLayoutDirection scrollbarLayoutDirection)
+{
+    if (scrollbarLayoutDirection == m_scrollbarLayoutDirection)
+        return;
+
+    m_scrollbarLayoutDirection = scrollbarLayoutDirection;
+    setPropertyChanged(Property::ScrollbarLayoutDirection);
+}
+
+void ScrollingStateScrollingNode::setScrollbarWidth(ScrollbarWidth scrollbarWidth)
+{
+    if (scrollbarWidth == m_scrollbarWidth)
+        return;
+    m_scrollbarWidth = scrollbarWidth;
+    setPropertyChanged(Property::ScrollbarWidth);
+}
+
+void ScrollingStateScrollingNode::setUseDarkAppearanceForScrollbars(bool useDarkAppearanceForScrollbars)
+{
+    if (useDarkAppearanceForScrollbars == m_useDarkAppearanceForScrollbars)
+        return;
+    m_useDarkAppearanceForScrollbars = useDarkAppearanceForScrollbars;
+    setPropertyChanged(Property::UseDarkAppearanceForScrollbars);
+}
+
 void ScrollingStateScrollingNode::dumpProperties(TextStream& ts, OptionSet<ScrollingStateTreeAsTextBehavior> behavior) const
 {
     ScrollingStateNode::dumpProperties(ts, behavior);
 
     if (m_scrollPosition != FloatPoint()) {
         TextStream::GroupScope scope(ts);
-        ts << "scroll position "
+        ts << "scroll position "_s
             << TextStream::FormatNumberRespectingIntegers(m_scrollPosition.x()) << " "
             << TextStream::FormatNumberRespectingIntegers(m_scrollPosition.y());
     }
 
     if (!m_scrollableAreaSize.isEmpty()) {
         TextStream::GroupScope scope(ts);
-        ts << "scrollable area size "
+        ts << "scrollable area size "_s
             << TextStream::FormatNumberRespectingIntegers(m_scrollableAreaSize.width()) << " "
             << TextStream::FormatNumberRespectingIntegers(m_scrollableAreaSize.height());
     }
 
     if (!m_totalContentsSize.isEmpty()) {
         TextStream::GroupScope scope(ts);
-        ts << "contents size "
+        ts << "contents size "_s
             << TextStream::FormatNumberRespectingIntegers(m_totalContentsSize.width()) << " "
             << TextStream::FormatNumberRespectingIntegers(m_totalContentsSize.height());
     }
 
     if (m_reachableContentsSize != m_totalContentsSize)
-        ts.dumpProperty("reachable contents size", m_reachableContentsSize);
+        ts.dumpProperty("reachable contents size"_s, m_reachableContentsSize);
 
-    if (!m_requestedScrollData.scrollPosition.isZero()) {
+    if (m_requestedScrollData.requestType == ScrollRequestType::PositionUpdate) {
+        auto scrollPosition = std::get<FloatPoint>(m_requestedScrollData.scrollPositionOrDelta);
+        if (!scrollPosition.isZero()) {
         TextStream::GroupScope scope(ts);
-        ts << "requested scroll position "
-            << TextStream::FormatNumberRespectingIntegers(m_requestedScrollData.scrollPosition.x()) << " "
-            << TextStream::FormatNumberRespectingIntegers(m_requestedScrollData.scrollPosition.y());
+            ts << "requested scroll position "_s
+            << TextStream::FormatNumberRespectingIntegers(scrollPosition.x()) << " "
+            << TextStream::FormatNumberRespectingIntegers(scrollPosition.y());
+        }
+    } else if (m_requestedScrollData.requestType == ScrollRequestType::DeltaUpdate) {
+        auto scrollDelta = std::get<FloatSize>(m_requestedScrollData.scrollPositionOrDelta);
+        if (!scrollDelta.isZero()) {
+            TextStream::GroupScope scope(ts);
+            ts << "requested scroll delta "_s
+            << TextStream::FormatNumberRespectingIntegers(scrollDelta.width()) << " "
+            << TextStream::FormatNumberRespectingIntegers(scrollDelta.height());
+        }
     }
+
     if (m_requestedScrollData.scrollType == ScrollType::Programmatic)
-        ts.dumpProperty("requested scroll position represents programmatic scroll", true);
+        ts.dumpProperty("requested scroll position represents programmatic scroll"_s, true);
 
     if (m_requestedScrollData.clamping == ScrollClamping::Unclamped)
-        ts.dumpProperty("requested scroll position clamping", m_requestedScrollData.clamping);
+        ts.dumpProperty("requested scroll position clamping"_s, m_requestedScrollData.clamping);
 
     if (m_requestedScrollData.animated == ScrollIsAnimated::Yes)
-        ts.dumpProperty("requested scroll position is animated", true);
+        ts.dumpProperty("requested scroll position is animated"_s, true);
 
     if (m_scrollOrigin != IntPoint())
-        ts.dumpProperty("scroll origin", m_scrollOrigin);
+        ts.dumpProperty("scroll origin"_s, m_scrollOrigin);
 
     if (m_snapOffsetsInfo.horizontalSnapOffsets.size())
-        ts.dumpProperty("horizontal snap offsets", m_snapOffsetsInfo.horizontalSnapOffsets);
+        ts.dumpProperty("horizontal snap offsets"_s, m_snapOffsetsInfo.horizontalSnapOffsets);
 
     if (m_snapOffsetsInfo.verticalSnapOffsets.size())
-        ts.dumpProperty("vertical snap offsets", m_snapOffsetsInfo.verticalSnapOffsets);
+        ts.dumpProperty("vertical snap offsets"_s, m_snapOffsetsInfo.verticalSnapOffsets);
 
     if (m_currentHorizontalSnapPointIndex)
-        ts.dumpProperty("current horizontal snap point index", m_currentHorizontalSnapPointIndex);
+        ts.dumpProperty("current horizontal snap point index"_s, m_currentHorizontalSnapPointIndex);
 
     if (m_currentVerticalSnapPointIndex)
-        ts.dumpProperty("current vertical snap point index", m_currentVerticalSnapPointIndex);
+        ts.dumpProperty("current vertical snap point index"_s, m_currentVerticalSnapPointIndex);
 
-    ts.dumpProperty("scrollable area parameters", m_scrollableAreaParameters);
+    ts.dumpProperty("scrollable area parameters"_s, m_scrollableAreaParameters);
 
 #if ENABLE(SCROLLING_THREAD)
     if (!m_synchronousScrollingReasons.isEmpty())
-        ts.dumpProperty("Scrolling on main thread because:", ScrollingCoordinator::synchronousScrollingReasonsAsText(m_synchronousScrollingReasons));
+        ts.dumpProperty("Scrolling on main thread because:"_s, ScrollingCoordinator::synchronousScrollingReasonsAsText(m_synchronousScrollingReasons));
 #endif
 
     if (m_isMonitoringWheelEvents)
-        ts.dumpProperty("expects wheel event test trigger", m_isMonitoringWheelEvents);
+        ts.dumpProperty("expects wheel event test trigger"_s, m_isMonitoringWheelEvents);
 
     if (behavior & ScrollingStateTreeAsTextBehavior::IncludeLayerIDs) {
         if (m_scrollContainerLayer.layerID())
-            ts.dumpProperty("scroll container layer", m_scrollContainerLayer.layerID());
+            ts.dumpProperty("scroll container layer"_s, m_scrollContainerLayer.layerID());
         if (m_scrolledContentsLayer.layerID())
-            ts.dumpProperty("scrolled contents layer", m_scrolledContentsLayer.layerID());
+            ts.dumpProperty("scrolled contents layer"_s, m_scrolledContentsLayer.layerID());
     }
 }
 

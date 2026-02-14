@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2021 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,33 +26,30 @@
 
 #pragma once
 
+#include <wtf/TZoneMalloc.h>
 #include <wtf/ThreadSafeRefCounted.h>
+#include <wtf/Threading.h>
 #include <wtf/text/StringHash.h>
 
 namespace PAL {
 
 struct ICUConverterWrapper;
 
-#if USE(WEB_THREAD)
-class ThreadGlobalData : public ThreadSafeRefCounted<ThreadGlobalData> {
-#else
-class ThreadGlobalData {
-#endif
+class ThreadGlobalData : public WTF::Thread::ClientData {
+    WTF_MAKE_TZONE_ALLOCATED(ThreadGlobalData);
     WTF_MAKE_NONCOPYABLE(ThreadGlobalData);
-    WTF_MAKE_FAST_ALLOCATED;
 public:
     PAL_EXPORT virtual ~ThreadGlobalData();
 
-    ICUConverterWrapper& cachedConverterICU() { return *m_cachedConverterICU; }
+    ICUConverterWrapper& cachedConverterICU() { return m_cachedConverterICU; }
 
 protected:
     PAL_EXPORT ThreadGlobalData();
-    void destroy(); // called on workers to clean up the ThreadGlobalData before the thread exits.
 
 private:
     PAL_EXPORT friend ThreadGlobalData& threadGlobalData();
 
-    std::unique_ptr<ICUConverterWrapper> m_cachedConverterICU;
+    const UniqueRef<ICUConverterWrapper> m_cachedConverterICU;
 };
 
 #if USE(WEB_THREAD)

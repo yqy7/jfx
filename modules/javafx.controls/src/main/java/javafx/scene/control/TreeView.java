@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,7 +46,6 @@ import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.WeakChangeListener;
-import javafx.beans.value.WritableValue;
 import javafx.collections.ListChangeListener;
 import javafx.css.CssMetaData;
 import javafx.css.Styleable;
@@ -128,6 +127,55 @@ import java.util.Map;
  * generate {@link TreeCell} instances, which are used to represent an item in the
  * TreeView. See the {@link Cell} class documentation for a more complete
  * description of how to write custom Cells.
+ *
+ * <h3>Warning: Nodes should not be inserted directly into the TreeView cells</h3>
+ * {@code TreeView} allows for it's cells to contain elements of any type, including
+ * {@code Node} instances. Putting nodes into
+ * the TreeView cells is <strong>strongly discouraged</strong>, as it can
+ * lead to unexpected results.
+ * <p>Important points to note:
+ * <ul>
+ * <li>Avoid inserting {@code Node} instances directly into the {@code TreeView} cells or its data model.</li>
+ * <li>The recommended approach is to put the relevant information into the items list, and
+ * provide a custom {@link #cellFactoryProperty() cell factory} to create the nodes for a
+ * given cell and update them on demand using the data stored in the item for that cell.</li>
+ * <li>Avoid creating new {@code Node}s in the {@code updateItem} method of a custom {@link #cellFactoryProperty() cell factory}.</li>
+ * </ul>
+ * <p>The following minimal example shows how to create a custom cell factory for {@code TreeView} containing {@code Node}s:
+ *
+ * <pre> {@code  TreeItem<Color> treeRoot = new TreeItem<>();
+ *  treeRoot.setExpanded(true);
+ *  TreeView<Color> treeView = new TreeView<>(treeRoot);
+ *
+ *  treeRoot.getChildren().addAll(
+ *      new TreeItem<>(Color.RED),
+ *      new TreeItem<>(Color.GREEN),
+ *      new TreeItem<>(Color.BLUE));
+ *
+ *  treeView.setCellFactory(p -> {
+ *      return new TreeCell<Color>() {
+ *      private final Rectangle rectangle;
+ *      {
+ *          setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+ *          rectangle = new Rectangle(10, 10);
+ *      }
+ *
+ *      @Override
+ *      protected void updateItem(Color item, boolean empty) {
+ *          super.updateItem(item, empty);
+ *
+ *          if (item == null || empty) {
+ *              setGraphic(null);
+ *          } else {
+ *              rectangle.setFill(item);
+ *              setGraphic(rectangle);
+ *          }
+ *      }
+ *  };});}</pre>
+ *
+ * <p> This example has an anonymous custom {@code TreeCell} class in the custom cell factory.
+ * Note that the {@code Rectangle} ({@code Node}) object needs to be created in the instance initialization block
+ * or the constructor of the custom {@code TreeCell} class and updated/used in its {@code updateItem} method.
  *
  * <h2>Editing</h2>
  * <p>This control supports inline editing of values, and this section attempts to
@@ -335,9 +383,9 @@ public class TreeView<T> extends Control {
 
         // install default selection and focus models - it's unlikely this will be changed
         // by many users.
-        MultipleSelectionModel<TreeItem<T>> sm = new TreeViewBitSetSelectionModel<T>(this);
+        MultipleSelectionModel<TreeItem<T>> sm = new TreeViewBitSetSelectionModel<>(this);
         setSelectionModel(sm);
-        setFocusModel(new TreeViewFocusModel<T>(this));
+        setFocusModel(new TreeViewFocusModel<>(this));
 
         setOnEditCommit(DEFAULT_EDIT_COMMIT_HANDLER);
     }
@@ -356,7 +404,7 @@ public class TreeView<T> extends Control {
     private boolean expandedItemCountDirty = true;
 
     // Used in the getTreeItem(int row) method to act as a cache.
-    // See RT-26716 for the justification and performance gains.
+    // See JDK-8125681 for the justification and performance gains.
     private Map<Integer, SoftReference<TreeItem<T>>> treeItemCacheMap = new HashMap<>();
 
 
@@ -437,14 +485,14 @@ public class TreeView<T> extends Control {
      */
     public final ObjectProperty<Callback<TreeView<T>, TreeCell<T>>> cellFactoryProperty() {
         if (cellFactory == null) {
-            cellFactory = new SimpleObjectProperty<Callback<TreeView<T>, TreeCell<T>>>(this, "cellFactory");
+            cellFactory = new SimpleObjectProperty<>(this, "cellFactory");
         }
         return cellFactory;
     }
 
 
     // --- Root
-    private ObjectProperty<TreeItem<T>> root = new SimpleObjectProperty<TreeItem<T>>(this, "root") {
+    private ObjectProperty<TreeItem<T>> root = new SimpleObjectProperty<>(this, "root") {
         private WeakReference<TreeItem<T>> weakOldItem;
 
         @Override protected void invalidated() {
@@ -460,7 +508,7 @@ public class TreeView<T> extends Control {
                 weakOldItem = new WeakReference<>(root);
             }
 
-            // Fix for RT-37853
+            // Fix for JDK-8094887
             edit(null);
 
             expandedItemCountDirty = true;
@@ -570,7 +618,7 @@ public class TreeView<T> extends Control {
      */
     public final ObjectProperty<MultipleSelectionModel<TreeItem<T>>> selectionModelProperty() {
         if (selectionModel == null) {
-            selectionModel = new SimpleObjectProperty<MultipleSelectionModel<TreeItem<T>>>(this, "selectionModel");
+            selectionModel = new SimpleObjectProperty<>(this, "selectionModel");
         }
         return selectionModel;
     }
@@ -603,7 +651,7 @@ public class TreeView<T> extends Control {
      */
     public final ObjectProperty<FocusModel<TreeItem<T>>> focusModelProperty() {
         if (focusModel == null) {
-            focusModel = new SimpleObjectProperty<FocusModel<TreeItem<T>>>(this, "focusModel");
+            focusModel = new SimpleObjectProperty<>(this, "focusModel");
         }
         return focusModel;
     }
@@ -758,7 +806,7 @@ public class TreeView<T> extends Control {
 
     private ReadOnlyObjectWrapper<TreeItem<T>> editingItemPropertyImpl() {
         if (editingItem == null) {
-            editingItem = new ReadOnlyObjectWrapper<TreeItem<T>>(this, "editingItem");
+            editingItem = new ReadOnlyObjectWrapper<>(this, "editingItem");
         }
         return editingItem;
     }
@@ -793,7 +841,7 @@ public class TreeView<T> extends Control {
      */
     public final ObjectProperty<EventHandler<EditEvent<T>>> onEditStartProperty() {
         if (onEditStart == null) {
-            onEditStart = new SimpleObjectProperty<EventHandler<EditEvent<T>>>(this, "onEditStart") {
+            onEditStart = new SimpleObjectProperty<>(this, "onEditStart") {
                 @Override protected void invalidated() {
                     setEventHandler(TreeView.<T>editStartEvent(), get());
                 }
@@ -839,7 +887,7 @@ public class TreeView<T> extends Control {
      */
     public final ObjectProperty<EventHandler<EditEvent<T>>> onEditCommitProperty() {
         if (onEditCommit == null) {
-            onEditCommit = new SimpleObjectProperty<EventHandler<EditEvent<T>>>(this, "onEditCommit") {
+            onEditCommit = new SimpleObjectProperty<>(this, "onEditCommit") {
                 @Override protected void invalidated() {
                     setEventHandler(TreeView.<T>editCommitEvent(), get());
                 }
@@ -884,7 +932,7 @@ public class TreeView<T> extends Control {
      */
     public final ObjectProperty<EventHandler<EditEvent<T>>> onEditCancelProperty() {
         if (onEditCancel == null) {
-            onEditCancel = new SimpleObjectProperty<EventHandler<EditEvent<T>>>(this, "onEditCancel") {
+            onEditCancel = new SimpleObjectProperty<>(this, "onEditCancel") {
                 @Override protected void invalidated() {
                     setEventHandler(TreeView.<T>editCancelEvent(), get());
                 }
@@ -958,7 +1006,7 @@ public class TreeView<T> extends Control {
 
     public ObjectProperty<EventHandler<ScrollToEvent<Integer>>> onScrollToProperty() {
         if( onScrollTo == null ) {
-            onScrollTo = new ObjectPropertyBase<EventHandler<ScrollToEvent<Integer>>>() {
+            onScrollTo = new ObjectPropertyBase<>() {
                 @Override
                 protected void invalidated() {
                     setEventHandler(ScrollToEvent.scrollToTopIndex(), get());
@@ -1061,16 +1109,14 @@ public class TreeView<T> extends Control {
     }
 
     /**
-     * Calling {@code refresh()} forces the TreeView control to recreate and
-     * repopulate the cells necessary to populate the visual bounds of the control.
-     * In other words, this forces the TreeView to update what it is showing to
-     * the user. This is useful in cases where the underlying data source has
-     * changed in a way that is not observed by the TreeView itself.
+     * Forces the TreeView to update what it is showing to the user.
+     * This is useful in cases where the underlying data source has changed in a way
+     * that is not observed by the TreeView itself.
      *
      * @since JavaFX 8u60
      */
     public void refresh() {
-        getProperties().put(Properties.RECREATE, Boolean.TRUE);
+        getProperties().put(Properties.REBUILD, Boolean.TRUE);
     }
 
 
@@ -1113,7 +1159,7 @@ public class TreeView<T> extends Control {
 
     private static class StyleableProperties {
         private static final CssMetaData<TreeView<?>,Number> FIXED_CELL_SIZE =
-                new CssMetaData<TreeView<?>,Number>("-fx-fixed-cell-size",
+                new CssMetaData<>("-fx-fixed-cell-size",
                                                      SizeConverter.getInstance(),
                                                      Region.USE_COMPUTED_SIZE) {
 
@@ -1126,14 +1172,14 @@ public class TreeView<T> extends Control {
                     }
 
                     @Override public StyleableProperty<Number> getStyleableProperty(TreeView<?> n) {
-                        return (StyleableProperty<Number>)(WritableValue<Number>) n.fixedCellSizeProperty();
+                        return (StyleableProperty<Number>)n.fixedCellSizeProperty();
                     }
                 };
 
         private static final List<CssMetaData<? extends Styleable, ?>> STYLEABLES;
         static {
             final List<CssMetaData<? extends Styleable, ?>> styleables =
-                    new ArrayList<CssMetaData<? extends Styleable, ?>>(Control.getClassCssMetaData());
+                    new ArrayList<>(Control.getClassCssMetaData());
             styleables.add(FIXED_CELL_SIZE);
             STYLEABLES = Collections.unmodifiableList(styleables);
         }
@@ -1215,8 +1261,11 @@ public class TreeView<T> extends Control {
          */
         public static final EventType<?> ANY = EDIT_ANY_EVENT;
 
+        @SuppressWarnings("doclint:missing")
         private final TreeView<T> source;
+        @SuppressWarnings("doclint:missing")
         private final T oldValue;
+        @SuppressWarnings("doclint:missing")
         private final T newValue;
         private transient final TreeItem<T> treeItem;
 
@@ -1408,12 +1457,12 @@ public class TreeView<T> extends Control {
                     // shuffle selection by the number of added items
                     shift += ControlUtils.isTreeItemIncludingAncestorsExpanded(treeItem) ? addedSize : 0;
 
-                    // RT-32963: We were taking the startRow from the TreeItem
+                    // JDK-8117147: We were taking the startRow from the TreeItem
                     // in which the children were added, rather than from the
                     // actual position of the new child. This led to selection
                     // being moved off the parent TreeItem by mistake.
                     // The 'if (e.getAddedSize() == 1)' condition here was
-                    // subsequently commented out due to RT-33894.
+                    // subsequently commented out due to JDK-8123085.
                     startRow = treeView.getRow(e.getChange().getAddedSubList().get(0));
                 } else if (e.wasRemoved()) {
                     // the start row is incorrect - it is _not_ the index of the
@@ -1425,7 +1474,7 @@ public class TreeView<T> extends Control {
 
                     // whilst we are here, we should check if the removed items
                     // are part of the selectedItems list - and remove them
-                    // from selection if they are (as per RT-15446)
+                    // from selection if they are (as per JDK-8114236)
                     final List<Integer> selectedIndices1 = getSelectedIndices();
                     final int selectedIndex = getSelectedIndex();
                     final List<TreeItem<T>> selectedItems = getSelectedItems();
@@ -1453,7 +1502,7 @@ public class TreeView<T> extends Control {
                                 selectedItems.size() == 1 &&
                                 selectedItem != null &&
                                 selectedItem.equals(removedChildren.get(0))) {
-                            // Bug fix for RT-28637
+                            // Bug fix for JDK-8118846
                             if (selectedIndex < getItemCount()) {
                                 final int previousRow = selectedIndex == 0 ? 0 : selectedIndex - 1;
                                 TreeItem<T> newSelectedItem = getModelItem(previousRow);
@@ -1509,7 +1558,7 @@ public class TreeView<T> extends Control {
             }
 
             // we firstly expand the path down such that the given object is
-            // visible. This fixes RT-14456, where selection was not happening
+            // visible. This fixes JDK-8113764, where selection was not happening
             // correctly on TreeItems that are not visible.
 
             if (obj != null) {
@@ -1520,7 +1569,7 @@ public class TreeView<T> extends Control {
                 }
             }
 
-            // Fix for RT-15419. We eagerly update the tree item count, such that
+            // Fix for JDK-8114413. We eagerly update the tree item count, such that
             // selection occurs on the row
             treeView.updateExpandedItemCount(treeView.getRoot());
 
@@ -1654,7 +1703,7 @@ public class TreeView<T> extends Control {
             }
         }
 
-        private EventHandler<TreeModificationEvent<T>> treeItemListener = new EventHandler<TreeModificationEvent<T>>() {
+        private EventHandler<TreeModificationEvent<T>> treeItemListener = new EventHandler<>() {
             @Override public void handle(TreeModificationEvent<T> e) {
                 // don't shift focus if the event occurred on a tree item after
                 // the focused row, or if there is no focus index at present

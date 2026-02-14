@@ -31,56 +31,14 @@
 namespace WebCore {
 
 struct MediaCapabilitiesEncodingInfo : MediaCapabilitiesInfo {
-    // FIXME(C++17): remove the following constructors once all compilers support extended
-    // aggregate initialization:
-    // <http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2015/p0017r1.html>
-    MediaCapabilitiesEncodingInfo() = default;
-    MediaCapabilitiesEncodingInfo(MediaEncodingConfiguration&& supportedConfiguration)
-        : MediaCapabilitiesEncodingInfo({ }, WTFMove(supportedConfiguration))
-    {
-    }
-    MediaCapabilitiesEncodingInfo(MediaCapabilitiesInfo&& info, MediaEncodingConfiguration&& supportedConfiguration)
-        : MediaCapabilitiesInfo(WTFMove(info))
-        , supportedConfiguration(WTFMove(supportedConfiguration))
-    {
-    }
-
-    MediaEncodingConfiguration supportedConfiguration;
+    MediaEncodingConfiguration configuration;
 
     MediaCapabilitiesEncodingInfo isolatedCopy() const;
-
-    template<class Encoder> void encode(Encoder&) const;
-    template<class Decoder> static std::optional<MediaCapabilitiesEncodingInfo> decode(Decoder&);
 };
 
 inline MediaCapabilitiesEncodingInfo MediaCapabilitiesEncodingInfo::isolatedCopy() const
 {
-    return { MediaCapabilitiesInfo::isolatedCopy(), supportedConfiguration.isolatedCopy() };
-}
-
-template<class Encoder>
-void MediaCapabilitiesEncodingInfo::encode(Encoder& encoder) const
-{
-    MediaCapabilitiesInfo::encode(encoder);
-    encoder << supportedConfiguration;
-}
-
-template<class Decoder>
-std::optional<MediaCapabilitiesEncodingInfo> MediaCapabilitiesEncodingInfo::decode(Decoder& decoder)
-{
-    auto info = MediaCapabilitiesInfo::decode(decoder);
-    if (!info)
-        return std::nullopt;
-
-    std::optional<MediaEncodingConfiguration> supportedConfiguration;
-    decoder >> supportedConfiguration;
-    if (!supportedConfiguration)
-        return std::nullopt;
-
-    return MediaCapabilitiesEncodingInfo(
-        WTFMove(*info),
-        WTFMove(*supportedConfiguration)
-    );
+    return { MediaCapabilitiesInfo::isolatedCopy(), configuration.isolatedCopy() };
 }
 
 } // namespace WebCore

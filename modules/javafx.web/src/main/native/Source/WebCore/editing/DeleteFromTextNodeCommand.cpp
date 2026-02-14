@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2008, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2005-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -64,7 +64,7 @@ void DeleteFromTextNodeCommand::doUnapply()
 }
 
 #ifndef NDEBUG
-void DeleteFromTextNodeCommand::getNodesInCommand(HashSet<Ref<Node>>& nodes)
+void DeleteFromTextNodeCommand::getNodesInCommand(NodeSet& nodes)
 {
     addNodeAndDescendants(m_node.ptr(), nodes);
 }

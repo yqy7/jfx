@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -80,7 +80,7 @@ public final class StubImageLoaderFactory {
             };
 
     public StubImageLoaderFactory() {
-        imageInfos = new HashMap<Object, StubPlatformImageInfo>();
+        imageInfos = new HashMap<>();
     }
 
     public void reset() {
@@ -112,8 +112,8 @@ public final class StubImageLoaderFactory {
     }
 
     public AsyncOperation createAsyncImageLoader(
-            final AsyncOperationListener listener,
-            final String url, final double loadWidth, final double loadHeight,
+            final AsyncOperationListener<ImageLoader> listener,
+            final Object url, final double loadWidth, final double loadHeight,
             final boolean preserveRatio, final boolean smooth) {
         final ImageLoader imageLoader =
                 createImageLoader(url, loadWidth, loadHeight,

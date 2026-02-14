@@ -36,17 +36,28 @@ struct ProtoCallFrame;
 typedef int64_t EncodedJSValue;
 
 extern "C" {
-    EncodedJSValue vmEntryToJavaScript(void*, VM*, ProtoCallFrame*);
-    EncodedJSValue vmEntryToNative(void*, VM*, ProtoCallFrame*);
-    EncodedJSValue vmEntryCustomGetter(CPURegister, CPURegister, CPURegister, CPURegister);
-    EncodedJSValue vmEntryCustomSetter(CPURegister, CPURegister, CPURegister, CPURegister, CPURegister);
-    EncodedJSValue vmEntryHostFunction(JSGlobalObject*, CallFrame*, void*);
+    EncodedJSValue SYSV_ABI vmEntryToJavaScript(void*, VM*, ProtoCallFrame*);
+    EncodedJSValue SYSV_ABI vmEntryToNative(void*, VM*, ProtoCallFrame*);
+    EncodedJSValue SYSV_ABI vmEntryCustomGetter(JSGlobalObject*, EncodedJSValue, PropertyName, void*);
+    void SYSV_ABI vmEntryCustomSetter(JSGlobalObject*, EncodedJSValue, EncodedJSValue, PropertyName, void*);
+    EncodedJSValue SYSV_ABI vmEntryHostFunction(JSGlobalObject*, CallFrame*, void*);
+
+#if CPU(ARM64) && CPU(ADDRESS64) && !ENABLE(C_LOOP)
+    EncodedJSValue vmEntryToJavaScriptWith0Arguments(void*, VM*, CodeBlock*, JSObject*, JSValue);
+    EncodedJSValue vmEntryToJavaScriptWith1Arguments(void*, VM*, CodeBlock*, JSObject*, JSValue, JSValue);
+    EncodedJSValue vmEntryToJavaScriptWith2Arguments(void*, VM*, CodeBlock*, JSObject*, JSValue, JSValue, JSValue);
+    EncodedJSValue vmEntryToJavaScriptWith3Arguments(void*, VM*, CodeBlock*, JSObject*, JSValue, JSValue, JSValue, JSValue);
+#endif
 }
 
-#if CPU(ARM64E)
+#if CPU(ARM64E) && !ENABLE(C_LOOP)
 extern "C" {
     void jitCagePtrGateAfter(void);
     void vmEntryToJavaScriptGateAfter(void);
+
+    // WebCore calls these from SelectorCompiler, so they are not hidden like normal LLInt symbols.
+    JS_EXPORT_PRIVATE unsigned SYSV_ABI vmEntryToCSSJIT(uintptr_t, uintptr_t, uintptr_t, const void* codePtr);
+    JS_EXPORT_PRIVATE void SYSV_ABI vmEntryToCSSJITAfter(void);
 
     void llint_function_for_call_arity_checkUntagGateAfter(void);
     void llint_function_for_call_arity_checkTagGateAfter(void);
@@ -73,9 +84,13 @@ MacroAssemblerCodeRef<JSEntryPtrTag> functionForConstructArityCheckThunk();
 MacroAssemblerCodeRef<JSEntryPtrTag> evalEntryThunk();
 MacroAssemblerCodeRef<JSEntryPtrTag> programEntryThunk();
 MacroAssemblerCodeRef<JSEntryPtrTag> moduleProgramEntryThunk();
+MacroAssemblerCodeRef<JSEntryPtrTag> defaultCallThunk();
 MacroAssemblerCodeRef<JSEntryPtrTag> getHostCallReturnValueThunk();
 MacroAssemblerCodeRef<JSEntryPtrTag> genericReturnPointThunk(OpcodeSize);
 MacroAssemblerCodeRef<JSEntryPtrTag> fuzzerReturnEarlyFromLoopHintThunk();
+#if ENABLE(JIT)
+MacroAssemblerCodeRef<JITThunkPtrTag> arityFixupThunk();
+#endif
 
 MacroAssemblerCodeRef<ExceptionHandlerPtrTag> callToThrowThunk();
 MacroAssemblerCodeRef<ExceptionHandlerPtrTag> handleUncaughtExceptionThunk();
@@ -84,6 +99,7 @@ MacroAssemblerCodeRef<ExceptionHandlerPtrTag> handleCatchThunk(OpcodeSize);
 #if ENABLE(WEBASSEMBLY)
 MacroAssemblerCodeRef<ExceptionHandlerPtrTag> handleWasmCatchThunk(OpcodeSize);
 MacroAssemblerCodeRef<ExceptionHandlerPtrTag> handleWasmCatchAllThunk(OpcodeSize);
+MacroAssemblerCodeRef<ExceptionHandlerPtrTag> handleWasmTryTableThunk(WasmOpcodeID, OpcodeSize);
 #endif
 
 #if ENABLE(JIT_CAGE)
@@ -94,6 +110,7 @@ MacroAssemblerCodeRef<NativeToJITGatePtrTag> jitCagePtrThunk();
 MacroAssemblerCodeRef<NativeToJITGatePtrTag> createJSGateThunk(void*, PtrTag, const char*);
 MacroAssemblerCodeRef<NativeToJITGatePtrTag> createWasmGateThunk(void*, PtrTag, const char*);
 MacroAssemblerCodeRef<NativeToJITGatePtrTag> createTailCallGate(PtrTag, bool);
+MacroAssemblerCodeRef<NativeToJITGatePtrTag> createWasmTailCallGate(PtrTag);
 MacroAssemblerCodeRef<NativeToJITGatePtrTag> loopOSREntryGateThunk();
 MacroAssemblerCodeRef<NativeToJITGatePtrTag> entryOSREntryGateThunk();
 MacroAssemblerCodeRef<NativeToJITGatePtrTag> wasmOSREntryGateThunk();
@@ -112,6 +129,15 @@ MacroAssemblerCodeRef<JSEntryPtrTag> returnLocationThunk(OpcodeID, OpcodeSize);
 
 #if ENABLE(WEBASSEMBLY)
 MacroAssemblerCodeRef<JITThunkPtrTag> wasmFunctionEntryThunk();
+MacroAssemblerCodeRef<JITThunkPtrTag> wasmFunctionEntryThunkSIMD();
+MacroAssemblerCodeRef<JITThunkPtrTag> inPlaceInterpreterEntryThunk();
+MacroAssemblerCodeRef<JITThunkPtrTag> inPlaceInterpreterSIMDEntryThunk();
+MacroAssemblerCodeRef<JITThunkPtrTag> inPlaceInterpreterCatchEntryThunk();
+MacroAssemblerCodeRef<JITThunkPtrTag> inPlaceInterpreterCatchAllEntryThunk();
+MacroAssemblerCodeRef<JITThunkPtrTag> inPlaceInterpreterTableCatchEntryThunk();
+MacroAssemblerCodeRef<JITThunkPtrTag> inPlaceInterpreterTableCatchRefEntryThunk();
+MacroAssemblerCodeRef<JITThunkPtrTag> inPlaceInterpreterTableCatchAllEntryThunk();
+MacroAssemblerCodeRef<JITThunkPtrTag> inPlaceInterpreterTableCatchAllrefEntryThunk();
 #endif // ENABLE(WEBASSEMBLY)
 
 } } // namespace JSC::LLInt

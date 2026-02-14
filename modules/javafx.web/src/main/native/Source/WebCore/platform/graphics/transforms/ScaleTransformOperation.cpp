@@ -27,6 +27,20 @@
 
 namespace WebCore {
 
+Ref<ScaleTransformOperation> ScaleTransformOperation::create(double sx, double sy, double sz, TransformOperation::Type type)
+{
+    return adoptRef(*new ScaleTransformOperation(sx, sy, sz, type));
+}
+
+ScaleTransformOperation::ScaleTransformOperation(double sx, double sy, double sz, TransformOperation::Type type)
+    : TransformOperation(type)
+    , m_x(sx)
+    , m_y(sy)
+    , m_z(sz)
+{
+    RELEASE_ASSERT(isScaleTransformOperationType(type));
+}
+
 bool ScaleTransformOperation::operator==(const TransformOperation& other) const
 {
     if (!isSameType(other))
@@ -68,7 +82,7 @@ Ref<TransformOperation> ScaleTransformOperation::blend(const TransformOperation*
 
 void ScaleTransformOperation::dump(TextStream& ts) const
 {
-    ts << type() << "(" << TextStream::FormatNumberRespectingIntegers(m_x) << ", " << TextStream::FormatNumberRespectingIntegers(m_y) << ", " << TextStream::FormatNumberRespectingIntegers(m_z) << ")";
+    ts << type() << '(' << TextStream::FormatNumberRespectingIntegers(m_x) << ", "_s << TextStream::FormatNumberRespectingIntegers(m_y) << ", "_s << TextStream::FormatNumberRespectingIntegers(m_z) << ')';
 }
 
 } // namespace WebCore

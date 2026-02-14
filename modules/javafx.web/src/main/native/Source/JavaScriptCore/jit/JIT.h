@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,14 +27,6 @@
 
 #if ENABLE(JIT)
 
-// We've run into some problems where changing the size of the class JIT leads to
-// performance fluctuations. Try forcing alignment in an attempt to stabilize this.
-#if COMPILER(GCC_COMPATIBLE)
-#define JIT_CLASS_ALIGNMENT alignas(32)
-#else
-#define JIT_CLASS_ALIGNMENT
-#endif
-
 #define ASSERT_JIT_OFFSET(actual, expected) ASSERT_WITH_MESSAGE(actual == expected, "JIT Offset \"%s\" should be %d, not %d.\n", #expected, static_cast<int>(expected), static_cast<int>(actual));
 
 #include "BaselineJITCode.h"
@@ -47,26 +39,32 @@
 #include "JSInterfaceJIT.h"
 #include "LLIntData.h"
 #include "PCToCodeOriginMap.h"
-#include "UnusedPointer.h"
+#include <wtf/SequesteredMalloc.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/UniqueRef.h>
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 namespace JSC {
 
     enum OpcodeID : unsigned;
 
     class ArrayAllocationProfile;
+    class BaselineJITPlan;
     class CallLinkInfo;
     class CodeBlock;
     class FunctionExecutable;
     class JIT;
     class Identifier;
-    class Interpreter;
     class BlockDirectory;
     class Register;
     class StructureChain;
     class StructureStubInfo;
 
-    struct Instruction;
+    template<typename> struct BaseInstruction;
+    struct JSOpcodeTraits;
+    using JSInstruction = BaseInstruction<JSOpcodeTraits>;
+
     struct OperandTypes;
     struct SimpleJumpTable;
     struct StringJumpTable;
@@ -79,13 +77,13 @@ namespace JSC {
     template<PtrTag tag>
     struct CallRecord {
         MacroAssembler::Call from;
-        FunctionPtr<tag> callee;
+        CodePtr<tag> callee;
 
         CallRecord()
         {
         }
 
-        CallRecord(MacroAssembler::Call from, FunctionPtr<tag> callee)
+        CallRecord(MacroAssembler::Call from, CodePtr<tag> callee)
             : from(from)
             , callee(callee)
         {
@@ -152,12 +150,12 @@ namespace JSC {
 
     struct CallCompilationInfo {
         MacroAssembler::Label doneLocation;
-        UnlinkedCallLinkInfo* unlinkedCallLinkInfo;
+        BaselineUnlinkedCallLinkInfo* unlinkedCallLinkInfo;
     };
 
-    void ctiPatchCallByReturnAddress(ReturnAddressPtr, FunctionPtr<CFunctionPtrTag> newCalleeFunction);
+    class JIT final : public JSInterfaceJIT {
+        WTF_MAKE_TZONE_NON_HEAP_ALLOCATABLE(JIT);
 
-    class JIT_CLASS_ALIGNMENT JIT : public JSInterfaceJIT {
         friend class JITSlowPathCall;
         friend class JITStubCall;
         friend class JITThunks;
@@ -166,51 +164,37 @@ namespace JSC {
         using MacroAssembler::JumpList;
         using MacroAssembler::Label;
 
-        static constexpr uintptr_t patchGetByIdDefaultStructure = unusedPointer;
-        static constexpr int patchGetByIdDefaultOffset = 0;
-        // Magic number - initial offset cannot be representable as a signed 8bit value, or the X86Assembler
-        // will compress the displacement, and we may not be able to fit a patched offset.
-        static constexpr int patchPutByIdDefaultOffset = 256;
-
         using Base = JSInterfaceJIT;
 
     public:
-        JIT(VM&, CodeBlock* = nullptr, BytecodeIndex loopOSREntryBytecodeOffset = BytecodeIndex(0));
+        JIT(VM&, BaselineJITPlan&, CodeBlock*);
         ~JIT();
 
         VM& vm() { return *JSInterfaceJIT::vm(); }
 
-        void compileAndLinkWithoutFinalizing(JITCompilationEffort);
-        CompilationResult finalizeOnMainThread(CodeBlock*);
-        size_t codeSize() const;
+        RefPtr<BaselineJITCode> compileAndLinkWithoutFinalizing(JITCompilationEffort);
+        static CompilationResult finalizeOnMainThread(CodeBlock*, BaselineJITPlan&, RefPtr<BaselineJITCode>);
 
-        void doMainThreadPreparationBeforeCompile();
+        static void doMainThreadPreparationBeforeCompile(VM&);
 
-        static CompilationResult compile(VM& vm, CodeBlock* codeBlock, JITCompilationEffort effort, BytecodeIndex bytecodeOffset = BytecodeIndex(0))
-        {
-            return JIT(vm, codeBlock, bytecodeOffset).privateCompile(codeBlock, effort);
-        }
+        static CompilationResult compileSync(VM&, CodeBlock*, JITCompilationEffort);
 
         static unsigned frameRegisterCountFor(UnlinkedCodeBlock*);
         static unsigned frameRegisterCountFor(CodeBlock*);
         static int stackPointerOffsetFor(UnlinkedCodeBlock*);
         static int stackPointerOffsetFor(CodeBlock*);
 
-        JS_EXPORT_PRIVATE static HashMap<CString, Seconds> compileTimeStats();
+        JS_EXPORT_PRIVATE static UncheckedKeyHashMap<CString, Seconds> compileTimeStats();
         JS_EXPORT_PRIVATE static Seconds totalCompileTime();
-
-        static constexpr GPRReg s_metadataGPR = LLInt::Registers::metadataTableGPR;
-        static constexpr GPRReg s_constantsGPR = LLInt::Registers::pbGPR;
 
     private:
         void privateCompileMainPass();
         void privateCompileLinkPass();
         void privateCompileSlowCases();
-        void link();
-        CompilationResult privateCompile(CodeBlock*, JITCompilationEffort);
+        RefPtr<BaselineJITCode> link(LinkBuffer&);
 
         // Add a call out from JIT code, without an exception check.
-        Call appendCall(const FunctionPtr<CFunctionPtrTag> function)
+        Call appendCall(const CodePtr<CFunctionPtrTag> function)
         {
             Call functionCall = call(OperationPtrTag);
             m_farCalls.append(FarCallRecord(functionCall, function.retagged<OperationPtrTag>()));
@@ -222,14 +206,8 @@ namespace JSC {
             call(function, OperationPtrTag);
         }
 
-#if OS(WINDOWS) && CPU(X86_64)
-        Call appendCallWithSlowPathReturnType(const FunctionPtr<CFunctionPtrTag> function)
-        {
-            Call functionCall = callWithSlowPathReturnType(OperationPtrTag);
-            m_farCalls.append(FarCallRecord(functionCall, function.retagged<OperationPtrTag>()));
-            return functionCall;
-        }
-#endif
+        template<size_t minAlign, typename Bytecode>
+        Address computeBaseAddressForMetadata(const Bytecode&, GPRReg);
 
         template <typename Bytecode>
         void loadPtrFromMetadata(const Bytecode&, size_t offset, GPRReg);
@@ -247,36 +225,31 @@ namespace JSC {
         void store32ToMetadata(GPRReg, const Bytecode&, size_t offset);
 
         template <typename Bytecode>
+        void storePtrToMetadata(GPRReg, const Bytecode&, size_t offset);
+
+        template <typename Bytecode>
         void materializePointerIntoMetadata(const Bytecode&, size_t offset, GPRReg);
 
     public:
         void loadConstant(unsigned constantIndex, GPRReg);
+        void loadStructureStubInfo(StructureStubInfoIndex, GPRReg);
+        static void emitMaterializeMetadataAndConstantPoolRegisters(CCallHelpers&);
     private:
         void loadGlobalObject(GPRReg);
+
+        // Assuming GPRInfo::jitDataRegister is available.
+        static void loadGlobalObject(CCallHelpers&, GPRReg);
+        static void loadConstant(CCallHelpers&, unsigned constantIndex, GPRReg);
+        static void loadStructureStubInfo(CCallHelpers&, StructureStubInfoIndex, GPRReg);
+
         void loadCodeBlockConstant(VirtualRegister, JSValueRegs);
         void loadCodeBlockConstantPayload(VirtualRegister, RegisterID);
 #if USE(JSVALUE32_64)
         void loadCodeBlockConstantTag(VirtualRegister, RegisterID);
 #endif
 
-        void emitPutCodeBlockToFrameInPrologue(GPRReg result = regT0);
-
-        void exceptionCheck(Jump jumpToHandler)
-        {
-            m_exceptionChecks.append(jumpToHandler);
-        }
-
-        void exceptionCheck()
-        {
-            m_exceptionChecks.append(emitExceptionCheck(vm()));
-        }
-
-        void exceptionCheckWithCallFrameRollback()
-        {
-            m_exceptionChecksWithCallFrameRollback.append(emitExceptionCheck(vm()));
-        }
-
-        void privateCompileExceptionHandlers();
+        void exceptionCheck(Jump jumpToHandler);
+        void exceptionCheck();
 
         void advanceToNextCheckpoint();
         void emitJumpSlowToHotForCheckpoint(Jump);
@@ -291,33 +264,22 @@ namespace JSC {
         void emitJumpSlowToHot(Jump, int);
 
         template<typename Op>
-        void compileOpCall(const Instruction*, unsigned callLinkInfoIndex);
-        template<typename Op>
-        void compileOpCallSlowCase(const Instruction*, Vector<SlowCaseEntry>::iterator&, unsigned callLinkInfoIndex);
+        void compileOpCall(const JSInstruction*);
 
         template<typename Op>
-        std::enable_if_t<
-            Op::opcodeID != op_call_varargs && Op::opcodeID != op_construct_varargs
-            && Op::opcodeID != op_tail_call_varargs && Op::opcodeID != op_tail_call_forward_arguments
-        , void> compileSetupFrame(const Op&);
+        void compileSetupFrame(const Op&);
 
         template<typename Op>
-        std::enable_if_t<
-            Op::opcodeID == op_call_varargs || Op::opcodeID == op_construct_varargs
-            || Op::opcodeID == op_tail_call_varargs || Op::opcodeID == op_tail_call_forward_arguments
-        , void> compileSetupFrame(const Op&);
-
+        bool compileTailCall(const Op&, BaselineUnlinkedCallLinkInfo*, unsigned callLinkInfoIndex);
         template<typename Op>
-        bool compileTailCall(const Op&, UnlinkedCallLinkInfo*, unsigned callLinkInfoIndex);
-        template<typename Op>
-        bool compileCallEval(const Op&);
-        void compileCallEvalSlowCase(const Instruction*, Vector<SlowCaseEntry>::iterator&);
+        void compileCallDirectEval(const Op&);
+        void compileCallDirectEvalSlowCase(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
         template<typename Op>
         void emitPutCallResult(const Op&);
 
 #if USE(JSVALUE64)
-        template<typename Op> void compileOpStrictEq(const Instruction*);
-        template<typename Op> void compileOpStrictEqJump(const Instruction*);
+        template<typename Op> void compileOpStrictEq(const JSInstruction*);
+        template<typename Op> void compileOpStrictEqJump(const JSInstruction*);
 #elif USE(JSVALUE32_64)
         void compileOpEqCommon(VirtualRegister src1, VirtualRegister src2);
         void compileOpEqSlowCommon(Vector<SlowCaseEntry>::iterator&);
@@ -333,24 +295,26 @@ namespace JSC {
         void emitWriteBarrier(GPRReg owner);
 
         template<typename Bytecode> void emitValueProfilingSite(const Bytecode&, JSValueRegs);
+        template<typename Bytecode> void emitValueProfilingSite(const Bytecode&, BytecodeIndex, JSValueRegs);
 
         template<typename Op>
         static inline constexpr bool isProfiledOp = std::is_same_v<decltype(Op::Metadata::m_profile), ValueProfile>;
         template<typename Op>
-        std::enable_if_t<isProfiledOp<Op>, void>
-        emitValueProfilingSiteIfProfiledOpcode(Op bytecode)
-        { // This assumes that the value to profile is in jsRegT10.
+        void emitValueProfilingSiteIfProfiledOpcode(Op bytecode)
+        {
+            // This assumes that the value to profile is in jsRegT10.
+            if constexpr (isProfiledOp<Op>)
             emitValueProfilingSite(bytecode, jsRegT10);
+            else
+                UNUSED_PARAM(bytecode);
         }
-        template<typename Op>
-        std::enable_if_t<!isProfiledOp<Op>, void>
-        emitValueProfilingSiteIfProfiledOpcode(Op)
-        { }
 
         template <typename Bytecode>
         void emitArrayProfilingSiteWithCell(const Bytecode&, RegisterID cellGPR, RegisterID scratchGPR);
         template <typename Bytecode>
         void emitArrayProfilingSiteWithCell(const Bytecode&, ptrdiff_t, RegisterID cellGPR, RegisterID scratchGPR);
+
+        void emitArrayProfilingSiteWithCellAndProfile(RegisterID cellGPR, RegisterID profileGPR, RegisterID scratchGPR);
 
         template<typename Op>
         ECMAMode ecmaMode(Op);
@@ -377,260 +341,289 @@ namespace JSC {
         void emitJumpSlowCaseIfNotJSCell(JSValueRegs, VirtualRegister);
 
         template<typename Op>
-        void emit_compareAndJump(const Instruction*, RelationalCondition);
-        void emit_compareAndJumpImpl(VirtualRegister op1, VirtualRegister op2, unsigned target, RelationalCondition);
+        void emit_compare(const JSInstruction*, RelationalCondition);
+        template <typename EmitCompareFunctor>
+        void emit_compareImpl(VirtualRegister op1, VirtualRegister op2, RelationalCondition, const EmitCompareFunctor&);
         template<typename Op>
-        void emit_compareUnsigned(const Instruction*, RelationalCondition);
+        void emit_compareAndJump(const JSInstruction*, RelationalCondition);
+        template<typename Op>
+        void emit_compareUnsigned(const JSInstruction*, RelationalCondition);
         void emit_compareUnsignedImpl(VirtualRegister dst, VirtualRegister op1, VirtualRegister op2, RelationalCondition);
         template<typename Op>
-        void emit_compareUnsignedAndJump(const Instruction*, RelationalCondition);
+        void emit_compareUnsignedAndJump(const JSInstruction*, RelationalCondition);
         void emit_compareUnsignedAndJumpImpl(VirtualRegister op1, VirtualRegister op2, unsigned target, RelationalCondition);
         template<typename Op, typename SlowOperation>
-        void emit_compareAndJumpSlow(const Instruction*, DoubleCondition, SlowOperation, bool invert, Vector<SlowCaseEntry>::iterator&);
-        template<typename SlowOperation>
-        void emit_compareAndJumpSlowImpl(VirtualRegister op1, VirtualRegister op2, unsigned target, size_t instructionSize, DoubleCondition, SlowOperation, bool invert, Vector<SlowCaseEntry>::iterator&);
+        void emit_compareSlow(const JSInstruction*, DoubleCondition, SlowOperation, Vector<SlowCaseEntry>::iterator&);
+        template<typename SlowOperation, typename HanldeReturnValueGPRFunctor, typename EmitDoubleCompareFunctor>
+        void emit_compareSlowImpl(VirtualRegister op1, VirtualRegister op2, size_t instructionSize, SlowOperation, Vector<SlowCaseEntry>::iterator&, const HanldeReturnValueGPRFunctor&, const EmitDoubleCompareFunctor&);
+        template<typename Op, typename SlowOperation>
+        void emit_compareAndJumpSlow(const JSInstruction*, DoubleCondition, SlowOperation, bool invert, Vector<SlowCaseEntry>::iterator&);
 
-        void assertStackPointerOffset();
-
-        void emit_op_add(const Instruction*);
-        void emit_op_bitand(const Instruction*);
-        void emit_op_bitor(const Instruction*);
-        void emit_op_bitxor(const Instruction*);
-        void emit_op_bitnot(const Instruction*);
-        void emit_op_call(const Instruction*);
-        void emit_op_tail_call(const Instruction*);
-        void emit_op_call_eval(const Instruction*);
-        void emit_op_call_varargs(const Instruction*);
-        void emit_op_tail_call_varargs(const Instruction*);
-        void emit_op_tail_call_forward_arguments(const Instruction*);
-        void emit_op_construct_varargs(const Instruction*);
-        void emit_op_catch(const Instruction*);
-        void emit_op_construct(const Instruction*);
-        void emit_op_create_this(const Instruction*);
-        void emit_op_to_this(const Instruction*);
-        void emit_op_get_argument(const Instruction*);
-        void emit_op_argument_count(const Instruction*);
-        void emit_op_get_rest_length(const Instruction*);
-        void emit_op_check_tdz(const Instruction*);
-        void emit_op_identity_with_profile(const Instruction*);
-        void emit_op_debug(const Instruction*);
-        void emit_op_del_by_id(const Instruction*);
-        void emitSlow_op_del_by_id(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emit_op_del_by_val(const Instruction*);
-        void emitSlow_op_del_by_val(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emit_op_div(const Instruction*);
-        void emit_op_end(const Instruction*);
-        void emit_op_enter(const Instruction*);
-        void emit_op_get_scope(const Instruction*);
-        void emit_op_eq(const Instruction*);
-        void emit_op_eq_null(const Instruction*);
-        void emit_op_below(const Instruction*);
-        void emit_op_beloweq(const Instruction*);
-        void emit_op_try_get_by_id(const Instruction*);
-        void emit_op_get_by_id(const Instruction*);
-        void emit_op_get_by_id_with_this(const Instruction*);
-        void emit_op_get_by_id_direct(const Instruction*);
-        void emit_op_get_by_val(const Instruction*);
-        void emit_op_get_private_name(const Instruction*);
-        void emit_op_set_private_brand(const Instruction*);
-        void emit_op_check_private_brand(const Instruction*);
-        void emit_op_get_argument_by_val(const Instruction*);
-        void emit_op_get_prototype_of(const Instruction*);
-        void emit_op_in_by_id(const Instruction*);
-        void emit_op_in_by_val(const Instruction*);
-        void emit_op_has_private_name(const Instruction*);
-        void emit_op_has_private_brand(const Instruction*);
-        void emit_op_init_lazy_reg(const Instruction*);
-        void emit_op_overrides_has_instance(const Instruction*);
-        void emit_op_instanceof(const Instruction*);
-        void emit_op_is_empty(const Instruction*);
-        void emit_op_typeof_is_undefined(const Instruction*);
-        void emit_op_is_undefined_or_null(const Instruction*);
-        void emit_op_is_boolean(const Instruction*);
-        void emit_op_is_number(const Instruction*);
+        void emit_op_add(const JSInstruction*);
+        void emit_op_bitand(const JSInstruction*);
+        void emit_op_bitor(const JSInstruction*);
+        void emit_op_bitxor(const JSInstruction*);
+        void emit_op_bitnot(const JSInstruction*);
+        void emit_op_call(const JSInstruction*);
+        void emit_op_call_ignore_result(const JSInstruction*);
+        void emit_op_tail_call(const JSInstruction*);
+        void emit_op_call_direct_eval(const JSInstruction*);
+        void emit_op_call_varargs(const JSInstruction*);
+        void emit_op_tail_call_varargs(const JSInstruction*);
+        void emit_op_tail_call_forward_arguments(const JSInstruction*);
+        void emit_op_construct_varargs(const JSInstruction*);
+        void emit_op_super_construct_varargs(const JSInstruction*);
+        void emit_op_catch(const JSInstruction*);
+        void emit_op_construct(const JSInstruction*);
+        void emit_op_super_construct(const JSInstruction*);
+        void emit_op_create_this(const JSInstruction*);
+        void emit_op_to_this(const JSInstruction*);
+        void emit_op_get_argument(const JSInstruction*);
+        void emit_op_argument_count(const JSInstruction*);
+        void emit_op_get_rest_length(const JSInstruction*);
+        void emit_op_check_tdz(const JSInstruction*);
+        void emit_op_identity_with_profile(const JSInstruction*);
+        void emit_op_debug(const JSInstruction*);
+        void emit_op_del_by_id(const JSInstruction*);
+        void emitSlow_op_del_by_id(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emit_op_del_by_val(const JSInstruction*);
+        void emitSlow_op_del_by_val(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emit_op_div(const JSInstruction*);
+        void emit_op_end(const JSInstruction*);
+        void emit_op_enter(const JSInstruction*);
+        void emit_op_get_scope(const JSInstruction*);
+        void emit_op_eq(const JSInstruction*);
+        void emit_op_eq_null(const JSInstruction*);
+        void emit_op_below(const JSInstruction*);
+        void emit_op_beloweq(const JSInstruction*);
+        void emit_op_try_get_by_id(const JSInstruction*);
+        void emit_op_get_by_id(const JSInstruction*);
+        void emit_op_get_length(const JSInstruction*);
+        void emit_op_get_by_id_with_this(const JSInstruction*);
+        void emit_op_get_by_id_direct(const JSInstruction*);
+        void emit_op_get_by_val(const JSInstruction*);
+        void emit_op_get_by_val_with_this(const JSInstruction*);
+        void emit_op_get_private_name(const JSInstruction*);
+        void emit_op_set_private_brand(const JSInstruction*);
+        void emit_op_check_private_brand(const JSInstruction*);
+        void emit_op_get_argument_by_val(const JSInstruction*);
+        void emit_op_get_prototype_of(const JSInstruction*);
+        void emit_op_in_by_id(const JSInstruction*);
+        void emit_op_in_by_val(const JSInstruction*);
+        void emit_op_has_private_name(const JSInstruction*);
+        void emit_op_has_private_brand(const JSInstruction*);
+        void emit_op_init_lazy_reg(const JSInstruction*);
+        void emit_op_overrides_has_instance(const JSInstruction*);
+        void emit_op_instanceof(const JSInstruction*);
+        void emit_op_is_empty(const JSInstruction*);
+        void emit_op_typeof_is_undefined(const JSInstruction*);
+        void emit_op_typeof_is_function(const JSInstruction*);
+        void emit_op_is_undefined_or_null(const JSInstruction*);
+        void emit_op_is_boolean(const JSInstruction*);
+        void emit_op_is_number(const JSInstruction*);
 #if USE(BIGINT32)
-        void emit_op_is_big_int(const Instruction*);
+        void emit_op_is_big_int(const JSInstruction*);
 #else
-        NO_RETURN void emit_op_is_big_int(const Instruction*);
+        [[noreturn]] void emit_op_is_big_int(const JSInstruction*);
 #endif
-        void emit_op_is_object(const Instruction*);
-        void emit_op_is_cell_with_type(const Instruction*);
-        void emit_op_jeq_null(const Instruction*);
-        void emit_op_jfalse(const Instruction*);
-        void emit_op_jmp(const Instruction*);
-        void emit_op_jneq_null(const Instruction*);
-        void emit_op_jundefined_or_null(const Instruction*);
-        void emit_op_jnundefined_or_null(const Instruction*);
-        void emit_op_jeq_ptr(const Instruction*);
-        void emit_op_jneq_ptr(const Instruction*);
-        void emit_op_jless(const Instruction*);
-        void emit_op_jlesseq(const Instruction*);
-        void emit_op_jgreater(const Instruction*);
-        void emit_op_jgreatereq(const Instruction*);
-        void emit_op_jnless(const Instruction*);
-        void emit_op_jnlesseq(const Instruction*);
-        void emit_op_jngreater(const Instruction*);
-        void emit_op_jngreatereq(const Instruction*);
-        void emit_op_jeq(const Instruction*);
-        void emit_op_jneq(const Instruction*);
-        void emit_op_jstricteq(const Instruction*);
-        void emit_op_jnstricteq(const Instruction*);
-        void emit_op_jbelow(const Instruction*);
-        void emit_op_jbeloweq(const Instruction*);
-        void emit_op_jtrue(const Instruction*);
-        void emit_op_loop_hint(const Instruction*);
-        void emit_op_check_traps(const Instruction*);
-        void emit_op_nop(const Instruction*);
-        void emit_op_super_sampler_begin(const Instruction*);
-        void emit_op_super_sampler_end(const Instruction*);
-        void emit_op_lshift(const Instruction*);
-        void emit_op_mod(const Instruction*);
-        void emit_op_pow(const Instruction*);
-        void emit_op_mov(const Instruction*);
-        void emit_op_mul(const Instruction*);
-        void emit_op_negate(const Instruction*);
-        void emit_op_neq(const Instruction*);
-        void emit_op_neq_null(const Instruction*);
-        void emit_op_new_array(const Instruction*);
-        void emit_op_new_array_with_size(const Instruction*);
-        void emit_op_new_func(const Instruction*);
-        void emit_op_new_func_exp(const Instruction*);
-        void emit_op_new_generator_func(const Instruction*);
-        void emit_op_new_generator_func_exp(const Instruction*);
-        void emit_op_new_async_func(const Instruction*);
-        void emit_op_new_async_func_exp(const Instruction*);
-        void emit_op_new_async_generator_func(const Instruction*);
-        void emit_op_new_async_generator_func_exp(const Instruction*);
-        void emit_op_new_object(const Instruction*);
-        void emit_op_new_regexp(const Instruction*);
-        void emit_op_not(const Instruction*);
-        void emit_op_nstricteq(const Instruction*);
-        void emit_op_dec(const Instruction*);
-        void emit_op_inc(const Instruction*);
-        void emit_op_profile_type(const Instruction*);
-        void emit_op_profile_control_flow(const Instruction*);
-        void emit_op_get_parent_scope(const Instruction*);
-        void emit_op_put_by_id(const Instruction*);
+        void emit_op_is_object(const JSInstruction*);
+        void emit_op_is_cell_with_type(const JSInstruction*);
+        void emit_op_has_structure_with_flags(const JSInstruction*);
+        void emit_op_jeq_null(const JSInstruction*);
+        void emit_op_jfalse(const JSInstruction*);
+        void emit_op_jmp(const JSInstruction*);
+        void emit_op_jneq_null(const JSInstruction*);
+        void emit_op_jundefined_or_null(const JSInstruction*);
+        void emit_op_jnundefined_or_null(const JSInstruction*);
+        void emit_op_jeq_ptr(const JSInstruction*);
+        void emit_op_jneq_ptr(const JSInstruction*);
+        void emit_op_less(const JSInstruction*);
+        void emit_op_lesseq(const JSInstruction*);
+        void emit_op_greater(const JSInstruction*);
+        void emit_op_greatereq(const JSInstruction*);
+        void emit_op_jless(const JSInstruction*);
+        void emit_op_jlesseq(const JSInstruction*);
+        void emit_op_jgreater(const JSInstruction*);
+        void emit_op_jgreatereq(const JSInstruction*);
+        void emit_op_jnless(const JSInstruction*);
+        void emit_op_jnlesseq(const JSInstruction*);
+        void emit_op_jngreater(const JSInstruction*);
+        void emit_op_jngreatereq(const JSInstruction*);
+        void emit_op_jeq(const JSInstruction*);
+        void emit_op_jneq(const JSInstruction*);
+        void emit_op_jstricteq(const JSInstruction*);
+        void emit_op_jnstricteq(const JSInstruction*);
+        void emit_op_jbelow(const JSInstruction*);
+        void emit_op_jbeloweq(const JSInstruction*);
+        void emit_op_jtrue(const JSInstruction*);
+        void emit_op_loop_hint(const JSInstruction*);
+        void emit_op_check_traps(const JSInstruction*);
+        void emit_op_nop(const JSInstruction*);
+        void emit_op_super_sampler_begin(const JSInstruction*);
+        void emit_op_super_sampler_end(const JSInstruction*);
+        void emit_op_lshift(const JSInstruction*);
+        void emit_op_mod(const JSInstruction*);
+        void emit_op_pow(const JSInstruction*);
+        void emit_op_mov(const JSInstruction*);
+        void emit_op_mul(const JSInstruction*);
+        void emit_op_negate(const JSInstruction*);
+        void emit_op_neq(const JSInstruction*);
+        void emit_op_neq_null(const JSInstruction*);
+        void emit_op_new_array(const JSInstruction*);
+        void emit_op_new_array_with_size(const JSInstruction*);
+        void emit_op_new_func(const JSInstruction*);
+        void emit_op_new_func_exp(const JSInstruction*);
+        void emit_op_new_generator_func(const JSInstruction*);
+        void emit_op_new_generator_func_exp(const JSInstruction*);
+        void emit_op_new_async_func(const JSInstruction*);
+        void emit_op_new_async_func_exp(const JSInstruction*);
+        void emit_op_new_async_generator_func(const JSInstruction*);
+        void emit_op_new_async_generator_func_exp(const JSInstruction*);
+        void emit_op_new_object(const JSInstruction*);
+        void emit_op_new_reg_exp(const JSInstruction*);
+        void emit_op_create_lexical_environment(const JSInstruction*);
+        void emit_op_create_direct_arguments(const JSInstruction*);
+        void emit_op_create_scoped_arguments(const JSInstruction*);
+        void emit_op_create_cloned_arguments(const JSInstruction*);
+        void emit_op_not(const JSInstruction*);
+        void emit_op_nstricteq(const JSInstruction*);
+        void emit_op_dec(const JSInstruction*);
+        void emit_op_inc(const JSInstruction*);
+        void emit_op_profile_type(const JSInstruction*);
+        void emit_op_profile_control_flow(const JSInstruction*);
+        void emit_op_get_parent_scope(const JSInstruction*);
+        void emit_op_put_by_id(const JSInstruction*);
         template<typename Op = OpPutByVal>
-        void emit_op_put_by_val(const Instruction*);
-        void emit_op_put_by_val_direct(const Instruction*);
-        void emit_op_put_private_name(const Instruction*);
-        void emit_op_put_getter_by_id(const Instruction*);
-        void emit_op_put_setter_by_id(const Instruction*);
-        void emit_op_put_getter_setter_by_id(const Instruction*);
-        void emit_op_put_getter_by_val(const Instruction*);
-        void emit_op_put_setter_by_val(const Instruction*);
-        void emit_op_ret(const Instruction*);
-        void emit_op_rshift(const Instruction*);
-        void emit_op_set_function_name(const Instruction*);
-        void emit_op_stricteq(const Instruction*);
-        void emit_op_sub(const Instruction*);
-        void emit_op_switch_char(const Instruction*);
-        void emit_op_switch_imm(const Instruction*);
-        void emit_op_switch_string(const Instruction*);
-        void emit_op_tear_off_arguments(const Instruction*);
-        void emit_op_throw(const Instruction*);
-        void emit_op_to_number(const Instruction*);
-        void emit_op_to_numeric(const Instruction*);
-        void emit_op_to_string(const Instruction*);
-        void emit_op_to_object(const Instruction*);
-        void emit_op_to_primitive(const Instruction*);
-        void emit_op_unexpected_load(const Instruction*);
-        void emit_op_unsigned(const Instruction*);
-        void emit_op_urshift(const Instruction*);
-        void emit_op_get_internal_field(const Instruction*);
-        void emit_op_put_internal_field(const Instruction*);
-        void emit_op_log_shadow_chicken_prologue(const Instruction*);
-        void emit_op_log_shadow_chicken_tail(const Instruction*);
-        void emit_op_to_property_key(const Instruction*);
+        void emit_op_put_by_val(const JSInstruction*);
+        void emit_op_put_by_val_direct(const JSInstruction*);
+        void emit_op_put_private_name(const JSInstruction*);
+        void emit_op_put_getter_by_id(const JSInstruction*);
+        void emit_op_put_setter_by_id(const JSInstruction*);
+        void emit_op_put_getter_setter_by_id(const JSInstruction*);
+        void emit_op_put_getter_by_val(const JSInstruction*);
+        void emit_op_put_setter_by_val(const JSInstruction*);
+        void emit_op_ret(const JSInstruction*);
+        void emit_op_rshift(const JSInstruction*);
+        void emit_op_set_function_name(const JSInstruction*);
+        void emit_op_stricteq(const JSInstruction*);
+        void emit_op_sub(const JSInstruction*);
+        void emit_op_switch_char(const JSInstruction*);
+        void emit_op_switch_imm(const JSInstruction*);
+        void emit_op_switch_string(const JSInstruction*);
+        void emit_op_tear_off_arguments(const JSInstruction*);
+        void emit_op_throw(const JSInstruction*);
+        void emit_op_to_number(const JSInstruction*);
+        void emit_op_to_numeric(const JSInstruction*);
+        void emit_op_to_string(const JSInstruction*);
+        void emit_op_to_object(const JSInstruction*);
+        void emit_op_to_primitive(const JSInstruction*);
+        void emit_op_unexpected_load(const JSInstruction*);
+        void emit_op_unsigned(const JSInstruction*);
+        void emit_op_urshift(const JSInstruction*);
+        void emit_op_get_internal_field(const JSInstruction*);
+        void emit_op_put_internal_field(const JSInstruction*);
+        void emit_op_log_shadow_chicken_prologue(const JSInstruction*);
+        void emit_op_log_shadow_chicken_tail(const JSInstruction*);
+        void emit_op_to_property_key(const JSInstruction*);
+        void emit_op_to_property_key_or_number(const JSInstruction*);
 
         template<typename OpcodeType>
         void generateGetByValSlowCase(const OpcodeType&, Vector<SlowCaseEntry>::iterator&);
 
-        void emit_op_get_property_enumerator(const Instruction*);
-        void emit_op_enumerator_next(const Instruction*);
-        void emit_op_enumerator_get_by_val(const Instruction*);
-        void emitSlow_op_enumerator_get_by_val(const Instruction*, Vector<SlowCaseEntry>::iterator&);
+        void emit_op_get_property_enumerator(const JSInstruction*);
+        void emit_op_enumerator_next(const JSInstruction*);
+        void emit_op_enumerator_get_by_val(const JSInstruction*);
+        void emitSlow_op_enumerator_get_by_val(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
 
         template<typename OpcodeType, typename SlowPathFunctionType>
-        void emit_enumerator_has_propertyImpl(const Instruction*, const OpcodeType&, SlowPathFunctionType);
-        void emit_op_enumerator_in_by_val(const Instruction*);
-        void emit_op_enumerator_has_own_property(const Instruction*);
+        void emit_enumerator_has_propertyImpl(const OpcodeType&, SlowPathFunctionType);
+        void emit_op_enumerator_in_by_val(const JSInstruction*);
+        void emit_op_enumerator_has_own_property(const JSInstruction*);
 
-        void emitSlow_op_add(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_call(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_tail_call(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_call_eval(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_call_varargs(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_tail_call_varargs(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_tail_call_forward_arguments(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_construct_varargs(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_construct(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_eq(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_get_callee(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_try_get_by_id(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_get_by_id(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_get_by_id_with_this(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_get_by_id_direct(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_get_by_val(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_get_private_name(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_set_private_brand(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_check_private_brand(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_get_argument_by_val(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_in_by_id(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_in_by_val(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_has_private_name(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_has_private_brand(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_instanceof(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_jless(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_jlesseq(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_jgreater(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_jgreatereq(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_jnless(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_jnlesseq(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_jngreater(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_jngreatereq(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_jeq(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_jneq(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_jstricteq(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_jnstricteq(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_loop_hint(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_check_traps(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_mod(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_pow(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_mul(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_negate(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_neq(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_new_object(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_put_by_id(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_put_by_val(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_put_private_name(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emitSlow_op_sub(const Instruction*, Vector<SlowCaseEntry>::iterator&);
+        template<typename OpcodeType>
+        void generatePutByValSlowCase(const OpcodeType&, Vector<SlowCaseEntry>::iterator&);
+        void emit_op_enumerator_put_by_val(const JSInstruction*);
+        void emitSlow_op_enumerator_put_by_val(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
 
-        void emit_op_resolve_scope(const Instruction*);
-        void emit_op_get_from_scope(const Instruction*);
-        void emit_op_put_to_scope(const Instruction*);
-        void emit_op_get_from_arguments(const Instruction*);
-        void emit_op_put_to_arguments(const Instruction*);
-        void emitSlow_op_put_to_scope(const Instruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_add(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_call_direct_eval(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_eq(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_get_callee(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_try_get_by_id(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_get_by_id(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_get_length(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_get_by_id_with_this(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_get_by_id_direct(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_get_by_val(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_get_by_val_with_this(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_get_private_name(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_set_private_brand(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_check_private_brand(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_get_argument_by_val(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_in_by_id(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_in_by_val(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_has_private_name(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_has_private_brand(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_instanceof(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_less(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_lesseq(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_greater(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_greatereq(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_jless(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_jlesseq(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_jgreater(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_jgreatereq(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_jnless(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_jnlesseq(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_jngreater(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_jngreatereq(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_jeq(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_jneq(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_jstricteq(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_jnstricteq(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_loop_hint(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_enter(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_check_traps(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_mod(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_pow(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_mul(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_negate(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_neq(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_new_object(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_put_by_id(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_put_by_val(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_put_by_val_direct(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_put_private_name(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlow_op_sub(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
 
-        void emitSlowCaseCall(const Instruction*, Vector<SlowCaseEntry>::iterator&, SlowPathFunction);
+        void emit_op_resolve_scope(const JSInstruction*);
+        void emitSlow_op_resolve_scope(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emit_op_get_from_scope(const JSInstruction*);
+        void emitSlow_op_get_from_scope(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emit_op_put_to_scope(const JSInstruction*);
+        void emit_op_get_from_arguments(const JSInstruction*);
+        void emit_op_put_to_arguments(const JSInstruction*);
+        void emitSlow_op_put_to_scope(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
 
-        void emit_op_iterator_open(const Instruction*);
-        void emitSlow_op_iterator_open(const Instruction*, Vector<SlowCaseEntry>::iterator&);
-        void emit_op_iterator_next(const Instruction*);
-        void emitSlow_op_iterator_next(const Instruction*, Vector<SlowCaseEntry>::iterator&);
+        void emitSlowCaseCall(Vector<SlowCaseEntry>::iterator&, SlowPathFunction);
+
+        void emit_op_iterator_open(const JSInstruction*);
+        void emitSlow_op_iterator_open(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
+        void emit_op_iterator_next(const JSInstruction*);
+        void emitSlow_op_iterator_next(const JSInstruction*, Vector<SlowCaseEntry>::iterator&);
 
         void emitHasPrivate(VirtualRegister dst, VirtualRegister base, VirtualRegister propertyOrBrand, AccessType);
-        void emitHasPrivateSlow(VirtualRegister base, VirtualRegister property, AccessType);
+        void emitHasPrivateSlow(AccessType, Vector<SlowCaseEntry>::iterator&);
 
         template<typename Op>
-        void emitNewFuncCommon(const Instruction*);
+        void emitNewFuncCommon(const JSInstruction*);
         template<typename Op>
-        void emitNewFuncExprCommon(const Instruction*);
+        void emitNewFuncExprCommon(const JSInstruction*);
         void emitVarInjectionCheck(bool needsVarInjectionChecks, GPRReg);
         void emitVarReadOnlyCheck(ResolveType, GPRReg scratchGPR);
         void emitNotifyWriteWatchpoint(GPRReg pointerToSet);
+        void emitGetScope(VirtualRegister destination);
+        void emitCheckTraps();
 
         bool isKnownCell(VirtualRegister);
 
@@ -645,52 +638,28 @@ namespace JSC {
         bool isOperandConstantChar(VirtualRegister);
 
         template <typename Op, typename Generator, typename ProfiledFunction, typename NonProfiledFunction>
-        void emitMathICFast(JITUnaryMathIC<Generator>*, const Instruction*, ProfiledFunction, NonProfiledFunction);
+        void emitMathICFast(JITUnaryMathIC<Generator>*, const JSInstruction*, ProfiledFunction, NonProfiledFunction);
         template <typename Op, typename Generator, typename ProfiledFunction, typename NonProfiledFunction>
-        void emitMathICFast(JITBinaryMathIC<Generator>*, const Instruction*, ProfiledFunction, NonProfiledFunction);
+        void emitMathICFast(JITBinaryMathIC<Generator>*, const JSInstruction*, ProfiledFunction, NonProfiledFunction);
 
         template <typename Op, typename Generator, typename ProfiledRepatchFunction, typename ProfiledFunction, typename RepatchFunction>
-        void emitMathICSlow(JITBinaryMathIC<Generator>*, const Instruction*, ProfiledRepatchFunction, ProfiledFunction, RepatchFunction);
+        void emitMathICSlow(JITBinaryMathIC<Generator>*, const JSInstruction*, ProfiledRepatchFunction, ProfiledFunction, RepatchFunction);
         template <typename Op, typename Generator, typename ProfiledRepatchFunction, typename ProfiledFunction, typename RepatchFunction>
-        void emitMathICSlow(JITUnaryMathIC<Generator>*, const Instruction*, ProfiledRepatchFunction, ProfiledFunction, RepatchFunction);
-
-    public:
-        static MacroAssemblerCodeRef<JITThunkPtrTag> returnFromBaselineGenerator(VM&);
+        void emitMathICSlow(JITUnaryMathIC<Generator>*, const JSInstruction*, ProfiledRepatchFunction, ProfiledFunction, RepatchFunction);
 
     private:
-#if ENABLE(EXTRA_CTI_THUNKS)
-        // Thunk generators.
-        static MacroAssemblerCodeRef<JITThunkPtrTag> slow_op_del_by_id_prepareCallGenerator(VM&);
-        static MacroAssemblerCodeRef<JITThunkPtrTag> slow_op_del_by_val_prepareCallGenerator(VM&);
-        static MacroAssemblerCodeRef<JITThunkPtrTag> slow_op_get_by_id_prepareCallGenerator(VM&);
-        static MacroAssemblerCodeRef<JITThunkPtrTag> slow_op_get_by_id_with_this_prepareCallGenerator(VM&);
-        static MacroAssemblerCodeRef<JITThunkPtrTag> slow_op_get_by_val_prepareCallGenerator(VM&);
-        static MacroAssemblerCodeRef<JITThunkPtrTag> slow_op_get_private_name_prepareCallGenerator(VM&);
-        static MacroAssemblerCodeRef<JITThunkPtrTag> slow_op_put_by_id_prepareCallGenerator(VM&);
-        static MacroAssemblerCodeRef<JITThunkPtrTag> slow_op_put_by_val_prepareCallGenerator(VM&);
-        static MacroAssemblerCodeRef<JITThunkPtrTag> slow_op_put_private_name_prepareCallGenerator(VM&);
         static MacroAssemblerCodeRef<JITThunkPtrTag> slow_op_put_to_scopeGenerator(VM&);
-
-        static MacroAssemblerCodeRef<JITThunkPtrTag> op_check_traps_handlerGenerator(VM&);
-        static MacroAssemblerCodeRef<JITThunkPtrTag> op_enter_handlerGenerator(VM&);
         static MacroAssemblerCodeRef<JITThunkPtrTag> op_throw_handlerGenerator(VM&);
-
-        static constexpr bool thunkIsUsedForOpGetFromScope(ResolveType resolveType)
-        {
-            // GlobalVar because it is more efficient to emit inline than use a thunk.
-            // ResolvedClosureVar and ModuleVar because we don't use these types with op_get_from_scope.
-            return !(resolveType == GlobalVar || resolveType == ResolvedClosureVar || resolveType == ModuleVar);
-        }
-
-        static MacroAssemblerCodeRef<JITThunkPtrTag> valueIsFalseyGenerator(VM&);
-        static MacroAssemblerCodeRef<JITThunkPtrTag> valueIsTruthyGenerator(VM&);
-#endif // ENABLE(EXTRA_CTI_THUNKS)
+        static MacroAssemblerCodeRef<JITThunkPtrTag> op_check_traps_handlerGenerator(VM&);
         static MacroAssemblerCodeRef<JITThunkPtrTag> slow_op_get_from_scopeGenerator(VM&);
         static MacroAssemblerCodeRef<JITThunkPtrTag> slow_op_resolve_scopeGenerator(VM&);
         template <ResolveType>
         static MacroAssemblerCodeRef<JITThunkPtrTag> generateOpGetFromScopeThunk(VM&);
         template <ResolveType>
         static MacroAssemblerCodeRef<JITThunkPtrTag> generateOpResolveScopeThunk(VM&);
+        static MacroAssemblerCodeRef<JITThunkPtrTag> op_enter_handlerGenerator(VM&);
+        static MacroAssemblerCodeRef<JITThunkPtrTag> valueIsTruthyGenerator(VM&);
+        static MacroAssemblerCodeRef<JITThunkPtrTag> valueIsFalseyGenerator(VM&);
 
         Jump getSlowCase(Vector<SlowCaseEntry>::iterator& iter)
         {
@@ -716,126 +685,101 @@ namespace JSC {
             return hasAnySlowCases(m_slowCases, iter, m_bytecodeIndex);
         }
 
-        MacroAssembler::Call appendCallWithExceptionCheck(const FunctionPtr<CFunctionPtrTag>);
+        template<typename OperationType>
+        MacroAssembler::Call appendCallWithExceptionCheck(const CodePtr<CFunctionPtrTag>);
+        template<typename OperationType>
         void appendCallWithExceptionCheck(Address);
-#if OS(WINDOWS) && CPU(X86_64)
-        MacroAssembler::Call appendCallWithExceptionCheckAndSlowPathReturnType(const FunctionPtr<CFunctionPtrTag>);
-#endif
-        MacroAssembler::Call appendCallWithCallFrameRollbackOnException(const FunctionPtr<CFunctionPtrTag>);
-        MacroAssembler::Call appendCallWithExceptionCheckSetJSValueResult(const FunctionPtr<CFunctionPtrTag>, VirtualRegister result);
+        template<typename OperationType>
+        MacroAssembler::Call appendCallWithExceptionCheckSetJSValueResult(const CodePtr<CFunctionPtrTag>, VirtualRegister result);
+        template<typename OperationType>
         void appendCallWithExceptionCheckSetJSValueResult(Address, VirtualRegister result);
-        template<typename Bytecode>
-        MacroAssembler::Call appendCallWithExceptionCheckSetJSValueResultWithProfile(const Bytecode&, const FunctionPtr<CFunctionPtrTag>, VirtualRegister result);
-        template<typename Bytecode>
+        template<typename OperationType>
+        MacroAssembler::Call appendCallSetJSValueResult(const CodePtr<CFunctionPtrTag>, VirtualRegister result);
+        template<typename OperationType>
+        void appendCallSetJSValueResult(Address, VirtualRegister result);
+        template<typename OperationType, typename Bytecode>
+        MacroAssembler::Call appendCallWithExceptionCheckSetJSValueResultWithProfile(const Bytecode&, const CodePtr<CFunctionPtrTag>, VirtualRegister result);
+        template<typename OperationType, typename Bytecode>
         void appendCallWithExceptionCheckSetJSValueResultWithProfile(const Bytecode&, Address, VirtualRegister result);
 
         template<typename OperationType, typename... Args>
-        std::enable_if_t<FunctionTraits<OperationType>::hasResult, MacroAssembler::Call>
-        callOperation(OperationType operation, VirtualRegister result, Args... args)
+        requires OperationHasResult<OperationType>
+        MacroAssembler::Call callOperation(OperationType operation, VirtualRegister result, Args... args)
         {
             setupArguments<OperationType>(args...);
-            return appendCallWithExceptionCheckSetJSValueResult(operation, result);
+            return appendCallWithExceptionCheckSetJSValueResult<OperationType>(operation, result);
         }
 
         template<typename OperationType, typename... Args>
-        std::enable_if_t<FunctionTraits<OperationType>::hasResult, void>
-        callOperation(Address target, VirtualRegister result, Args... args)
+        requires OperationHasResult<OperationType>
+        void callOperation(Address target, VirtualRegister result, Args... args)
         {
             setupArgumentsForIndirectCall<OperationType>(target, args...);
-            return appendCallWithExceptionCheckSetJSValueResult(Address(GPRInfo::nonArgGPR0, target.offset), result);
+            return appendCallWithExceptionCheckSetJSValueResult<OperationType>(Address(GPRInfo::nonArgGPR0, target.offset), result);
         }
 
-#if OS(WINDOWS) && CPU(X86_64)
-        template<typename Type>
-        struct is64BitType {
-            static constexpr bool value = sizeof(Type) <= 8;
-        };
+        template<typename OperationType, typename... Args>
+        requires OperationHasResult<OperationType>
+        MacroAssembler::Call callOperationNoExceptionCheck(OperationType operation, VirtualRegister result, Args... args)
+        {
+            setupArguments<OperationType>(args...);
+            return appendCallSetJSValueResult<OperationType>(operation, result);
+        }
 
-        template<>
-        struct is64BitType<void> {
-            static constexpr bool value = true;
-        };
+        template<typename OperationType, typename... Args>
+        requires OperationHasResult<OperationType>
+        void callOperationNoExceptionCheck(Address target, VirtualRegister result, Args... args)
+        {
+            setupArgumentsForIndirectCall<OperationType>(target, args...);
+            return appendCallSetJSValueResult<OperationType>(Address(GPRInfo::nonArgGPR0, target.offset), result);
+        }
 
         template<typename OperationType, typename... Args>
         MacroAssembler::Call callOperation(OperationType operation, Args... args)
         {
             setupArguments<OperationType>(args...);
-            // x64 Windows cannot use standard call when the return type is larger than 64 bits.
-            if constexpr (is64BitType<typename FunctionTraits<OperationType>::ResultType>::value)
-                return appendCallWithExceptionCheck(operation);
-            return appendCallWithExceptionCheckAndSlowPathReturnType(operation);
+            return appendCallWithExceptionCheck<OperationType>(operation);
         }
-#else // OS(WINDOWS) && CPU(X86_64)
-        template<typename OperationType, typename... Args>
-        MacroAssembler::Call callOperation(OperationType operation, Args... args)
-        {
-            setupArguments<OperationType>(args...);
-            return appendCallWithExceptionCheck(operation);
-        }
-#endif // OS(WINDOWS) && CPU(X86_64)
 
         template<typename OperationType, typename... Args>
         void callOperation(Address target, Args... args)
         {
-#if OS(WINDOWS) && CPU(X86_64)
-            // x64 Windows cannot use standard call when the return type is larger than 64 bits.
-            static_assert(is64BitType<typename FunctionTraits<OperationType>::ResultType>::value);
-#endif
             setupArgumentsForIndirectCall<OperationType>(target, args...);
-            appendCallWithExceptionCheck(Address(GPRInfo::nonArgGPR0, target.offset));
+            appendCallWithExceptionCheck<OperationType>(Address(GPRInfo::nonArgGPR0, target.offset));
         }
 
         template<typename Bytecode, typename OperationType, typename... Args>
-        std::enable_if_t<FunctionTraits<OperationType>::hasResult, MacroAssembler::Call>
-        callOperationWithProfile(const Bytecode& bytecode, OperationType operation, VirtualRegister result, Args... args)
+        requires OperationHasResult<OperationType>
+        MacroAssembler::Call callOperationWithProfile(const Bytecode& bytecode, OperationType operation, VirtualRegister result, Args... args)
         {
             setupArguments<OperationType>(args...);
-            return appendCallWithExceptionCheckSetJSValueResultWithProfile(bytecode, operation, result);
+            return appendCallWithExceptionCheckSetJSValueResultWithProfile<OperationType>(bytecode, operation, result);
         }
 
         template<typename OperationType, typename Bytecode, typename... Args>
-        std::enable_if_t<FunctionTraits<OperationType>::hasResult, void>
-        callOperationWithProfile(const Bytecode& bytecode, Address target, VirtualRegister result, Args... args)
+        requires OperationHasResult<OperationType>
+        void callOperationWithProfile(const Bytecode& bytecode, Address target, VirtualRegister result, Args... args)
         {
             setupArgumentsForIndirectCall<OperationType>(target, args...);
-            return appendCallWithExceptionCheckSetJSValueResultWithProfile(bytecode, Address(GPRInfo::nonArgGPR0, target.offset), result);
+            return appendCallWithExceptionCheckSetJSValueResultWithProfile<OperationType>(bytecode, Address(GPRInfo::nonArgGPR0, target.offset), result);
         }
 
         template<typename OperationType, typename... Args>
+        requires OperationHasResult<OperationType>
         MacroAssembler::Call callOperationWithResult(OperationType operation, JSValueRegs resultRegs, Args... args)
         {
             setupArguments<OperationType>(args...);
-            auto result = appendCallWithExceptionCheck(operation);
+            auto result = appendCallWithExceptionCheck<OperationType>(operation);
             setupResults(resultRegs);
             return result;
         }
 
-#if OS(WINDOWS) && CPU(X86_64)
-        template<typename OperationType, typename... Args>
-        MacroAssembler::Call callOperationNoExceptionCheck(OperationType operation, Args... args)
-        {
-            setupArguments<OperationType>(args...);
-            updateTopCallFrame();
-            // x64 Windows cannot use standard call when the return type is larger than 64 bits.
-            if constexpr (is64BitType<typename FunctionTraits<OperationType>::ResultType>::value)
-                return appendCall(operation);
-            return appendCallWithSlowPathReturnType(operation);
-        }
-#else // OS(WINDOWS) && CPU(X86_64)
         template<typename OperationType, typename... Args>
         MacroAssembler::Call callOperationNoExceptionCheck(OperationType operation, Args... args)
         {
             setupArguments<OperationType>(args...);
             updateTopCallFrame();
             return appendCall(operation);
-        }
-#endif // OS(WINDOWS) && CPU(X86_64)
-
-        template<typename OperationType, typename... Args>
-        MacroAssembler::Call callOperationWithCallFrameRollbackOnException(OperationType operation, Args... args)
-        {
-            setupArguments<OperationType>(args...);
-            return appendCallWithCallFrameRollbackOnException(operation);
         }
 
         enum class ProfilingPolicy {
@@ -844,29 +788,17 @@ namespace JSC {
         };
 
         template<typename Op, typename SnippetGenerator>
-        void emitBitBinaryOpFastPath(const Instruction* currentInstruction, ProfilingPolicy shouldEmitProfiling = ProfilingPolicy::NoProfiling);
-
-        void emitRightShiftFastPath(const Instruction* currentInstruction, OpcodeID);
+        void emitBitBinaryOpFastPath(const JSInstruction* currentInstruction);
 
         template<typename Op>
-        void emitRightShiftFastPath(const Instruction* currentInstruction, JITRightShiftGenerator::ShiftType);
+        void emitRightShiftFastPath(const JSInstruction* currentInstruction, JITRightShiftGenerator::ShiftType);
 
         void updateTopCallFrame();
-
-        Call emitNakedNearCall(CodePtr<NoPtrTag> function = { });
-        Call emitNakedNearTailCall(CodePtr<NoPtrTag> function = { });
-        Jump emitNakedNearJump(CodePtr<JITThunkPtrTag> function = { });
 
         // Loads the character value of a single character string into dst.
         void emitLoadCharacterString(RegisterID src, RegisterID dst, JumpList& failures);
 
-        int jumpTarget(const Instruction*, int target);
-
-#if ENABLE(DFG_JIT)
-        void emitEnterOptimizationCheck();
-#else
-        void emitEnterOptimizationCheck() { }
-#endif
+        int jumpTarget(const JSInstruction*, int target);
 
 #ifndef NDEBUG
         void printBytecodeOperandTypes(VirtualRegister src1, VirtualRegister src2);
@@ -896,26 +828,29 @@ namespace JSC {
         void emitSaveCalleeSaves();
         void emitRestoreCalleeSaves();
 
+#if ASSERT_ENABLED
+        static MacroAssemblerCodeRef<JITThunkPtrTag> consistencyCheckGenerator(VM&);
+        void emitConsistencyCheck();
+#endif
+
         static bool reportCompileTimes();
         static bool computeCompileTimes();
 
         void resetSP();
 
         JITConstantPool::Constant addToConstantPool(JITConstantPool::Type, void* payload = nullptr);
-        std::tuple<UnlinkedStructureStubInfo*, JITConstantPool::Constant> addUnlinkedStructureStubInfo();
-        UnlinkedCallLinkInfo* addUnlinkedCallLinkInfo();
+        std::tuple<BaselineUnlinkedStructureStubInfo*, StructureStubInfoIndex> addUnlinkedStructureStubInfo();
+        BaselineUnlinkedCallLinkInfo* addUnlinkedCallLinkInfo();
 
-        Interpreter* m_interpreter;
-
+        BaselineJITPlan& m_plan;
         Vector<FarCallRecord> m_farCalls;
-        Vector<NearCallRecord> m_nearCalls;
-        Vector<NearJumpRecord> m_nearJumps;
         Vector<Label> m_labels;
-        HashMap<BytecodeIndex, Label> m_checkpointLabels;
-        HashMap<BytecodeIndex, Label> m_fastPathResumeLabels;
+        UncheckedKeyHashMap<BytecodeIndex, Label> m_checkpointLabels;
+        UncheckedKeyHashMap<BytecodeIndex, Label> m_fastPathResumeLabels;
         Vector<JITGetByIdGenerator> m_getByIds;
         Vector<JITGetByValGenerator> m_getByVals;
         Vector<JITGetByIdWithThisGenerator> m_getByIdsWithThis;
+        Vector<JITGetByValWithThisGenerator> m_getByValsWithThis;
         Vector<JITPutByIdGenerator> m_putByIds;
         Vector<JITPutByValGenerator> m_putByVals;
         Vector<JITInByIdGenerator> m_inByIds;
@@ -931,12 +866,15 @@ namespace JSC {
         Vector<SlowCaseEntry> m_slowCases;
         Vector<SwitchRecord> m_switches;
 
-        JumpList m_exceptionChecks;
-        JumpList m_exceptionChecksWithCallFrameRollback;
+#if ASSERT_ENABLED
+        Label m_consistencyCheckLabel;
+        Vector<Call> m_consistencyCheckCalls;
+#endif
 
         unsigned m_getByIdIndex { UINT_MAX };
         unsigned m_getByValIndex { UINT_MAX };
         unsigned m_getByIdWithThisIndex { UINT_MAX };
+        unsigned m_getByValWithThisIndex { UINT_MAX };
         unsigned m_putByIdIndex { UINT_MAX };
         unsigned m_putByValIndex { UINT_MAX };
         unsigned m_inByIdIndex { UINT_MAX };
@@ -945,35 +883,29 @@ namespace JSC {
         unsigned m_delByIdIndex { UINT_MAX };
         unsigned m_instanceOfIndex { UINT_MAX };
         unsigned m_privateBrandAccessIndex { UINT_MAX };
-        unsigned m_callLinkInfoIndex { UINT_MAX };
         unsigned m_bytecodeCountHavingSlowCase { 0 };
 
         Label m_arityCheck;
-        std::unique_ptr<LinkBuffer> m_linkBuffer;
 
         std::unique_ptr<JITDisassembler> m_disassembler;
         RefPtr<Profiler::Compilation> m_compilation;
 
         PCToCodeOriginMapBuilder m_pcToCodeOriginMapBuilder;
-        std::unique_ptr<PCToCodeOriginMap> m_pcToCodeOriginMap;
 
-        HashMap<const Instruction*, void*> m_instructionToMathIC;
-        HashMap<const Instruction*, UniqueRef<MathICGenerationState>> m_instructionToMathICGenerationState;
+        UncheckedKeyHashMap<const JSInstruction*, void*> m_instructionToMathIC;
+        UncheckedKeyHashMap<const JSInstruction*, UniqueRef<MathICGenerationState>> m_instructionToMathICGenerationState;
 
         bool m_canBeOptimized;
         bool m_shouldEmitProfiling;
-        BytecodeIndex m_loopOSREntryBytecodeIndex;
 
-        CodeBlock* m_profiledCodeBlock { nullptr };
-        UnlinkedCodeBlock* m_unlinkedCodeBlock { nullptr };
+        CodeBlock* const m_profiledCodeBlock { nullptr };
+        UnlinkedCodeBlock* const m_unlinkedCodeBlock { nullptr };
 
         MathICHolder m_mathICs;
-        RefPtr<BaselineJITCode> m_jitCode;
 
         Vector<JITConstantPool::Value> m_constantPool;
-        JITConstantPool::Constant m_globalObjectConstant { std::numeric_limits<unsigned>::max() };
-        SegmentedVector<UnlinkedCallLinkInfo> m_unlinkedCalls;
-        SegmentedVector<UnlinkedStructureStubInfo> m_unlinkedStubInfos;
+        SaSegmentedVector<BaselineUnlinkedCallLinkInfo> m_unlinkedCalls;
+        SaSegmentedVector<BaselineUnlinkedStructureStubInfo> m_unlinkedStubInfos;
         FixedVector<SimpleJumpTable> m_switchJumpTables;
         FixedVector<StringJumpTable> m_stringSwitchJumpTables;
 
@@ -984,5 +916,6 @@ namespace JSC {
 
 } // namespace JSC
 
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
 
 #endif // ENABLE(JIT)

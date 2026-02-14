@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2017 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008-2017 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,14 +27,20 @@
 #include "config.h"
 #include "WorkerThread.h"
 
+#include "AdvancedPrivacyProtections.h"
 #include "IDBConnectionProxy.h"
 #include "ScriptSourceCode.h"
 #include "SecurityOrigin.h"
 #include "SocketProvider.h"
+#include "WorkerBadgeProxy.h"
+#include "WorkerDebuggerProxy.h"
 #include "WorkerGlobalScope.h"
+#include "WorkerLoaderProxy.h"
+#include "WorkerReportingProxy.h"
 #include "WorkerScriptFetcher.h"
 #include <JavaScriptCore/ScriptCallStack.h>
 #include <wtf/SetForScope.h>
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/Threading.h>
 
 #if PLATFORM(JAVA)
@@ -54,6 +60,7 @@ WorkerParameters WorkerParameters::isolatedCopy() const
 {
     return {
         scriptURL.isolatedCopy(),
+        ownerURL.isolatedCopy(),
         name.isolatedCopy(),
         inspectorIdentifier.isolatedCopy(),
         userAgent.isolatedCopy(),
@@ -68,11 +75,16 @@ WorkerParameters WorkerParameters::isolatedCopy() const
         settingsValues.isolatedCopy(),
         workerThreadMode,
         sessionID,
+        crossThreadCopy(serviceWorkerData),
+        clientIdentifier,
+        advancedPrivacyProtections,
+        noiseInjectionHashSalt
     };
 }
 
 struct WorkerThreadStartupData {
-    WTF_MAKE_NONCOPYABLE(WorkerThreadStartupData); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED_INLINE(WorkerThreadStartupData);
+    WTF_MAKE_NONCOPYABLE(WorkerThreadStartupData);
 public:
     WorkerThreadStartupData(const WorkerParameters& params, const ScriptBuffer& sourceCode, WorkerThreadStartMode, const SecurityOrigin& topOrigin);
 
@@ -92,11 +104,12 @@ WorkerThreadStartupData::WorkerThreadStartupData(const WorkerParameters& other, 
 {
 }
 
-WorkerThread::WorkerThread(const WorkerParameters& params, const ScriptBuffer& sourceCode, WorkerLoaderProxy& workerLoaderProxy, WorkerDebuggerProxy& workerDebuggerProxy, WorkerReportingProxy& workerReportingProxy, WorkerThreadStartMode startMode, const SecurityOrigin& topOrigin, IDBClient::IDBConnectionProxy* connectionProxy, SocketProvider* socketProvider, JSC::RuntimeFlags runtimeFlags)
+WorkerThread::WorkerThread(const WorkerParameters& params, const ScriptBuffer& sourceCode, WorkerLoaderProxy& workerLoaderProxy, WorkerDebuggerProxy& workerDebuggerProxy, WorkerReportingProxy& workerReportingProxy, WorkerBadgeProxy& badgeProxy, WorkerThreadStartMode startMode, const SecurityOrigin& topOrigin, IDBClient::IDBConnectionProxy* connectionProxy, SocketProvider* socketProvider, JSC::RuntimeFlags runtimeFlags)
     : WorkerOrWorkletThread(params.inspectorIdentifier.isolatedCopy(), params.workerThreadMode)
-    , m_workerLoaderProxy(workerLoaderProxy)
-    , m_workerDebuggerProxy(workerDebuggerProxy)
-    , m_workerReportingProxy(workerReportingProxy)
+    , m_workerLoaderProxy(&workerLoaderProxy)
+    , m_workerDebuggerProxy(&workerDebuggerProxy)
+    , m_workerReportingProxy(&workerReportingProxy)
+    , m_workerBadgeProxy(&badgeProxy)
     , m_runtimeFlags(runtimeFlags)
     , m_startupData(makeUnique<WorkerThreadStartupData>(params, sourceCode, startMode, topOrigin))
     , m_idbConnectionProxy(connectionProxy)
@@ -115,14 +128,15 @@ Ref<Thread> WorkerThread::createThread()
 {
     if (is<WorkerMainRunLoop>(runLoop())) {
         // This worker should run on the main thread.
-        RunLoop::main().dispatch([protectedThis = Ref { *this }] {
+        RunLoop::mainSingleton().dispatch([protectedThis = Ref { *this }] {
             protectedThis->workerOrWorkletThread();
         });
         ASSERT(isMainThread());
-        return Thread::current();
+        return Thread::currentSingleton();
     }
 
-    return Thread::create(threadName(), [this] {
+    // WorkerOrWorkletThread::workerOrWorkletThread destroys the worker and expects a single reference to this.
+    SUPPRESS_UNCOUNTED_LAMBDA_CAPTURE return Thread::create(threadName(), [this] {
         workerOrWorkletThread();
     }, ThreadType::JavaScript);
 }
@@ -142,37 +156,40 @@ bool WorkerThread::shouldWaitForWebInspectorOnStartup() const
 
 void WorkerThread::evaluateScriptIfNecessary(String& exceptionMessage)
 {
-    SetForScope<bool> isInStaticScriptEvaluation(m_isInStaticScriptEvaluation, true);
+    SetForScope isInStaticScriptEvaluation(m_isInStaticScriptEvaluation, true);
 
     // We are currently holding only the initial script code. If the WorkerType is Module, we should fetch the entire graph before executing the rest of this.
     // We invoke module loader as if we are executing inline module script tag in Document.
+
+    Ref globalScope = *this->globalScope();
 
     WeakPtr<ScriptBufferSourceProvider> sourceProvider;
     if (m_startupData->params.workerType == WorkerType::Classic) {
         ScriptSourceCode sourceCode(m_startupData->sourceCode, URL(m_startupData->params.scriptURL));
         sourceProvider = static_cast<ScriptBufferSourceProvider&>(sourceCode.provider());
-        globalScope()->script()->evaluate(sourceCode, &exceptionMessage);
+        globalScope->script()->evaluate(sourceCode, &exceptionMessage);
         finishedEvaluatingScript();
     } else {
-        auto scriptFetcher = WorkerScriptFetcher::create(globalScope()->credentials(), globalScope()->destination(), globalScope()->referrerPolicy());
-        ScriptSourceCode sourceCode(m_startupData->sourceCode, URL(m_startupData->params.scriptURL), { }, JSC::SourceProviderSourceType::Module, scriptFetcher.copyRef());
+        auto parameters = ModuleFetchParameters::create(JSC::ScriptFetchParameters::Type::JavaScript, emptyString(), /* isTopLevelModule */ true);
+        auto scriptFetcher = WorkerScriptFetcher::create(WTFMove(parameters), globalScope->credentials(), globalScope->destination(), globalScope->referrerPolicy());
+        ScriptSourceCode sourceCode(m_startupData->sourceCode, URL(m_startupData->params.scriptURL), { }, { }, JSC::SourceProviderSourceType::Module, scriptFetcher.copyRef());
         sourceProvider = static_cast<ScriptBufferSourceProvider&>(sourceCode.provider());
-        bool success = globalScope()->script()->loadModuleSynchronously(scriptFetcher.get(), sourceCode);
+        bool success = globalScope->script()->loadModuleSynchronously(scriptFetcher.get(), sourceCode);
         if (success) {
-            if (std::optional<LoadableScript::Error> error = scriptFetcher->error()) {
+            if (auto error = scriptFetcher->error()) {
                 if (std::optional<LoadableScript::ConsoleMessage> message = error->consoleMessage)
                     exceptionMessage = message->message;
                 else
                     exceptionMessage = "Importing a module script failed."_s;
-                globalScope()->reportException(exceptionMessage, { }, { }, { }, { }, { });
+                globalScope->reportErrorToWorkerObject(exceptionMessage);
             } else if (!scriptFetcher->wasCanceled()) {
-                globalScope()->script()->linkAndEvaluateModule(scriptFetcher.get(), sourceCode, &exceptionMessage);
+                globalScope->script()->linkAndEvaluateModule(scriptFetcher.get(), sourceCode, &exceptionMessage);
                 finishedEvaluatingScript();
             }
         }
     }
     if (sourceProvider)
-        globalScope()->setMainScriptSourceProvider(*sourceProvider);
+        globalScope->setMainScriptSourceProvider(*sourceProvider);
 
     // Free the startup data to cause its member variable deref's happen on the worker's thread (since
     // all ref/derefs of these objects are happening on the thread at this point). Note that
@@ -180,19 +197,18 @@ void WorkerThread::evaluateScriptIfNecessary(String& exceptionMessage)
     m_startupData = nullptr;
 }
 
-IDBClient::IDBConnectionProxy* WorkerThread::idbConnectionProxy()
-{
-    return m_idbConnectionProxy.get();
-}
-
-SocketProvider* WorkerThread::socketProvider()
-{
-    return m_socketProvider.get();
-}
-
 WorkerGlobalScope* WorkerThread::globalScope()
 {
+    ASSERT(!thread() || thread() == &Thread::currentSingleton());
     return downcast<WorkerGlobalScope>(WorkerOrWorkletThread::globalScope());
+}
+
+void WorkerThread::clearProxies()
+{
+    m_workerLoaderProxy = nullptr;
+    m_workerDebuggerProxy = nullptr;
+    m_workerReportingProxy = nullptr;
+    m_workerBadgeProxy = nullptr;
 }
 
 } // namespace WebCore

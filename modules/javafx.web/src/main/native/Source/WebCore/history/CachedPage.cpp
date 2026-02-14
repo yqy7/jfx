@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008, 2014 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,15 +26,19 @@
 #include "config.h"
 #include "CachedPage.h"
 
+#include "BackForwardController.h"
 #include "Document.h"
+#include "DocumentLoader.h"
 #include "Element.h"
 #include "FocusController.h"
-#include "Frame.h"
 #include "FrameLoader.h"
-#include "FrameLoaderClient.h"
-#include "FrameView.h"
 #include "HistoryController.h"
 #include "HistoryItem.h"
+#include "LocalFrame.h"
+#include "LocalFrameInlines.h"
+#include "LocalFrameLoaderClient.h"
+#include "LocalFrameView.h"
+#include "Navigation.h"
 #include "Node.h"
 #include "Page.h"
 #include "PageTransitionEvent.h"
@@ -44,6 +48,7 @@
 #include "VisitedLinkState.h"
 #include <wtf/RefCountedLeakCounter.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/TZoneMallocInlines.h>
 
 #if PLATFORM(IOS_FAMILY)
 #include "FrameSelection.h"
@@ -53,15 +58,18 @@
 namespace WebCore {
 using namespace JSC;
 
+WTF_MAKE_TZONE_ALLOCATED_IMPL(CachedPage);
+
 DEFINE_DEBUG_ONLY_GLOBAL(WTF::RefCountedLeakCounter, cachedPageCounter, ("CachedPage"));
 
 CachedPage::CachedPage(Page& page)
     : m_page(page)
     , m_expirationTime(MonotonicTime::now() + page.settings().backForwardCacheExpirationInterval())
     , m_cachedMainFrame(makeUnique<CachedFrame>(page.mainFrame()))
-#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
-    , m_loadedSubresourceDomains(page.mainFrame().loader().client().loadedSubresourceDomains())
-#endif
+    , m_loadedSubresourceDomains([&] {
+        RefPtr localFrame = page.localMainFrame();
+        return localFrame ? localFrame->loader().client().loadedSubresourceDomains() : Vector<RegistrableDomain>();
+    }())
 {
 #ifndef NDEBUG
     cachedPageCounter.increment();
@@ -78,29 +86,29 @@ CachedPage::~CachedPage()
         m_cachedMainFrame->destroy();
 }
 
-static void firePageShowAndPopStateEvents(Page& page)
+static void firePageShowEvent(Page& page)
 {
     // Dispatching JavaScript events can cause frame destruction.
-    auto& mainFrame = page.mainFrame();
-    Vector<Ref<Frame>> childFrames;
-    for (auto* child = mainFrame.tree().traverseNextInPostOrder(CanWrap::Yes); child; child = child->tree().traverseNextInPostOrder(CanWrap::No))
-        childFrames.append(*child);
+    Ref mainFrame = page.mainFrame();
+
+    Vector<Ref<LocalFrame>> childFrames;
+    for (auto* child = mainFrame->tree().traverseNextInPostOrder(CanWrap::Yes); child; child = child->tree().traverseNextInPostOrder(CanWrap::No)) {
+        if (RefPtr localChild = dynamicDowncast<LocalFrame>(child))
+            childFrames.append(localChild.releaseNonNull());
+    }
 
     for (auto& child : childFrames) {
-        if (!child->tree().isDescendantOf(&mainFrame))
+        if (!child->tree().isDescendantOf(mainFrame.ptr()))
             continue;
-        auto* document = child->document();
+        RefPtr document = child->document();
         if (!document)
             continue;
 
+        document->clearRevealForReactivation();
         // This takes care of firing the visibilitychange event and making sure the document is reported as visible.
         document->setVisibilityHiddenDueToDismissal(false);
 
-        document->dispatchPageshowEvent(PageshowEventPersisted);
-
-        auto* historyItem = child->loader().history().currentItem();
-        if (historyItem && historyItem->stateObject())
-            document->dispatchPopstateEvent(historyItem->stateObject());
+        document->dispatchPageshowEvent(PageshowEventPersistence::Persisted);
     }
 }
 
@@ -109,38 +117,46 @@ public:
     CachedPageRestorationScope(Page& page)
         : m_page(page)
     {
-        m_page.setIsRestoringCachedPage(true);
+        m_page->setIsRestoringCachedPage(true);
     }
 
     ~CachedPageRestorationScope()
     {
-        m_page.setIsRestoringCachedPage(false);
+        m_page->setIsRestoringCachedPage(false);
     }
 
 private:
-    Page& m_page;
+    WeakRef<Page> m_page;
 };
 
 void CachedPage::restore(Page& page)
 {
     ASSERT(m_cachedMainFrame);
+    ASSERT(m_cachedMainFrame->view());
     ASSERT(m_cachedMainFrame->view()->frame().isMainFrame());
     ASSERT(!page.subframeCount());
+
+    RefPtr localMainFrame = page.localMainFrame();
 
     CachedPageRestorationScope restorationScope(page);
     m_cachedMainFrame->open();
 
     // Restore the focus appearance for the focused element.
     // FIXME: Right now we don't support pages w/ frames in the b/f cache.  This may need to be tweaked when we add support for that.
-    RefPtr focusedDocument = CheckedRef(page.focusController())->focusedOrMainFrame().document();
+    RefPtr focusedOrMainFrame = page.focusController().focusedOrMainFrame();
+    if (!focusedOrMainFrame)
+        return;
+
+    RefPtr focusedDocument = focusedOrMainFrame->document();
     if (RefPtr element = focusedDocument->focusedElement()) {
 #if PLATFORM(IOS_FAMILY)
         // We don't want focused nodes changing scroll position when restoring from the cache
         // as it can cause ugly jumps before we manage to restore the cached position.
-        page.mainFrame().selection().suppressScrolling();
+        if (localMainFrame)
+        localMainFrame->selection().suppressScrolling();
 
         bool hadProhibitsScrolling = false;
-        FrameView* frameView = page.mainFrame().view();
+        RefPtr frameView = localMainFrame->protectedVirtualView();
         if (frameView) {
             hadProhibitsScrolling = frameView->prohibitsScrolling();
             frameView->setProhibitsScrolling(true);
@@ -150,12 +166,13 @@ void CachedPage::restore(Page& page)
 #if PLATFORM(IOS_FAMILY)
         if (frameView)
             frameView->setProhibitsScrolling(hadProhibitsScrolling);
-        page.mainFrame().selection().restoreScrolling();
+        if (localMainFrame)
+            localMainFrame->checkedSelection()->restoreScrolling();
 #endif
     }
 
-    if (m_needsDeviceOrPageScaleChanged)
-        page.mainFrame().deviceOrPageScaleFactorChanged();
+    if (m_needsDeviceOrPageScaleChanged && localMainFrame)
+        localMainFrame->deviceOrPageScaleFactorChanged();
 
     page.setNeedsRecalcStyleInAllFrames();
 
@@ -165,16 +182,22 @@ void CachedPage::restore(Page& page)
 #endif
 
     if (m_needsUpdateContentsSize) {
-        if (FrameView* frameView = page.mainFrame().view())
+        if (RefPtr frameView = localMainFrame->protectedVirtualView())
             frameView->updateContentsSize();
     }
 
-    firePageShowAndPopStateEvents(page);
+    if (CheckedRef backForwardController = page.backForward(); page.settings().navigationAPIEnabled() && focusedDocument->window() && backForwardController->currentItem()) {
+        Ref currentItem = *backForwardController->currentItem();
+        auto allItems = backForwardController->allItems();
+        focusedDocument->window()->navigation().updateForReactivation(allItems, currentItem);
+    }
 
-#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
-    for (auto& domain : m_loadedSubresourceDomains)
-        page.mainFrame().loader().client().didLoadFromRegistrableDomain(WTFMove(domain));
-#endif
+    firePageShowEvent(page);
+
+    for (auto& domain : m_loadedSubresourceDomains) {
+        if (localMainFrame)
+            localMainFrame->loader().client().didLoadFromRegistrableDomain(WTFMove(domain));
+    }
 
     clear();
 }
@@ -189,14 +212,17 @@ void CachedPage::clear()
 #endif
     m_needsDeviceOrPageScaleChanged = false;
     m_needsUpdateContentsSize = false;
-#if ENABLE(INTELLIGENT_TRACKING_PREVENTION)
     m_loadedSubresourceDomains.clear();
-#endif
 }
 
 bool CachedPage::hasExpired() const
 {
     return MonotonicTime::now() > m_expirationTime;
+}
+
+RefPtr<DocumentLoader> CachedPage::protectedDocumentLoader() const
+{
+    return documentLoader();
 }
 
 } // namespace WebCore

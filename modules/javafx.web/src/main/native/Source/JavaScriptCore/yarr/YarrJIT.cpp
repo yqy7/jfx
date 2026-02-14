@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2009-2023 Apple Inc. All rights reserved.
  * Copyright (C) 2019 the V8 project authors. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,9 +27,13 @@
 #include "config.h"
 #include "YarrJIT.h"
 
+#include "AllowMacroScratchRegisterUsage.h"
 #include "CCallHelpers.h"
 #include "LinkBuffer.h"
 #include "Options.h"
+#if ENABLE(YARR_JIT_BACKREFERENCES_FOR_16BIT_EXPRS)
+#include "JITThunks.h"
+#endif
 #include "VM.h"
 #include "Yarr.h"
 #include "YarrCanonicalize.h"
@@ -37,10 +41,15 @@
 #include "YarrJITRegisters.h"
 #include "YarrMatchingContextHolder.h"
 #include <wtf/ASCIICType.h>
+#include <wtf/BitVector.h>
 #include <wtf/HexNumber.h>
 #include <wtf/ListDump.h>
+#include <wtf/MathExtras.h>
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/Threading.h>
+#include <wtf/text/MakeString.h>
 
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 
 #if ENABLE(YARR_JIT)
 
@@ -49,9 +58,103 @@ namespace YarrJITInternal {
 static constexpr bool verbose = false;
 }
 
+static constexpr int32_t errorCodePoint = -1;
+
+#if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
+enum class TryReadUnicodeCharGenFirstNonBMPOptimization { DontUseOptimization, UseOptimization };
+
+static MacroAssemblerCodeRef<JITThunkPtrTag> tryReadUnicodeCharSlowThunkGenerator(VM&);
+
+#if ENABLE(YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP)
+static MacroAssemblerCodeRef<JITThunkPtrTag> tryReadUnicodeCharIncForNonBMPSlowThunkGenerator(VM&);
+#endif
+#endif
+
+#if ENABLE(YARR_JIT_BACKREFERENCES_FOR_16BIT_EXPRS)
+JSC_DECLARE_NOEXCEPT_JIT_OPERATION(operationAreCanonicallyEquivalent, bool, (unsigned, unsigned, CanonicalMode));
+
+static MacroAssemblerCodeRef<JITThunkPtrTag> areCanonicallyEquivalentThunkGenerator(VM&);
+
+// Since the generator areCanonicallyEquivalentThunkGenerator() needs to be static,
+// we set the incoming argument registers to the thunk here and ASSERT at runtime
+// that they match.
+#if CPU(ARM64)
+static constexpr GPRReg areCanonicallyEquivalentCharArgReg = ARM64Registers::x6;
+static constexpr GPRReg areCanonicallyEquivalentPattCharArgReg = ARM64Registers::x7;
+static constexpr GPRReg areCanonicallyEquivalentCanonicalModeArgReg = ARM64Registers::x10;
+#elif CPU(X86_64)
+static constexpr GPRReg areCanonicallyEquivalentCharArgReg = X86Registers::eax;
+static constexpr GPRReg areCanonicallyEquivalentPattCharArgReg = X86Registers::r9;
+static constexpr GPRReg areCanonicallyEquivalentCanonicalModeArgReg = X86Registers::r13;
+
+// The thunk code assumes that we return the result to areCanonicallyEquivalentCharArgReg.
+static_assert(areCanonicallyEquivalentCharArgReg == GPRInfo::returnValueGPR);
+#endif
+#endif
+
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(BoyerMooreBitmap);
+WTF_MAKE_TZONE_ALLOCATED_IMPL(BoyerMooreFastCandidates);
+WTF_MAKE_TZONE_ALLOCATED_IMPL(YarrBoyerMooreData);
+WTF_MAKE_TZONE_ALLOCATED_IMPL(YarrCodeBlock);
+
 #if CPU(ARM64E)
 JSC_ANNOTATE_JIT_OPERATION_RETURN(vmEntryToYarrJITAfter);
 #endif
+
+// We should pick the less frequently appearing character as a BM search's anchor to make BM search more and more efficient.
+// This class takes some samples from the passed subject string to put weight on characters so that we can pick an optimal one adaptively.
+class SubjectSampler {
+public:
+    static constexpr unsigned sampleSize = 128;
+
+    explicit SubjectSampler(CharSize charSize)
+        : m_is8Bit(charSize == CharSize::Char8)
+    {
+    }
+
+    int32_t frequency(char16_t character) const
+    {
+        if (!m_size)
+            return 1;
+        return static_cast<int32_t>(m_samples[character & BoyerMooreBitmap::mapMask]) * sampleSize / m_size;
+    }
+
+    void sample(StringView string)
+    {
+        unsigned half = string.length() > sampleSize ? (string.length() - sampleSize) / 2 : 0;
+        unsigned end = std::min(string.length(), half + sampleSize);
+        if (string.is8Bit()) {
+            auto characters8 = string.span8();
+            for (unsigned i = half; i < end; ++i)
+                add(characters8[i]);
+        } else {
+            auto characters16 = string.span16();
+            for (unsigned i = half; i < end; ++i)
+                add(characters16[i]);
+        }
+    }
+
+    void dump() const
+    {
+        dataLogLn("Sampling Results size:(", m_size, ")");
+        for (unsigned i = 0; i < BoyerMooreBitmap::mapSize; ++i)
+            dataLogLn("    [", makeString(pad(' ', 3, i)), "] ", m_samples[i]);
+    }
+
+    bool is8Bit() const { return m_is8Bit; }
+
+private:
+    inline void add(char16_t character)
+    {
+        ++m_size;
+        ++m_samples[character & BoyerMooreBitmap::mapMask];
+    }
+
+    std::array<uint8_t, BoyerMooreBitmap::mapSize> m_samples { };
+    uint8_t m_size { };
+    bool m_is8Bit { true };
+};
 
 void BoyerMooreFastCandidates::dump(PrintStream& out) const
 {
@@ -64,7 +167,7 @@ void BoyerMooreFastCandidates::dump(PrintStream& out) const
 
 class BoyerMooreInfo {
     WTF_MAKE_NONCOPYABLE(BoyerMooreInfo);
-    WTF_MAKE_FAST_ALLOCATED(BoyerMooreInfo);
+    WTF_MAKE_TZONE_ALLOCATED(BoyerMooreInfo);
 public:
     static constexpr unsigned maxLength = 32;
 
@@ -78,11 +181,11 @@ public:
     unsigned length() const { return m_characters.size(); }
     void shortenLength(unsigned length)
     {
-        ASSERT(length <= this->length());
+        if (length <= this->length())
         m_characters.shrink(length);
     }
 
-    void set(unsigned index, UChar32 character)
+    void set(unsigned index, char32_t character)
     {
         m_characters[index].add(m_charSize, character);
     }
@@ -92,7 +195,7 @@ public:
         m_characters[index].setAll();
     }
 
-    void addCharacters(unsigned index, const Vector<UChar32>& characters)
+    void addCharacters(unsigned index, const Vector<char32_t>& characters)
     {
         m_characters[index].addCharacters(m_charSize, characters);
     }
@@ -107,19 +210,23 @@ public:
         return makeUniqueRef<BoyerMooreInfo>(charSize, length);
     }
 
-    std::optional<std::tuple<unsigned, unsigned>> findWorthwhileCharacterSequenceForLookahead() const;
+    std::optional<std::tuple<unsigned, unsigned>> findWorthwhileCharacterSequenceForLookahead(const SubjectSampler&) const;
     std::tuple<BoyerMooreBitmap::Map, BoyerMooreFastCandidates> createCandidateBitmap(unsigned begin, unsigned end) const;
 
+    void dump(PrintStream&) const;
+
 private:
-    std::tuple<int, unsigned, unsigned> findBestCharacterSequence(unsigned numberOfCandidatesLimit) const;
+    std::tuple<int32_t, unsigned, unsigned> findBestCharacterSequence(const SubjectSampler&, unsigned numberOfCandidatesLimit) const;
 
     Vector<BoyerMooreBitmap> m_characters;
     CharSize m_charSize;
 };
 
-std::tuple<int, unsigned, unsigned> BoyerMooreInfo::findBestCharacterSequence(unsigned numberOfCandidatesLimit) const
+WTF_MAKE_TZONE_ALLOCATED_IMPL(BoyerMooreInfo);
+
+std::tuple<int32_t, unsigned, unsigned> BoyerMooreInfo::findBestCharacterSequence(const SubjectSampler& sampler, unsigned numberOfCandidatesLimit) const
 {
-    int biggestPoint = 0;
+    int32_t biggestPoint = INT32_MIN;
     unsigned beginResult = 0;
     unsigned endResult = 0;
     for (unsigned index = 0; index < length();) {
@@ -132,13 +239,14 @@ std::tuple<int, unsigned, unsigned> BoyerMooreInfo::findBestCharacterSequence(un
         for (; index < length() && m_characters[index].count() <= numberOfCandidatesLimit; ++index)
             map.merge(m_characters[index].map());
 
-        // If map has many candidates, then point of this sequence is low since it will match too many things.
-        // And if the sequence is longer, then the point of this sequence is higher since it can skip many characters.
-        // FIXME: Currently we are handling all characters equally. But we should have weight per character since e.g. 'e' should appear more frequently than '\v'.
-        // https://bugs.webkit.org/show_bug.cgi?id=228610
-        int frequency = map.count();
-        int matchingProbability = BoyerMooreBitmap::mapSize - frequency;
-        int point = (index - begin) * matchingProbability;
+        int32_t frequency = 0;
+        map.forEachSetBit([&](unsigned index) {
+            frequency += sampler.frequency(index);
+        });
+
+        // Cutoff at 50%. If we could encounter the character more than 50%, then BM search would be useless probably.
+        int32_t matchingProbability = (BoyerMooreBitmap::mapSize / 2) - frequency;
+        int32_t point = (index - begin) * matchingProbability;
         if (point > biggestPoint) {
             biggestPoint = point;
             beginResult = begin;
@@ -148,26 +256,26 @@ std::tuple<int, unsigned, unsigned> BoyerMooreInfo::findBestCharacterSequence(un
     return std::tuple { biggestPoint, beginResult, endResult };
 }
 
-std::optional<std::tuple<unsigned, unsigned>> BoyerMooreInfo::findWorthwhileCharacterSequenceForLookahead() const
+std::optional<std::tuple<unsigned, unsigned>> BoyerMooreInfo::findWorthwhileCharacterSequenceForLookahead(const SubjectSampler& sampler) const
 {
     // If candiates-per-character becomes larger, then sequence is not profitable since this sequence will match against
     // too many characters. But if we limit candiates-per-character smaller, it is possible that we only find very short
     // character sequence. We start with low limit, then enlarging the limit to find more and more profitable
     // character sequence.
-    int biggestPoint = 0;
+    int32_t biggestPoint = INT32_MIN;
     unsigned begin = 0;
     unsigned end = 0;
     constexpr unsigned maxCandidatesPerCharacter = 32;
     static_assert(maxCandidatesPerCharacter < BoyerMooreBitmap::mapSize);
     for (unsigned limit = 4; limit < maxCandidatesPerCharacter; limit *= 2) {
-        auto [newPoint, newBegin, newEnd] = findBestCharacterSequence(limit);
+        auto [newPoint, newBegin, newEnd] = findBestCharacterSequence(sampler, limit);
         if (newPoint > biggestPoint) {
             biggestPoint = newPoint;
             begin = newBegin;
             end = newEnd;
         }
     }
-    if (!biggestPoint)
+    if (biggestPoint < 0)
         return std::nullopt;
     return std::tuple { begin, end };
 }
@@ -184,21 +292,278 @@ std::tuple<BoyerMooreBitmap::Map, BoyerMooreFastCandidates> BoyerMooreInfo::crea
     return std::tuple { WTFMove(map), WTFMove(charactersFastPath) };
 }
 
+void BoyerMooreInfo::dump(PrintStream& out) const
+{
+    out.println("BoyerMooreInfo size:(", m_characters.size(), ")");
+    unsigned index = 0;
+    for (auto& map : m_characters)
+        out.println("    [", makeString(pad(' ', 3, index++)), "] ", map);
+}
+
+void BoyerMooreBitmap::dump(PrintStream& out) const
+{
+    out.print(m_map);
+}
+
+#if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
+template<TryReadUnicodeCharGenFirstNonBMPOptimization useNonBMPOptimization>
+void tryReadUnicodeCharImpl(VM& vm, CCallHelpers& jit, MacroAssembler::RegisterID resultReg)
+{
+    MacroAssembler::JumpList slowCases;
+    MacroAssembler::JumpList isBMP;
+    MacroAssembler::JumpList done;
+
+    YarrJITDefaultRegisters regs;
+
+#if HAVE(YARR_SURROGATE_REGISTERS)
+    GPRReg surrogateTagMask = regs.surrogateTagMask;
+    GPRReg surrogatePairTags = regs.surrogatePairTags;
+#else
+    static constexpr MacroAssembler::TrustedImm32 surrogateTagMask = MacroAssembler::TrustedImm32(0xdc00dc00);
+    static constexpr MacroAssembler::TrustedImm32 surrogatePairTags = MacroAssembler::TrustedImm32(0xdc00d800);
+#endif
+
+    if (resultReg != regs.regT0)
+        jit.swap(regs.regT0, resultReg);
+
+    // Check if we can read two UTF-16 characters at once.
+    jit.add64(MacroAssembler::TrustedImm32(4), regs.regUnicodeInputAndTrail, regs.unicodeAndSubpatternIdTemp);
+    slowCases.append(jit.branchPtr(MacroAssembler::Above, regs.unicodeAndSubpatternIdTemp, regs.endOfStringAddress));
+
+    // Load and try to process two UTF-16 characters.
+    // If they are a proper surrogate pair, compute the non-BMP codepoint.
+    jit.load32(MacroAssembler::Address(regs.regUnicodeInputAndTrail), resultReg);
+#if CPU(ARM64)
+    jit.and32AndSetFlags(surrogateTagMask, resultReg, regs.unicodeAndSubpatternIdTemp);
+    isBMP.append(jit.branch(MacroAssembler::Zero));
+#else
+    jit.and32(surrogateTagMask, resultReg, regs.unicodeAndSubpatternIdTemp);
+    isBMP.append(jit.branch32(MacroAssembler::Equal, regs.unicodeAndSubpatternIdTemp, MacroAssembler::TrustedImm32(0)));
+#endif
+    slowCases.append(jit.branch32(MacroAssembler::NotEqual, regs.unicodeAndSubpatternIdTemp, surrogatePairTags));
+
+    // Create the UTF32 character from the surrogate pair.
+#if CPU(ARM64)
+    jit.urshift32(resultReg, MacroAssembler::TrustedImm32(16), regs.unicodeAndSubpatternIdTemp);
+    jit.insertBitField32(resultReg, MacroAssembler::TrustedImm32(10), MacroAssembler::TrustedImm32(10), regs.unicodeAndSubpatternIdTemp);
+    jit.add32(MacroAssembler::TrustedImm32(0x10000), regs.unicodeAndSubpatternIdTemp, resultReg);
+#else
+    jit.and32(MacroAssembler::TrustedImm32(0xffff), resultReg, regs.unicodeAndSubpatternIdTemp);
+    jit.lshift32(MacroAssembler::TrustedImm32(10), regs.unicodeAndSubpatternIdTemp);
+    jit.urshift32(resultReg, MacroAssembler::TrustedImm32(16), resultReg);
+    jit.getEffectiveAddress(MacroAssembler::BaseIndex(regs.unicodeAndSubpatternIdTemp, resultReg, MacroAssembler::TimesOne, -U16_SURROGATE_OFFSET), resultReg);
+#endif
+
+#if ENABLE(YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP)
+    if (useNonBMPOptimization == TryReadUnicodeCharGenFirstNonBMPOptimization::UseOptimization)
+        jit.move(MacroAssembler::TrustedImm32(1), regs.firstCharacterAdditionalReadSize);
+#endif
+    done.append(jit.jump());
+
+    isBMP.link(jit);
+    jit.and32(MacroAssembler::TrustedImm32(0xffff), resultReg);
+
+    done.append(jit.jump());
+
+    slowCases.link(&jit);
+#if ENABLE(YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP)
+    if constexpr (useNonBMPOptimization == TryReadUnicodeCharGenFirstNonBMPOptimization::UseOptimization)
+        jit.nearCallThunk(CodeLocationLabel { vm.getCTIStub(tryReadUnicodeCharIncForNonBMPSlowThunkGenerator).template retaggedCode<NoPtrTag>() });
+    else
+#endif
+        jit.nearCallThunk(CodeLocationLabel { vm.getCTIStub(tryReadUnicodeCharSlowThunkGenerator).template retaggedCode<NoPtrTag>() });
+    done.link(&jit);
+
+    if (resultReg != regs.regT0)
+        jit.swap(regs.regT0, resultReg);
+}
+
+template<TryReadUnicodeCharGenFirstNonBMPOptimization useNonBMPOptimization>
+void tryReadUnicodeCharSlowImpl(CCallHelpers& jit)
+{
+    MacroAssembler::JumpList bmpOnly;
+    MacroAssembler::JumpList isBMP;
+    MacroAssembler::JumpList notSurrogatePair;
+    MacroAssembler::JumpList checkForDanglingSurrogates;
+    MacroAssembler::JumpList bmpDone;
+    MacroAssembler::JumpList haveResult;
+
+    YarrJITDefaultRegisters regs;
+
+    // This code generator is used to build two variations of a character reader that handles Unicode non-BMP surrogate pairs.
+    // This code generator is used to build thunks or as inline code. Its "calling convention" is unconventional.
+    // It assumes the following registers are already populated with these values:
+    // regs.regUnicodeInputAndTrail is the string address to start reading from.
+    // regs.input contains the pointer of the beginning of the string.
+    // regs.endOfStringAddress contains the address one past the end of the string.
+    // For architectures that put the surrogate masks and tags in registers,
+    // regs.surrogateTagMask contains 0xdc00dc00 and regs.surrogatePairTags contains 0xdc00d800.
+    // When the YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP optimization is enabled and used,
+    // regs.firstCharacterAdditionalReadSize is used to advance 2 characters when we read a non-BMP codepoint.
+    // regs.unicodeAndSubpatternIdTemp is used as a temporary.
+    // The result is returned via regs.regT0.
+
+#if HAVE(YARR_SURROGATE_REGISTERS)
+    GPRReg surrogateTagMask = regs.surrogateTagMask;
+#else
+    static constexpr MacroAssembler::TrustedImm32 surrogateTagMask = MacroAssembler::TrustedImm32(0xdc00dc00);
+#endif
+    auto resultReg = regs.regT0;
+
+    // Check if we can read two UTF-16 characters at once.
+    jit.add64(MacroAssembler::TrustedImm32(4), regs.regUnicodeInputAndTrail, regs.unicodeAndSubpatternIdTemp);
+    bmpOnly.append(jit.branchPtr(MacroAssembler::Above, regs.unicodeAndSubpatternIdTemp, regs.endOfStringAddress));
+
+    // Load and try to process two UTF-16 characters.
+    // If they are a proper surrogate pair, compute the non-BMP codepoint.
+    jit.load32(MacroAssembler::Address(regs.regUnicodeInputAndTrail), resultReg);
+#if CPU(ARM64)
+    jit.and32AndSetFlags(surrogateTagMask, resultReg, regs.unicodeAndSubpatternIdTemp);
+    isBMP.append(jit.branch(MacroAssembler::Zero));
+#else
+    jit.and32(surrogateTagMask, resultReg, regs.unicodeAndSubpatternIdTemp);
+    isBMP.append(jit.branch32(MacroAssembler::Equal, regs.unicodeAndSubpatternIdTemp, MacroAssembler::TrustedImm32(0)));
+#endif
+
+    // if it is surrogate pair, we already handled it in the inlined code.
+
+    // Check if we can return the dangling surrogate or if it is part of a valid pair where the leading surrogate
+    // that is offset one character before the load pointer.
+    jit.and32(MacroAssembler::TrustedImm32(0xffff), regs.unicodeAndSubpatternIdTemp);
+    // If it is a leading surrogate, the check above proved that it wasn't followed by a trailing surrogate.
+    // If so fall through, otherwise perform other dangling checks.
+    checkForDanglingSurrogates.append(jit.branch32(MacroAssembler::Equal, regs.unicodeAndSubpatternIdTemp, MacroAssembler::TrustedImm32(0xdc00)));
+
+    isBMP.link(jit);
+    jit.and32(MacroAssembler::TrustedImm32(0xffff), resultReg);
+
+    jit.ret();
+
+    checkForDanglingSurrogates.link(&jit);
+    // Remove the second character that we loaded.
+    jit.and32(MacroAssembler::TrustedImm32(0xffff), resultReg);
+    MacroAssembler::Label checkForDanglingSurrogatesLabel(&jit);
+
+    // Can ew read the prior character?
+    jit.subPtr(MacroAssembler::TrustedImm32(2), regs.regUnicodeInputAndTrail);
+    // If not, we branch to return the dangling surrogate.
+    bmpDone.append(jit.branchPtr(MacroAssembler::Below, regs.regUnicodeInputAndTrail, regs.input));
+
+    // Load the prior character and check if it is a leading surrogate.
+    jit.load16Unaligned(MacroAssembler::Address(regs.regUnicodeInputAndTrail), regs.regUnicodeInputAndTrail);
+    jit.and32(surrogateTagMask, regs.regUnicodeInputAndTrail, regs.unicodeAndSubpatternIdTemp);
+    // It wasn't a leading surrogate, so return the original dangling surrogate.
+    bmpDone.append(jit.branch32(MacroAssembler::NotEqual, regs.unicodeAndSubpatternIdTemp, MacroAssembler::TrustedImm32(0xd800)));
+
+    // The prior characters was a leading surrogate, Ecma262 says that this is an error, so return the error code point.
+    jit.move(MacroAssembler::TrustedImm32(errorCodePoint), resultReg);
+    bmpDone.append(jit.jump());
+
+    bmpOnly.link(&jit);
+    // Can't read two characters, then just read one.
+    jit.load16Unaligned(MacroAssembler::Address(regs.regUnicodeInputAndTrail), resultReg);
+
+    // Is the character a trailing surrogate?
+    jit.and32(surrogateTagMask, resultReg, regs.unicodeAndSubpatternIdTemp);
+    // If so, branch back to handle the possibility that we loaded the second surrogate of a proper pair.
+    jit.branch32(MacroAssembler::Equal, regs.unicodeAndSubpatternIdTemp, MacroAssembler::TrustedImm32(0xdc00)).linkTo(checkForDanglingSurrogatesLabel, jit);
+
+    bmpDone.link(&jit);
+
+    haveResult.link(&jit);
+}
+
+
+#endif // ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
+
 template<class YarrJITRegs = YarrJITDefaultRegisters>
 class YarrGenerator final : public YarrJITInfo {
+    class MatchTargets {
+    public:
+        enum class PreferredTarget : uint8_t {
+            NoPreference = 0,
+            PreferMatchSucceeded = 1,
+            MatchFailFallThrough = PreferMatchSucceeded,
+            PreferMatchFailed = 2,
+            MatchSuccessFallThrough = PreferMatchFailed
+        };
+
+        MatchTargets(PreferredTarget preferredTarget = PreferredTarget::NoPreference)
+            : m_preferredTarget(preferredTarget)
+        { }
+
+        MatchTargets(MacroAssembler::JumpList& matchDest)
+            : m_matchSucceededTargets(&matchDest)
+            , m_preferredTarget(PreferredTarget::PreferMatchSucceeded)
+        { }
+
+        MatchTargets(MacroAssembler::JumpList& compareDest, PreferredTarget preferredTarget)
+            : m_preferredTarget(preferredTarget)
+        {
+            if (preferredTarget == PreferredTarget::PreferMatchFailed)
+                m_matchFailedTargets = &compareDest;
+            else
+                m_matchSucceededTargets  = &compareDest;
+        }
+
+        MatchTargets(MacroAssembler::JumpList& matchDest, MacroAssembler::JumpList& failDest, PreferredTarget preferredTarget = PreferredTarget::NoPreference)
+            : m_matchSucceededTargets(&matchDest)
+            , m_matchFailedTargets(&failDest)
+            , m_preferredTarget(preferredTarget)
+        { }
+
+        PreferredTarget preferredTarget()
+        {
+            return m_preferredTarget;
+        }
+
+        bool hasSucceedTarget()
+        {
+            return m_matchSucceededTargets != nullptr;
+        }
+
+        bool hasFailedTarget()
+        {
+            return m_matchFailedTargets != nullptr;
+        }
+
+        MacroAssembler::JumpList& matchSucceeded() { return *m_matchSucceededTargets; }
+        MacroAssembler::JumpList& matchFailed() { return *m_matchFailedTargets; }
+
+        void appendSucceeded(MacroAssembler::Jump jump)
+        {
+            ASSERT(m_matchSucceededTargets != nullptr);
+            m_matchSucceededTargets->append(jump);
+        }
+
+        void appendFailed(MacroAssembler::Jump jump)
+        {
+            ASSERT(m_matchFailedTargets != nullptr);
+            m_matchFailedTargets->append(jump);
+        }
+
+    private:
+        MacroAssembler::JumpList* m_matchSucceededTargets { nullptr };
+        MacroAssembler::JumpList* m_matchFailedTargets { nullptr };
+        PreferredTarget m_preferredTarget;
+    };
 
 #if ENABLE(YARR_JIT_ALL_PARENS_EXPRESSIONS)
     struct ParenContextSizes {
         size_t m_numSubpatterns;
+        size_t m_numDuplicateNamedCaptures;
         size_t m_frameSlots;
 
-        ParenContextSizes(size_t numSubpatterns, size_t frameSlots)
+        ParenContextSizes(size_t numSubpatterns, size_t numDuplicateNamedCaptures, size_t frameSlots)
             : m_numSubpatterns(numSubpatterns)
+            , m_numDuplicateNamedCaptures(numDuplicateNamedCaptures)
             , m_frameSlots(frameSlots)
         {
         }
 
         size_t numSubpatterns() { return m_numSubpatterns; }
+
+        size_t numDuplicateNamedCaptures() { return m_numDuplicateNamedCaptures; }
 
         size_t frameSlots() { return m_frameSlots; }
     };
@@ -214,11 +579,12 @@ class YarrGenerator final : public YarrJITInfo {
             unsigned start;
             unsigned end;
         } subpatterns[0];
+        unsigned duplicateNamedCaptures[0];
         uintptr_t frameSlots[0];
 
         static size_t sizeFor(ParenContextSizes& parenContextSizes)
         {
-            return sizeof(ParenContext) + sizeof(Subpatterns) * parenContextSizes.numSubpatterns() + sizeof(uintptr_t) * parenContextSizes.frameSlots();
+            return sizeof(ParenContext) + sizeof(Subpatterns) * parenContextSizes.numSubpatterns() + sizeof(unsigned) * (parenContextSizes.numDuplicateNamedCaptures()) + sizeof(uintptr_t) * parenContextSizes.frameSlots();
         }
 
         static constexpr ptrdiff_t nextOffset()
@@ -246,9 +612,14 @@ class YarrGenerator final : public YarrJITInfo {
             return offsetof(ParenContext, subpatterns) + (subpattern - 1) * sizeof(Subpatterns);
         }
 
+        static constexpr ptrdiff_t duplicateNamedCaptureOffset(ParenContextSizes& parenContextSizes, size_t namedCapture)
+        {
+            return offsetof(ParenContext, subpatterns) + (parenContextSizes.numSubpatterns()) * sizeof(Subpatterns) + (namedCapture - 1) * sizeof(unsigned);
+        }
+
         static ptrdiff_t savedFrameOffset(ParenContextSizes& parenContextSizes)
         {
-            return offsetof(ParenContext, subpatterns) + (parenContextSizes.numSubpatterns()) * sizeof(Subpatterns);
+            return offsetof(ParenContext, subpatterns) + (parenContextSizes.numSubpatterns()) * sizeof(Subpatterns) + (parenContextSizes.numDuplicateNamedCaptures()) * sizeof(unsigned);
         }
     };
 
@@ -319,6 +690,9 @@ class YarrGenerator final : public YarrJITInfo {
 
     void saveParenContext(MacroAssembler::RegisterID parenContextReg, MacroAssembler::RegisterID tempReg, unsigned firstSubpattern, unsigned lastSubpattern, unsigned subpatternBaseFrameLocation)
     {
+        BitVector duplicateNamedCaptureGroups;
+        bool hasNamedCaptures = m_pattern.hasDuplicateNamedCaptureGroups();
+
         loadFromFrame(subpatternBaseFrameLocation + BackTrackInfoParentheses::matchAmountIndex(), tempReg);
         storeBeginAndMatchAmountToParenContext(m_regs.index, tempReg, parenContextReg);
         loadFromFrame(subpatternBaseFrameLocation + BackTrackInfoParentheses::returnAddressIndex(), tempReg);
@@ -328,7 +702,17 @@ class YarrGenerator final : public YarrJITInfo {
                 static_assert(is64Bit());
                 m_jit.load64(MacroAssembler::Address(m_regs.output, (subpattern << 1) * sizeof(unsigned)), tempReg);
                 m_jit.store64(tempReg, MacroAssembler::Address(parenContextReg, ParenContext::subpatternOffset(subpattern)));
+                if (hasNamedCaptures) {
+                    unsigned duplicateNamedGroup = m_pattern.m_duplicateNamedGroupForSubpatternId[subpattern];
+                    if (duplicateNamedGroup)
+                        duplicateNamedCaptureGroups.set(duplicateNamedGroup);
+                }
                 clearSubpatternStart(subpattern);
+            }
+            for (unsigned duplicateNamedGroupId : duplicateNamedCaptureGroups) {
+                m_jit.load32(MacroAssembler::Address(m_regs.output, (offsetForDuplicateNamedGroupId(duplicateNamedGroupId) * sizeof(unsigned))), tempReg);
+                m_jit.store32(tempReg, MacroAssembler::Address(parenContextReg, ParenContext::duplicateNamedCaptureOffset(m_parenContextSizes, duplicateNamedGroupId)));
+                m_jit.store32(MacroAssembler::TrustedImm32(0), MacroAssembler::Address(m_regs.output, (offsetForDuplicateNamedGroupId(duplicateNamedGroupId) * sizeof(unsigned))));
             }
         }
         subpatternBaseFrameLocation += YarrStackSpaceForBackTrackInfoParentheses;
@@ -340,6 +724,9 @@ class YarrGenerator final : public YarrJITInfo {
 
     void restoreParenContext(MacroAssembler::RegisterID parenContextReg, MacroAssembler::RegisterID tempReg, unsigned firstSubpattern, unsigned lastSubpattern, unsigned subpatternBaseFrameLocation)
     {
+        BitVector duplicateNamedCaptureGroups;
+        bool hasNamedCaptures = m_pattern.hasDuplicateNamedCaptureGroups();
+
         loadBeginAndMatchAmountFromParenContext(parenContextReg, m_regs.index, tempReg);
         storeToFrame(m_regs.index, subpatternBaseFrameLocation + BackTrackInfoParentheses::beginIndex());
         storeToFrame(tempReg, subpatternBaseFrameLocation + BackTrackInfoParentheses::matchAmountIndex());
@@ -350,6 +737,15 @@ class YarrGenerator final : public YarrJITInfo {
                 static_assert(is64Bit());
                 m_jit.load64(MacroAssembler::Address(parenContextReg, ParenContext::subpatternOffset(subpattern)), tempReg);
                 m_jit.store64(tempReg, MacroAssembler::Address(m_regs.output, (subpattern << 1) * sizeof(unsigned)));
+                if (hasNamedCaptures) {
+                    unsigned duplicateNamedGroup = m_pattern.m_duplicateNamedGroupForSubpatternId[subpattern];
+                    if (duplicateNamedGroup)
+                        duplicateNamedCaptureGroups.set(duplicateNamedGroup);
+                }
+            }
+            for (unsigned duplicateNamedGroupId : duplicateNamedCaptureGroups) {
+                m_jit.load32(MacroAssembler::Address(parenContextReg, ParenContext::duplicateNamedCaptureOffset(m_parenContextSizes, duplicateNamedGroupId)), tempReg);
+                m_jit.store32(tempReg, MacroAssembler::Address(m_regs.output, (offsetForDuplicateNamedGroupId(duplicateNamedGroupId) * sizeof(int))));
             }
         }
         subpatternBaseFrameLocation += YarrStackSpaceForBackTrackInfoParentheses;
@@ -382,124 +778,287 @@ class YarrGenerator final : public YarrJITInfo {
         }
     }
 
-    void matchCharacterClassRange(MacroAssembler::RegisterID character, MacroAssembler::JumpList& failures, MacroAssembler::JumpList& matchDest, const CharacterRange* ranges, unsigned count, unsigned* matchIndex, const UChar32* matches, unsigned matchCount)
+    constexpr static unsigned MaximumCharacterClassSizeForBitTest = 8 * sizeof(UCPURegister);
+    using CharacterBitSet = WTF::BitSet<MaximumCharacterClassSizeForBitTest>;
+
+    void matchCharacterClassByBitTest(MacroAssembler::RegisterID character, MacroAssembler::RegisterID scratch, MacroAssembler::JumpList& matchDest, char32_t min, char32_t max, CharacterBitSet mask)
     {
-        do {
-            // pick which range we're going to generate
-            int which = count >> 1;
-            char lo = ranges[which].begin;
-            char hi = ranges[which].end;
-
-            // check if there are any ranges or matches below lo.  If not, just jl to failure -
-            // if there is anything else to check, check that first, if it falls through jmp to failure.
-            if ((*matchIndex < matchCount) && (matches[*matchIndex] < lo)) {
-                MacroAssembler::Jump loOrAbove = m_jit.branch32(MacroAssembler::GreaterThanOrEqual, character, MacroAssembler::Imm32((unsigned short)lo));
-
-                // generate code for all ranges before this one
-                if (which)
-                    matchCharacterClassRange(character, failures, matchDest, ranges, which, matchIndex, matches, matchCount);
-
-                while ((*matchIndex < matchCount) && (matches[*matchIndex] < lo)) {
-                    matchDest.append(m_jit.branch32(MacroAssembler::Equal, character, MacroAssembler::Imm32((unsigned short)matches[*matchIndex])));
-                    ++*matchIndex;
+        switch (mask.count()) {
+        case 0:
+            return;
+        case 1:
+        case 2:
+        case 3:
+        case 4:
+            // If the set is small enough, still defer to a series of branches.
+            mask.forEachSetBit([&](size_t value) {
+                matchDest.append(m_jit.branch32(MacroAssembler::Equal, character, MacroAssembler::TrustedImm32(min + value)));
+                return IterationStatus::Continue;
+            });
+            break;
+        default: {
+            // Otherwise, actually perform the bit test.
+#if CPU(REGISTER64)
+            m_jit.sub32(character, MacroAssembler::Imm32(static_cast<unsigned>(min)), scratch);
+            MacroAssembler::Jump notInVector = m_jit.branch32(MacroAssembler::Above, scratch, MacroAssembler::TrustedImm32(max - min));
+            m_jit.lshift64(MacroAssembler::TrustedImm32(1), scratch, scratch);
+            matchDest.append(m_jit.branchTest64(MacroAssembler::NonZero, scratch, MacroAssembler::TrustedImm64(mask.storage()[0])));
+#else
+            m_jit.sub32(character, MacroAssembler::Imm32(static_cast<unsigned>(min)), scratch);
+            MacroAssembler::Jump notInVector = m_jit.branch32(MacroAssembler::Above, scratch, MacroAssembler::TrustedImm32(max - min));
+            m_jit.lshift32(MacroAssembler::TrustedImm32(1), scratch, scratch);
+            matchDest.append(m_jit.branchTest32(MacroAssembler::NonZero, scratch, MacroAssembler::TrustedImm32(mask.storage()[0])));
+#endif
+            notInVector.link(&m_jit);
+        }
+        }
                 }
-                failures.append(m_jit.jump());
 
-                loOrAbove.link(&m_jit);
-            } else if (which) {
-                MacroAssembler::Jump loOrAbove = m_jit.branch32(MacroAssembler::GreaterThanOrEqual, character, MacroAssembler::Imm32((unsigned short)lo));
-
-                matchCharacterClassRange(character, failures, matchDest, ranges, which, matchIndex, matches, matchCount);
-                failures.append(m_jit.jump());
-
-                loOrAbove.link(&m_jit);
-            } else
-                failures.append(m_jit.branch32(MacroAssembler::LessThan, character, MacroAssembler::Imm32((unsigned short)lo)));
-
-            while ((*matchIndex < matchCount) && (matches[*matchIndex] <= hi))
-                ++*matchIndex;
-
-            matchDest.append(m_jit.branch32(MacroAssembler::LessThanOrEqual, character, MacroAssembler::Imm32((unsigned short)hi)));
-            // fall through to here, the value is above hi.
-
-            // shuffle along & loop around if there are any more matches to handle.
-            unsigned next = which + 1;
-            ranges += next;
-            count -= next;
-        } while (count);
-    }
-
-    void matchCharacterClass(MacroAssembler::RegisterID character, MacroAssembler::JumpList& matchDest, const CharacterClass* charClass)
+    void matchCharacterClassSet(MacroAssembler::RegisterID character, MacroAssembler::RegisterID scratch, MacroAssembler::JumpList& matchDest, std::span<const char32_t> matches)
     {
-        if (charClass->m_table && !m_decodeSurrogatePairs) {
-            MacroAssembler::ExtendedAddress tableEntry(character, reinterpret_cast<intptr_t>(charClass->m_table));
-            matchDest.append(m_jit.branchTest8(charClass->m_tableInverted ? MacroAssembler::Zero : MacroAssembler::NonZero, tableEntry));
+        if (matches.empty())
+            return;
+
+        if (matches.size() == 1) {
+            matchDest.append(m_jit.branch32(MacroAssembler::Equal, character, MacroAssembler::Imm32(static_cast<unsigned>(matches.front()))));
             return;
         }
 
-        MacroAssembler::JumpList unicodeFail;
-        if (charClass->m_matchesUnicode.size() || charClass->m_rangesUnicode.size()) {
-            MacroAssembler::JumpList isAscii;
-            if (charClass->m_matches.size() || charClass->m_ranges.size())
-                isAscii.append(m_jit.branch32(MacroAssembler::LessThanOrEqual, character, MacroAssembler::TrustedImm32(0x7f)));
+        // If we have multiple matches close together (not necessarily contiguous), we
+        // can try a biased bitmask - subtract the minimum match from the character,
+        // then see if it's present in a precomputed mask. We keep the bitset size quite
+        // small in order to keep it easy to materialize - this approach lets us avoid
+        // a load or lookup table in favor of just masking against an immediate.
 
-            if (charClass->m_matchesUnicode.size()) {
-                for (unsigned i = 0; i < charClass->m_matchesUnicode.size(); ++i) {
-                    UChar32 ch = charClass->m_matchesUnicode[i];
-                    matchDest.append(m_jit.branch32(MacroAssembler::Equal, character, MacroAssembler::Imm32(ch)));
-                }
+        char32_t min = matches.front();
+        char32_t max = matches.back();
+        ASSERT(max > min);
+        if ((max - min) < MaximumCharacterClassSizeForBitTest) {
+            CharacterBitSet mask;
+            for (char32_t character : matches)
+                mask.set(character - min);
+            matchCharacterClassByBitTest(character, scratch, matchDest, min, max, mask);
+            return;
+    }
+
+        // We have too many matches to handle in a single set, but we may be able to
+        // recursively group some of our matches together. Worst case, we just do a
+        // character-by-character match. Greedily matching is potentially suboptimal,
+        // but I doubt worth spending time doing better.
+
+        size_t lastStart = 0;
+        for (size_t index = 1; index < matches.size(); ++index) {
+            if ((matches[index] - matches[lastStart]) >= MaximumCharacterClassSizeForBitTest) {
+                matchCharacterClassSet(character, scratch, matchDest, matches.subspan(lastStart, index - lastStart));
+                lastStart = index;
             }
+        }
+        if (lastStart < matches.size())
+            matchCharacterClassSet(character, scratch, matchDest, matches.subspan(lastStart));
+    }
 
-            if (charClass->m_rangesUnicode.size()) {
-                for (unsigned i = 0; i < charClass->m_rangesUnicode.size(); ++i) {
-                    UChar32 lo = charClass->m_rangesUnicode[i].begin;
-                    UChar32 hi = charClass->m_rangesUnicode[i].end;
+    void matchCharacterClassRange(MacroAssembler::RegisterID character, MacroAssembler::RegisterID scratch, MacroAssembler::JumpList& failures, MacroAssembler::JumpList& matchDest, std::span<const CharacterRange> ranges, std::span<const char32_t> matches, bool& shouldGenerateFailureJump, bool isTopLevel)
+    {
+        if (ranges.size() == 1 && !matches.size()) {
+            matchCharacterClassOnlyOneRange(character, scratch, failures, ranges.front());
+            matchDest.append(m_jit.jump());
+            shouldGenerateFailureJump = false;
+            return;
+        }
+        ASSERT(ranges.size()); // We could handle this case, but we shouldn't expect to reach here without any ranges.
 
-                    MacroAssembler::Jump below = m_jit.branch32(MacroAssembler::LessThan, character, MacroAssembler::Imm32(lo));
-                    matchDest.append(m_jit.branch32(MacroAssembler::LessThanOrEqual, character, MacroAssembler::Imm32(hi)));
-                    below.link(&m_jit);
+        // Let's first see if all our ranges and matches neatly fit into a bitvector...
+        uint32_t min = ranges.front().begin;
+        uint32_t max = ranges.back().end;
+        if (matches.size()) {
+            min = std::min<uint32_t>(min, matches.front());
+            max = std::max<uint32_t>(max, matches.back());
+        }
+        if ((max - min) < MaximumCharacterClassSizeForBitTest) {
+            CharacterBitSet mask;
+            for (auto range : ranges) {
+                for (char32_t ch = range.begin; ch <= range.end; ++ch)
+                    mask.set(ch - min);
                 }
-            }
-
-            if (charClass->m_matches.size() || charClass->m_ranges.size())
-                unicodeFail = m_jit.jump();
-            isAscii.link(&m_jit);
+            for (auto character : matches)
+                mask.set(character - min);
+            matchCharacterClassByBitTest(character, scratch, matchDest, min, max, mask);
+            return;
         }
 
-        if (charClass->m_ranges.size()) {
-            unsigned matchIndex = 0;
-            MacroAssembler::JumpList failures;
-            matchCharacterClassRange(character, failures, matchDest, charClass->m_ranges.begin(), charClass->m_ranges.size(), &matchIndex, charClass->m_matches.begin(), charClass->m_matches.size());
-            while (matchIndex < charClass->m_matches.size())
-                matchDest.append(m_jit.branch32(MacroAssembler::Equal, character, MacroAssembler::Imm32((unsigned short)charClass->m_matches[matchIndex++])));
+        // Otherwise, binary search the ranges and matches. We still want to take advantage of a bitvector test
+        // if possible, so we greedily add ranges to the median as long as we fit within the bit test size.
+        unsigned whichFirst = ranges.size() >> 1;
+        unsigned whichLast = whichFirst;
+        char32_t lo = ranges[whichFirst].begin;
+        char32_t hi = ranges[whichLast].end;
+        while (whichLast < ranges.size() - 1) {
+            char32_t nextHi = ranges[whichLast + 1].end;
+            if (nextHi - lo < MaximumCharacterClassSizeForBitTest) {
+                whichLast++;
+                hi = nextHi;
+            } else
+                break;
+            }
 
-            failures.link(&m_jit);
-        } else if (charClass->m_matches.size()) {
-            // optimization: gather 'a','A' etc back together, can mask & test once.
-            Vector<char> matchesAZaz;
+        // First, explore any matches below the minimum of the current range.
+        unsigned smallerMatchCount = 0;
+        while (smallerMatchCount < matches.size() && matches[smallerMatchCount] < lo)
+            smallerMatchCount++;
 
-            for (unsigned i = 0; i < charClass->m_matches.size(); ++i) {
-                char ch = charClass->m_matches[i];
-                if (m_pattern.ignoreCase()) {
-                    if (isASCIILower(ch)) {
-                        matchesAZaz.append(ch);
-                        continue;
+        // Otherwise, explore any matches beyond the maximum of the current range.
+        unsigned higherMatchStart = smallerMatchCount;
+        while (higherMatchStart < matches.size() && matches[higherMatchStart] <= hi)
+            higherMatchStart++;
+
+        if (whichFirst) {
+            MacroAssembler::Jump loOrAbove = m_jit.branch32(MacroAssembler::GreaterThanOrEqual, character, MacroAssembler::Imm32(static_cast<unsigned>(lo)));
+            bool shouldGenerateFailureJump = true;
+            matchCharacterClassRange(character, scratch, failures, matchDest, ranges.first(whichFirst), matches.first(smallerMatchCount), shouldGenerateFailureJump, false);
+            if (shouldGenerateFailureJump)
+                failures.append(m_jit.jump());
+            loOrAbove.link(&m_jit);
+        } else if (smallerMatchCount) {
+            MacroAssembler::Jump loOrAbove = m_jit.branch32(MacroAssembler::GreaterThanOrEqual, character, MacroAssembler::Imm32(static_cast<unsigned>(lo)));
+            matchCharacterClassSet(character, scratch, matchDest, matches.first(smallerMatchCount));
+            failures.append(m_jit.jump());
+            loOrAbove.link(&m_jit);
+        } else
+            failures.append(m_jit.branch32(MacroAssembler::LessThan, character, MacroAssembler::Imm32(static_cast<unsigned>(lo))));
+
+        // At this point we will have either matched, failed, or character is >= lo. Next, let's check if we're actually in the current range.
+
+        if (whichFirst != whichLast) {
+            CharacterBitSet mask;
+            for (auto range : ranges.subspan(whichFirst, whichLast - whichFirst + 1)) {
+                for (char32_t ch = range.begin; ch <= range.end; ++ch)
+                    mask.set(ch - lo);
+            }
+            for (auto character : matches.subspan(smallerMatchCount, higherMatchStart - smallerMatchCount))
+                mask.set(character - lo);
+            matchCharacterClassByBitTest(character, scratch, matchDest, lo, hi, mask);
+        } else
+            matchDest.append(m_jit.branch32(MacroAssembler::LessThanOrEqual, character, MacroAssembler::Imm32(static_cast<unsigned>(hi))));
+
+        if (whichLast + 1 < ranges.size()) {
+            bool shouldGenerateFailureJump = true;
+            matchCharacterClassRange(character, scratch, failures, matchDest, ranges.subspan(whichLast + 1), matches.subspan(higherMatchStart), shouldGenerateFailureJump, false);
+            if (shouldGenerateFailureJump)
+                failures.append(m_jit.jump());
+        } else if (higherMatchStart < matches.size()) {
+            matchCharacterClassSet(character, scratch, matchDest, matches.subspan(higherMatchStart));
+            if (!isTopLevel)
+                failures.append(m_jit.jump());
+                }
+            }
+
+    void matchCharacterClassOnlyOneRange(const MacroAssembler::RegisterID character, const MacroAssembler::RegisterID scratch, MacroAssembler::JumpList& failMatches, const CharacterRange& range)
+    {
+        // Instead of doing two branches, we rely on unsigned underflow - any values below ranges.begin
+        // will wrap around to the top of the 32-bit unsigned integer range, meaning all values outside
+        // the range will be strictly above (end - begin).
+        unsigned biasedEnd = range.end - range.begin;
+        m_jit.sub32(character, MacroAssembler::Imm32(static_cast<unsigned>(range.begin)), scratch);
+        failMatches.append(m_jit.branch32(MacroAssembler::Above, scratch, MacroAssembler::TrustedImm32(biasedEnd)));
+        }
+
+    void matchCharacterClassOnlyOneRange(const MacroAssembler::RegisterID character, const MacroAssembler::RegisterID scratch, MacroAssembler::JumpList& failMatches, const Vector<CharacterRange>& ranges)
+    {
+        ASSERT(ranges.size() == 1);
+        matchCharacterClassOnlyOneRange(character, scratch, failMatches, ranges[0]);
+    }
+
+    void matchCharacterClassTable(MacroAssembler::RegisterID character, MacroAssembler::JumpList& failMatches, const char* table, bool tableInverted = false)
+    {
+        ASSERT(!m_decodeSurrogatePairs);
+        MacroAssembler::ExtendedAddress tableEntry(character, reinterpret_cast<intptr_t>(table));
+        failMatches.append(m_jit.branchTest8(tableInverted ? MacroAssembler::NonZero : MacroAssembler::Zero, tableEntry));
                     }
-                    if (isASCIIUpper(ch))
-                        continue;
+
+    void matchCharacterClass(MacroAssembler::RegisterID character, MacroAssembler::RegisterID scratch, MatchTargets matchTargets, const CharacterClass* charClass)
+    {
+        if (charClass->m_table && !m_decodeSurrogatePairs) {
+            if (matchTargets.hasFailedTarget()) {
+                MacroAssembler::ExtendedAddress tableEntry(character, reinterpret_cast<intptr_t>(charClass->m_table));
+                matchTargets.appendFailed(m_jit.branchTest8(charClass->m_tableInverted ? MacroAssembler::NonZero : MacroAssembler::Zero, tableEntry));
+                return;
                 }
-                matchDest.append(m_jit.branch32(MacroAssembler::Equal, character, MacroAssembler::Imm32((unsigned short)ch)));
+            MacroAssembler::ExtendedAddress tableEntry(character, reinterpret_cast<intptr_t>(charClass->m_table));
+            matchTargets.appendSucceeded(m_jit.branchTest8(charClass->m_tableInverted ? MacroAssembler::Zero : MacroAssembler::NonZero, tableEntry));
+            return;
             }
 
-            if (unsigned countAZaz = matchesAZaz.size()) {
-                m_jit.or32(MacroAssembler::TrustedImm32(32), character);
-                for (unsigned i = 0; i < countAZaz; ++i)
-                    matchDest.append(m_jit.branch32(MacroAssembler::Equal, character, MacroAssembler::TrustedImm32(matchesAZaz[i])));
-            }
+        Vector<char32_t, 32> unifiedMatches;
+        Vector<CharacterRange, 32> unifiedRanges;
+        unifiedMatches.appendVector(charClass->m_matches);
+        unifiedMatches.appendVector(charClass->m_matchesUnicode);
+        unifiedRanges.appendVector(charClass->m_ranges);
+        unifiedRanges.appendVector(charClass->m_rangesUnicode);
+
+        ASSERT(std::is_sorted(unifiedMatches.begin(), unifiedMatches.end(), [](auto& lhs, auto& rhs) {
+            return lhs < rhs;
+        }));
+        ASSERT(std::is_sorted(unifiedRanges.begin(), unifiedRanges.end(), [](auto& lhs, auto& rhs) {
+            return lhs.begin < rhs.begin;
+        }));
+
+        std::sort(unifiedMatches.begin(), unifiedMatches.end(), [](auto& lhs, auto& rhs) {
+            return lhs < rhs;
+        });
+        std::sort(unifiedRanges.begin(), unifiedRanges.end(), [](auto& lhs, auto& rhs) {
+            return lhs.begin < rhs.begin;
+        });
+
+        if (!unifiedRanges.size() && !unifiedMatches.size() && matchTargets.hasFailedTarget()) {
+            matchTargets.appendFailed(m_jit.jump());
+            return;
         }
 
-        if (charClass->m_matchesUnicode.size() || charClass->m_rangesUnicode.size())
-            unicodeFail.link(&m_jit);
+        if (unifiedRanges.size()) {
+            MacroAssembler::JumpList failures;
+            bool shouldGenerateFailureJump = false;
+            matchCharacterClassRange(character, scratch, failures, matchTargets.matchSucceeded(), unifiedRanges.span(), unifiedMatches.span(), shouldGenerateFailureJump, true);
+            failures.link(&m_jit);
+        } else if (unifiedMatches.size())
+            matchCharacterClassSet(character, scratch, matchTargets.matchSucceeded(), unifiedMatches.span());
+    }
+
+    void matchCharacterClassTermInner(PatternTerm* term, MacroAssembler::JumpList& failures, const MacroAssembler::RegisterID character, const MacroAssembler::RegisterID scratch)
+    {
+        ASSERT(term->type == PatternTerm::Type::CharacterClass);
+
+        auto processCharacterClass = [&] (CharacterClass* characterClassToProcess) {
+#if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
+        if (m_decodeSurrogatePairs && term->invert())
+            failures.append(m_jit.branch32(MacroAssembler::Equal, character, MacroAssembler::TrustedImm32(errorCodePoint)));
+#endif
+        if (term->invert())
+                matchCharacterClass(character, scratch, failures, characterClassToProcess);
+            else if (characterClassToProcess->m_matches.isEmpty() && characterClassToProcess->m_matchesUnicode.isEmpty()
+                && (characterClassToProcess->m_ranges.size() + characterClassToProcess->m_rangesUnicode.size()) == 1) {
+                matchCharacterClassOnlyOneRange(character, scratch, failures, characterClassToProcess->m_ranges.size() ? characterClassToProcess->m_ranges : characterClassToProcess->m_rangesUnicode);
+        } else {
+            MacroAssembler::JumpList matchDest;
+            // If we are matching the "any character" builtin class for non-unicode patterns,
+            // we only need to read the character and don't need to match as it will always succeed.
+                if (!characterClassToProcess->m_anyCharacter) {
+                    matchCharacterClass(character, scratch, MatchTargets(matchDest, failures, MatchTargets::PreferredTarget::MatchSuccessFallThrough), characterClassToProcess);
+                    if (!matchDest.empty())
+                failures.append(m_jit.jump());
+            }
+            matchDest.link(&m_jit);
+        }
+        };
+
+        if (m_charSize == CharSize::Char8) {
+            CharacterClass characterClass8Bit;
+
+            characterClass8Bit.copyOnly8BitCharacterData(*term->characterClass);
+            processCharacterClass(&characterClass8Bit);
+        } else
+            processCharacterClass(term->characterClass);
+
+        // Note that this falls through on a successful characterClass match.
     }
 
 #if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
@@ -507,11 +1066,11 @@ class YarrGenerator final : public YarrJITInfo {
     {
         ASSERT(term->type == PatternTerm::Type::CharacterClass);
 
-        if (term->isFixedWidthCharacterClass())
+        if (term->isFixedWidthCharacterClass() && !term->invert())
             m_jit.add32(MacroAssembler::TrustedImm32(term->characterClass->hasNonBMPCharacters() ? 2 : 1), m_regs.index);
         else {
             m_jit.add32(MacroAssembler::TrustedImm32(1), m_regs.index);
-            MacroAssembler::Jump isBMPChar = m_jit.branch32(MacroAssembler::LessThan, character, m_regs.supplementaryPlanesBase);
+            MacroAssembler::Jump isBMPChar = m_jit.branch32(MacroAssembler::LessThan, character, MacroAssembler::TrustedImm32(0x10000));
             failuresAfterIncrementingIndex.append(atEndOfInput());
             m_jit.add32(MacroAssembler::TrustedImm32(1), m_regs.index);
             isBMPChar.link(&m_jit);
@@ -587,47 +1146,33 @@ class YarrGenerator final : public YarrJITInfo {
         if (m_charSize == CharSize::Char8)
             return MacroAssembler::BaseIndex(m_regs.input, indexReg, MacroAssembler::TimesOne, characterOffset * static_cast<int32_t>(sizeof(char)));
 
-        return MacroAssembler::BaseIndex(m_regs.input, indexReg, MacroAssembler::TimesTwo, characterOffset * static_cast<int32_t>(sizeof(UChar)));
+        return MacroAssembler::BaseIndex(m_regs.input, indexReg, MacroAssembler::TimesTwo, characterOffset * static_cast<int32_t>(sizeof(char16_t)));
     }
 
 #if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
-    void tryReadUnicodeCharImpl(MacroAssembler::RegisterID resultReg)
-    {
-        ASSERT(m_charSize == CharSize::Char16);
-
-        MacroAssembler::JumpList notUnicode;
-
-        m_jit.load16Unaligned(MacroAssembler::Address(m_regs.regUnicodeInputAndTrail), resultReg);
-
-        // Is the character a leading surrogate?
-        m_jit.and32(m_regs.surrogateTagMask, resultReg, m_regs.unicodeTemp);
-        notUnicode.append(m_jit.branch32(MacroAssembler::NotEqual, m_regs.unicodeTemp, m_regs.leadingSurrogateTag));
-
-        // Is the input long enough to read a trailing surrogate?
-        m_jit.addPtr(MacroAssembler::TrustedImm32(2), m_regs.regUnicodeInputAndTrail);
-        notUnicode.append(m_jit.branchPtr(MacroAssembler::AboveOrEqual, m_regs.regUnicodeInputAndTrail, m_regs.endOfStringAddress));
-
-        // Is the character a trailing surrogate?
-        m_jit.load16Unaligned(MacroAssembler::Address(m_regs.regUnicodeInputAndTrail), m_regs.regUnicodeInputAndTrail);
-        m_jit.and32(m_regs.surrogateTagMask, m_regs.regUnicodeInputAndTrail, m_regs.unicodeTemp);
-        notUnicode.append(m_jit.branch32(MacroAssembler::NotEqual, m_regs.unicodeTemp, m_regs.trailingSurrogateTag));
-
-        // Combine leading and trailing surrogates to produce a code point.
-        m_jit.lshift32(MacroAssembler::TrustedImm32(10), resultReg);
-        m_jit.getEffectiveAddress(MacroAssembler::BaseIndex(resultReg, m_regs.regUnicodeInputAndTrail, MacroAssembler::TimesOne, -U16_SURROGATE_OFFSET), resultReg);
-        notUnicode.link(&m_jit);
-    }
-
     void tryReadUnicodeChar(MacroAssembler::BaseIndex address, MacroAssembler::RegisterID resultReg)
     {
         ASSERT(m_charSize == CharSize::Char16);
 
         m_jit.getEffectiveAddress(address, m_regs.regUnicodeInputAndTrail);
 
-        if (resultReg == m_regs.regT0)
-            m_tryReadUnicodeCharacterCalls.append(m_jit.nearCall());
-        else
-            tryReadUnicodeCharImpl(resultReg);
+#if ENABLE(YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP)
+        if (m_useFirstNonBMPCharacterOptimization) {
+            tryReadUnicodeCharImpl<TryReadUnicodeCharGenFirstNonBMPOptimization::UseOptimization>(*m_vm, m_jit, resultReg);
+            return;
+        }
+#endif
+        tryReadUnicodeCharImpl<TryReadUnicodeCharGenFirstNonBMPOptimization::DontUseOptimization>(*m_vm, m_jit, resultReg);
+    }
+
+    void tryReadNonBMPUnicodeChar(Checked<unsigned> negativeCharacterOffset, MacroAssembler::RegisterID resultReg, MacroAssembler::RegisterID indexReg)
+    {
+        ASSERT(m_charSize == CharSize::Char16);
+
+        MacroAssembler::BaseIndex address = negativeOffsetIndexedAddress(negativeCharacterOffset, resultReg, indexReg);
+
+        m_jit.getEffectiveAddress(address, m_regs.regUnicodeInputAndTrail);
+        tryReadUnicodeCharImpl<TryReadUnicodeCharGenFirstNonBMPOptimization::DontUseOptimization>(*m_vm, m_jit, resultReg);
     }
 #endif
 
@@ -650,19 +1195,30 @@ class YarrGenerator final : public YarrJITInfo {
             m_jit.load16Unaligned(address, resultReg);
     }
 
-    MacroAssembler::Jump jumpIfCharNotEquals(UChar32 ch, Checked<unsigned> negativeCharacterOffset, MacroAssembler::RegisterID character)
+    template<MacroAssembler::RelationalCondition cond>
+    MacroAssembler::Jump jumpIfCharCond(char32_t ch, Checked<unsigned> negativeCharacterOffset, MacroAssembler::RegisterID character, bool ignoreCase)
     {
         readCharacter(negativeCharacterOffset, character);
 
         // For case-insesitive compares, non-ascii characters that have different
         // upper & lower case representations are converted to a character class.
-        ASSERT(!m_pattern.ignoreCase() || isASCIIAlpha(ch) || isCanonicallyUnique(ch, m_canonicalMode));
-        if (m_pattern.ignoreCase() && isASCIIAlpha(ch)) {
+        ASSERT(!ignoreCase || isASCIIAlpha(ch) || isCanonicallyUnique(ch, m_canonicalMode));
+        if (ignoreCase && isASCIIAlpha(ch)) {
             m_jit.or32(MacroAssembler::TrustedImm32(0x20), character);
             ch |= 0x20;
         }
 
-        return m_jit.branch32(MacroAssembler::NotEqual, character, MacroAssembler::Imm32(ch));
+        return m_jit.branch32(cond, character, MacroAssembler::Imm32(ch));
+    }
+
+    MacroAssembler::Jump jumpIfCharNotEquals(char32_t ch, Checked<unsigned> negativeCharacterOffset, MacroAssembler::RegisterID character, bool ignoreCase)
+    {
+        return jumpIfCharCond<MacroAssembler::NotEqual>(ch, negativeCharacterOffset, character, ignoreCase);
+    }
+
+    MacroAssembler::Jump jumpIfCharEquals(char32_t ch, Checked<unsigned> negativeCharacterOffset, MacroAssembler::RegisterID character, bool ignoreCase)
+    {
+        return jumpIfCharCond<MacroAssembler::Equal>(ch, negativeCharacterOffset, character, ignoreCase);
     }
 
     void storeToFrame(MacroAssembler::RegisterID reg, unsigned frameLocation)
@@ -738,13 +1294,13 @@ class YarrGenerator final : public YarrJITInfo {
         MacroAssembler::JumpList finishExiting;
         if (!m_abortExecution.empty()) {
             m_abortExecution.link(&m_jit);
-            m_jit.move(MacroAssembler::TrustedImmPtr((void*)static_cast<size_t>(-2)), m_regs.returnRegister);
+            m_jit.move(MacroAssembler::TrustedImmPtr((void*)static_cast<size_t>(JSRegExpResult::JITCodeFailure)), m_regs.returnRegister);
             finishExiting.append(m_jit.jump());
         }
 
         if (!m_hitMatchLimit.empty()) {
             m_hitMatchLimit.link(&m_jit);
-            m_jit.move(MacroAssembler::TrustedImmPtr((void*)static_cast<size_t>(-1)), m_regs.returnRegister);
+            m_jit.move(MacroAssembler::TrustedImmPtr((void*)static_cast<size_t>(JSRegExpResult::ErrorNoMatch)), m_regs.returnRegister);
         }
 
         finishExiting.link(&m_jit);
@@ -821,6 +1377,15 @@ class YarrGenerator final : public YarrJITInfo {
         SimpleNestedAlternativeBegin,
         SimpleNestedAlternativeNext,
         SimpleNestedAlternativeEnd,
+        // Used for alternatives in subpatterns where there is a list of BOL anchored
+        // string alternatives. Such a string list doesn't need backtracking. If the
+        // pattern is also EOL anchored, e.g. /^(?:cat|dog|doggy)$/, the list of strings
+        // needs to be sorted such that all longer strings with a prefix prior in the
+        // list appear first. In the example, we'd sort the alternatives to something
+        // like: /^(?:cat|doggy|dog)$/. This elimnates the need to backktrack.
+        StringListAlternativeBegin,
+        StringListAlternativeNext,
+        StringListAlternativeEnd,
         // Used to wrap 'Once' subpattern matches (quantityMaxCount == 1).
         ParenthesesSubpatternOnceBegin,
         ParenthesesSubpatternOnceEnd,
@@ -879,8 +1444,8 @@ class YarrGenerator final : public YarrJITInfo {
         // characters but matched.
         MacroAssembler::Jump m_zeroLengthMatch;
 
-        // This flag is used to null out the second pattern character, when
-        // two are fused to match a pair together.
+        // This flag is used to null out the subsequent pattern characters, when
+        // multiple are fused to match as a group.
         bool m_isDeadCode { false };
 
         // Currently used in the case of some of the more complex management of
@@ -1037,6 +1602,12 @@ class YarrGenerator final : public YarrJITInfo {
         Vector<ReturnAddressRecord, 4> m_backtrackRecords;
     };
 
+    unsigned offsetForDuplicateNamedGroupId(unsigned duplicateNamedGroupId)
+    {
+        ASSERT(duplicateNamedGroupId);
+        return ((m_pattern.m_numSubpatterns + 1) << 1) + duplicateNamedGroupId - 1;
+    }
+
     // Generation methods:
     // ===================
 
@@ -1055,15 +1626,16 @@ class YarrGenerator final : public YarrJITInfo {
         YarrOp& op = m_ops[opIndex];
         PatternTerm* term = op.m_term;
 
-        if (m_pattern.multiline()) {
+        if (term->multiline()) {
             const MacroAssembler::RegisterID character = m_regs.regT0;
+            const MacroAssembler::RegisterID scratch = m_regs.regT1;
 
             MacroAssembler::JumpList matchDest;
             if (!term->inputPosition)
                 matchDest.append(m_jit.branch32(MacroAssembler::Equal, m_regs.index, MacroAssembler::Imm32(op.m_checkedOffset)));
 
             readCharacter(op.m_checkedOffset - term->inputPosition + 1, character);
-            matchCharacterClass(character, matchDest, m_pattern.newlineCharacterClass());
+            matchCharacterClass(character, scratch, matchDest, m_pattern.newlineCharacterClass());
             op.m_jumps.append(m_jit.jump());
 
             matchDest.link(&m_jit);
@@ -1085,15 +1657,16 @@ class YarrGenerator final : public YarrJITInfo {
         YarrOp& op = m_ops[opIndex];
         PatternTerm* term = op.m_term;
 
-        if (m_pattern.multiline()) {
+        if (term->multiline()) {
             const MacroAssembler::RegisterID character = m_regs.regT0;
+            const MacroAssembler::RegisterID scratch = m_regs.regT1;
 
             MacroAssembler::JumpList matchDest;
             if (term->inputPosition == op.m_checkedOffset)
                 matchDest.append(atEndOfInput());
 
             readCharacter(op.m_checkedOffset - term->inputPosition, character);
-            matchCharacterClass(character, matchDest, m_pattern.newlineCharacterClass());
+            matchCharacterClass(character, scratch, matchDest, m_pattern.newlineCharacterClass());
             op.m_jumps.append(m_jit.jump());
 
             matchDest.link(&m_jit);
@@ -1117,6 +1690,7 @@ class YarrGenerator final : public YarrJITInfo {
         PatternTerm* term = op.m_term;
 
         const MacroAssembler::RegisterID character = m_regs.regT0;
+        const MacroAssembler::RegisterID scratch = m_regs.regT1;
 
         if (term->inputPosition == op.m_checkedOffset)
             nextIsNotWordChar.append(atEndOfInput());
@@ -1125,12 +1699,12 @@ class YarrGenerator final : public YarrJITInfo {
 
         CharacterClass* wordcharCharacterClass;
 
-        if (m_unicodeIgnoreCase)
+        if (m_pattern.eitherUnicode() && term->ignoreCase())
             wordcharCharacterClass = m_pattern.wordUnicodeIgnoreCaseCharCharacterClass();
         else
             wordcharCharacterClass = m_pattern.wordcharCharacterClass();
 
-        matchCharacterClass(character, nextIsWordChar, wordcharCharacterClass);
+        matchCharacterClass(character, scratch, nextIsWordChar, wordcharCharacterClass);
     }
 
     void generateAssertionWordBoundary(size_t opIndex)
@@ -1139,6 +1713,7 @@ class YarrGenerator final : public YarrJITInfo {
         PatternTerm* term = op.m_term;
 
         const MacroAssembler::RegisterID character = m_regs.regT0;
+        const MacroAssembler::RegisterID scratch = m_regs.regT1;
 
         MacroAssembler::Jump atBegin;
         MacroAssembler::JumpList matchDest;
@@ -1148,12 +1723,12 @@ class YarrGenerator final : public YarrJITInfo {
 
         CharacterClass* wordcharCharacterClass;
 
-        if (m_unicodeIgnoreCase)
+        if (m_pattern.eitherUnicode() && term->ignoreCase())
             wordcharCharacterClass = m_pattern.wordUnicodeIgnoreCaseCharCharacterClass();
         else
             wordcharCharacterClass = m_pattern.wordcharCharacterClass();
 
-        matchCharacterClass(character, matchDest, wordcharCharacterClass);
+        matchCharacterClass(character, scratch, matchDest, wordcharCharacterClass);
         if (!term->inputPosition)
             atBegin.link(&m_jit);
 
@@ -1186,26 +1761,40 @@ class YarrGenerator final : public YarrJITInfo {
         nonWordCharThenWordChar.link(&m_jit);
         wordCharThenNonWordChar.link(&m_jit);
     }
+
     void backtrackAssertionWordBoundary(size_t opIndex)
     {
         backtrackTermDefault(opIndex);
     }
 
 #if ENABLE(YARR_JIT_BACKREFERENCES)
-    void matchBackreference(size_t opIndex, MacroAssembler::JumpList& characterMatchFails, MacroAssembler::RegisterID character, MacroAssembler::RegisterID patternIndex, MacroAssembler::RegisterID patternCharacter)
+    void matchBackreference(size_t opIndex, MacroAssembler::JumpList& characterMatchFails, MacroAssembler::RegisterID character, MacroAssembler::RegisterID patternIndex, MacroAssembler::RegisterID patternCharacter, MacroAssembler::RegisterID subpatternIdReg)
     {
         YarrOp& op = m_ops[opIndex];
         PatternTerm* term = op.m_term;
         unsigned subpatternId = term->backReferenceSubpatternId;
+        unsigned duplicateNamedGroupId = m_pattern.hasDuplicateNamedCaptureGroups() ? m_pattern.m_duplicateNamedGroupForSubpatternId[subpatternId] : 0;
 
         MacroAssembler::Label loop(&m_jit);
 
+#if ENABLE(YARR_JIT_BACKREFERENCES_FOR_16BIT_EXPRS)
+        if (!m_decodeSurrogatePairs)
+            readCharacter(0, patternCharacter, patternIndex);
+        else {
+            // For reading Unicode characters, use the standard resultReg so we can call the standard tryReadUnicodeChar()
+            // helper instead of emitting an inlined version.
+            readCharacter(op.m_checkedOffset - term->inputPosition, character, patternIndex);
+            m_jit.move(character, patternCharacter);
+        }
+#else
         readCharacter(0, patternCharacter, patternIndex);
+#endif
         readCharacter(op.m_checkedOffset - term->inputPosition, character);
 
-        if (!m_pattern.ignoreCase())
+        if (!term->ignoreCase()) {
+            characterMatchFails.append(m_jit.branch32(MacroAssembler::Equal, character, MacroAssembler::TrustedImm32(errorCodePoint)));
             characterMatchFails.append(m_jit.branch32(MacroAssembler::NotEqual, character, patternCharacter));
-        else {
+        } else if (m_charSize == CharSize::Char8) {
             MacroAssembler::Jump charactersMatch = m_jit.branch32(MacroAssembler::Equal, character, patternCharacter);
             MacroAssembler::ExtendedAddress characterTableEntry(character, reinterpret_cast<intptr_t>(&canonicalTableLChar));
             m_jit.load16(characterTableEntry, character);
@@ -1214,17 +1803,64 @@ class YarrGenerator final : public YarrJITInfo {
             characterMatchFails.append(m_jit.branch32(MacroAssembler::NotEqual, character, patternCharacter));
             charactersMatch.link(&m_jit);
         }
+#if ENABLE(YARR_JIT_BACKREFERENCES_FOR_16BIT_EXPRS)
+        else {
+            // 16 Bit ignore case matching.
+            RELEASE_ASSERT(character == areCanonicallyEquivalentCharArgReg);
+            RELEASE_ASSERT(patternCharacter == areCanonicallyEquivalentPattCharArgReg);
+            RELEASE_ASSERT(m_regs.regUnicodeInputAndTrail == areCanonicallyEquivalentCanonicalModeArgReg);
+            ASSERT(m_decode16BitForBackreferencesWithCalls);
+
+            // Fail matching for dangling surrogates.
+            characterMatchFails.append(m_jit.branch32(MacroAssembler::Equal, character, MacroAssembler::TrustedImm32(errorCodePoint)));
+            characterMatchFails.append(m_jit.branch32(MacroAssembler::Equal, patternCharacter, MacroAssembler::TrustedImm32(errorCodePoint)));
+
+            MacroAssembler::JumpList charactersMatch;
+            charactersMatch.append(m_jit.branch32(MacroAssembler::Equal, character, patternCharacter));
+            MacroAssembler::Jump notASCII = m_jit.branch32(MacroAssembler::GreaterThan, character, MacroAssembler::TrustedImm32(127));
+            // The ASCII part of canonicalTableLChar works for UCS2 and Unicode patterns.
+            MacroAssembler::ExtendedAddress characterTableEntry(character, reinterpret_cast<intptr_t>(&canonicalTableLChar));
+            m_jit.load16(characterTableEntry, character);
+            MacroAssembler::ExtendedAddress patternTableEntry(patternCharacter, reinterpret_cast<intptr_t>(&canonicalTableLChar));
+            m_jit.load16(patternTableEntry, patternCharacter);
+            characterMatchFails.append(m_jit.branch32(MacroAssembler::NotEqual, character, patternCharacter));
+            charactersMatch.append(m_jit.jump());
+
+            notASCII.link(&m_jit);
+            // We are safe to use the regUnicodeInputAndTrail register as an argument since it
+            // is only used when reading unicode characters.
+            int32_t canonicalMode = static_cast<int32_t>(m_decodeSurrogatePairs ? CanonicalMode::Unicode : CanonicalMode::UCS2);
+            m_jit.move(MacroAssembler::TrustedImm32(canonicalMode), areCanonicallyEquivalentCanonicalModeArgReg);
+
+            m_jit.nearCallThunk(CodeLocationLabel { m_vm->getCTIStub(areCanonicallyEquivalentThunkGenerator).retaggedCode<NoPtrTag>() });
+
+            // Match return as a bool in character reg.
+            characterMatchFails.append(m_jit.branch32(MacroAssembler::Equal, character, MacroAssembler::Imm32(0)));
+            // Add code to compare non-ASCII Unicode codepoints.
+            charactersMatch.link(&m_jit);
+        }
+#endif
 
         m_jit.add32(MacroAssembler::TrustedImm32(1), m_regs.index);
         m_jit.add32(MacroAssembler::TrustedImm32(1), patternIndex);
 
         if (m_decodeSurrogatePairs) {
-            MacroAssembler::Jump isBMPChar = m_jit.branch32(MacroAssembler::LessThan, character, m_regs.supplementaryPlanesBase);
+            auto isBMPChar = m_jit.branch32(MacroAssembler::LessThan, patternCharacter, MacroAssembler::TrustedImm32(0x10000));
             m_jit.add32(MacroAssembler::TrustedImm32(1), m_regs.index);
             m_jit.add32(MacroAssembler::TrustedImm32(1), patternIndex);
             isBMPChar.link(&m_jit);
         }
 
+        if (!!duplicateNamedGroupId) {
+            MacroAssembler::RegisterID endIndex = character; // We can reuse the character register here as we already matched.
+
+            if (subpatternIdReg == InvalidGPRReg) {
+                subpatternIdReg = m_regs.unicodeAndSubpatternIdTemp;
+                m_jit.load32(MacroAssembler::Address(m_regs.output, offsetForDuplicateNamedGroupId(duplicateNamedGroupId) * sizeof(unsigned)), subpatternIdReg);
+            }
+            loadSubPatternEnd(m_regs.output, subpatternIdReg, endIndex);
+            m_jit.branch32(MacroAssembler::NotEqual, patternIndex, endIndex).linkTo(loop, &m_jit);
+        } else
         m_jit.branch32(MacroAssembler::NotEqual, patternIndex, MacroAssembler::Address(m_regs.output, ((subpatternId << 1) + 1) * sizeof(int))).linkTo(loop, &m_jit);
     }
 
@@ -1233,17 +1869,22 @@ class YarrGenerator final : public YarrJITInfo {
         YarrOp& op = m_ops[opIndex];
         PatternTerm* term = op.m_term;
 
-        if (m_pattern.ignoreCase() && m_charSize != CharSize::Char8) {
+#if !ENABLE(YARR_JIT_BACKREFERENCES_FOR_16BIT_EXPRS)
+        if (term->ignoreCase() && m_charSize != CharSize::Char8) {
             m_failureReason = JITFailureReason::BackReference;
             return;
         }
+#endif
 
         unsigned subpatternId = term->backReferenceSubpatternId;
+        unsigned duplicateNamedGroupId = m_pattern.hasDuplicateNamedCaptureGroups() ? m_pattern.m_duplicateNamedGroupForSubpatternId[subpatternId] : 0;
         unsigned parenthesesFrameLocation = term->frameLocation;
 
         const MacroAssembler::RegisterID characterOrTemp = m_regs.regT0;
-        const MacroAssembler::RegisterID patternIndex = m_regs.regT1;
-        const MacroAssembler::RegisterID patternTemp = m_regs.regT2;
+        const MacroAssembler::RegisterID patternTemp = m_regs.regT1;
+        const MacroAssembler::RegisterID patternIndex = m_regs.regT2;
+
+        MacroAssembler::RegisterID subpatternIdReg = InvalidGPRReg;
 
         storeToFrame(m_regs.index, parenthesesFrameLocation + BackTrackInfoBackReference::beginIndex());
         if (term->quantityType != QuantifierType::FixedCount || term->quantityMaxCount != 1)
@@ -1252,6 +1893,24 @@ class YarrGenerator final : public YarrJITInfo {
         MacroAssembler::JumpList matches;
 
         if (term->quantityType != QuantifierType::NonGreedy) {
+            MacroAssembler::JumpList zeroLengthMatches;
+
+            if (duplicateNamedGroupId) {
+                if (!m_decodeSurrogatePairs)
+                    subpatternIdReg  = m_regs.unicodeAndSubpatternIdTemp;
+                else
+                    subpatternIdReg  = patternTemp;
+
+                loadSubPatternIdForDuplicateNamedGroup(m_regs.output, duplicateNamedGroupId, subpatternIdReg);
+                MacroAssembler::Jump emptySubpattern = m_jit.branch32(MacroAssembler::Equal, MacroAssembler::TrustedImm32(0), subpatternIdReg);
+                if (term->quantityType != QuantifierType::FixedCount || term->quantityMaxCount != 1) {
+                    // This is an empty match, which is successful.
+                    matches.append(emptySubpattern);
+                } else
+                    zeroLengthMatches.append(emptySubpattern);
+
+                loadSubPattern(m_regs.output, subpatternIdReg, patternIndex, patternTemp);
+            } else
             loadSubPattern(m_regs.output, subpatternId, patternIndex, patternTemp);
 
             // An empty match is successful without consuming characters
@@ -1259,10 +1918,12 @@ class YarrGenerator final : public YarrJITInfo {
                 matches.append(m_jit.branch32(MacroAssembler::Equal, MacroAssembler::TrustedImm32(-1), patternIndex));
                 matches.append(m_jit.branch32(MacroAssembler::Equal, patternIndex, patternTemp));
             } else {
-                MacroAssembler::Jump zeroLengthMatch = m_jit.branch32(MacroAssembler::Equal, MacroAssembler::TrustedImm32(-1), patternIndex);
+                zeroLengthMatches.append(m_jit.branch32(MacroAssembler::Equal, MacroAssembler::TrustedImm32(-1), patternIndex));
                 MacroAssembler::Jump tryNonZeroMatch = m_jit.branch32(MacroAssembler::NotEqual, patternIndex, patternTemp);
-                zeroLengthMatch.link(&m_jit);
+                zeroLengthMatches.link(&m_jit);
                 storeToFrame(MacroAssembler::TrustedImm32(1), parenthesesFrameLocation + BackTrackInfoBackReference::matchAmountIndex());
+                if (term->quantityType == QuantifierType::Greedy)
+                    storeToFrame(MacroAssembler::TrustedImm32(0), parenthesesFrameLocation + BackTrackInfoBackReference::backReferenceSizeIndex());
                 matches.append(m_jit.jump());
                 tryNonZeroMatch.link(&m_jit);
             }
@@ -1272,21 +1933,29 @@ class YarrGenerator final : public YarrJITInfo {
         case QuantifierType::FixedCount: {
             MacroAssembler::Label outerLoop(&m_jit);
 
-            // PatternTemp should contain pattern end index at this point
+            // PatternTemp should contain pattern end index at this point. Compute pattern size.
             m_jit.sub32(patternIndex, patternTemp);
             op.m_jumps.append(checkNotEnoughInput(patternTemp));
 
-            matchBackreference(opIndex, op.m_jumps, characterOrTemp, patternIndex, patternTemp);
+            matchBackreference(opIndex, op.m_jumps, characterOrTemp, patternIndex, patternTemp, subpatternIdReg == m_regs.unicodeAndSubpatternIdTemp ? subpatternIdReg : InvalidGPRReg);
 
             if (term->quantityMaxCount != 1) {
                 loadFromFrame(parenthesesFrameLocation + BackTrackInfoBackReference::matchAmountIndex(), characterOrTemp);
                 m_jit.add32(MacroAssembler::TrustedImm32(1), characterOrTemp);
                 storeToFrame(characterOrTemp, parenthesesFrameLocation + BackTrackInfoBackReference::matchAmountIndex());
                 matches.append(m_jit.branch32(MacroAssembler::Equal, MacroAssembler::Imm32(term->quantityMaxCount), characterOrTemp));
+                if (duplicateNamedGroupId) {
+                    if (m_decodeSurrogatePairs)
+                        loadSubPatternIdForDuplicateNamedGroup(m_regs.output, duplicateNamedGroupId, subpatternIdReg);
+                    // At this point, we have already checked that subpatternIdReg has a valid subpatternId.
+                    loadSubPattern(m_regs.output, subpatternIdReg, patternIndex, patternTemp);
+                } else
                 loadSubPattern(m_regs.output, subpatternId, patternIndex, patternTemp);
                 m_jit.jump(outerLoop);
             }
             matches.link(&m_jit);
+
+            storeToFrame(MacroAssembler::TrustedImm32(1), parenthesesFrameLocation + BackTrackInfoBackReference::matchAmountIndex());
             break;
         }
 
@@ -1295,17 +1964,25 @@ class YarrGenerator final : public YarrJITInfo {
 
             MacroAssembler::Label outerLoop(&m_jit);
 
-            // PatternTemp should contain pattern end index at this point
+            // PatternTemp should contain pattern end index at this point. Compute pattern size.
             m_jit.sub32(patternIndex, patternTemp);
+            storeToFrame(patternTemp, parenthesesFrameLocation + BackTrackInfoBackReference::backReferenceSizeIndex());
+
             matches.append(checkNotEnoughInput(patternTemp));
 
-            matchBackreference(opIndex, incompleteMatches, characterOrTemp, patternIndex, patternTemp);
+            matchBackreference(opIndex, incompleteMatches, characterOrTemp, patternIndex, patternTemp, subpatternIdReg == m_regs.unicodeAndSubpatternIdTemp ? subpatternIdReg : InvalidGPRReg);
 
             loadFromFrame(parenthesesFrameLocation + BackTrackInfoBackReference::matchAmountIndex(), characterOrTemp);
             m_jit.add32(MacroAssembler::TrustedImm32(1), characterOrTemp);
             storeToFrame(characterOrTemp, parenthesesFrameLocation + BackTrackInfoBackReference::matchAmountIndex());
             if (term->quantityMaxCount != quantifyInfinite)
                 matches.append(m_jit.branch32(MacroAssembler::Equal, MacroAssembler::Imm32(term->quantityMaxCount), characterOrTemp));
+            if (duplicateNamedGroupId) {
+                if (m_decodeSurrogatePairs)
+                    loadSubPatternIdForDuplicateNamedGroup(m_regs.output, duplicateNamedGroupId, subpatternIdReg);
+                // At this point, we have already checked that subpatternIdReg has a valid subpatternId.
+                loadSubPattern(m_regs.output, subpatternIdReg, patternIndex, patternTemp);
+            } else
             loadSubPattern(m_regs.output, subpatternId, patternIndex, patternTemp);
 
             // Store current index in frame for restoring after a partial match
@@ -1322,17 +1999,29 @@ class YarrGenerator final : public YarrJITInfo {
 
         case QuantifierType::NonGreedy: {
             MacroAssembler::JumpList incompleteMatches;
+            MacroAssembler::JumpList zeroLengthMatches;
 
             matches.append(m_jit.jump());
 
             op.m_reentry = m_jit.label();
 
+            if (duplicateNamedGroupId) {
+                if (!m_decodeSurrogatePairs)
+                    subpatternIdReg  = m_regs.unicodeAndSubpatternIdTemp;
+                else
+                    subpatternIdReg  = patternTemp;
+
+                loadSubPatternIdForDuplicateNamedGroup(m_regs.output, duplicateNamedGroupId, subpatternIdReg);
+                zeroLengthMatches.append(m_jit.branch32(MacroAssembler::Equal, MacroAssembler::TrustedImm32(0), subpatternIdReg));
+
+                loadSubPattern(m_regs.output, subpatternIdReg, patternIndex, patternTemp);
+            } else
             loadSubPattern(m_regs.output, subpatternId, patternIndex, patternTemp);
 
             // An empty match is successful without consuming characters
-            MacroAssembler::Jump zeroLengthMatch = m_jit.branch32(MacroAssembler::Equal, MacroAssembler::TrustedImm32(-1), patternIndex);
+            zeroLengthMatches.append(m_jit.branch32(MacroAssembler::Equal, MacroAssembler::TrustedImm32(-1), patternIndex));
             MacroAssembler::Jump tryNonZeroMatch = m_jit.branch32(MacroAssembler::NotEqual, patternIndex, patternTemp);
-            zeroLengthMatch.link(&m_jit);
+            zeroLengthMatches.link(&m_jit);
             storeToFrame(MacroAssembler::TrustedImm32(1), parenthesesFrameLocation + BackTrackInfoBackReference::matchAmountIndex());
             matches.append(m_jit.jump());
             tryNonZeroMatch.link(&m_jit);
@@ -1343,7 +2032,7 @@ class YarrGenerator final : public YarrJITInfo {
 
             storeToFrame(m_regs.index, parenthesesFrameLocation + BackTrackInfoBackReference::beginIndex());
 
-            matchBackreference(opIndex, incompleteMatches, characterOrTemp, patternIndex, patternTemp);
+            matchBackreference(opIndex, incompleteMatches, characterOrTemp, patternIndex, patternTemp, subpatternIdReg == m_regs.unicodeAndSubpatternIdTemp ? subpatternIdReg : InvalidGPRReg);
 
             matches.append(m_jit.jump());
 
@@ -1360,8 +2049,6 @@ class YarrGenerator final : public YarrJITInfo {
         YarrOp& op = m_ops[opIndex];
         PatternTerm* term = op.m_term;
 
-        unsigned subpatternId = term->backReferenceSubpatternId;
-
         m_backtrackingState.link(&m_jit);
         op.m_jumps.link(&m_jit);
 
@@ -1375,15 +2062,13 @@ class YarrGenerator final : public YarrJITInfo {
 
         case QuantifierType::Greedy: {
             const MacroAssembler::RegisterID matchAmount = m_regs.regT0;
-            const MacroAssembler::RegisterID patternStartIndex = m_regs.regT1;
-            const MacroAssembler::RegisterID patternEndIndexOrLen = m_regs.regT2;
+            const MacroAssembler::RegisterID matchSize = m_regs.regT1;
 
             loadFromFrame(parenthesesFrameLocation + BackTrackInfoBackReference::matchAmountIndex(), matchAmount);
             failures.append(m_jit.branchTest32(MacroAssembler::Zero, matchAmount));
 
-            loadSubPattern(m_regs.output, subpatternId, patternStartIndex, patternEndIndexOrLen);
-            m_jit.sub32(patternStartIndex, patternEndIndexOrLen);
-            m_jit.sub32(patternEndIndexOrLen, m_regs.index);
+            loadFromFrame(parenthesesFrameLocation + BackTrackInfoBackReference::backReferenceSizeIndex(), matchSize);
+            m_jit.sub32(matchSize, m_regs.index);
 
             m_jit.sub32(MacroAssembler::TrustedImm32(1), matchAmount);
             storeToFrame(matchAmount, parenthesesFrameLocation + BackTrackInfoBackReference::matchAmountIndex());
@@ -1409,26 +2094,19 @@ class YarrGenerator final : public YarrJITInfo {
     }
 #endif
 
-    void generatePatternCharacterOnce(size_t opIndex)
+    void generatePatternCharacterOnce(size_t opIndex, MatchTargets& matchTargets)
     {
         YarrOp& op = m_ops[opIndex];
 
         if (op.m_isDeadCode)
             return;
 
+        MatchTargets defaultMatchTargets(matchTargets.hasFailedTarget() ? matchTargets.matchFailed() : op.m_jumps, MatchTargets::PreferredTarget::MatchSuccessFallThrough);
+        MatchTargets lastMatchTargets(matchTargets.matchSucceeded(), matchTargets.hasFailedTarget() ? matchTargets.matchFailed() : op.m_jumps, matchTargets.preferredTarget());
+
         // m_ops always ends with a YarrOpCode::BodyAlternativeEnd or YarrOpCode::MatchFailed
         // node, so there must always be at least one more node.
         ASSERT(opIndex + 1 < m_ops.size());
-        YarrOp* nextOp = &m_ops[opIndex + 1];
-
-        PatternTerm* term = op.m_term;
-        UChar32 ch = term->patternCharacter;
-
-        if (!isLatin1(ch) && (m_charSize == CharSize::Char8)) {
-            // Have a 16 bit pattern character and an 8 bit string - short circuit
-            op.m_jumps.append(m_jit.jump());
-            return;
-        }
 
         const MacroAssembler::RegisterID character = m_regs.regT0;
 #if CPU(X86_64) || CPU(ARM64) || CPU(RISCV64)
@@ -1436,186 +2114,374 @@ class YarrGenerator final : public YarrJITInfo {
 #else
         unsigned maxCharactersAtOnce = m_charSize == CharSize::Char8 ? 4 : 2;
 #endif
-        uint64_t ignoreCaseMask = 0;
-#if CPU(BIG_ENDIAN)
-        uint64_t allCharacters = ch << (m_charSize == CharSize::Char8 ? 24 : 16);
-#else
-        uint64_t allCharacters = ch;
-#endif
-        unsigned numberCharacters;
-        unsigned startTermPosition = term->inputPosition;
+
+        uint64_t charMask = m_charSize == CharSize::Char8 ? 0xff : 0xffff;
+        Vector<YarrOp*, 16> opList;
+        unsigned firstPosition = op.m_term->inputPosition;
+        unsigned lastPosition = firstPosition;
+        auto firstChar = op.m_term->patternCharacter;
+        bool have16BitCharacter = !isLatin1(firstChar);
 
         // For case-insesitive compares, non-ascii characters that have different
         // upper & lower case representations are converted to a character class.
-        ASSERT(!m_pattern.ignoreCase() || isASCIIAlpha(ch) || isCanonicallyUnique(ch, m_canonicalMode));
+        ASSERT(!op.m_term->ignoreCase() || isASCIIAlpha(firstChar) || isCanonicallyUnique(firstChar, m_canonicalMode));
 
-        if (m_pattern.ignoreCase() && isASCIIAlpha(ch)) {
-#if CPU(BIG_ENDIAN)
-            ignoreCaseMask |= 32 << (m_charSize == CharSize::Char8 ? 24 : 16);
-#else
-            ignoreCaseMask |= 32;
-#endif
+        if (m_decodeSurrogatePairs && (!U_IS_BMP(firstChar) || U16_IS_SURROGATE(firstChar))) {
+            // The first term we are considering is a non-BMP or dangling surrogate char in unicode pattern. Just try matching it and be done.
+            uint64_t charToMatch = firstChar;
+
+            auto offset = op.m_checkedOffset - op.m_term->inputPosition;
+
+            if (!matchTargets.hasSucceedTarget() || m_ops[opIndex + 1].m_op == YarrOpCode::Term)
+                defaultMatchTargets.appendFailed(jumpIfCharNotEquals(charToMatch, offset, character, op.m_term->ignoreCase()));
+            else
+                matchTargets.appendSucceeded(jumpIfCharEquals(charToMatch, offset, character, op.m_term->ignoreCase()));
+
+            return;
         }
 
-        for (numberCharacters = 1; numberCharacters < maxCharactersAtOnce && nextOp->m_op == YarrOpCode::Term; ++numberCharacters, nextOp = &m_ops[opIndex + numberCharacters]) {
-            PatternTerm* nextTerm = nextOp->m_term;
+        opList.append(&m_ops[opIndex]);
+
+        for (size_t i = opIndex + 1; i < m_ops.size(); ++i) {
+            YarrOp* currOp = &m_ops[i];
+            if (currOp->m_op != YarrOpCode::Term)
+                break;
+
+            PatternTerm* currTerm = currOp->m_term;
 
             // YarrJIT handles decoded surrogate pair as one character if unicode flag is enabled.
             // Note that the numberCharacters become 1 while the width of the pattern character becomes 32bit in this case.
-            if (nextTerm->type != PatternTerm::Type::PatternCharacter
-                || nextTerm->quantityType != QuantifierType::FixedCount
-                || nextTerm->quantityMaxCount != 1
-                || nextTerm->inputPosition != (startTermPosition + numberCharacters)
-                || (U16_LENGTH(nextTerm->patternCharacter) != 1 && m_decodeSurrogatePairs))
+            if (currTerm->quantityType != QuantifierType::FixedCount
+                || currTerm->quantityMaxCount != 1
+                || (currTerm->type != PatternTerm::Type::PatternCharacter
+                    && currTerm->type != PatternTerm::Type::CharacterClass)
+                || (m_decodeSurrogatePairs
+                    && ((currTerm->type == PatternTerm::Type::PatternCharacter && (!U_IS_BMP(currTerm->patternCharacter) || U16_IS_SURROGATE(currTerm->patternCharacter)))
+                        || (currTerm->type == PatternTerm::Type::CharacterClass && (currTerm->characterClass->hasNonBMPCharacters()
+                            || currTerm->invert())))))
                 break;
 
-            nextOp->m_isDeadCode = true;
+            unsigned currPosition = currTerm->inputPosition;
 
-#if CPU(BIG_ENDIAN)
-            int shiftAmount = (m_charSize == CharSize::Char8 ? 24 : 16) - ((m_charSize == CharSize::Char8 ? 8 : 16) * numberCharacters);
-#else
-            int shiftAmount = (m_charSize == CharSize::Char8 ? 8 : 16) * numberCharacters;
-#endif
+            constexpr unsigned maxGroupingDistance = 16;
 
-            UChar32 currentCharacter = nextTerm->patternCharacter;
-
-            if (!isLatin1(currentCharacter) && (m_charSize == CharSize::Char8)) {
-                // Have a 16 bit pattern character and an 8 bit string - short circuit
-                op.m_jumps.append(m_jit.jump());
-                return;
+            if (currPosition > lastPosition) {
+                // If the next term is too far away, we'll handle it by itself
+                if (currPosition > lastPosition + maxGroupingDistance)
+                    break;
+                if (currPosition > lastPosition + 1)
+                    opList.insertFill(lastPosition - firstPosition + 1, nullptr, currPosition - lastPosition - 1);
+                opList.append(currOp);
+                lastPosition = currPosition;
+            } else if (currPosition < firstPosition) {
+                // If the next term is too far away, we'll handle it by itself
+                if (currPosition < firstPosition - maxGroupingDistance)
+                    break;
+                opList.insertFill(0, nullptr, firstPosition - currPosition);
+                opList.first() = currOp;
+                firstPosition = currPosition;
+            } else {
+                ASSERT(opList[currPosition - firstPosition] == nullptr);
+                opList[currPosition - firstPosition] = currOp;
             }
-
-            // For case-insesitive compares, non-ascii characters that have different
-            // upper & lower case representations are converted to a character class.
-            ASSERT(!m_pattern.ignoreCase() || isASCIIAlpha(currentCharacter) || isCanonicallyUnique(currentCharacter, m_canonicalMode));
-
-            allCharacters |= (static_cast<uint64_t>(currentCharacter) << shiftAmount);
-
-            if (m_pattern.ignoreCase() && isASCIIAlpha(currentCharacter))
-                ignoreCaseMask |= 32ULL << shiftAmount;
         }
 
-        if (m_decodeSurrogatePairs)
-            op.m_jumps.append(jumpIfNoAvailableInput());
+        // Prune list after first hole and check for 16 bit characters. Also mark "dead" terms that will be checked as part of this term's processing.
+        bool foundFirstCharTerm = opList[0]->m_term->type == PatternTerm::Type::PatternCharacter;
+        size_t firstCharTermIndex = 0;
+        for (size_t i = 1; i < opList.size(); ++i) {
+            YarrOp* currOp = opList[i];
+
+            if (!currOp) {
+                // If we have characters, break out
+                if (foundFirstCharTerm) {
+                    opList.shrink(i);
+                    break;
+            }
+                // Otherwise, we're still in the non-character prefix
+                continue;
+            }
+
+            if (currOp->m_term->type == PatternTerm::Type::PatternCharacter) {
+            // For case-insesitive compares, non-ascii characters that have different
+            // upper & lower case representations are converted to a character class.
+                ASSERT(!currOp->m_term->ignoreCase() || isASCIIAlpha(currOp->m_term->patternCharacter) || isCanonicallyUnique(currOp->m_term->patternCharacter, m_canonicalMode));
+                if (foundFirstCharTerm)
+                    currOp->m_isDeadCode = true;
+                else {
+                    foundFirstCharTerm = true;
+                    firstCharTermIndex = i;
+                }
+                have16BitCharacter |= !isLatin1(currOp->m_term->patternCharacter);
+            }
+        }
+
+        // We definitely should have a PatternCharacter, otherwise we shouldn't have gotten here
+        // This assertion also checks that firstCharTermIndex is correct
+        ASSERT(foundFirstCharTerm);
+        if (firstCharTermIndex)
+            opList.removeAt(0, firstCharTermIndex);
+
+        if (have16BitCharacter && (m_charSize == CharSize::Char8)) {
+            // Have a 16 bit pattern character and an 8 bit string - short circuit
+            defaultMatchTargets.appendFailed(m_jit.jump());
+            return;
+        }
+
+        // Remove all trailing character class terms.
+        while (!opList.isEmpty() && opList.last()->m_term->type == PatternTerm::Type::CharacterClass)
+            opList.removeLast();
+
+        RELEASE_ASSERT(!opList.isEmpty());
+
+        auto checkedOffset = opList[0]->m_checkedOffset;
+
+        unsigned startPosition = opList[0]->m_term->inputPosition;
+        unsigned numCharsToCheck { 0 };
+        unsigned charsCheckedLastIter { 0 };
+
+        for (size_t opListIdx = 0; opListIdx < opList.size(); opListIdx += numCharsToCheck, startPosition += numCharsToCheck, charsCheckedLastIter = numCharsToCheck) {
+            // Skip past leading non-Character terms.
+            for (; opListIdx < opList.size(); ++opListIdx, ++startPosition) {
+                YarrOp* currOp = opList[opListIdx];
+                ASSERT(currOp);
+                if (currOp->m_term->type == PatternTerm::Type::PatternCharacter)
+                    break;
+            }
+
+            if (opListIdx == opList.size()) {
+                // The remaining term(s) are all character classes. Our work here is done.
+                return;
+            }
+
+            unsigned numCharsRemaining = opList.size() - opListIdx;
+            unsigned negativeOffset = 0;
+            numCharsToCheck = std::min(numCharsRemaining, maxCharactersAtOnce);
+
+            // We want to do the minimul number of load, compare and branch blocks.
+            // This means that we want to do overlapping loads and masking if that is profitable.
+            // For example, if we have 7 adjacent characters, we want to do two load32, compare and branch
+            // groups with the second group offset by 1 byte. If that group of 7 adjacent characters
+            // occurs after a group of 8, we want to do one load64, compare and branch offset by one byte.
+            // The goal is to do as many larger loads first, followed by one smaller one.
+            // After this adjustment, numCharsToCheck should be 1, 2, 4 or 8.
+            switch (numCharsToCheck) {
+            case 3:
+                if (charsCheckedLastIter >= 4) {
+                    numCharsToCheck = 4;
+                    negativeOffset = 1;
+                } else
+                    numCharsToCheck = 2;
+                break;
+            case 5:
+                if (charsCheckedLastIter == 8) {
+                    numCharsToCheck = 8;
+                    negativeOffset = 3;
+                } else
+                    numCharsToCheck = 4;
+                break;
+            case 6:
+                if (charsCheckedLastIter == 8) {
+                    numCharsToCheck = 8;
+                    negativeOffset = 2;
+                } else
+                    numCharsToCheck = 4;
+                break;
+            case 7:
+                if (charsCheckedLastIter == 8) {
+                    numCharsToCheck = 8;
+                    negativeOffset = 1;
+                } else if (charsCheckedLastIter == 4) {
+                    numCharsToCheck = 4;
+                    negativeOffset = 1;
+                } else
+                    numCharsToCheck = 4;
+                break;
+            default:
+                break;
+            }
+
+            if (negativeOffset) {
+                opListIdx -= negativeOffset;
+                startPosition -= negativeOffset;
+            }
+
+            ASSERT(numCharsToCheck == 1 || numCharsToCheck == 2 || numCharsToCheck == 4 || numCharsToCheck == 8);
+
+            auto calcShiftAmount = [&] (unsigned positionInLoad) {
+                return (m_charSize == CharSize::Char8 ? 8 : 16) * positionInLoad;
+            };
+
+            char32_t currentCharacter { 0 };
+            uint64_t allCharacters { 0 };
+            uint64_t caseMask { 0 };
+            uint64_t ignoredCharsMask { 0 };
+            unsigned positionInLoad = 0;
+            unsigned firstCharInLoad = opListIdx + negativeOffset;
+            unsigned lastCharInLoad { 0 };
+            for (unsigned i = 0; i < negativeOffset; ++i, ++positionInLoad)
+                ignoredCharsMask |= charMask << calcShiftAmount(positionInLoad);
+
+            for (auto i = opListIdx + negativeOffset; i < opListIdx + numCharsToCheck; ++i, ++positionInLoad) {
+                YarrOp* currOp = opList[i];
+
+                ASSERT(currOp);
+
+                PatternTerm* currTerm = currOp->m_term;
+
+                unsigned shiftAmount = calcShiftAmount(positionInLoad);
+
+                if (currTerm->type == PatternTerm::Type::PatternCharacter) {
+                    currentCharacter = currTerm->patternCharacter;
+
+                    lastCharInLoad = i;
+                    allCharacters |= (static_cast<uint64_t>(currentCharacter) << shiftAmount);
+                    if (currTerm->ignoreCase() && isASCIIAlpha(currentCharacter))
+                        caseMask |= 32ULL << shiftAmount;
+                } else if (currTerm->type == PatternTerm::Type::CharacterClass)
+                    ignoredCharsMask |= charMask << shiftAmount;
+            }
+
+            auto numRealCharsToCheck = roundUpToPowerOfTwo(lastCharInLoad - firstCharInLoad + 1);
+
+#if ENABLE(YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP)
+            if (m_useFirstNonBMPCharacterOptimization && numRealCharsToCheck > 1) {
+                // We are going to try matching more than one character at a time,
+                // so we should only advance one character at a time as normal.
+            m_jit.move(MacroAssembler::TrustedImm32(0), m_regs.firstCharacterAdditionalReadSize);
+        }
+#endif
+
+            MatchTargets* matchTargetForFinalComparison = (opListIdx + numCharsToCheck >= opList.size()) ? &lastMatchTargets : &defaultMatchTargets;
 
         if (m_charSize == CharSize::Char8) {
-            auto check1 = [&] (Checked<unsigned> offset, UChar32 characters) {
-                op.m_jumps.append(jumpIfCharNotEquals(characters, offset, character));
+                auto check1 = [&] (Checked<unsigned> offset, char32_t characters, uint16_t caseMask, MatchTargets& matchTargets) {
+                    readCharacter(offset, character);
+                    if (caseMask)
+                        m_jit.or32(MacroAssembler::Imm32(caseMask), character);
+                    if (!matchTargets.hasSucceedTarget())
+                        defaultMatchTargets.appendFailed(m_jit.branch32(MacroAssembler::NotEqual, character, MacroAssembler::Imm32(characters | caseMask)));
+                    else
+                        matchTargets.appendSucceeded(m_jit.branch32(MacroAssembler::Equal, character, MacroAssembler::Imm32(characters | caseMask)));
             };
 
-            auto check2 = [&] (Checked<unsigned> offset, uint16_t characters, uint16_t mask) {
+                auto check2 = [&] (Checked<unsigned> offset, uint16_t characters, uint16_t caseMask, MatchTargets& matchTargets) {
                 m_jit.load16Unaligned(negativeOffsetIndexedAddress(offset, character), character);
-                if (mask)
-                    m_jit.or32(MacroAssembler::Imm32(mask), character);
-                op.m_jumps.append(m_jit.branch32(MacroAssembler::NotEqual, character, MacroAssembler::Imm32(characters | mask)));
+                    if (caseMask)
+                        m_jit.or32(MacroAssembler::Imm32(caseMask), character);
+                    if (!matchTargets.hasSucceedTarget())
+                        defaultMatchTargets.appendFailed(m_jit.branch32(MacroAssembler::NotEqual, character, MacroAssembler::Imm32(characters | caseMask)));
+                    else
+                        matchTargets.appendSucceeded(m_jit.branch32(MacroAssembler::Equal, character, MacroAssembler::Imm32(characters | caseMask)));
             };
 
-            auto check4 = [&] (Checked<unsigned> offset, unsigned characters, unsigned mask) {
-                if (mask) {
+                auto check4 = [&] (Checked<unsigned> offset, unsigned characters, unsigned caseMask, uint64_t ignoredCharsMask, MatchTargets& matchTargets) {
                     m_jit.load32WithUnalignedHalfWords(negativeOffsetIndexedAddress(offset, character), character);
-                    if (mask)
-                        m_jit.or32(MacroAssembler::Imm32(mask), character);
-                    op.m_jumps.append(m_jit.branch32(MacroAssembler::NotEqual, character, MacroAssembler::Imm32(characters | mask)));
-                    return;
-                }
-                op.m_jumps.append(m_jit.branch32WithUnalignedHalfWords(MacroAssembler::NotEqual, negativeOffsetIndexedAddress(offset, character), MacroAssembler::TrustedImm32(characters)));
+                    if (ignoredCharsMask)
+                        m_jit.and32(MacroAssembler::Imm32(~ignoredCharsMask), character);
+                    if (caseMask)
+                        m_jit.or32(MacroAssembler::Imm32(caseMask), character);
+                    if (!matchTargets.hasSucceedTarget())
+                        defaultMatchTargets.appendFailed(m_jit.branch32(MacroAssembler::NotEqual, character, MacroAssembler::Imm32(characters | caseMask)));
+                    else
+                        matchTargets.appendSucceeded(m_jit.branch32(MacroAssembler::Equal, character, MacroAssembler::Imm32(characters | caseMask)));
             };
 
 #if CPU(X86_64) || CPU(ARM64) || CPU(RISCV64)
-            auto check8 = [&] (Checked<unsigned> offset, uint64_t characters, uint64_t mask) {
+                auto check8 = [&] (Checked<unsigned> offset, uint64_t characters, uint64_t caseMask, uint64_t ignoredCharsMask, MatchTargets& matchTargets) {
                 m_jit.load64(negativeOffsetIndexedAddress(offset, character), character);
-                if (mask)
-                    m_jit.or64(MacroAssembler::TrustedImm64(mask), character);
-                op.m_jumps.append(m_jit.branch64(MacroAssembler::NotEqual, character, MacroAssembler::TrustedImm64(characters | mask)));
+                    if (ignoredCharsMask)
+                        m_jit.and64(MacroAssembler::TrustedImm64(~ignoredCharsMask), character);
+                    if (caseMask)
+                        m_jit.or64(MacroAssembler::TrustedImm64(caseMask), character);
+                    if (!matchTargets.hasSucceedTarget())
+                        defaultMatchTargets.appendFailed(m_jit.branch64(MacroAssembler::NotEqual, character, MacroAssembler::TrustedImm64(characters | caseMask)));
+                    else
+                        matchTargets.appendSucceeded(m_jit.branch64(MacroAssembler::Equal, character, MacroAssembler::TrustedImm64(characters | caseMask)));
             };
 #endif
 
-            switch (numberCharacters) {
+                switch (numRealCharsToCheck) {
             case 1:
-                // Use 32bit width of allCharacters since Yarr counts surrogate pairs as one character with unicode flag.
-                check1(op.m_checkedOffset - startTermPosition, allCharacters & 0xffffffff);
-                return;
+                    ASSERT(~ignoredCharsMask);
+                    check1(checkedOffset - startPosition, allCharacters & 0xff, caseMask & 0xff, *matchTargetForFinalComparison);
+                    break;
             case 2: {
-                check2(op.m_checkedOffset - startTermPosition, allCharacters & 0xffff, ignoreCaseMask & 0xffff);
-                return;
-            }
-            case 3: {
-                check2(op.m_checkedOffset - startTermPosition, allCharacters & 0xffff, ignoreCaseMask & 0xffff);
-                check1(op.m_checkedOffset - startTermPosition - 2, (allCharacters >> 16) & 0xff);
-                return;
+                    ASSERT(~ignoredCharsMask);
+                    check2(checkedOffset - startPosition, allCharacters & 0xffff, caseMask & 0xffff, *matchTargetForFinalComparison);
+                    break;
             }
             case 4: {
-                check4(op.m_checkedOffset - startTermPosition, allCharacters & 0xffffffff, ignoreCaseMask & 0xffffffff);
-                return;
+                    check4(checkedOffset - startPosition, allCharacters & 0xffffffff, caseMask & 0xffffffff, ignoredCharsMask, *matchTargetForFinalComparison);
+                    break;
             }
 #if CPU(X86_64) || CPU(ARM64) || CPU(RISCV64)
-            case 5: {
-                check4(op.m_checkedOffset - startTermPosition, allCharacters & 0xffffffff, ignoreCaseMask & 0xffffffff);
-                check1(op.m_checkedOffset - startTermPosition - 4, (allCharacters >> 32) & 0xff);
-                return;
-            }
-            case 6: {
-                check4(op.m_checkedOffset - startTermPosition, allCharacters & 0xffffffff, ignoreCaseMask & 0xffffffff);
-                check2(op.m_checkedOffset - startTermPosition - 4, (allCharacters >> 32) & 0xffff, (ignoreCaseMask >> 32) & 0xffff);
-                return;
-            }
-            case 7: {
-                check4(op.m_checkedOffset - startTermPosition, allCharacters & 0xffffffff, ignoreCaseMask & 0xffffffff);
-                check2(op.m_checkedOffset - startTermPosition - 4, (allCharacters >> 32) & 0xffff, (ignoreCaseMask >> 32) & 0xffff);
-                check1(op.m_checkedOffset - startTermPosition - 6, (allCharacters >> 48) & 0xff);
-                return;
-            }
             case 8: {
-                check8(op.m_checkedOffset - startTermPosition, allCharacters, ignoreCaseMask);
-                return;
+                    check8(checkedOffset - startPosition, allCharacters, caseMask, ignoredCharsMask, *matchTargetForFinalComparison);
+                    break;
             }
 #endif
+                default:
+                    ASSERT_NOT_REACHED();
+                    break;
             }
         } else {
-            auto check1 = [&] (Checked<unsigned> offset, UChar32 characters) {
-                op.m_jumps.append(jumpIfCharNotEquals(characters, offset, character));
+                // m_charSize == CharSize::Char16
+                auto check1 = [&] (Checked<unsigned> offset, char32_t characters, uint16_t caseMask, MatchTargets& matchTargets) {
+                    if (!matchTargets.hasSucceedTarget())
+                        defaultMatchTargets.appendFailed(jumpIfCharNotEquals(characters, offset, character, caseMask));
+                    else
+                        matchTargets.appendSucceeded(jumpIfCharEquals(characters, offset, character, caseMask));
             };
 
-            auto check2 = [&] (Checked<unsigned> offset, unsigned characters, unsigned mask) {
-                if (mask) {
+                auto check2 = [&] (Checked<unsigned> offset, unsigned characters, unsigned caseMask, MatchTargets& matchTargets) {
                     m_jit.load32WithUnalignedHalfWords(negativeOffsetIndexedAddress(offset, character), character);
-                    if (mask)
-                        m_jit.or32(MacroAssembler::Imm32(mask), character);
-                    op.m_jumps.append(m_jit.branch32(MacroAssembler::NotEqual, character, MacroAssembler::Imm32(characters | mask)));
-                    return;
-                }
-                op.m_jumps.append(m_jit.branch32WithUnalignedHalfWords(MacroAssembler::NotEqual, negativeOffsetIndexedAddress(offset, character), MacroAssembler::TrustedImm32(characters)));
+                    if (caseMask)
+                        m_jit.or32(MacroAssembler::Imm32(caseMask), character);
+                    if (!matchTargets.hasSucceedTarget())
+                        defaultMatchTargets.appendFailed(m_jit.branch32(MacroAssembler::NotEqual, character, MacroAssembler::Imm32(characters | caseMask)));
+                    else
+                        matchTargets.appendSucceeded(m_jit.branch32(MacroAssembler::Equal, character, MacroAssembler::Imm32(characters | caseMask)));
             };
 
 #if CPU(X86_64) || CPU(ARM64) || CPU(RISCV64)
-            auto check4 = [&] (Checked<unsigned> offset, uint64_t characters, uint64_t mask) {
+                auto check4 = [&] (Checked<unsigned> offset, uint64_t characters, uint64_t caseMask, uint64_t ignoredCharsMask, MatchTargets& matchTargets) {
                 m_jit.load64(negativeOffsetIndexedAddress(offset, character), character);
-                if (mask)
-                    m_jit.or64(MacroAssembler::TrustedImm64(mask), character);
-                op.m_jumps.append(m_jit.branch64(MacroAssembler::NotEqual, character, MacroAssembler::TrustedImm64(characters | mask)));
+                    if (ignoredCharsMask)
+                        m_jit.and64(MacroAssembler::TrustedImm64(~ignoredCharsMask), character);
+                    if (caseMask)
+                        m_jit.or64(MacroAssembler::TrustedImm64(caseMask), character);
+                    if (!matchTargets.hasSucceedTarget())
+                        defaultMatchTargets.appendFailed(m_jit.branch64(MacroAssembler::NotEqual, character, MacroAssembler::TrustedImm64(characters | caseMask)));
+                    else
+                        matchTargets.appendSucceeded(m_jit.branch64(MacroAssembler::Equal, character, MacroAssembler::TrustedImm64(characters | caseMask)));
             };
 #endif
 
-            switch (numberCharacters) {
+                switch (numRealCharsToCheck) {
             case 1:
-                // Use 32bit width of allCharacters since Yarr counts surrogate pairs as one character with unicode flag.
-                check1(op.m_checkedOffset - startTermPosition, allCharacters & 0xffffffff);
-                return;
-            case 2:
-                check2(op.m_checkedOffset - startTermPosition, allCharacters & 0xffffffff, ignoreCaseMask & 0xffffffff);
-                return;
+                    ASSERT(~ignoredCharsMask);
+                    check1(checkedOffset - startPosition, allCharacters & 0xffffffff, caseMask & 0xffffffff, *matchTargetForFinalComparison);
+                    break;
+                case 2: {
+                    ASSERT(~ignoredCharsMask);
+                    check2(checkedOffset - startPosition, allCharacters & 0xffffffff, caseMask & 0xffffffff, *matchTargetForFinalComparison);
+                    break;
+                }
 #if CPU(X86_64) || CPU(ARM64) || CPU(RISCV64)
-            case 3:
-                check2(op.m_checkedOffset - startTermPosition, allCharacters & 0xffffffff, ignoreCaseMask & 0xffffffff);
-                check1(op.m_checkedOffset - startTermPosition - 2, (allCharacters >> 32) & 0xffff);
-                return;
-            case 4:
-                check4(op.m_checkedOffset - startTermPosition, allCharacters, ignoreCaseMask);
-                return;
+                case 4: {
+                    check4(checkedOffset - startPosition, allCharacters, caseMask, ignoredCharsMask, *matchTargetForFinalComparison);
+                    break;
+                }
 #endif
+                default:
+                    ASSERT_NOT_REACHED();
+                    break;
             }
         }
     }
+    }
+
     void backtrackPatternCharacterOnce(size_t opIndex)
     {
         backtrackTermDefault(opIndex);
@@ -1625,7 +2491,7 @@ class YarrGenerator final : public YarrJITInfo {
     {
         YarrOp& op = m_ops[opIndex];
         PatternTerm* term = op.m_term;
-        UChar32 ch = term->patternCharacter;
+        char32_t ch = term->patternCharacter;
 
         const MacroAssembler::RegisterID character = m_regs.regT0;
         const MacroAssembler::RegisterID countRegister = m_regs.regT1;
@@ -1641,8 +2507,8 @@ class YarrGenerator final : public YarrJITInfo {
         readCharacter(op.m_checkedOffset - term->inputPosition - scaledMaxCount, character, countRegister);
         // For case-insesitive compares, non-ascii characters that have different
         // upper & lower case representations are converted to a character class.
-        ASSERT(!m_pattern.ignoreCase() || isASCIIAlpha(ch) || isCanonicallyUnique(ch, m_canonicalMode));
-        if (m_pattern.ignoreCase() && isASCIIAlpha(ch)) {
+        ASSERT(!term->ignoreCase() || isASCIIAlpha(ch) || isCanonicallyUnique(ch, m_canonicalMode));
+        if (term->ignoreCase() && isASCIIAlpha(ch)) {
             m_jit.or32(MacroAssembler::TrustedImm32(0x20), character);
             ch |= 0x20;
         }
@@ -1665,7 +2531,7 @@ class YarrGenerator final : public YarrJITInfo {
     {
         YarrOp& op = m_ops[opIndex];
         PatternTerm* term = op.m_term;
-        UChar32 ch = term->patternCharacter;
+        char32_t ch = term->patternCharacter;
 
         const MacroAssembler::RegisterID character = m_regs.regT0;
         const MacroAssembler::RegisterID countRegister = m_regs.regT1;
@@ -1677,7 +2543,7 @@ class YarrGenerator final : public YarrJITInfo {
             MacroAssembler::JumpList failures;
             MacroAssembler::Label loop(&m_jit);
             failures.append(atEndOfInput());
-            failures.append(jumpIfCharNotEquals(ch, op.m_checkedOffset - term->inputPosition, character));
+            failures.append(jumpIfCharNotEquals(ch, op.m_checkedOffset - term->inputPosition, character, term->ignoreCase()));
 
             m_jit.add32(MacroAssembler::TrustedImm32(1), m_regs.index);
 #if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
@@ -1736,7 +2602,7 @@ class YarrGenerator final : public YarrJITInfo {
     {
         YarrOp& op = m_ops[opIndex];
         PatternTerm* term = op.m_term;
-        UChar32 ch = term->patternCharacter;
+        char32_t ch = term->patternCharacter;
 
         const MacroAssembler::RegisterID character = m_regs.regT0;
         const MacroAssembler::RegisterID countRegister = m_regs.regT1;
@@ -1751,7 +2617,7 @@ class YarrGenerator final : public YarrJITInfo {
             nonGreedyFailures.append(atEndOfInput());
             if (term->quantityMaxCount != quantifyInfinite)
                 nonGreedyFailures.append(m_jit.branch32(MacroAssembler::Equal, countRegister, MacroAssembler::Imm32(term->quantityMaxCount)));
-            nonGreedyFailures.append(jumpIfCharNotEquals(ch, op.m_checkedOffset - term->inputPosition, character));
+            nonGreedyFailures.append(jumpIfCharNotEquals(ch, op.m_checkedOffset - term->inputPosition, character, term->ignoreCase()));
 
             m_jit.add32(MacroAssembler::TrustedImm32(1), m_regs.index);
 #if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
@@ -1784,43 +2650,38 @@ class YarrGenerator final : public YarrJITInfo {
         PatternTerm* term = op.m_term;
 
         const MacroAssembler::RegisterID character = m_regs.regT0;
+        const MacroAssembler::RegisterID scratch = m_regs.regT1;
 
         if (m_decodeSurrogatePairs) {
             op.m_jumps.append(jumpIfNoAvailableInput());
             storeToFrame(m_regs.index, term->frameLocation + BackTrackInfoCharacterClass::beginIndex());
         }
 
-        MacroAssembler::JumpList matchDest;
         readCharacter(op.m_checkedOffset - term->inputPosition, character);
-        // If we are matching the "any character" builtin class we only need to read the
-        // character and don't need to match as it will always succeed.
-        if (term->invert() || !term->characterClass->m_anyCharacter) {
-            matchCharacterClass(character, matchDest, term->characterClass);
 
-            if (term->invert())
-                op.m_jumps.append(matchDest);
-            else {
-                op.m_jumps.append(m_jit.jump());
-                matchDest.link(&m_jit);
-            }
-        }
+        matchCharacterClassTermInner(term, op.m_jumps, character, scratch);
+
 #if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
         if (m_decodeSurrogatePairs && (!term->characterClass->hasOneCharacterSize() || term->invert())) {
-            MacroAssembler::Jump isBMPChar = m_jit.branch32(MacroAssembler::LessThan, character, m_regs.supplementaryPlanesBase);
+            MacroAssembler::Jump isBMPChar = m_jit.branch32(MacroAssembler::LessThan, character, MacroAssembler::TrustedImm32(0x10000));
             op.m_jumps.append(atEndOfInput());
             m_jit.add32(MacroAssembler::TrustedImm32(1), m_regs.index);
             isBMPChar.link(&m_jit);
         }
 #endif
     }
-    void backtrackCharacterClassOnce(size_t opIndex)
+
+    void backtrackCharacterClassOnce(size_t opIndex, bool fallThroughToCharacterClassFixedCount)
     {
+        UNUSED_PARAM(fallThroughToCharacterClassFixedCount);
 #if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
         if (m_decodeSurrogatePairs) {
             YarrOp& op = m_ops[opIndex];
             PatternTerm* term = op.m_term;
 
             m_backtrackingState.link(&m_jit);
+            // If we fallthough to the same CharacterClassOnce, we will override this index register, so we do not need to load here.
+            if (!fallThroughToCharacterClassFixedCount)
             loadFromFrame(term->frameLocation + BackTrackInfoCharacterClass::beginIndex(), m_regs.index);
             m_backtrackingState.fallthrough();
         }
@@ -1835,32 +2696,30 @@ class YarrGenerator final : public YarrJITInfo {
 
         const MacroAssembler::RegisterID character = m_regs.regT0;
         const MacroAssembler::RegisterID countRegister = m_regs.regT1;
+        const MacroAssembler::RegisterID scratch = m_regs.regT2;
+        m_usesT2 = true;
+
+        MacroAssembler::JumpList done;
 
         if (m_decodeSurrogatePairs)
             op.m_jumps.append(jumpIfNoAvailableInput());
 
         Checked<unsigned> scaledMaxCount = term->quantityMaxCount;
 #if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
-        if (m_decodeSurrogatePairs && term->characterClass->hasOnlyNonBMPCharacters() && !term->invert())
+        bool nonBMPOnly = false;
+        if (m_decodeSurrogatePairs && term->characterClass->hasOnlyNonBMPCharacters() && !term->invert()) {
             scaledMaxCount *= 2;
+            nonBMPOnly = true;
+        }
 #endif
         m_jit.sub32(m_regs.index, MacroAssembler::Imm32(scaledMaxCount), countRegister);
 
         MacroAssembler::Label loop(&m_jit);
-        MacroAssembler::JumpList matchDest;
         readCharacter(op.m_checkedOffset - term->inputPosition - scaledMaxCount, character, countRegister);
-        // If we are matching the "any character" builtin class we only need to read the
-        // character and don't need to match as it will always succeed.
-        if (term->invert() || !term->characterClass->m_anyCharacter) {
-            matchCharacterClass(character, matchDest, term->characterClass);
 
-            if (term->invert())
-                op.m_jumps.append(matchDest);
-            else {
-                op.m_jumps.append(m_jit.jump());
-                matchDest.link(&m_jit);
-            }
-        }
+        MacroAssembler::Label nonBMPLoop(&m_jit);
+
+        matchCharacterClassTermInner(term, op.m_jumps, character, scratch);
 
 #if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
         if (m_decodeSurrogatePairs) {
@@ -1868,7 +2727,7 @@ class YarrGenerator final : public YarrJITInfo {
                 m_jit.add32(MacroAssembler::TrustedImm32(term->characterClass->hasNonBMPCharacters() ? 2 : 1), countRegister);
             else {
                 m_jit.add32(MacroAssembler::TrustedImm32(1), countRegister);
-                MacroAssembler::Jump isBMPChar = m_jit.branch32(MacroAssembler::LessThan, character, m_regs.supplementaryPlanesBase);
+                MacroAssembler::Jump isBMPChar = m_jit.branch32(MacroAssembler::LessThan, character, MacroAssembler::TrustedImm32(0x10000));
                 op.m_jumps.append(atEndOfInput());
                 m_jit.add32(MacroAssembler::TrustedImm32(1), countRegister);
                 m_jit.add32(MacroAssembler::TrustedImm32(1), m_regs.index);
@@ -1877,8 +2736,19 @@ class YarrGenerator final : public YarrJITInfo {
         } else
 #endif
             m_jit.add32(MacroAssembler::TrustedImm32(1), countRegister);
+
+#if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
+        if (nonBMPOnly) {
+            done.append(m_jit.branch32(MacroAssembler::Equal, countRegister, m_regs.index));
+            tryReadNonBMPUnicodeChar(op.m_checkedOffset - term->inputPosition - scaledMaxCount, character, countRegister);
+            m_jit.jump().linkTo(nonBMPLoop, &m_jit);
+        } else
+#endif
         m_jit.branch32(MacroAssembler::NotEqual, countRegister, m_regs.index).linkTo(loop, &m_jit);
+
+        done.link(&m_jit);
     }
+
     void backtrackCharacterClassFixed(size_t opIndex)
     {
         backtrackTermDefault(opIndex);
@@ -1891,6 +2761,8 @@ class YarrGenerator final : public YarrJITInfo {
 
         const MacroAssembler::RegisterID character = m_regs.regT0;
         const MacroAssembler::RegisterID countRegister = m_regs.regT1;
+        const MacroAssembler::RegisterID scratch = m_regs.regT2;
+        m_usesT2 = true;
 
         if (m_decodeSurrogatePairs && (!term->characterClass->hasOneCharacterSize() || term->invert()))
             storeToFrame(m_regs.index, term->frameLocation + BackTrackInfoCharacterClass::beginIndex());
@@ -1907,20 +2779,9 @@ class YarrGenerator final : public YarrJITInfo {
 #endif
             failures.append(atEndOfInput());
 
-        if (term->invert()) {
             readCharacter(op.m_checkedOffset - term->inputPosition, character);
-            matchCharacterClass(character, failures, term->characterClass);
-        } else {
-            MacroAssembler::JumpList matchDest;
-            readCharacter(op.m_checkedOffset - term->inputPosition, character);
-            // If we are matching the "any character" builtin class for non-unicode patterns,
-            // we only need to read the character and don't need to match as it will always succeed.
-            if (!term->characterClass->m_anyCharacter) {
-                matchCharacterClass(character, matchDest, term->characterClass);
-                failures.append(m_jit.jump());
-            }
-            matchDest.link(&m_jit);
-        }
+
+        matchCharacterClassTermInner(term, failures, character, scratch);
 
 #if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
         if (m_decodeSurrogatePairs)
@@ -1930,11 +2791,15 @@ class YarrGenerator final : public YarrJITInfo {
             m_jit.add32(MacroAssembler::TrustedImm32(1), m_regs.index);
         m_jit.add32(MacroAssembler::TrustedImm32(1), countRegister);
 
-        if (term->quantityMaxCount != quantifyInfinite) {
-            m_jit.branch32(MacroAssembler::NotEqual, countRegister, MacroAssembler::Imm32(term->quantityMaxCount)).linkTo(loop, &m_jit);
-            failures.append(m_jit.jump());
-        } else
+        if (term->quantityMaxCount == quantifyInfinite)
             m_jit.jump(loop);
+        else {
+            m_jit.branch32(MacroAssembler::NotEqual, countRegister, MacroAssembler::Imm32(term->quantityMaxCount)).linkTo(loop, &m_jit);
+            if (!failuresDecrementIndex.empty()) {
+                // Don't emit the superfluous jump to the next instruction if we don't have any failuresDecrementIndex jumps to link.
+            failures.append(m_jit.jump());
+            }
+        }
 
         if (!failuresDecrementIndex.empty()) {
             failuresDecrementIndex.link(&m_jit);
@@ -1979,7 +2844,7 @@ class YarrGenerator final : public YarrJITInfo {
             m_jit.add32(MacroAssembler::TrustedImm32(1), m_regs.index);
 
 #if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
-            MacroAssembler::Jump isBMPChar = m_jit.branch32(MacroAssembler::LessThan, character, m_regs.supplementaryPlanesBase);
+            MacroAssembler::Jump isBMPChar = m_jit.branch32(MacroAssembler::LessThan, character, MacroAssembler::TrustedImm32(0x10000));
             m_jit.add32(MacroAssembler::TrustedImm32(1), m_regs.index);
             isBMPChar.link(&m_jit);
 #endif
@@ -2000,14 +2865,13 @@ class YarrGenerator final : public YarrJITInfo {
         const MacroAssembler::RegisterID countRegister = m_regs.regT1;
 
         m_jit.move(MacroAssembler::TrustedImm32(0), countRegister);
-        op.m_reentry = m_jit.label();
 
 #if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
-        if (m_decodeSurrogatePairs) {
-            if (!term->characterClass->hasOneCharacterSize() || term->invert())
+        if (m_decodeSurrogatePairs)
                 storeToFrame(m_regs.index, term->frameLocation + BackTrackInfoCharacterClass::beginIndex());
-        }
 #endif
+
+        op.m_reentry = m_jit.label();
 
         storeToFrame(countRegister, term->frameLocation + BackTrackInfoCharacterClass::matchAmountIndex());
     }
@@ -2019,38 +2883,22 @@ class YarrGenerator final : public YarrJITInfo {
 
         const MacroAssembler::RegisterID character = m_regs.regT0;
         const MacroAssembler::RegisterID countRegister = m_regs.regT1;
+        const MacroAssembler::RegisterID scratch = m_regs.regT2;
+        m_usesT2 = true;
 
         MacroAssembler::JumpList nonGreedyFailures;
         MacroAssembler::JumpList nonGreedyFailuresDecrementIndex;
 
         m_backtrackingState.link(&m_jit);
 
-#if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
-        if (m_decodeSurrogatePairs) {
-            if (!term->characterClass->hasOneCharacterSize() || term->invert())
-                loadFromFrame(term->frameLocation + BackTrackInfoCharacterClass::beginIndex(), m_regs.index);
-        }
-#endif
-
         loadFromFrame(term->frameLocation + BackTrackInfoCharacterClass::matchAmountIndex(), countRegister);
 
         nonGreedyFailures.append(atEndOfInput());
         nonGreedyFailures.append(m_jit.branch32(MacroAssembler::Equal, countRegister, MacroAssembler::Imm32(term->quantityMaxCount)));
 
-        MacroAssembler::JumpList matchDest;
         readCharacter(op.m_checkedOffset - term->inputPosition, character);
-        // If we are matching the "any character" builtin class for non-unicode patterns,
-        // we only need to read the character and don't need to match as it will always succeed.
-        if (term->invert() || !term->characterClass->m_anyCharacter) {
-            matchCharacterClass(character, matchDest, term->characterClass);
 
-            if (term->invert())
-                nonGreedyFailures.append(matchDest);
-            else {
-                nonGreedyFailures.append(m_jit.jump());
-                matchDest.link(&m_jit);
-            }
-        }
+        matchCharacterClassTermInner(term, nonGreedyFailures, character, scratch);
 
 #if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
         if (m_decodeSurrogatePairs)
@@ -2067,6 +2915,12 @@ class YarrGenerator final : public YarrJITInfo {
             m_jit.sub32(MacroAssembler::TrustedImm32(1), m_regs.index);
         }
         nonGreedyFailures.link(&m_jit);
+
+#if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
+        if (m_decodeSurrogatePairs)
+            loadFromFrame(term->frameLocation + BackTrackInfoCharacterClass::beginIndex(), m_regs.index);
+        else
+#endif
         m_jit.sub32(countRegister, m_regs.index);
         m_backtrackingState.fallthrough();
     }
@@ -2078,11 +2932,14 @@ class YarrGenerator final : public YarrJITInfo {
 
         const MacroAssembler::RegisterID character = m_regs.regT0;
         const MacroAssembler::RegisterID matchPos = m_regs.regT1;
+        const MacroAssembler::RegisterID scratch = m_regs.regT2;
+        m_usesT2 = true;
+
         MacroAssembler::JumpList foundBeginningNewLine;
         MacroAssembler::JumpList saveStartIndex;
         MacroAssembler::JumpList foundEndingNewLine;
 
-        if (m_pattern.dotAll()) {
+        if (term->dotAll()) {
             m_jit.move(MacroAssembler::TrustedImm32(0), matchPos);
             setMatchStart(matchPos);
             m_jit.move(m_regs.length, m_regs.index);
@@ -2099,7 +2956,7 @@ class YarrGenerator final : public YarrJITInfo {
             m_jit.load8(MacroAssembler::BaseIndex(m_regs.input, matchPos, MacroAssembler::TimesOne, 0), character);
         else
             m_jit.load16(MacroAssembler::BaseIndex(m_regs.input, matchPos, MacroAssembler::TimesTwo, 0), character);
-        matchCharacterClass(character, foundBeginningNewLine, m_pattern.newlineCharacterClass());
+        matchCharacterClass(character, scratch, foundBeginningNewLine, m_pattern.newlineCharacterClass());
 
         m_jit.branch32(MacroAssembler::Above, matchPos, m_regs.initialStart).linkTo(findBOLLoop, &m_jit);
         saveStartIndex.append(m_jit.jump());
@@ -2108,7 +2965,7 @@ class YarrGenerator final : public YarrJITInfo {
         m_jit.add32(MacroAssembler::TrustedImm32(1), matchPos); // Advance past newline
         saveStartIndex.link(&m_jit);
 
-        if (!m_pattern.multiline() && term->anchors.bolAnchor)
+        if (!term->multiline() && term->anchors.bolAnchor)
             op.m_jumps.append(m_jit.branchTest32(MacroAssembler::NonZero, matchPos));
 
         ASSERT(!m_pattern.m_body->m_hasFixedSize);
@@ -2122,13 +2979,13 @@ class YarrGenerator final : public YarrJITInfo {
             m_jit.load8(MacroAssembler::BaseIndex(m_regs.input, matchPos, MacroAssembler::TimesOne, 0), character);
         else
             m_jit.load16(MacroAssembler::BaseIndex(m_regs.input, matchPos, MacroAssembler::TimesTwo, 0), character);
-        matchCharacterClass(character, foundEndingNewLine, m_pattern.newlineCharacterClass());
+        matchCharacterClass(character, scratch, foundEndingNewLine, m_pattern.newlineCharacterClass());
         m_jit.add32(MacroAssembler::TrustedImm32(1), matchPos);
         m_jit.jump(findEOLLoop);
 
         foundEndingNewLine.link(&m_jit);
 
-        if (!m_pattern.multiline() && term->anchors.eolAnchor)
+        if (!term->multiline() && term->anchors.eolAnchor)
             op.m_jumps.append(m_jit.branch32(MacroAssembler::NotEqual, matchPos, m_regs.length));
 
         m_jit.move(matchPos, m_regs.index);
@@ -2142,7 +2999,7 @@ class YarrGenerator final : public YarrJITInfo {
     // Code generation/backtracking for simple terms
     // (pattern characters, character classes, and assertions).
     // These methods farm out work to the set of functions above.
-    void generateTerm(size_t opIndex)
+    void generateTerm(size_t opIndex, MatchTargets& matchTargets)
     {
         YarrOp& op = m_ops[opIndex];
         PatternTerm* term = op.m_term;
@@ -2152,7 +3009,7 @@ class YarrGenerator final : public YarrJITInfo {
             switch (term->quantityType) {
             case QuantifierType::FixedCount:
                 if (term->quantityMaxCount == 1)
-                    generatePatternCharacterOnce(opIndex);
+                    generatePatternCharacterOnce(opIndex, matchTargets);
                 else
                     generatePatternCharacterFixed(opIndex);
                 break;
@@ -2240,9 +3097,18 @@ class YarrGenerator final : public YarrJITInfo {
         case PatternTerm::Type::CharacterClass:
             switch (term->quantityType) {
             case QuantifierType::FixedCount:
-                if (term->quantityMaxCount == 1)
-                    backtrackCharacterClassOnce(opIndex);
-                else
+                if (term->quantityMaxCount == 1) {
+                    bool fallThroughToCharacterClassFixedCount = false;
+                    if (opIndex != 0) {
+                        auto& previousOp = m_ops[opIndex - 1];
+                        if (previousOp.m_op == YarrOpCode::Term) {
+                            auto* term = previousOp.m_term;
+                            if (term->type == PatternTerm::Type::CharacterClass && term->quantityType == QuantifierType::FixedCount)
+                                fallThroughToCharacterClassFixedCount = true;
+                        }
+                    }
+                    backtrackCharacterClassOnce(opIndex, fallThroughToCharacterClassFixedCount);
+                } else
                     backtrackCharacterClassFixed(opIndex);
                 break;
             case QuantifierType::Greedy:
@@ -2293,6 +3159,9 @@ class YarrGenerator final : public YarrJITInfo {
         // Forwards generate the matching code.
         ASSERT(m_ops.size());
         size_t opIndex = 0;
+        Vector<MatchTargets, 8> termMatchTargets;
+
+        termMatchTargets.append(MatchTargets());
 
         do {
             if (m_disassembler)
@@ -2302,7 +3171,7 @@ class YarrGenerator final : public YarrJITInfo {
             switch (op.m_op) {
 
             case YarrOpCode::Term:
-                generateTerm(opIndex);
+                generateTerm(opIndex, termMatchTargets.last());
                 break;
 
             // YarrOpCode::BodyAlternativeBegin/Next/End
@@ -2330,6 +3199,14 @@ class YarrGenerator final : public YarrJITInfo {
             case YarrOpCode::BodyAlternativeBegin: {
                 PatternAlternative* alternative = op.m_alternative;
 
+                termMatchTargets.append(MatchTargets());
+
+#if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS) && ENABLE(YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP)
+                // Always set to zero.
+                if (m_useFirstNonBMPCharacterOptimization)
+                    m_jit.move(MacroAssembler::TrustedImm32(0), m_regs.firstCharacterAdditionalReadSize);
+#endif
+
                 // Upon entry at the head of the set of alternatives, check if input is available
                 // to run the first alternative. (This progresses the input position).
                 op.m_jumps.append(jumpIfNoAvailableInput(alternative->m_minimumSize));
@@ -2338,9 +3215,10 @@ class YarrGenerator final : public YarrJITInfo {
                 // set as appropriate to this alternative.
                 op.m_reentry = m_jit.label();
 
+
                 // Emit fast skip path with stride if we have BoyerMooreInfo.
                 if (op.m_bmInfo) {
-                    auto range = op.m_bmInfo->findWorthwhileCharacterSequenceForLookahead();
+                    auto range = op.m_bmInfo->findWorthwhileCharacterSequenceForLookahead(m_sampler);
                     if (range) {
                         auto [beginIndex, endIndex] = *range;
                         ASSERT(endIndex <= alternative->m_minimumSize);
@@ -2357,6 +3235,7 @@ class YarrGenerator final : public YarrJITInfo {
                             static_assert(BoyerMooreFastCandidates::maxSize == 2);
                             dataLogLnIf(Options::verboseRegExpCompilation(), "Found characters fastpath lookahead ", charactersFastPath, " range:[", beginIndex, ", ", endIndex, ")");
 
+                            JIT_COMMENT(m_jit, "BMSearch characters fastpath lookahead ", charactersFastPath, " range:[", beginIndex, ", ", endIndex, ")");
                             auto loopHead = m_jit.label();
                             readCharacter(op.m_checkedOffset - endIndex + 1, m_regs.regT0);
                             matched.append(m_jit.branch32(MacroAssembler::Equal, m_regs.regT0, MacroAssembler::TrustedImm32(charactersFastPath.at(0))));
@@ -2364,10 +3243,12 @@ class YarrGenerator final : public YarrJITInfo {
                                 matched.append(m_jit.branch32(MacroAssembler::Equal, m_regs.regT0, MacroAssembler::TrustedImm32(charactersFastPath.at(1))));
                             jumpIfAvailableInput(endIndex - beginIndex).linkTo(loopHead, &m_jit);
                         } else {
-                            const auto* pointer = getBoyerMooreBitmap(map);
+                            auto span = getBoyerMooreBitmap(map);
                             dataLogLnIf(Options::verboseRegExpCompilation(), "Found bitmap lookahead count:(", mapCount, "),range:[", beginIndex, ", ", endIndex, ")");
 
-                            m_jit.move(MacroAssembler::TrustedImmPtr(pointer), m_regs.regT1);
+                            JIT_COMMENT(m_jit, "BMSearch bitmap lookahead count:(", mapCount, "),range:[", beginIndex, ", ", endIndex, ")");
+                            ASSERT(span.size());
+                            m_jit.move(MacroAssembler::TrustedImmPtr(span.data()), m_regs.regT1);
                             auto loopHead = m_jit.label();
                             readCharacter(op.m_checkedOffset - endIndex + 1, m_regs.regT0);
 #if CPU(ARM64) || CPU(RISCV64)
@@ -2382,8 +3263,7 @@ class YarrGenerator final : public YarrJITInfo {
                             static_assert(sizeof(BoyerMooreBitmap::Map::WordType) == sizeof(uint64_t));
                             static_assert(1 << 6 == 64);
                             static_assert(1 << (6 + 1) == BoyerMooreBitmap::Map::size());
-                            m_jit.move(m_regs.regT0, m_regs.regT2);
-                            m_jit.urshift32(MacroAssembler::TrustedImm32(6), m_regs.regT2);
+                            m_jit.urshift32(m_regs.regT0, MacroAssembler::TrustedImm32(6), m_regs.regT2);
                             m_jit.and32(MacroAssembler::TrustedImm32(1), m_regs.regT2);
                             m_jit.load64(MacroAssembler::BaseIndex(m_regs.regT1, m_regs.regT2, MacroAssembler::TimesEight), m_regs.regT2);
                             matched.append(m_jit.branchTestBit64(MacroAssembler::NonZero, m_regs.regT2, m_regs.regT0)); // We can ignore upper bits since modulo-64 is performed.
@@ -2425,7 +3305,8 @@ class YarrGenerator final : public YarrJITInfo {
                             } else
                                 setMatchStart(m_regs.index);
                         }
-                    }
+                    } else
+                        dataLogLnIf(Options::verboseRegExpCompilation(), "BM search candidates were not efficient enough. Not using BM search");
                 }
                 break;
             }
@@ -2433,6 +3314,9 @@ class YarrGenerator final : public YarrJITInfo {
             case YarrOpCode::BodyAlternativeEnd: {
                 PatternAlternative* priorAlternative = m_ops[op.m_previousOp].m_alternative;
                 PatternAlternative* alternative = op.m_alternative;
+
+                if (op.m_op == YarrOpCode::BodyAlternativeEnd)
+                    termMatchTargets.takeLast();
 
                 // If we get here, the prior alternative matched - return success.
 
@@ -2443,6 +3327,7 @@ class YarrGenerator final : public YarrJITInfo {
                 // slot, and return. In the case of pattern with a fixed size, we will
                 // not have yet set the value in the first
                 ASSERT(m_regs.index != m_regs.returnRegister);
+                ASSERT(m_regs.output != m_regs.returnRegister);
                 if (m_pattern.m_body->m_hasFixedSize) {
                     if (priorAlternative->m_minimumSize)
                         m_jit.sub32(m_regs.index, MacroAssembler::Imm32(priorAlternative->m_minimumSize), m_regs.returnRegister);
@@ -2467,6 +3352,11 @@ class YarrGenerator final : public YarrJITInfo {
                     // PRIOR alteranative, and we will only check input availability if we
                     // need to progress it forwards.
                     op.m_reentry = m_jit.label();
+                    if (m_compileMode == JITCompileMode::IncludeSubpatterns
+                        && priorAlternative->needToCleanupCaptures()) {
+                            for (unsigned subpattern = priorAlternative->firstCleanupSubpatternId(); subpattern <= priorAlternative->m_lastSubpatternId; subpattern++)
+                                clearSubpatternStart(subpattern);
+                    }
                     if (alternative->m_minimumSize > priorAlternative->m_minimumSize) {
                         m_jit.add32(MacroAssembler::Imm32(alternative->m_minimumSize - priorAlternative->m_minimumSize), m_regs.index);
                         op.m_jumps.append(jumpIfNoAvailableInput());
@@ -2482,6 +3372,7 @@ class YarrGenerator final : public YarrJITInfo {
             }
 
             // YarrOpCode::SimpleNestedAlternativeBegin/Next/End
+            // YarrOpCode::StringListAlternativeBegin/Next/End
             // YarrOpCode::NestedAlternativeBegin/Next/End
             //
             // These nodes are used to handle sets of alternatives that are nested within
@@ -2498,10 +3389,22 @@ class YarrGenerator final : public YarrJITInfo {
             // 'return address' using a DataLabelPtr, used to store the address to jump
             // to when backtracking, to get to the code for the appropriate alternative.
             case YarrOpCode::SimpleNestedAlternativeBegin:
+            case YarrOpCode::StringListAlternativeBegin:
             case YarrOpCode::NestedAlternativeBegin: {
                 PatternTerm* term = op.m_term;
                 PatternAlternative* alternative = op.m_alternative;
                 PatternDisjunction* disjunction = term->parentheses.disjunction;
+
+                if (op.m_op == YarrOpCode::StringListAlternativeBegin) {
+                    YarrOp* endOp = &m_ops[op.m_nextOp];
+                    while (endOp->m_nextOp != notFound) {
+                        ASSERT(endOp->m_op == YarrOpCode::SimpleNestedAlternativeNext || endOp->m_op == YarrOpCode::StringListAlternativeNext || endOp->m_op == YarrOpCode::NestedAlternativeNext);
+                        endOp = &m_ops[endOp->m_nextOp];
+                    }
+                    ASSERT(endOp->m_op == YarrOpCode::SimpleNestedAlternativeEnd || endOp->m_op == YarrOpCode::StringListAlternativeEnd || endOp->m_op == YarrOpCode::NestedAlternativeEnd);
+
+                    termMatchTargets.last() = alternative->m_isLastAlternative ? MatchTargets(MatchTargets::PreferredTarget::MatchSuccessFallThrough) : MatchTargets(endOp->m_jumps, op.m_jumps, MatchTargets::PreferredTarget::MatchFailFallThrough);
+                }
 
                 // Calculate how much input we need to check for, and if non-zero check.
                 op.m_checkAdjust = Checked<unsigned>(alternative->m_minimumSize);
@@ -2512,10 +3415,21 @@ class YarrGenerator final : public YarrJITInfo {
                 break;
             }
             case YarrOpCode::SimpleNestedAlternativeNext:
+            case YarrOpCode::StringListAlternativeNext:
             case YarrOpCode::NestedAlternativeNext: {
                 PatternTerm* term = op.m_term;
                 PatternAlternative* alternative = op.m_alternative;
                 PatternDisjunction* disjunction = term->parentheses.disjunction;
+
+                YarrOp* endOp = &m_ops[op.m_nextOp];
+                while (endOp->m_nextOp != notFound) {
+                    ASSERT(endOp->m_op == YarrOpCode::SimpleNestedAlternativeNext || endOp->m_op == YarrOpCode::StringListAlternativeNext || endOp->m_op == YarrOpCode::NestedAlternativeNext);
+                    endOp = &m_ops[endOp->m_nextOp];
+                }
+                ASSERT(endOp->m_op == YarrOpCode::SimpleNestedAlternativeEnd || endOp->m_op == YarrOpCode::StringListAlternativeEnd || endOp->m_op == YarrOpCode::NestedAlternativeEnd);
+
+                if (op.m_op == YarrOpCode::StringListAlternativeNext)
+                    termMatchTargets.last() = alternative->m_isLastAlternative ? MatchTargets(MatchTargets::PreferredTarget::MatchSuccessFallThrough) : MatchTargets(endOp->m_jumps, op.m_jumps, MatchTargets::PreferredTarget::MatchFailFallThrough);
 
                 // In the non-simple case, store a 'return address' so we can backtrack correctly.
                 if (op.m_op == YarrOpCode::NestedAlternativeNext) {
@@ -2529,6 +3443,7 @@ class YarrGenerator final : public YarrJITInfo {
                     op.m_zeroLengthMatch = m_jit.branch32(MacroAssembler::Equal, m_regs.index, MacroAssembler::Address(MacroAssembler::stackPointerRegister, term->frameLocation * sizeof(void*)));
                 }
 
+                if (op.m_op != YarrOpCode::StringListAlternativeNext) {
                 // If we reach here then the last alternative has matched - jump to the
                 // End node, to skip over any further alternatives.
                 //
@@ -2537,13 +3452,8 @@ class YarrGenerator final : public YarrJITInfo {
                 // data structures, or by making backtracking code that jumps to Next
                 // alternatives are responsible for checking that input is available (if
                 // we didn't need to plant the input checks, then m_jumps would be free).
-                YarrOp* endOp = &m_ops[op.m_nextOp];
-                while (endOp->m_nextOp != notFound) {
-                    ASSERT(endOp->m_op == YarrOpCode::SimpleNestedAlternativeNext || endOp->m_op == YarrOpCode::NestedAlternativeNext);
-                    endOp = &m_ops[endOp->m_nextOp];
-                }
-                ASSERT(endOp->m_op == YarrOpCode::SimpleNestedAlternativeEnd || endOp->m_op == YarrOpCode::NestedAlternativeEnd);
                 endOp->m_jumps.append(m_jit.jump());
+                }
 
                 // This is the entry point for the next alternative.
                 op.m_reentry = m_jit.label();
@@ -2552,11 +3462,25 @@ class YarrGenerator final : public YarrJITInfo {
                 op.m_checkAdjust = alternative->m_minimumSize;
                 if ((term->quantityType == QuantifierType::FixedCount) && (term->type != PatternTerm::Type::ParentheticalAssertion))
                     op.m_checkAdjust -= disjunction->m_minimumSize;
-                if (op.m_checkAdjust)
+                if (op.m_op == YarrOpCode::StringListAlternativeNext) {
+                    YarrOp* prevOp = &m_ops[op.m_previousOp];
+
+                    prevOp->m_jumps.link(&m_jit);
+                    prevOp->m_jumps.clear();
+                    op.m_jumps.link(&m_jit);
+                    op.m_jumps.clear();
+                    auto lastCheckAdjust = prevOp->m_checkAdjust;
+                    if (lastCheckAdjust > op.m_checkAdjust)
+                        m_jit.sub32(MacroAssembler::Imm32(lastCheckAdjust - op.m_checkAdjust), m_regs.index);
+                    else if (op.m_checkAdjust > lastCheckAdjust)
+                        m_jit.add32(MacroAssembler::Imm32(op.m_checkAdjust - lastCheckAdjust), m_regs.index);
+                    op.m_jumps.append(jumpIfNoAvailableInput());
+                } else if (op.m_checkAdjust)
                     op.m_jumps.append(jumpIfNoAvailableInput(op.m_checkAdjust));
                 break;
             }
             case YarrOpCode::SimpleNestedAlternativeEnd:
+            case YarrOpCode::StringListAlternativeEnd:
             case YarrOpCode::NestedAlternativeEnd: {
                 PatternTerm* term = op.m_term;
 
@@ -2586,6 +3510,9 @@ class YarrGenerator final : public YarrJITInfo {
             // quantity count of 1 (this covers fixed once, and ?/?? quantifiers).
             case YarrOpCode::ParenthesesSubpatternOnceBegin: {
                 PatternTerm* term = op.m_term;
+
+                termMatchTargets.append(MatchTargets());
+
                 unsigned parenthesesFrameLocation = term->frameLocation;
                 const MacroAssembler::RegisterID indexTemporary = m_regs.regT0;
                 ASSERT(term->quantityMaxCount == 1);
@@ -2636,6 +3563,8 @@ class YarrGenerator final : public YarrJITInfo {
                 const MacroAssembler::RegisterID indexTemporary = m_regs.regT0;
                 ASSERT(term->quantityMaxCount == 1);
 
+                termMatchTargets.takeLast();
+
                 // If the nested alternative matched without consuming any characters, punt this back to the interpreter.
                 // FIXME: <https://bugs.webkit.org/show_bug.cgi?id=200786> Add ability for the YARR JIT to properly
                 // handle nested expressions that can match without consuming characters
@@ -2649,12 +3578,17 @@ class YarrGenerator final : public YarrJITInfo {
                 // offsets only afterwards, at the point the results array is
                 // being accessed.
                 if (term->capture() && m_compileMode == JITCompileMode::IncludeSubpatterns) {
+                    auto subpatternId = term->parentheses.subpatternId;
                     unsigned inputOffset = op.m_checkedOffset - term->inputPosition;
                     if (inputOffset) {
                         m_jit.sub32(m_regs.index, MacroAssembler::Imm32(inputOffset), indexTemporary);
-                        setSubpatternEnd(indexTemporary, term->parentheses.subpatternId);
+                        setSubpatternEnd(indexTemporary, subpatternId);
                     } else
-                        setSubpatternEnd(m_regs.index, term->parentheses.subpatternId);
+                        setSubpatternEnd(m_regs.index, subpatternId);
+                    if (m_pattern.m_numDuplicateNamedCaptureGroups) {
+                        if (auto duplicateNamedGroupId = m_pattern.m_duplicateNamedGroupForSubpatternId[subpatternId])
+                            m_jit.store32(MacroAssembler::TrustedImm32(subpatternId), MacroAssembler::Address(m_regs.output, (offsetForDuplicateNamedGroupId(duplicateNamedGroupId) * sizeof(int))));
+                    }
                 }
 
                 // If the parentheses are quantified Greedy then add a label to jump back
@@ -2672,9 +3606,13 @@ class YarrGenerator final : public YarrJITInfo {
             // YarrOpCode::ParenthesesSubpatternTerminalBegin/End
             case YarrOpCode::ParenthesesSubpatternTerminalBegin: {
                 PatternTerm* term = op.m_term;
-                ASSERT(term->quantityType == QuantifierType::Greedy);
-                ASSERT(term->quantityMaxCount == quantifyInfinite);
                 ASSERT(!term->capture());
+                if (term->quantityType == QuantifierType::Greedy)
+                    ASSERT(term->quantityMaxCount == quantifyInfinite);
+                if (term->quantityType == QuantifierType::FixedCount)
+                    ASSERT(term->quantityMaxCount == 1);
+
+                termMatchTargets.append(MatchTargets());
 
                 // Upon entry set a label to loop back to.
                 op.m_reentry = m_jit.label();
@@ -2687,6 +3625,8 @@ class YarrGenerator final : public YarrJITInfo {
             case YarrOpCode::ParenthesesSubpatternTerminalEnd: {
                 YarrOp& beginOp = m_ops[op.m_previousOp];
                 PatternTerm* term = op.m_term;
+
+                termMatchTargets.takeLast();
 
                 // If the nested alternative matched without consuming any characters, punt this back to the interpreter.
                 // FIXME: <https://bugs.webkit.org/show_bug.cgi?id=200786> Add ability for the YARR JIT to properly
@@ -2708,6 +3648,8 @@ class YarrGenerator final : public YarrJITInfo {
             //
             // These nodes support generic subpatterns.
             case YarrOpCode::ParenthesesSubpatternBegin: {
+                termMatchTargets.append(MatchTargets());
+
 #if ENABLE(YARR_JIT_ALL_PARENS_EXPRESSIONS)
                 PatternTerm* term = op.m_term;
                 unsigned parenthesesFrameLocation = term->frameLocation;
@@ -2770,6 +3712,8 @@ class YarrGenerator final : public YarrJITInfo {
                 break;
             }
             case YarrOpCode::ParenthesesSubpatternEnd: {
+                termMatchTargets.takeLast();
+
 #if ENABLE(YARR_JIT_ALL_PARENS_EXPRESSIONS)
                 PatternTerm* term = op.m_term;
                 unsigned parenthesesFrameLocation = term->frameLocation;
@@ -2796,12 +3740,17 @@ class YarrGenerator final : public YarrJITInfo {
                 if (term->capture() && m_compileMode == JITCompileMode::IncludeSubpatterns) {
                     const MacroAssembler::RegisterID indexTemporary = m_regs.regT0;
 
+                    auto subpatternId = term->parentheses.subpatternId;
                     unsigned inputOffset = op.m_checkedOffset - term->inputPosition;
                     if (inputOffset) {
                         m_jit.sub32(m_regs.index, MacroAssembler::Imm32(inputOffset), indexTemporary);
-                        setSubpatternEnd(indexTemporary, term->parentheses.subpatternId);
+                        setSubpatternEnd(indexTemporary, subpatternId);
                     } else
-                        setSubpatternEnd(m_regs.index, term->parentheses.subpatternId);
+                        setSubpatternEnd(m_regs.index, subpatternId);
+                    if (m_pattern.m_numDuplicateNamedCaptureGroups) {
+                        if (auto duplicateNamedGroupId = m_pattern.m_duplicateNamedGroupForSubpatternId[subpatternId])
+                            m_jit.store32(MacroAssembler::TrustedImm32(subpatternId), MacroAssembler::Address(m_regs.output, (offsetForDuplicateNamedGroupId(duplicateNamedGroupId) * sizeof(int))));
+                    }
                 }
 
                 // If the parentheses are quantified Greedy then add a label to jump back
@@ -2829,6 +3778,8 @@ class YarrGenerator final : public YarrJITInfo {
             case YarrOpCode::ParentheticalAssertionBegin: {
                 PatternTerm* term = op.m_term;
 
+                termMatchTargets.append(MatchTargets());
+
                 // Store the current index - assertions should not update index, so
                 // we will need to restore it upon a successful match.
                 unsigned parenthesesFrameLocation = term->frameLocation;
@@ -2841,13 +3792,20 @@ class YarrGenerator final : public YarrJITInfo {
             case YarrOpCode::ParentheticalAssertionEnd: {
                 PatternTerm* term = op.m_term;
 
+                termMatchTargets.takeLast();
+
                 // Restore the input index value.
                 unsigned parenthesesFrameLocation = term->frameLocation;
                 loadFromFrame(parenthesesFrameLocation + BackTrackInfoParentheticalAssertion::beginIndex(), m_regs.index);
 
                 // If inverted, a successful match of the assertion must be treated
-                // as a failure, so jump to backtracking.
+                // as a failure, clear any nested captures and jump to backtracking.
                 if (term->invert()) {
+                    if (m_compileMode == JITCompileMode::IncludeSubpatterns
+                        && term->containsAnyCaptures()) {
+                        for (unsigned subpattern = term->parentheses.subpatternId; subpattern <= term->parentheses.lastSubpatternId; subpattern++)
+                            clearSubpatternStart(subpattern);
+                    }
                     op.m_jumps.append(m_jit.jump());
                     op.m_reentry = m_jit.label();
                 }
@@ -2862,6 +3820,8 @@ class YarrGenerator final : public YarrJITInfo {
 
             ++opIndex;
         } while (opIndex < m_ops.size());
+
+        termMatchTargets.takeLast();
     }
 
     void backtrack()
@@ -2957,12 +3917,22 @@ class YarrGenerator final : public YarrJITInfo {
                         // If the pattern size is not fixed, then store the start index for use if we match.
                         if (!m_pattern.m_body->m_hasFixedSize) {
                             if (alternative->m_minimumSize == 1)
+#if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS) && ENABLE(YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP)
+                                if (m_useFirstNonBMPCharacterOptimization) {
+                                    m_jit.add32(m_regs.firstCharacterAdditionalReadSize, m_regs.index, m_regs.regT0);
+                                    setMatchStart(m_regs.regT0);
+                                } else
+#endif
                                 setMatchStart(m_regs.index);
                             else {
                                 if (alternative->m_minimumSize)
                                     m_jit.sub32(m_regs.index, MacroAssembler::Imm32(alternative->m_minimumSize - 1), m_regs.regT0);
                                 else
                                     m_jit.add32(MacroAssembler::TrustedImm32(1), m_regs.index, m_regs.regT0);
+#if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS) && ENABLE(YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP)
+                                if (m_useFirstNonBMPCharacterOptimization)
+                                    m_jit.add32(m_regs.firstCharacterAdditionalReadSize, m_regs.regT0);
+#endif
                                 setMatchStart(m_regs.regT0);
                             }
                         }
@@ -2983,6 +3953,10 @@ class YarrGenerator final : public YarrJITInfo {
                             unsigned delta = beginOp->m_alternative->m_minimumSize - alternative->m_minimumSize;
                             if (delta != 0xFFFFFFFFu) {
                                 // We need to check input because we are incrementing the input.
+#if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS) && ENABLE(YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP)
+                                if (m_useFirstNonBMPCharacterOptimization)
+                                    m_jit.add32(m_regs.firstCharacterAdditionalReadSize, m_regs.index);
+#endif
                                 m_jit.add32(MacroAssembler::Imm32(delta + 1), m_regs.index);
                                 checkInput().linkTo(beginOp->m_reentry, &m_jit);
                             }
@@ -3062,6 +4036,10 @@ class YarrGenerator final : public YarrJITInfo {
                     if (alternative->m_minimumSize == m_pattern.m_body->m_minimumSize) {
                         // If the last alternative had the same minimum size as the disjunction,
                         // just simply increment input pos by 1, no adjustment based on minimum size.
+#if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS) && ENABLE(YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP)
+                        if (m_useFirstNonBMPCharacterOptimization)
+                            m_jit.add32(m_regs.firstCharacterAdditionalReadSize, m_regs.index);
+#endif
                         m_jit.add32(MacroAssembler::TrustedImm32(1), m_regs.index);
                     } else {
                         // If the minumum for the last alternative was one greater than than that
@@ -3112,6 +4090,7 @@ class YarrGenerator final : public YarrJITInfo {
             }
 
             // YarrOpCode::SimpleNestedAlternativeBegin/Next/End
+            // YarrOpCode::StringListAlternativeBegin/Next/End
             // YarrOpCode::NestedAlternativeBegin/Next/End
             //
             // Generate code for when we backtrack back out of an alternative into
@@ -3124,13 +4103,15 @@ class YarrGenerator final : public YarrJITInfo {
             // alternative.
             case YarrOpCode::SimpleNestedAlternativeBegin:
             case YarrOpCode::SimpleNestedAlternativeNext:
+            case YarrOpCode::StringListAlternativeBegin:
+            case YarrOpCode::StringListAlternativeNext:
             case YarrOpCode::NestedAlternativeBegin:
             case YarrOpCode::NestedAlternativeNext: {
                 YarrOp& nextOp = m_ops[op.m_nextOp];
                 bool isBegin = op.m_previousOp == notFound;
                 bool isLastAlternative = nextOp.m_nextOp == notFound;
-                ASSERT(isBegin == (op.m_op == YarrOpCode::SimpleNestedAlternativeBegin || op.m_op == YarrOpCode::NestedAlternativeBegin));
-                ASSERT(isLastAlternative == (nextOp.m_op == YarrOpCode::SimpleNestedAlternativeEnd || nextOp.m_op == YarrOpCode::NestedAlternativeEnd));
+                ASSERT(isBegin == (op.m_op == YarrOpCode::SimpleNestedAlternativeBegin || op.m_op == YarrOpCode::StringListAlternativeBegin || op.m_op == YarrOpCode::NestedAlternativeBegin));
+                ASSERT(isLastAlternative == (nextOp.m_op == YarrOpCode::SimpleNestedAlternativeEnd || nextOp.m_op == YarrOpCode::StringListAlternativeEnd || nextOp.m_op == YarrOpCode::NestedAlternativeEnd));
 
                 // Treat an input check failure the same as a failed match.
                 m_backtrackingState.append(op.m_jumps);
@@ -3156,6 +4137,7 @@ class YarrGenerator final : public YarrJITInfo {
                 // backtracking to here, correct, and then jump on. If not we can
                 // link the backtracks directly to their destination.
                 if (op.m_checkAdjust) {
+                    if (!m_backtrackingState.isEmpty()) {
                     // Handle the cases where we need to link the backtracks here.
                     m_backtrackingState.link(&m_jit);
                     m_jit.sub32(MacroAssembler::Imm32(op.m_checkAdjust), m_regs.index);
@@ -3168,6 +4150,7 @@ class YarrGenerator final : public YarrJITInfo {
                     } else {
                         // A single alternative on its own can fall through.
                         m_backtrackingState.fallthrough();
+                    }
                     }
                 } else {
                     // Handle the cases where we can link the backtracks directly to their destinations.
@@ -3199,15 +4182,16 @@ class YarrGenerator final : public YarrJITInfo {
                 if (isBegin) {
                     YarrOp* endOp = &m_ops[op.m_nextOp];
                     while (endOp->m_nextOp != notFound) {
-                        ASSERT(endOp->m_op == YarrOpCode::SimpleNestedAlternativeNext || endOp->m_op == YarrOpCode::NestedAlternativeNext);
+                        ASSERT(endOp->m_op == YarrOpCode::SimpleNestedAlternativeNext || endOp->m_op == YarrOpCode::StringListAlternativeNext || endOp->m_op == YarrOpCode::NestedAlternativeNext);
                         endOp = &m_ops[endOp->m_nextOp];
                     }
-                    ASSERT(endOp->m_op == YarrOpCode::SimpleNestedAlternativeEnd || endOp->m_op == YarrOpCode::NestedAlternativeEnd);
+                    ASSERT(endOp->m_op == YarrOpCode::SimpleNestedAlternativeEnd || endOp->m_op == YarrOpCode::StringListAlternativeEnd || endOp->m_op == YarrOpCode::NestedAlternativeEnd);
                     m_backtrackingState.append(endOp->m_jumps);
                 }
                 break;
             }
             case YarrOpCode::SimpleNestedAlternativeEnd:
+            case YarrOpCode::StringListAlternativeEnd:
             case YarrOpCode::NestedAlternativeEnd: {
                 PatternTerm* term = op.m_term;
 
@@ -3257,14 +4241,36 @@ class YarrGenerator final : public YarrJITInfo {
                     m_backtrackingState.link(&m_jit);
 
                     // If capturing, clear the capture (we only need to reset start).
-                    if (term->capture() && m_compileMode == JITCompileMode::IncludeSubpatterns)
-                        clearSubpatternStart(term->parentheses.subpatternId);
+                    if (term->capture() && m_compileMode == JITCompileMode::IncludeSubpatterns) {
+                        auto subpatternId = term->parentheses.subpatternId;
+                        clearSubpatternStart(subpatternId);
+                        if (m_pattern.m_numDuplicateNamedCaptureGroups) {
+                            if (auto duplicateNamedGroupId = m_pattern.m_duplicateNamedGroupForSubpatternId[subpatternId])
+                                m_jit.store32(MacroAssembler::TrustedImm32(0), MacroAssembler::Address(m_regs.output, (offsetForDuplicateNamedGroupId(duplicateNamedGroupId) * sizeof(int))));
+                        }
+                    }
 
                     // If Greedy, jump to the end.
                     if (term->quantityType == QuantifierType::Greedy) {
                         // Clear the flag in the stackframe indicating we ran through the subpattern.
                         unsigned parenthesesFrameLocation = term->frameLocation;
                         storeToFrame(MacroAssembler::TrustedImm32(-1), parenthesesFrameLocation + BackTrackInfoParenthesesOnce::beginIndex());
+
+                        // Clear out any nested captures.
+                        if (m_compileMode == JITCompileMode::IncludeSubpatterns && term->containsAnyCaptures()) {
+                            unsigned firstPatternId = term->parentheses.subpatternId;
+                            if (term->capture())
+                                firstPatternId++;
+                            for (unsigned subpattern = firstPatternId; subpattern <= term->parentheses.lastSubpatternId; subpattern++) {
+                                clearSubpatternStart(subpattern);
+
+                                if (m_pattern.m_numDuplicateNamedCaptureGroups) {
+                                    if (auto duplicateNamedGroupId = m_pattern.m_duplicateNamedGroupForSubpatternId[subpattern])
+                                        m_jit.store32(MacroAssembler::TrustedImm32(0), MacroAssembler::Address(m_regs.output, (offsetForDuplicateNamedGroupId(duplicateNamedGroupId) * sizeof(int))));
+                                }
+                            }
+                        }
+
                         // Jump to after the parentheses, skipping the subpattern.
                         m_jit.jump(m_ops[op.m_nextOp].m_reentry);
                         // A backtrack from after the parentheses, when skipping the subpattern,
@@ -3481,10 +4487,6 @@ class YarrGenerator final : public YarrJITInfo {
                 break;
             }
             case YarrOpCode::ParentheticalAssertionEnd: {
-                // FIXME: We should really be clearing any nested subpattern
-                // matches on bailing out from after the pattern. Firefox has
-                // this bug too (presumably because they use YARR!)
-
                 // Never backtrack into an assertion; later failures bail to before the begin.
                 m_backtrackingState.takeBacktracksToJumpList(op.m_jumps, &m_jit);
                 break;
@@ -3517,7 +4519,7 @@ class YarrGenerator final : public YarrJITInfo {
         YarrOpCode alternativeNextOpCode = YarrOpCode::SimpleNestedAlternativeNext;
         YarrOpCode alternativeEndOpCode = YarrOpCode::SimpleNestedAlternativeEnd;
 
-        if (UNLIKELY(!isSafeToRecurse())) {
+        if (!isSafeToRecurse()) [[unlikely]] {
             m_failureReason = JITFailureReason::ParenthesisNestedTooDeep;
             return;
         }
@@ -3539,8 +4541,25 @@ class YarrGenerator final : public YarrJITInfo {
             parenthesesBeginOpCode = YarrOpCode::ParenthesesSubpatternOnceBegin;
             parenthesesEndOpCode = YarrOpCode::ParenthesesSubpatternOnceEnd;
 
-            // If there is more than one alternative we cannot use the 'simple' nodes.
-            if (term->parentheses.disjunction->m_alternatives.size() != 1) {
+            if (term->parentheses.isStringList) {
+                // This is an anchored non-capturing string list parenthesis that can't backtrack, we use the 'string list' nodes.
+                // We may need to reorder these if we have an EOL after.
+
+                if (term->parentheses.isEOLStringList) {
+                    PatternDisjunction* nestedDisjunction = term->parentheses.disjunction;
+                    nestedDisjunction->m_alternatives.last()->m_isLastAlternative = false;
+
+                    std::sort(nestedDisjunction->m_alternatives.begin(), nestedDisjunction->m_alternatives.end(), [](auto& l, auto& r) -> bool {
+                        return l->m_terms.size() > r->m_terms.size();
+                    });
+                    nestedDisjunction->m_alternatives.last()->m_isLastAlternative = true;
+                }
+
+                alternativeBeginOpCode = YarrOpCode::StringListAlternativeBegin;
+                alternativeNextOpCode = YarrOpCode::StringListAlternativeNext;
+                alternativeEndOpCode = YarrOpCode::StringListAlternativeEnd;
+            } else if (term->parentheses.disjunction->m_alternatives.size() != 1) {
+                // Otherwise, check if there is more than one alternative. If so, we cannot use the 'simple' nodes.
                 alternativeBeginOpCode = YarrOpCode::NestedAlternativeBegin;
                 alternativeNextOpCode = YarrOpCode::NestedAlternativeNext;
                 alternativeEndOpCode = YarrOpCode::NestedAlternativeEnd;
@@ -3595,7 +4614,16 @@ class YarrGenerator final : public YarrJITInfo {
                 lastOp.m_checkAdjust = nestedAlternative->m_minimumSize;
                 if ((term->quantityType == QuantifierType::FixedCount) && (term->type != PatternTerm::Type::ParentheticalAssertion))
                     lastOp.m_checkAdjust -= disjunction->m_minimumSize;
-                lastOp.m_checkedOffset = checkedOffset + lastOp.m_checkAdjust;
+
+                Checked<unsigned, RecordOverflow> checkedOffsetResult(checkedOffset);
+                checkedOffsetResult += lastOp.m_checkAdjust;
+
+                if (checkedOffsetResult.hasOverflowed()) [[unlikely]] {
+                    m_failureReason = JITFailureReason::OffsetTooLarge;
+                    return;
+                }
+
+                lastOp.m_checkedOffset = checkedOffsetResult;
             }
             opCompileAlternative(m_ops[lastOpIndex].m_checkedOffset, nestedAlternative);
 
@@ -3640,7 +4668,7 @@ class YarrGenerator final : public YarrJITInfo {
     // once, and will never backtrack back into the assertion.
     void opCompileParentheticalAssertion(Checked<unsigned> checkedOffset, PatternTerm* term)
     {
-        if (UNLIKELY(!isSafeToRecurse())) {
+        if (!isSafeToRecurse()) [[unlikely]] {
             m_failureReason = JITFailureReason::ParenthesisNestedTooDeep;
             return;
         }
@@ -3741,7 +4769,7 @@ class YarrGenerator final : public YarrJITInfo {
     // to return the failing result.
     void opCompileBody(PatternDisjunction* disjunction)
     {
-        if (UNLIKELY(!isSafeToRecurse())) {
+        if (!isSafeToRecurse()) [[unlikely]] {
             m_failureReason = JITFailureReason::ParenthesisNestedTooDeep;
             return;
         }
@@ -3799,13 +4827,17 @@ class YarrGenerator final : public YarrJITInfo {
         // it fails when the body alternatives fail to match with the current offset.
         // FIXME: Support unicode flag.
         // https://bugs.webkit.org/show_bug.cgi?id=228611
-        if (disjunction->m_minimumSize && !m_pattern.sticky() && !m_pattern.unicode()) {
+        if (disjunction->m_minimumSize && !m_pattern.sticky() && !m_pattern.eitherUnicode()) {
             auto bmInfo = BoyerMooreInfo::create(m_charSize, std::min<unsigned>(disjunction->m_minimumSize, BoyerMooreInfo::maxLength));
             if (collectBoyerMooreInfo(disjunction, currentAlternativeIndex, bmInfo.get())) {
+                dataLogLnIf(YarrJITInternal::verbose, bmInfo.get());
                 m_ops.last().m_bmInfo = bmInfo.ptr();
                 m_bmInfos.append(WTFMove(bmInfo));
                 m_usesT2 = true;
-            }
+                if (m_sampleString)
+                    m_sampler.sample(m_sampleString.value());
+            } else
+                dataLogLnIf(YarrJITInternal::verbose, "BM collection failed");
         }
 
         do {
@@ -3836,6 +4868,148 @@ class YarrGenerator final : public YarrJITInfo {
         lastOp.m_checkedOffset = 0;
     }
 
+    std::optional<unsigned> collectBoyerMooreInfoFromTerm(PatternTerm& term, unsigned cursor, BoyerMooreInfo& bmInfo)
+    {
+                switch (term.type) {
+                case PatternTerm::Type::AssertionBOL:
+                case PatternTerm::Type::AssertionEOL:
+                case PatternTerm::Type::AssertionWordBoundary:
+            // Conservatively say any assertions just match.
+            return cursor;
+
+                case PatternTerm::Type::BackReference:
+                case PatternTerm::Type::ForwardReference:
+            return std::nullopt;
+
+        case PatternTerm::Type::ParenthesesSubpattern: {
+            // Right now, we only support /(...)/ or /(...)?/ case.
+            PatternDisjunction* disjunction = term.parentheses.disjunction;
+            if (term.quantityType != QuantifierType::FixedCount && term.quantityType != QuantifierType::Greedy)
+                return std::nullopt;
+            if (term.quantityMaxCount != 1)
+                return std::nullopt;
+            if (term.m_matchDirection != MatchDirection::Forward)
+                return std::nullopt;
+            if (term.m_invert)
+                return std::nullopt;
+
+            auto& alternatives = disjunction->m_alternatives;
+            std::optional<unsigned> minimumCursor;
+            for (unsigned i = 0; i < alternatives.size(); ++i) {
+                PatternAlternative* alternative = alternatives[i].get();
+                unsigned alternativeCursor = cursor;
+                for (unsigned index = 0; index < alternative->m_terms.size() && alternativeCursor < bmInfo.length(); ++index) {
+                    PatternTerm& term = alternative->m_terms[index];
+                    std::optional<unsigned> nextCursor = collectBoyerMooreInfoFromTerm(term, alternativeCursor, bmInfo);
+                    if (!nextCursor) {
+                        dataLogLnIf(YarrJITInternal::verbose, "Shortening to ", alternativeCursor);
+                        bmInfo.shortenLength(alternativeCursor);
+                        break;
+                    }
+                    alternativeCursor = nextCursor.value();
+                }
+                if (!minimumCursor)
+                    minimumCursor = alternativeCursor;
+                else if (minimumCursor.value() != alternativeCursor) {
+                    // Alternatives have different size.
+                    // Let's say we have /(aaa|b)c/. Then, we would like to create BM info,
+                    //
+                    //     offset     0 1
+                    //     characters a a
+                    //                b c
+                    //
+                    // And we do not want to create 2, 3, 4 offsets since it changes based on whether we pick "aaa" or "b".
+                    // So, when we encounter (aaa|b), after applying each alternative to BMInfo, we cut BMInfo candidate length
+                    // with the shortest + 1 size, in this case "2".
+                    if (minimumCursor.value() > alternativeCursor)
+                        minimumCursor = alternativeCursor;
+                    dataLogLnIf(YarrJITInternal::verbose, "Shortening to ", minimumCursor.value() + 1);
+                    bmInfo.shortenLength(minimumCursor.value() + 1);
+                }
+            }
+
+            if (term.quantityType == QuantifierType::FixedCount)
+                cursor = minimumCursor.value();
+            else {
+                // Let's see /(aaaa|bbbb)?c/. In this case, we do not update the cursor since "(aaaa|bbbb)" is optional.
+                // And let's shorten the candidate to "1" in this case since we do not want to apply "c" to all possible subsequent cases.
+                dataLogLnIf(YarrJITInternal::verbose, "Shortening to ", cursor + 1);
+                bmInfo.shortenLength(cursor + 1);
+            }
+            return cursor;
+        }
+
+                case PatternTerm::Type::ParentheticalAssertion:
+            return std::nullopt;
+
+                case PatternTerm::Type::DotStarEnclosure:
+            return std::nullopt;
+
+                case PatternTerm::Type::CharacterClass: {
+            if (term.quantityType != QuantifierType::FixedCount && term.quantityType != QuantifierType::Greedy)
+                return std::nullopt;
+            if (term.quantityMaxCount != 1)
+                return std::nullopt;
+            if (term.inputPosition != cursor)
+                return std::nullopt;
+                    auto& characterClass = *term.characterClass;
+                    if (term.invert() || characterClass.m_anyCharacter) {
+                        bmInfo.setAll(cursor);
+                // If this is greedy one-character pattern "a?", we should not increase cursor.
+                // If we see greedy pattern, then we cut bmInfo here to avoid possibility explosion.
+                if (term.quantityType == QuantifierType::FixedCount)
+                        ++cursor;
+                else
+                    bmInfo.shortenLength(cursor + 1);
+                return cursor;
+                    }
+                    if (!characterClass.m_rangesUnicode.isEmpty())
+                        bmInfo.addRanges(cursor, characterClass.m_rangesUnicode);
+                    if (!characterClass.m_matchesUnicode.isEmpty())
+                        bmInfo.addCharacters(cursor, characterClass.m_matchesUnicode);
+                    if (!characterClass.m_ranges.isEmpty())
+                        bmInfo.addRanges(cursor, characterClass.m_ranges);
+                    if (!characterClass.m_matches.isEmpty())
+                        bmInfo.addCharacters(cursor, characterClass.m_matches);
+
+            // If this is greedy one-character pattern "a?", we should not increase cursor.
+            // If we see greedy pattern, then we cut bmInfo here to avoid possibility explosion.
+            if (term.quantityType == QuantifierType::FixedCount)
+                    ++cursor;
+            else
+                bmInfo.shortenLength(cursor + 1);
+            return cursor;
+                }
+                case PatternTerm::Type::PatternCharacter: {
+            if (term.quantityType != QuantifierType::FixedCount && term.quantityType != QuantifierType::Greedy)
+                return std::nullopt;
+            if (term.quantityMaxCount != 1)
+                return std::nullopt;
+            if (term.inputPosition != cursor)
+                return std::nullopt;
+                    if (U16_LENGTH(term.patternCharacter) != 1 && m_decodeSurrogatePairs)
+                return std::nullopt;
+                    // For case-insesitive compares, non-ascii characters that have different
+                    // upper & lower case representations are already converted to a character class.
+            ASSERT(!term.ignoreCase() || isASCIIAlpha(term.patternCharacter) || isCanonicallyUnique(term.patternCharacter, m_canonicalMode));
+            if (term.ignoreCase() && isASCIIAlpha(term.patternCharacter)) {
+                        bmInfo.set(cursor, toASCIIUpper(term.patternCharacter));
+                        bmInfo.set(cursor, toASCIILower(term.patternCharacter));
+                    } else
+                        bmInfo.set(cursor, term.patternCharacter);
+
+            // If this is greedy one-character pattern "a?", we should not increase cursor.
+            // If we see greedy pattern, then we cut bmInfo here to avoid possibility explosion.
+            if (term.quantityType == QuantifierType::FixedCount)
+                    ++cursor;
+            else
+                bmInfo.shortenLength(cursor + 1);
+            return cursor;
+                }
+                }
+        return std::nullopt;
+    }
+
     bool collectBoyerMooreInfo(PatternDisjunction* disjunction, size_t currentAlternativeIndex, BoyerMooreInfo& bmInfo)
     {
         // If we have a searching pattern /abcdef/, then we can check the 6th character against a set of {a, b, c, d, e, f}.
@@ -3853,8 +5027,6 @@ class YarrGenerator final : public YarrJITInfo {
 
         ASSERT(disjunction->m_minimumSize);
 
-        // FIXME: Support nested disjunctions (e.g. /(?:abc|def|g(?:hi|jk))/).
-        // https://bugs.webkit.org/show_bug.cgi?id=228614
         // FIXME: Support non-fixed-sized lookahead (e.g. /.*abc/ and extract "abc" sequence).
         // https://bugs.webkit.org/show_bug.cgi?id=228612
         auto& alternatives = disjunction->m_alternatives;
@@ -3863,92 +5035,27 @@ class YarrGenerator final : public YarrJITInfo {
             PatternAlternative* alternative = alternatives[currentAlternativeIndex].get();
             for (unsigned index = 0; index < alternative->m_terms.size() && cursor < bmInfo.length(); ++index) {
                 PatternTerm& term = alternative->m_terms[index];
-                switch (term.type) {
-                case PatternTerm::Type::AssertionBOL:
-                case PatternTerm::Type::AssertionEOL:
-                case PatternTerm::Type::AssertionWordBoundary:
-                case PatternTerm::Type::BackReference:
-                case PatternTerm::Type::ForwardReference:
-                case PatternTerm::Type::ParenthesesSubpattern:
-                case PatternTerm::Type::ParentheticalAssertion:
-                case PatternTerm::Type::DotStarEnclosure:
-                    break;
-                case PatternTerm::Type::CharacterClass: {
-                    if (term.quantityType != QuantifierType::FixedCount || term.quantityMaxCount != 1)
-                        break;
-                    if (term.inputPosition != index)
-                        break;
-                    auto& characterClass = *term.characterClass;
-                    if (term.invert() || characterClass.m_anyCharacter) {
-                        bmInfo.setAll(cursor);
-                        ++cursor;
-                        continue;
-                    }
-                    if (!characterClass.m_rangesUnicode.isEmpty())
-                        bmInfo.addRanges(cursor, characterClass.m_rangesUnicode);
-                    if (!characterClass.m_matchesUnicode.isEmpty())
-                        bmInfo.addCharacters(cursor, characterClass.m_matchesUnicode);
-                    if (!characterClass.m_ranges.isEmpty())
-                        bmInfo.addRanges(cursor, characterClass.m_ranges);
-                    if (!characterClass.m_matches.isEmpty())
-                        bmInfo.addCharacters(cursor, characterClass.m_matches);
-                    ++cursor;
-                    continue;
-                }
-                case PatternTerm::Type::PatternCharacter: {
-                    if (term.quantityType != QuantifierType::FixedCount || term.quantityMaxCount != 1)
-                        break;
-                    if (term.inputPosition != index)
-                        break;
-                    if (U16_LENGTH(term.patternCharacter) != 1 && m_decodeSurrogatePairs)
-                        break;
-                    // For case-insesitive compares, non-ascii characters that have different
-                    // upper & lower case representations are already converted to a character class.
-                    ASSERT(!m_pattern.ignoreCase() || isASCIIAlpha(term.patternCharacter) || isCanonicallyUnique(term.patternCharacter, m_canonicalMode));
-                    if (m_pattern.ignoreCase() && isASCIIAlpha(term.patternCharacter)) {
-                        bmInfo.set(cursor, toASCIIUpper(term.patternCharacter));
-                        bmInfo.set(cursor, toASCIILower(term.patternCharacter));
-                    } else
-                        bmInfo.set(cursor, term.patternCharacter);
-                    ++cursor;
-                    continue;
-                }
-                }
+                std::optional<unsigned> nextCursor = collectBoyerMooreInfoFromTerm(term, cursor, bmInfo);
+                if (!nextCursor) {
                 dataLogLnIf(YarrJITInternal::verbose, "Shortening to ", cursor);
                 bmInfo.shortenLength(cursor);
                 break;
+            }
+                cursor = nextCursor.value();
             }
         }
         return bmInfo.length();
     }
 
-    const BoyerMooreBitmap::Map::WordType* getBoyerMooreBitmap(const BoyerMooreBitmap::Map& map)
+    std::span<const BoyerMooreBitmap::Map::WordType> getBoyerMooreBitmap(const BoyerMooreBitmap::Map& map)
     {
-        if (const auto* existingPointer = m_boyerMooreData->tryReuseBoyerMooreBitmap(map))
-           return existingPointer;
+        if (auto existing = m_boyerMooreData->tryReuseBoyerMooreBitmap(map); existing.size())
+            return existing;
 
         auto heapMap = makeUniqueRef<BoyerMooreBitmap::Map>(map);
-        const auto* pointer = heapMap->storage();
+        auto pointer = heapMap->storage();
         m_bmMaps.append(WTFMove(heapMap));
         return pointer;
-    }
-
-    void generateTryReadUnicodeCharacterHelper()
-    {
-#if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
-        if (m_tryReadUnicodeCharacterCalls.isEmpty())
-            return;
-
-        ASSERT(m_decodeSurrogatePairs);
-
-        m_tryReadUnicodeCharacterEntry = m_jit.label();
-
-        m_jit.tagReturnAddress();
-
-        tryReadUnicodeCharImpl(m_regs.regT0);
-
-        m_jit.ret();
-#endif
     }
 
     void generateEnter()
@@ -3970,39 +5077,29 @@ class YarrGenerator final : public YarrJITInfo {
         if (m_pattern.m_saveInitialStartValue)
             pushInEnter(X86Registers::ebx);
 
-#if OS(WINDOWS)
-        pushInEnter(X86Registers::edi);
-#endif
 #if ENABLE(YARR_JIT_ALL_PARENS_EXPRESSIONS)
         if (m_containsNestedSubpatterns) {
-#if OS(WINDOWS)
-            pushInEnter(X86Registers::esi);
-#endif
             pushInEnter(X86Registers::r12);
         }
 #endif
 
-        if (m_decodeSurrogatePairs) {
+        if (mayCall()) {
             pushInEnter(X86Registers::r13);
             pushInEnter(X86Registers::r14);
             pushInEnter(X86Registers::r15);
-        }
-#if OS(WINDOWS)
-        if (m_compileMode == JITCompileMode::IncludeSubpatterns)
-            m_jit.loadPtr(MacroAssembler::Address(MacroAssembler::framePointerRegister, 6 * sizeof(void*)), m_regs.output);
-        // rcx is the pointer to the allocated space for result in x64 Windows.
-        pushInEnter(X86Registers::ecx);
-#endif
+        } else if (m_pattern.hasDuplicateNamedCaptureGroups())
+            pushInEnter(X86Registers::r14);
+
 #elif CPU(ARM64)
         UNUSED_VARIABLE(pushInEnter);
         if (!Options::useJITCage())
             m_jit.tagReturnAddress();
-        if (m_decodeSurrogatePairs) {
+        if (mayCall()) {
             if (!Options::useJITCage())
                 pushPairInEnter(MacroAssembler::framePointerRegister, MacroAssembler::linkRegister);
-            m_jit.move(MacroAssembler::TrustedImm32(0x10000), m_regs.supplementaryPlanesBase);
-            m_jit.move(MacroAssembler::TrustedImm32(0xd800), m_regs.leadingSurrogateTag);
-            m_jit.move(MacroAssembler::TrustedImm32(0xdc00), m_regs.trailingSurrogateTag);
+
+            m_jit.move(MacroAssembler::TrustedImm32(0xdc00dc00), m_regs.surrogateTagMask);
+            m_jit.move(MacroAssembler::TrustedImm32(0xdc00d800), m_regs.surrogatePairTags);
         }
 #elif CPU(ARM_THUMB2)
         UNUSED_VARIABLE(pushPairInEnter);
@@ -4013,7 +5110,7 @@ class YarrGenerator final : public YarrJITInfo {
         pushInEnter(ARMRegisters::r10);
 #elif CPU(RISCV64)
         UNUSED_VARIABLE(pushInEnter);
-        if (m_decodeSurrogatePairs)
+        if (mayCall())
             pushPairInEnter(MacroAssembler::framePointerRegister, MacroAssembler::linkRegister);
 #else
         UNUSED_VARIABLE(pushInEnter);
@@ -4031,36 +5128,24 @@ class YarrGenerator final : public YarrJITInfo {
 #endif
 
 #if CPU(X86_64)
-#if OS(WINDOWS)
-        // Store the return value in the allocated space pointed by rcx.
-        m_jit.pop(X86Registers::ecx);
-        m_jit.store64(m_regs.returnRegister, MacroAssembler::Address(X86Registers::ecx));
-        m_jit.store64(m_regs.returnRegister2, MacroAssembler::Address(X86Registers::ecx, sizeof(void*)));
-        m_jit.move(X86Registers::ecx, m_regs.returnRegister);
-#endif
-        if (m_decodeSurrogatePairs) {
+        if (mayCall()) {
             m_jit.pop(X86Registers::r15);
             m_jit.pop(X86Registers::r14);
             m_jit.pop(X86Registers::r13);
-        }
+        } else if (m_pattern.hasDuplicateNamedCaptureGroups())
+            m_jit.pop(X86Registers::r14);
 
 #if ENABLE(YARR_JIT_ALL_PARENS_EXPRESSIONS)
         if (m_containsNestedSubpatterns) {
             m_jit.pop(X86Registers::r12);
-#if OS(WINDOWS)
-            m_jit.pop(X86Registers::esi);
-#endif
         }
-#endif
-#if OS(WINDOWS)
-        m_jit.pop(X86Registers::edi);
 #endif
 
         if (m_pattern.m_saveInitialStartValue)
             m_jit.pop(X86Registers::ebx);
         m_jit.emitFunctionEpilogue();
 #elif CPU(ARM64)
-        if (m_decodeSurrogatePairs) {
+        if (mayCall()) {
             if (!Options::useJITCage())
                 m_jit.popPair(MacroAssembler::framePointerRegister, MacroAssembler::linkRegister);
         }
@@ -4071,7 +5156,7 @@ class YarrGenerator final : public YarrJITInfo {
         m_jit.pop(ARMRegisters::r5);
         m_jit.pop(ARMRegisters::r4);
 #elif CPU(RISCV64)
-        if (m_decodeSurrogatePairs)
+        if (mayCall())
             m_jit.popPair(MacroAssembler::framePointerRegister, MacroAssembler::linkRegister);
 #endif
 
@@ -4090,27 +5175,47 @@ class YarrGenerator final : public YarrJITInfo {
         m_jit.loadPair32(outputGPR, MacroAssembler::TrustedImm32((subpatternId << 1) * sizeof(int)), startIndexGPR, endIndexOrLenGPR);
     }
 
+    void loadSubPatternIdForDuplicateNamedGroup(MacroAssembler::RegisterID outputGPR, unsigned duplicateNamedGroupId, MacroAssembler::RegisterID subpatternIdGPR)
+    {
+        m_jit.load32(MacroAssembler::Address(outputGPR, offsetForDuplicateNamedGroupId(duplicateNamedGroupId) * sizeof(unsigned)), subpatternIdGPR);
+    }
+
+    void loadSubPattern(MacroAssembler::RegisterID outputGPR, MacroAssembler::RegisterID subpatternIdGPR, MacroAssembler::RegisterID startIndexGPR, MacroAssembler::RegisterID endIndexOrLenGPR)
+    {
+        m_jit.getEffectiveAddress(MacroAssembler::BaseIndex(outputGPR, subpatternIdGPR, MacroAssembler::TimesEight), endIndexOrLenGPR);
+        m_jit.loadPair32(endIndexOrLenGPR, startIndexGPR, endIndexOrLenGPR);
+    }
+
+    void loadSubPatternEnd(MacroAssembler::RegisterID outputGPR, MacroAssembler::RegisterID subpatternIdGPR, MacroAssembler::RegisterID endIndex)
+    {
+        m_jit.getEffectiveAddress(MacroAssembler::BaseIndex(outputGPR, subpatternIdGPR, MacroAssembler::TimesEight), endIndex);
+        m_jit.load32(MacroAssembler::Address(endIndex, sizeof(unsigned)), endIndex);
+    }
+
 public:
-    YarrGenerator(CCallHelpers& jit, const VM* vm, YarrCodeBlock* codeBlock, const YarrJITRegs& regs, YarrPattern& pattern, const String& patternString, CharSize charSize, JITCompileMode compileMode)
+    YarrGenerator(CCallHelpers& jit, VM* vm, YarrCodeBlock* codeBlock, const YarrJITRegs& regs, YarrPattern& pattern, StringView patternString, CharSize charSize, JITCompileMode compileMode, std::optional<StringView> sampleString)
         : m_jit(jit)
         , m_vm(vm)
         , m_codeBlock(codeBlock)
+        , m_boyerMooreData(static_cast<YarrBoyerMooreData*>(codeBlock))
         , m_regs(regs)
         , m_pattern(pattern)
         , m_patternString(patternString)
         , m_charSize(charSize)
         , m_compileMode(compileMode)
-        , m_decodeSurrogatePairs(m_charSize == CharSize::Char16 && m_pattern.unicode())
-        , m_unicodeIgnoreCase(m_pattern.unicode() && m_pattern.ignoreCase())
-        , m_canonicalMode(m_pattern.unicode() ? CanonicalMode::Unicode : CanonicalMode::UCS2)
+        , m_decodeSurrogatePairs(m_charSize == CharSize::Char16 && m_pattern.eitherUnicode())
+        , m_unicodeIgnoreCase(m_pattern.eitherUnicode() && m_pattern.ignoreCase())
+        , m_decode16BitForBackreferencesWithCalls(m_charSize == CharSize::Char16 && m_pattern.m_containsBackreferences && m_pattern.ignoreCase())
+        , m_canonicalMode(m_pattern.eitherUnicode() ? CanonicalMode::Unicode : CanonicalMode::UCS2)
 #if ENABLE(YARR_JIT_ALL_PARENS_EXPRESSIONS)
-        , m_parenContextSizes(compileMode == JITCompileMode::IncludeSubpatterns ? m_pattern.m_numSubpatterns : 0, m_pattern.m_body->m_callFrameSize)
+        , m_parenContextSizes(compileMode == JITCompileMode::IncludeSubpatterns ? m_pattern.m_numSubpatterns : 0, compileMode == JITCompileMode::IncludeSubpatterns ? m_pattern.m_numDuplicateNamedCaptureGroups : 0, m_pattern.m_body->m_callFrameSize)
 #endif
+        , m_sampleString(sampleString)
+        , m_sampler(charSize)
     {
-        m_boyerMooreData = static_cast<YarrBoyerMoyerData*>(m_codeBlock);
     }
 
-    YarrGenerator(CCallHelpers& jit, const VM* vm, YarrBoyerMoyerData* yarrBMData, const YarrJITRegs& regs, YarrPattern& pattern, const String& patternString, CharSize charSize, JITCompileMode compileMode)
+    YarrGenerator(CCallHelpers& jit, VM* vm, YarrBoyerMooreData* yarrBMData, const YarrJITRegs& regs, YarrPattern& pattern, StringView patternString, CharSize charSize, JITCompileMode compileMode)
         : m_jit(jit)
         , m_vm(vm)
         , m_codeBlock(nullptr)
@@ -4120,12 +5225,14 @@ public:
         , m_patternString(patternString)
         , m_charSize(charSize)
         , m_compileMode(compileMode)
-        , m_decodeSurrogatePairs(m_charSize == CharSize::Char16 && m_pattern.unicode())
-        , m_unicodeIgnoreCase(m_pattern.unicode() && m_pattern.ignoreCase())
-        , m_canonicalMode(m_pattern.unicode() ? CanonicalMode::Unicode : CanonicalMode::UCS2)
+        , m_decodeSurrogatePairs(m_charSize == CharSize::Char16 && m_pattern.eitherUnicode())
+        , m_unicodeIgnoreCase(m_pattern.eitherUnicode() && m_pattern.ignoreCase())
+        , m_decode16BitForBackreferencesWithCalls(m_charSize == CharSize::Char16 && m_pattern.m_containsBackreferences && m_pattern.ignoreCase())
+        , m_canonicalMode(m_pattern.eitherUnicode() ? CanonicalMode::Unicode : CanonicalMode::UCS2)
 #if ENABLE(YARR_JIT_ALL_PARENS_EXPRESSIONS)
-        , m_parenContextSizes(compileMode == JITCompileMode::IncludeSubpatterns ? m_pattern.m_numSubpatterns : 0, m_pattern.m_body->m_callFrameSize)
+        , m_parenContextSizes(compileMode == JITCompileMode::IncludeSubpatterns ? m_pattern.m_numSubpatterns : 0, compileMode == JITCompileMode::IncludeSubpatterns ? m_pattern.m_numDuplicateNamedCaptureGroups : 0, m_pattern.m_body->m_callFrameSize)
 #endif
+        , m_sampler(charSize)
     {
         if (m_pattern.m_containsBackreferences)
             m_usesT2 = true;
@@ -4164,12 +5271,28 @@ public:
 
         if (m_pattern.m_containsBackreferences
 #if ENABLE(YARR_JIT_BACKREFERENCES)
+#if ENABLE(YARR_JIT_BACKREFERENCES_FOR_16BIT_EXPRS)
+            && (m_compileMode == JITCompileMode::MatchOnly)
+#else
             && (m_compileMode == JITCompileMode::MatchOnly || (m_pattern.ignoreCase() && m_charSize != CharSize::Char8))
+#endif
 #endif
             ) {
                 codeBlock.setFallBackWithFailureReason(JITFailureReason::BackReference);
                 return;
         }
+
+        if (m_pattern.m_containsLookbehinds) {
+            codeBlock.setFallBackWithFailureReason(JITFailureReason::Lookbehind);
+            return;
+        }
+
+#if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS) && ENABLE(YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP)
+        if (m_decodeSurrogatePairs && m_compileMode != JITCompileMode::InlineTest && !m_pattern.multiline() && !m_pattern.m_containsBOL && !m_pattern.m_containsLookbehinds && !m_pattern.m_containsModifiers) {
+            ASSERT(m_regs.firstCharacterAdditionalReadSize != InvalidGPRReg);
+            m_useFirstNonBMPCharacterOptimization = true;
+        }
+#endif
 
         // We need to compile before generating code since we set flags based on compilation that
         // are used during generation.
@@ -4180,7 +5303,7 @@ public:
             return;
         }
 
-        if (UNLIKELY(Options::dumpDisassembly() || Options::dumpRegExpDisassembly()))
+        if (Options::dumpDisassembly() || Options::dumpRegExpDisassembly()) [[unlikely]]
             m_disassembler = makeUnique<YarrDisassembler>(this);
 
         if (m_disassembler)
@@ -4209,11 +5332,7 @@ public:
             functionChecks<YarrCodeBlock::YarrJITCode16>();
             functionChecks<YarrCodeBlock::YarrJITCodeMatchOnly8>();
             functionChecks<YarrCodeBlock::YarrJITCodeMatchOnly16>();
-#if CPU(X86_64) && OS(WINDOWS)
-            // matchingContext is the 5th argument, it is found on the stack.
-            MacroAssembler::RegisterID matchingContext = m_regs.regT1;
-            m_jit.loadPtr(MacroAssembler::Address(MacroAssembler::framePointerRegister, 7 * sizeof(void*)), matchingContext);
-#elif CPU(ARM_THUMB2) || CPU(MIPS)
+#if CPU(ARM_THUMB2)
             // Not enough argument registers: try to load the 5th argument from the stack
             MacroAssembler::RegisterID matchingContext = m_regs.regT1;
 
@@ -4257,6 +5376,8 @@ public:
             }
             for (; subpatternId < m_pattern.m_numSubpatterns + 1; ++subpatternId)
                 m_jit.store32(MacroAssembler::TrustedImm32(-1), MacroAssembler::Address(m_regs.output, (subpatternId << 1) * sizeof(int)));
+            for (unsigned i = m_pattern.offsetVectorBaseForNamedCaptures(); i < m_pattern.offsetsSize(); ++i)
+                m_jit.store32(MacroAssembler::TrustedImm32(0), MacroAssembler::Address(m_regs.output, (i) * sizeof(int)));
         } else {
             if (!m_pattern.m_body->m_hasFixedSize)
                 setMatchStart(m_regs.index);
@@ -4284,14 +5405,12 @@ public:
 
         ptrdiff_t codeSize = MacroAssembler::differenceBetween(startOfMainCode, m_jit.label());
         bool canInline = m_compileMode != JITCompileMode::IncludeSubpatterns
-            && !m_pattern.global() && !m_pattern.sticky() && !m_pattern.unicode()
+            && !m_pattern.global() && !m_pattern.sticky() && !m_pattern.eitherUnicode()
 #if ENABLE(YARR_JIT_ALL_PARENS_EXPRESSIONS)
             && !m_containsNestedSubpatterns
 #endif
             && !m_pattern.m_containsBackreferences
             && !m_pattern.m_saveInitialStartValue;
-
-        generateTryReadUnicodeCharacterHelper();
 
         generateJITFailReturn();
 
@@ -4305,44 +5424,39 @@ public:
             });
         }
 
-        if (!m_tryReadUnicodeCharacterCalls.isEmpty()) {
-            m_jit.addLinkTask([=] (LinkBuffer& linkBuffer) {
-            CodeLocationLabel<NoPtrTag> tryReadUnicodeCharacterHelper = linkBuffer.locationOf<NoPtrTag>(m_tryReadUnicodeCharacterEntry);
-
-            for (auto call : m_tryReadUnicodeCharacterCalls)
-                linkBuffer.link(call, tryReadUnicodeCharacterHelper);
+        if (m_disassembler) {
+            // Disassemble after all link tasks are complete.
+            m_jit.addLinkTask([=, this] (LinkBuffer& linkBuffer) {
+                m_disassembler->dump(linkBuffer);
             });
         }
 
-        LinkBuffer linkBuffer(m_jit, REGEXP_CODE_ID, LinkBuffer::Profile::YarrJIT, JITCompilationCanFail);
+        LinkBuffer linkBuffer(m_jit, &codeBlock, LinkBuffer::Profile::YarrJIT, JITCompilationCanFail);
         if (linkBuffer.didFailToAllocate()) {
             codeBlock.setFallBackWithFailureReason(JITFailureReason::ExecutableMemoryAllocationFailure);
             return;
         }
 
-        if (m_disassembler)
-            m_disassembler->dump(linkBuffer);
-
         if (m_compileMode == JITCompileMode::MatchOnly) {
             if (m_charSize == CharSize::Char8) {
-                codeBlock.set8BitCodeMatchOnly(FINALIZE_REGEXP_CODE(linkBuffer, YarrMatchOnly8BitPtrTag, "Match-only 8-bit regular expression"), WTFMove(m_bmMaps));
+                codeBlock.set8BitCodeMatchOnly(FINALIZE_REGEXP_CODE(linkBuffer, YarrMatchOnly8BitPtrTag, nullptr, "Match-only 8-bit regular expression"), WTFMove(m_bmMaps));
                 codeBlock.set8BitInlineStats(codeSize, callFrameSizeInBytes, canInline, m_usesT2);
             } else {
-                codeBlock.set16BitCodeMatchOnly(FINALIZE_REGEXP_CODE(linkBuffer, YarrMatchOnly16BitPtrTag, "Match-only 16-bit regular expression"), WTFMove(m_bmMaps));
+                codeBlock.set16BitCodeMatchOnly(FINALIZE_REGEXP_CODE(linkBuffer, YarrMatchOnly16BitPtrTag, nullptr, "Match-only 16-bit regular expression"), WTFMove(m_bmMaps));
                 codeBlock.set16BitInlineStats(codeSize, callFrameSizeInBytes, canInline, m_usesT2);
             }
         } else {
             if (m_charSize == CharSize::Char8)
-                codeBlock.set8BitCode(FINALIZE_REGEXP_CODE(linkBuffer, Yarr8BitPtrTag, "8-bit regular expression"), WTFMove(m_bmMaps));
+                codeBlock.set8BitCode(FINALIZE_REGEXP_CODE(linkBuffer, Yarr8BitPtrTag, nullptr, "8-bit regular expression"), WTFMove(m_bmMaps));
             else
-                codeBlock.set16BitCode(FINALIZE_REGEXP_CODE(linkBuffer, Yarr16BitPtrTag, "16-bit regular expression"), WTFMove(m_bmMaps));
+                codeBlock.set16BitCode(FINALIZE_REGEXP_CODE(linkBuffer, Yarr16BitPtrTag, nullptr, "16-bit regular expression"), WTFMove(m_bmMaps));
         }
         if (m_failureReason)
             codeBlock.setFallBackWithFailureReason(*m_failureReason);
     }
 
 #if ENABLE(YARR_JIT_REGEXP_TEST_INLINE)
-    void compileInline(YarrBoyerMoyerData& boyerMooreData)
+    void compileInline(YarrBoyerMooreData& boyerMooreData)
     {
         RELEASE_ASSERT(!m_pattern.m_containsBackreferences);
 
@@ -4358,16 +5472,20 @@ public:
         RELEASE_ASSERT(!m_containsNestedSubpatterns);
 #endif
 
-        ASSERT(!m_failureReason);
-
-        if (m_usesT2)
-            ASSERT(m_regs.regT2 != MacroAssembler::InvalidGPRReg);
-
-        if (UNLIKELY(Options::dumpDisassembly() || Options::dumpRegExpDisassembly()))
+        if (Options::dumpDisassembly() || Options::dumpRegExpDisassembly()) [[unlikely]]
             m_disassembler = makeUnique<YarrDisassembler>(this);
 
         if (m_disassembler)
             m_disassembler->setStartOfCode(m_jit.label());
+
+        if (m_failureReason) {
+            m_jit.move(MacroAssembler::TrustedImmPtr((void*)static_cast<size_t>(JSRegExpResult::JITCodeFailure)), m_regs.returnRegister);
+            m_jit.move(MacroAssembler::TrustedImm32(0), m_regs.returnRegister2);
+            return;
+        }
+
+        if (m_usesT2)
+            ASSERT(m_regs.regT2 != MacroAssembler::InvalidGPRReg);
 
         MacroAssembler::Jump hasInput = checkInput();
         generateFailReturn();
@@ -4376,7 +5494,17 @@ public:
         unsigned callFrameSizeInBytes = alignCallFrameSizeInBytes(m_pattern.m_body->m_callFrameSize);
         if (callFrameSizeInBytes) {
             // Create space on stack for matching context data.
-            m_jit.addPtr(MacroAssembler::TrustedImm32(-callFrameSizeInBytes), MacroAssembler::stackPointerRegister, MacroAssembler::stackPointerRegister);
+            // Note that this stack check cannot clobber m_regs.regT1 as it is needed for the slow path we call if we fail the stack check.
+            m_jit.addPtr(MacroAssembler::TrustedImm32(-callFrameSizeInBytes), MacroAssembler::stackPointerRegister, m_regs.regT0);
+            MacroAssembler::Jump stackOk = m_jit.branchPtr(MacroAssembler::LessThanOrEqual, MacroAssembler::AbsoluteAddress(const_cast<VM*>(m_vm)->addressOfSoftStackLimit()), m_regs.regT0);
+
+            // Exceeded stack limit, punt to the interpreter.
+            m_jit.move(MacroAssembler::TrustedImmPtr((void*)static_cast<size_t>(JSRegExpResult::JITCodeFailure)), m_regs.returnRegister);
+            m_jit.move(MacroAssembler::TrustedImm32(0), m_regs.returnRegister2);
+            m_inlinedFailedMatch.append(m_jit.jump());
+
+            stackOk.link(&m_jit);
+            m_jit.move(m_regs.regT0, MacroAssembler::stackPointerRegister);
         }
 
 #ifdef JIT_UNICODE_EXPRESSIONS
@@ -4392,6 +5520,8 @@ public:
         if (m_compileMode == JITCompileMode::IncludeSubpatterns) {
             for (unsigned i = 0; i < m_pattern.m_numSubpatterns + 1; ++i)
                 m_jit.store32(MacroAssembler::TrustedImm32(-1), MacroAssembler::Address(m_regs.output, (i << 1) * sizeof(int)));
+            for (unsigned i = m_pattern.offsetVectorBaseForNamedCaptures(); i < m_pattern.offsetsSize(); ++i)
+                m_jit.store32(MacroAssembler::TrustedImm32(0), MacroAssembler::Address(m_regs.output, (i) * sizeof(int)));
         }
 
         if (!m_pattern.m_body->m_hasFixedSize)
@@ -4407,8 +5537,6 @@ public:
         if (m_disassembler)
             m_disassembler->setEndOfBacktrack(m_jit.label());
 
-        generateTryReadUnicodeCharacterHelper();
-
         generateJITFailReturn();
 
         if (m_disassembler)
@@ -4421,15 +5549,6 @@ public:
         if (!backtrackRecords.isEmpty()) {
             m_jit.addLinkTask([=] (LinkBuffer& linkBuffer) {
                 BacktrackingState::linkBacktrackRecords(linkBuffer, backtrackRecords);
-            });
-        }
-
-        if (!m_tryReadUnicodeCharacterCalls.isEmpty()) {
-            m_jit.addLinkTask([=] (LinkBuffer& linkBuffer) {
-                CodeLocationLabel<NoPtrTag> tryReadUnicodeCharacterHelper = linkBuffer.locationOf<NoPtrTag>(m_tryReadUnicodeCharacterEntry);
-
-                for (auto call : m_tryReadUnicodeCharacterCalls)
-                    linkBuffer.link(call, tryReadUnicodeCharacterHelper);
             });
         }
 
@@ -4491,7 +5610,7 @@ public:
             case PatternTerm::Type::PatternCharacter:
                 out.printf("PatternCharacter checked-offset:(%u) ", op.m_checkedOffset.value());
                 dumpUChar32(out, term->patternCharacter);
-                if (m_pattern.ignoreCase())
+                if (op.m_term->ignoreCase())
                     out.print("ignore case ");
 
                 term->dumpQuantifier(out);
@@ -4545,6 +5664,10 @@ public:
             out.printf("SimpleNestedAlternativeBegin minimum-size:(%u),checked-offset:(%u)\n", op.m_alternative->m_minimumSize, op.m_checkedOffset.value());
             return 1;
 
+        case YarrOpCode::StringListAlternativeBegin:
+            out.printf("StringListAlternativeBegin minimum-size:(%u),checked-offset:(%u)\n", op.m_alternative->m_minimumSize, op.m_checkedOffset.value());
+            return 1;
+
         case YarrOpCode::NestedAlternativeBegin:
             out.printf("NestedAlternativeBegin minimum-size:(%u),checked-offset:(%u)\n", op.m_alternative->m_minimumSize, op.m_checkedOffset.value());
             return 1;
@@ -4553,12 +5676,22 @@ public:
             out.printf("SimpleNestedAlternativeNext minimum-size:(%u),checked-offset:(%u)\n", op.m_alternative->m_minimumSize, op.m_checkedOffset.value());
             return 0;
 
+        case YarrOpCode::StringListAlternativeNext:
+            out.printf("StringListAlternativeNext minimum-size:(%u),checked-offset:(%u)\n", op.m_alternative->m_minimumSize, op.m_checkedOffset.value());
+            return 0;
+
         case YarrOpCode::NestedAlternativeNext:
             out.printf("NestedAlternativeNext minimum-size:(%u),checked-offset:(%u)\n", op.m_alternative->m_minimumSize, op.m_checkedOffset.value());
             return 0;
 
         case YarrOpCode::SimpleNestedAlternativeEnd:
             out.printf("SimpleNestedAlternativeEnd checked-offset:(%u) ", op.m_checkedOffset.value());
+            term->dumpQuantifier(out);
+            out.print("\n");
+            return -1;
+
+        case YarrOpCode::StringListAlternativeEnd:
+            out.printf("StringListAlternativeEnd checked-offset:(%u) ", op.m_checkedOffset.value());
             term->dumpQuantifier(out);
             out.print("\n");
             return -1;
@@ -4641,37 +5774,45 @@ public:
         return 0;
     }
 
+    bool mayCall() const
+    {
+        return m_decodeSurrogatePairs || m_decode16BitForBackreferencesWithCalls;
+    }
+
 private:
     CCallHelpers& m_jit;
-    const VM* m_vm;
-    YarrCodeBlock* m_codeBlock;
-    YarrBoyerMoyerData* m_boyerMooreData;
+    VM* m_vm;
+    YarrCodeBlock* const m_codeBlock;
+    YarrBoyerMooreData* const m_boyerMooreData;
     const YarrJITRegs& m_regs;
 
     StackCheck* m_compilationThreadStackChecker { nullptr };
     YarrPattern& m_pattern;
-    const String& m_patternString;
+    const StringView m_patternString;
 
-    CharSize m_charSize;
-    JITCompileMode m_compileMode;
+    const CharSize m_charSize;
+    const JITCompileMode m_compileMode;
 
     // Used to detect regular expression constructs that are not currently
     // supported in the JIT; fall back to the interpreter when this is detected.
     std::optional<JITFailureReason> m_failureReason;
 
-    bool m_decodeSurrogatePairs;
-    bool m_unicodeIgnoreCase;
+    const bool m_decodeSurrogatePairs : 1;
+    const bool m_unicodeIgnoreCase : 1;
+    const bool m_decode16BitForBackreferencesWithCalls : 1;
+
     bool m_usesT2 { false };
-    CanonicalMode m_canonicalMode;
+    const CanonicalMode m_canonicalMode;
 #if ENABLE(YARR_JIT_ALL_PARENS_EXPRESSIONS)
     bool m_containsNestedSubpatterns { false };
     ParenContextSizes m_parenContextSizes;
 #endif
+#if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS) && ENABLE(YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP)
+    bool m_useFirstNonBMPCharacterOptimization { false };
+#endif
     MacroAssembler::JumpList m_abortExecution;
     MacroAssembler::JumpList m_hitMatchLimit;
-    Vector<MacroAssembler::Call> m_tryReadUnicodeCharacterCalls;
     MacroAssembler::Label m_tryReadUnicodeCharacterEntry;
-
     MacroAssembler::JumpList m_inlinedMatched;
     MacroAssembler::JumpList m_inlinedFailedMatch;
 
@@ -4690,7 +5831,129 @@ private:
     // offset in the stack if there wasn't enough registers to pass it, e.g.,
     // ARMv7 and MIPS only use 4 registers to pass function arguments.
     unsigned m_pushCountInEnter { 0 };
+
+    std::optional<StringView> m_sampleString;
+    SubjectSampler m_sampler;
 };
+
+#if ENABLE(YARR_JIT_UNICODE_EXPRESSIONS)
+static MacroAssemblerCodeRef<JITThunkPtrTag> tryReadUnicodeCharSlowThunkGenerator(VM&)
+{
+    CCallHelpers jit(nullptr);
+
+    jit.tagReturnAddress();
+    tryReadUnicodeCharSlowImpl<TryReadUnicodeCharGenFirstNonBMPOptimization::DontUseOptimization>(jit);
+    jit.ret();
+
+    LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID, LinkBuffer::Profile::Thunk);
+
+    return FINALIZE_THUNK(patchBuffer, JITThunkPtrTag, "Yarr tryReadUnicodeChar"_s, "YARR tryReadUnicodeChar thunk");
+}
+
+#if ENABLE(YARR_JIT_UNICODE_CAN_INCREMENT_INDEX_FOR_NON_BMP)
+static MacroAssemblerCodeRef<JITThunkPtrTag> tryReadUnicodeCharIncForNonBMPSlowThunkGenerator(VM&)
+{
+    CCallHelpers jit(nullptr);
+
+    jit.tagReturnAddress();
+    tryReadUnicodeCharSlowImpl<TryReadUnicodeCharGenFirstNonBMPOptimization::UseOptimization>(jit);
+    jit.ret();
+
+    LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID, LinkBuffer::Profile::Thunk);
+
+    return FINALIZE_THUNK(patchBuffer, JITThunkPtrTag, "Yarr tryReadUnicodeChar w/Inc for non-BMP"_s, "YARR tryReadUnicodeChar w/Inc for non-BMP thunk");
+}
+#endif
+#endif
+
+#if ENABLE(YARR_JIT_BACKREFERENCES_FOR_16BIT_EXPRS)
+static MacroAssemblerCodeRef<JITThunkPtrTag> areCanonicallyEquivalentThunkGenerator(VM&)
+{
+    CCallHelpers jit(nullptr);
+
+    unsigned pushCount = 0;
+
+#if CPU(ARM64)
+    constexpr unsigned registersToSave = 16;
+
+    auto pushCallerSavePair = [&]() {
+        jit.pushPair(GPRInfo::toRegister(pushCount), GPRInfo::toRegister(pushCount + 1));
+        pushCount += 2;
+    };
+
+    auto popCallerSavePair = [&]() {
+        pushCount -= 2;
+        jit.popPair(GPRInfo::toRegister(pushCount), GPRInfo::toRegister(pushCount + 1));
+    };
+#elif CPU(X86_64)
+    constexpr unsigned registersToSave = 7;
+
+    constexpr GPRReg callerSaves[registersToSave] = {
+        // We don't save RAX since the return value ends up there.
+        X86Registers::ecx,
+        X86Registers::edx,
+        X86Registers::esi,
+        X86Registers::edi,
+        X86Registers::r8,
+        X86Registers::r9,
+        X86Registers::r10
+    };
+
+    auto pushCallerSave = [&]() {
+        jit.push(callerSaves[pushCount]);
+        pushCount++;
+    };
+
+    auto popCallerSave = [&]() {
+        pushCount--;
+        jit.pop(callerSaves[pushCount]);
+    };
+#endif
+
+    jit.emitFunctionPrologue();
+
+#if CPU(ARM64)
+    while (pushCount < registersToSave)
+        pushCallerSavePair();
+#elif CPU(X86_64)
+    while (pushCount < registersToSave)
+        pushCallerSave();
+#endif
+
+    jit.setupArguments<decltype(operationAreCanonicallyEquivalent)>(areCanonicallyEquivalentCharArgReg, areCanonicallyEquivalentPattCharArgReg, areCanonicallyEquivalentCanonicalModeArgReg);
+    jit.callOperation<OperationPtrTag>(operationAreCanonicallyEquivalent);
+
+#if CPU(ARM64)
+    // Convert 8-bit bool result into 32 bit value and save in IP0 while restoring callee saves.
+    jit.zeroExtend8To32(GPRInfo::returnValueGPR, ARM64Registers::ip0);
+
+    while (pushCount)
+        popCallerSavePair();
+
+    jit.move(ARM64Registers::ip0, areCanonicallyEquivalentCharArgReg);
+#elif CPU(X86_64)
+    // Convert 8-bit bool result into 32 bit value.
+    jit.zeroExtend8To32(GPRInfo::returnValueGPR, GPRInfo::returnValueGPR);
+
+    while (pushCount)
+        popCallerSave();
+#endif
+
+    ASSERT(!pushCount);
+
+    jit.emitFunctionEpilogue();
+    jit.ret();
+
+    LinkBuffer patchBuffer(jit, GLOBAL_THUNK_ID, LinkBuffer::Profile::Thunk);
+
+    return FINALIZE_THUNK(patchBuffer, JITThunkPtrTag, "Yarr areCanonicallyEquivalent", "YARR areCanonicallyEquivalent call");
+}
+
+JSC_DEFINE_NOEXCEPT_JIT_OPERATION(operationAreCanonicallyEquivalent, bool, (unsigned a, unsigned b, CanonicalMode canonicalMode))
+{
+    return areCanonicallyEquivalent(static_cast<char32_t>(a), static_cast<char32_t>(b), canonicalMode);
+}
+#endif
 
 static void dumpCompileFailure(JITFailureReason failure)
 {
@@ -4703,6 +5966,9 @@ static void dumpCompileFailure(JITFailureReason failure)
         break;
     case JITFailureReason::ForwardReference:
         dataLog("Can't JIT a pattern containing forward references\n");
+        break;
+    case JITFailureReason::Lookbehind:
+        dataLog("Can't JIT a pattern containing lookbehinds\n");
         break;
     case JITFailureReason::VariableCountedParenthesisWithNonZeroMinimum:
         dataLog("Can't JIT a pattern containing a variable counted parenthesis with a non-zero minimum\n");
@@ -4719,20 +5985,23 @@ static void dumpCompileFailure(JITFailureReason failure)
     case JITFailureReason::ExecutableMemoryAllocationFailure:
         dataLog("Can't JIT because of failure of allocation of executable memory\n");
         break;
+    case JITFailureReason::OffsetTooLarge:
+        dataLog("Can't JIT because pattern exceeds string length limits\n");
+        break;
     }
 }
 
-void jitCompile(YarrPattern& pattern, String& patternString, CharSize charSize, VM* vm, YarrCodeBlock& codeBlock, JITCompileMode mode)
+void jitCompile(YarrPattern& pattern, StringView patternString, CharSize charSize, std::optional<StringView> sampleString, VM* vm, YarrCodeBlock& codeBlock, JITCompileMode mode)
 {
     CCallHelpers masm;
 
     ASSERT(mode == JITCompileMode::MatchOnly || mode == JITCompileMode::IncludeSubpatterns);
 
     YarrJITDefaultRegisters jitRegisters;
-    YarrGenerator<YarrJITDefaultRegisters>(masm, vm, &codeBlock, jitRegisters, pattern, patternString, charSize, mode).compile(codeBlock);
+    YarrGenerator<YarrJITDefaultRegisters>(masm, vm, &codeBlock, jitRegisters, pattern, patternString, charSize, mode, sampleString).compile(codeBlock);
 
     if (auto failureReason = codeBlock.failureReason()) {
-        if (UNLIKELY(Options::dumpCompiledRegExpPatterns())) {
+        if (Options::dumpCompiledRegExpPatterns()) [[unlikely]] {
             pattern.dumpPatternString(WTF::dataFile(), patternString);
             dataLog(" : ");
             dumpCompileFailure(*failureReason);
@@ -4741,14 +6010,22 @@ void jitCompile(YarrPattern& pattern, String& patternString, CharSize charSize, 
 }
 
 #if ENABLE(YARR_JIT_REGEXP_TEST_INLINE)
-#if !(CPU(ARM64) || (CPU(X86_64) && !OS(WINDOWS)) || CPU(RISCV64))
+#if !(CPU(ARM64) || CPU(X86_64) || CPU(RISCV64))
 #error "No support for inlined JIT'ing of RegExp.test for this CPU / OS combination."
 #endif
 
-void jitCompileInlinedTest(StackCheck* m_compilationThreadStackChecker, const String& patternString, OptionSet<Yarr::Flags> flags, CharSize charSize, const VM* vm, YarrBoyerMoyerData& boyerMooreData, CCallHelpers& jit, YarrJITRegisters& jitRegisters)
+void jitCompileInlinedTest(StackCheck* m_compilationThreadStackChecker, StringView patternString, OptionSet<Yarr::Flags> flags, CharSize charSize, VM* vm, YarrBoyerMooreData& boyerMooreData, CCallHelpers& jit, YarrJITRegisters& jitRegisters)
 {
     Yarr::ErrorCode errorCode;
     Yarr::YarrPattern pattern(patternString, flags, errorCode);
+
+    if (errorCode != Yarr::ErrorCode::NoError) {
+        // This path cannot clobber jitRegisters.regT1 as it is needed for the slow path we'll end up in.
+        jit.move(MacroAssembler::TrustedImmPtr((void*)static_cast<size_t>(JSRegExpResult::JITCodeFailure)), jitRegisters.returnRegister);
+        return;
+    }
+
+    jitRegisters.validate();
 
     YarrGenerator<YarrJITRegisters> yarrGenerator(jit, vm, &boyerMooreData, jitRegisters, pattern, patternString, charSize, JITCompileMode::InlineTest);
     yarrGenerator.setStackChecker(m_compilationThreadStackChecker);
@@ -4756,6 +6033,16 @@ void jitCompileInlinedTest(StackCheck* m_compilationThreadStackChecker, const St
 }
 #endif
 
+void YarrCodeBlock::dumpSimpleName(PrintStream& out) const
+{
+    if (m_regExp)
+        RegExp::dumpToStream(m_regExp, out);
+    else
+        out.print("unspecified");
+}
+
 }}
 
 #endif
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

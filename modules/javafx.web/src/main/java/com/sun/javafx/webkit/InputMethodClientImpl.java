@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,7 @@ import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
 
 import com.sun.javafx.logging.PlatformLogger;
@@ -58,13 +59,14 @@ public final class InputMethodClientImpl
     private boolean state;
 
     public InputMethodClientImpl(WebView wv, WebPage webPage) {
-        this.wvRef = new WeakReference<WebView>(wv);
+        this.wvRef = new WeakReference<>(wv);
         this.webPage = webPage;
         if (webPage != null) {
             webPage.setInputMethodClient(this);
         }
     }
 
+    @Override
     public void activateInputMethods(final boolean doActivate) {
         WebView wv = wvRef.get();
         if (wv != null && wv.getScene() != null) {
@@ -81,7 +83,7 @@ public final class InputMethodClientImpl
      * Converts the given InputMethodEvent to a WCInputMethodEvent.
      */
     public static WCInputMethodEvent convertToWCInputMethodEvent(InputMethodEvent ie) {
-        List<Integer> underlines = new ArrayList<Integer>();
+        List<Integer> underlines = new ArrayList<>();
         StringBuilder composed = new StringBuilder();
         int pos = 0;
 
@@ -122,8 +124,25 @@ public final class InputMethodClientImpl
     }
 
     // InputMethodRequests implementation
+
+    private <T> T callOnEventThread(Callable<T> callable) {
+        FutureTask<T> f = new FutureTask<>(callable);
+
+        Invoker.getInvoker().invokeOnEventThread(f);
+        T result = null;
+        try {
+            result = f.get();
+        } catch (ExecutionException ex) {
+            log.severe("InputMethodClientImpl " + ex);
+        } catch (InterruptedException ex) {
+            log.severe("InputMethodClientImpl InterruptedException" + ex);
+        }
+        return result;
+    }
+
+    @Override
     public Point2D getTextLocation(int offset) {
-        FutureTask<Point2D> f = new FutureTask<>(() -> {
+        Point2D result = callOnEventThread((Callable<Point2D>) () -> {
             int[] loc = webPage.getClientTextLocation(offset);
             WCPoint point = webPage.getPageClient().windowToScreen(
                     // We need lower left corner of the char bounds rectangle here
@@ -131,60 +150,61 @@ public final class InputMethodClientImpl
             return new Point2D(point.getIntX(), point.getIntY());
         });
 
-        Invoker.getInvoker().invokeOnEventThread(f);
-        Point2D result = null;
-        try {
-            result = f.get();
-        } catch (ExecutionException ex) {
-            log.severe("InputMethodClientImpl.getTextLocation " + ex);
-        } catch (InterruptedException ex) {
-            log.severe("InputMethodClientImpl.getTextLocation InterruptedException" + ex);
-        }
         return result;
     }
 
+    @Override
     public int getLocationOffset(int x, int y) {
-        FutureTask<Integer> f = new FutureTask<>(() -> {
+        Integer result = callOnEventThread((Callable<Integer>) () -> {
             WCPoint point = webPage.getPageClient().windowToScreen(new WCPoint(0, 0));
             return webPage.getClientLocationOffset(x - point.getIntX(), y - point.getIntY());
         });
 
-        Invoker.getInvoker().invokeOnEventThread(f);
-        int location = 0;
-        try {
-            location = f.get();
-        } catch (ExecutionException ex) {
-            log.severe("InputMethodClientImpl.getLocationOffset " + ex);
-        } catch (InterruptedException ex) {
-            log.severe("InputMethodClientImpl.getTextLocation InterruptedException" + ex);
-        }
-        return location;
+        return result != null ? result : 0;
     }
 
+    @Override
     public void cancelLatestCommittedText() {
         // "Undo commit" is not supported.
     }
 
+    @Override
     public String getSelectedText() {
-        return webPage.getClientSelectedText();
+        String result = callOnEventThread((Callable<String>) () -> {
+            return webPage.getClientSelectedText();
+        });
+
+        return result != null ? result : "";
     }
 
     @Override
     public int getInsertPositionOffset() {
-        return webPage.getClientInsertPositionOffset();
+        Integer result = callOnEventThread((Callable<Integer>) () -> {
+            return webPage.getClientInsertPositionOffset();
+        });
+
+        return result != null ? result : 0;
     }
 
     @Override
     public String getCommittedText(int begin, int end) {
-        try {
-            return webPage.getClientCommittedText().substring(begin, end);
-        } catch (StringIndexOutOfBoundsException e) {
-            throw new IllegalArgumentException(e);
-        }
+        String result = callOnEventThread((Callable<String>) () -> {
+            try {
+                return webPage.getClientCommittedText().substring(begin, end);
+            } catch (StringIndexOutOfBoundsException e) {
+                throw new IllegalArgumentException(e);
+            }
+        });
+
+        return result != null ? result : "";
     }
 
     @Override
     public int getCommittedTextLength() {
-        return webPage.getClientCommittedTextLength();
+        Integer result = callOnEventThread((Callable<Integer>) () -> {
+            return webPage.getClientCommittedTextLength();
+        });
+
+        return result != null ? result : 0;
     }
 }

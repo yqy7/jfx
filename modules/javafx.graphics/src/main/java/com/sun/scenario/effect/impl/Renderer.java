@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,8 +25,6 @@
 
 package com.sun.scenario.effect.impl;
 
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -87,14 +85,12 @@ public abstract class Renderer {
 
     public static final String rootPkg = "com.sun.scenario.effect";
     private static final Map<FilterContext, Renderer> rendererMap =
-        new HashMap<FilterContext, Renderer>(1);
+        new HashMap<>(1);
     private Map<String, EffectPeer> peerCache =
         Collections.synchronizedMap(new HashMap<String, EffectPeer>(5));
     private final ImagePool imagePool;
 
-    @SuppressWarnings("removal")
-    protected static final boolean verbose = AccessController.doPrivileged(
-            (PrivilegedAction<Boolean>) () -> Boolean.getBoolean("decora.verbose"));
+    protected static final boolean verbose = Boolean.getBoolean("decora.verbose");
 
     protected Renderer() {
         this.imagePool = new ImagePool();

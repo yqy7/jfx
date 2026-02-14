@@ -23,10 +23,8 @@
 * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-[
-    EnabledAtRuntime=CSSTypedOMEnabled,
-    Conditional=CSS_TYPED_OM,
-] enum CSSNumericBaseType {
+// https://drafts.css-houdini.org/css-typed-om/#enumdef-cssnumericbasetype
+enum CSSNumericBaseType {
     "length",
     "angle",
     "time",

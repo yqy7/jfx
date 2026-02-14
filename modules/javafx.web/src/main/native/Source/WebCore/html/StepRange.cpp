@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2024 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,8 +25,12 @@
 #include "HTMLParserIdioms.h"
 #include <wtf/MathExtras.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(StepRange);
+WTF_MAKE_TZONE_ALLOCATED_IMPL(StepRange::StepDescription);
 
 using namespace HTMLNames;
 
@@ -87,20 +91,21 @@ Decimal StepRange::clampValue(const Decimal& value) const
     const Decimal inRangeValue = std::max(m_minimum, std::min(value, m_maximum));
     if (!m_hasStep)
         return inRangeValue;
-    // Rounds inRangeValue to minimum + N * step.
-    const Decimal roundedValue = roundByStep(inRangeValue, m_minimum);
-    const Decimal clampedValue = roundedValue > m_maximum ? roundedValue - m_step : roundedValue;
-    ASSERT(clampedValue >= m_minimum);
-    ASSERT(clampedValue <= m_maximum);
+    // Rounds inRangeValue to stepBase + N * step.
+    const Decimal roundedValue = roundByStep(inRangeValue, m_stepBase);
+    const Decimal clampedValue = roundedValue > m_maximum ? roundedValue - m_step : (roundedValue < m_minimum ? roundedValue + m_step : roundedValue);
+    // clampedValue can be outside of [m_minimum, m_maximum] if m_step is huge.
+    if (clampedValue < m_minimum || clampedValue > m_maximum)
+        return inRangeValue;
     return clampedValue;
 }
 
-Decimal StepRange::parseStep(AnyStepHandling anyStepHandling, const StepDescription& stepDescription, const String& stepString)
+Decimal StepRange::parseStep(AnyStepHandling anyStepHandling, const StepDescription& stepDescription, StringView stepString)
 {
     if (stepString.isEmpty())
         return stepDescription.defaultValue();
 
-    if (equalLettersIgnoringASCIICase(stepString, "any")) {
+    if (equalLettersIgnoringASCIICase(stepString, "any"_s)) {
         switch (anyStepHandling) {
         case AnyStepHandling::Reject:
             return Decimal::nan();

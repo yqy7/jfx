@@ -28,7 +28,7 @@
 
 #pragma once
 
-#ifdef __OBJC__
+#if defined(__OBJC__) && !defined(__clang_tapi__)
 #error Please use @autoreleasepool instead of AutodrainedPool.
 #endif
 
@@ -41,7 +41,7 @@ namespace WTF {
 // It can be used in cross-platform code; will compile down to nothing for non-Cocoa platforms.
 
 class AutodrainedPool {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(AutodrainedPool);
     WTF_MAKE_NONCOPYABLE(AutodrainedPool);
 
 public:

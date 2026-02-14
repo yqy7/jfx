@@ -46,13 +46,11 @@
 #define GST_DISABLE_MINIOBJECT_INLINE_FUNCTIONS
 #include "gst_private.h"
 #include <string.h>             /* memcpy */
-#include "gsterror.h"
 #include "gstenumtypes.h"
 #include "gstinfo.h"
 #include "gstmessage.h"
 #include "gsttaglist.h"
 #include "gstutils.h"
-#include "gstquark.h"
 #include "gstvalue.h"
 
 
@@ -116,8 +114,6 @@ static GstMessageQuarks message_quarks[] = {
   {0, NULL, 0}
 };
 
-static GQuark details_quark = 0;
-
 GType _gst_message_type = 0;
 GST_DEFINE_MINI_OBJECT_TYPE (GstMessage, gst_message);
 
@@ -132,7 +128,6 @@ _priv_gst_message_initialize (void)
     message_quarks[i].quark =
         g_quark_from_static_string (message_quarks[i].name);
   }
-  details_quark = g_quark_from_static_string ("details");
 
   _gst_message_type = gst_message_get_type ();
 }
@@ -223,7 +218,7 @@ _gst_message_free (GstMessage * message)
   memset (message, 0xff, sizeof (GstMessageImpl));
 #endif
 
-  g_slice_free1 (sizeof (GstMessageImpl), message);
+  g_free (message);
 }
 
 static void
@@ -240,7 +235,7 @@ _gst_message_copy (GstMessage * message)
       GST_MESSAGE_TYPE_NAME (message),
       GST_OBJECT_NAME (GST_MESSAGE_SRC (message)));
 
-  copy = g_slice_new0 (GstMessageImpl);
+  copy = g_new0 (GstMessageImpl, 1);
 
   gst_message_init (copy, GST_MESSAGE_TYPE (message),
       GST_MESSAGE_SRC (message));
@@ -281,15 +276,15 @@ gst_message_init (GstMessageImpl * message, GstMessageType type,
 /**
  * gst_message_new_custom:
  * @type: The #GstMessageType to distinguish messages
- * @src: (transfer none) (allow-none): The object originating the message.
- * @structure: (transfer full) (allow-none): the structure for the
+ * @src: (transfer none) (nullable): The object originating the message.
+ * @structure: (transfer full) (nullable): the structure for the
  *     message. The message will take ownership of the structure.
  *
  * Create a new custom-typed message. This can be used for anything not
  * handled by other message-specific functions to pass a message to the
  * app. The structure field can be %NULL.
  *
- * Returns: (transfer full) (nullable): The new message.
+ * Returns: (transfer full): The new message.
  *
  * MT safe.
  */
@@ -299,7 +294,7 @@ gst_message_new_custom (GstMessageType type, GstObject * src,
 {
   GstMessageImpl *message;
 
-  message = g_slice_new0 (GstMessageImpl);
+  message = g_new0 (GstMessageImpl, 1);
 
   GST_CAT_LOG (GST_CAT_MESSAGE, "source %s: creating new message %p %s",
       (src ? GST_OBJECT_NAME (src) : "NULL"), message,
@@ -320,7 +315,7 @@ gst_message_new_custom (GstMessageType type, GstObject * src,
   /* ERRORS */
 had_parent:
   {
-    g_slice_free1 (sizeof (GstMessageImpl), message);
+    g_free (message);
     g_warning ("structure is already owned by another object");
     return NULL;
   }
@@ -379,7 +374,7 @@ gst_message_set_seqnum (GstMessage * message, guint32 seqnum)
 
 /**
  * gst_message_new_eos:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  *
  * Create a new eos message. This message is generated and posted in
  * the sink elements of a GstBin. The bin will only forward the EOS
@@ -399,19 +394,147 @@ gst_message_new_eos (GstObject * src)
   return message;
 }
 
+/* Internal function for setting details on a message. Checks for valid
+ * arguments should be done before calling this.
+ *
+ * Will create a message structure if it doesn't have one already
+ **/
+static void
+message_set_details (GstMessage * message, GstStructure * details)
+{
+  GValue v = G_VALUE_INIT;
+
+  if (GST_MESSAGE_STRUCTURE (message) == NULL) {
+    const gchar *message_name = gst_message_type_get_name (message->type);
+    g_return_if_fail (message_name);
+    GstStructure *structure = gst_structure_new_static_str_empty (message_name);
+    gst_structure_set_parent_refcount (structure,
+        &message->mini_object.refcount);
+    GST_MESSAGE_STRUCTURE (message) = structure;
+  }
+  g_value_init (&v, GST_TYPE_STRUCTURE);
+  g_value_take_boxed (&v, details);
+  gst_structure_take_value (GST_MESSAGE_STRUCTURE (message), "details", &v);
+}
+
+/**
+ * gst_message_set_details:
+ * @message: A #GstMessage
+ * @details: (transfer full) (nullable): A GstStructure with details
+ *
+ * Add @details to @message. Will fail if the message already has details set on
+ * it or if it is not writable.
+ *
+ * Since: 1.26
+ */
+void
+gst_message_set_details (GstMessage * message, GstStructure * details)
+{
+  g_return_if_fail (GST_IS_MESSAGE (message));
+  g_return_if_fail (gst_message_is_writable (message));
+  g_return_if_fail (details);
+
+  if (GST_MESSAGE_STRUCTURE (message)
+      && gst_structure_has_field (GST_MESSAGE_STRUCTURE (message), "details")) {
+    gst_structure_free (details);
+    g_critical ("Message already has details");
+    return;
+  }
+
+  message_set_details (message, details);
+}
+
+/* Internal function for parsing details of a message.
+ * Checks for valid arguments should be done before calling this.
+ *
+ * Will create a details structure if create_if_missing is TRUE
+ */
+static void
+message_parse_details (GstMessage * message, GstStructure ** details,
+    gboolean create_if_missing)
+{
+  *details = NULL;
+
+  if (GST_MESSAGE_STRUCTURE (message) == NULL && !create_if_missing)
+    return;
+
+  if (GST_MESSAGE_STRUCTURE (message) &&
+      gst_structure_has_field (GST_MESSAGE_STRUCTURE (message), "details")) {
+    const GValue *v = gst_structure_get_value (GST_MESSAGE_STRUCTURE (message),
+        "details");
+    if (v && G_VALUE_TYPE (v) == GST_TYPE_STRUCTURE) {
+      *details = g_value_get_boxed (v);
+    }
+  } else if (create_if_missing) {
+    *details = gst_structure_new_static_str_empty ("message-details");
+    message_set_details (message, (GstStructure *) * details);
+  }
+}
+
+/**
+ * gst_message_get_details:
+ * @message: A #GstMessage
+ *
+ * Returns the optional details structure of the message. May be NULL if none.
+ *
+ * The returned structure must not be freed.
+ *
+ * Returns: (transfer none) (nullable): The details, or NULL if none.
+ *
+ * Since: 1.26
+ */
+const GstStructure *
+gst_message_get_details (GstMessage * message)
+{
+  const GstStructure *details;
+
+  g_return_val_if_fail (GST_IS_MESSAGE (message), NULL);
+
+  message_parse_details (message, (GstStructure **) & details, FALSE);
+
+  return details;
+}
+
+/**
+ * gst_message_writable_details:
+ * @message: A writable #GstMessage
+ *
+ * Returns the details structure of the @message. If not present it will be
+ * created. Use this function (instead of gst_message_get_details()) if you
+ * want to write to the @details structure.
+ *
+ * The returned structure must not be freed.
+ *
+ * Returns: (transfer none): The details
+ *
+ * Since: 1.26
+ */
+GstStructure *
+gst_message_writable_details (GstMessage * message)
+{
+  GstStructure *details;
+
+  g_return_val_if_fail (GST_IS_MESSAGE (message), NULL);
+  g_return_val_if_fail (gst_message_is_writable (message), NULL);
+
+  message_parse_details (message, &details, TRUE);
+
+  return details;
+}
+
 /**
  * gst_message_new_error_with_details:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @error: (transfer none): The GError for this message.
  * @debug: A debugging string.
- * @details: (transfer full) (allow-none): A GstStructure with details
+ * @details: (transfer full) (nullable): A GstStructure with details
  *
  * Create a new error message. The message will copy @error and
  * @debug. This message is posted by element when a fatal event
  * occurred. The pipeline will probably (partially) stop. The application
  * receiving this message should stop the pipeline.
  *
- * Returns: (transfer full) (nullable): the new error message.
+ * Returns: (transfer full): the new error message.
  *
  * Since: 1.10
  */
@@ -428,17 +551,11 @@ gst_message_new_error_with_details (GstObject * src, GError * error,
         "string is not valid UTF-8. Please file a bug.");
   }
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_ERROR),
-      GST_QUARK (GERROR), G_TYPE_ERROR, error,
-      GST_QUARK (DEBUG), G_TYPE_STRING, debug, NULL);
+  structure = gst_structure_new_static_str ("GstMessageError",
+      "gerror", G_TYPE_ERROR, error, "debug", G_TYPE_STRING, debug, NULL);
   message = gst_message_new_custom (GST_MESSAGE_ERROR, src, structure);
   if (details) {
-    GValue v = G_VALUE_INIT;
-
-    g_value_init (&v, GST_TYPE_STRUCTURE);
-    g_value_take_boxed (&v, details);
-    gst_structure_id_take_value (GST_MESSAGE_STRUCTURE (message), details_quark,
-        &v);
+    message_set_details (message, details);
   }
 
   return message;
@@ -446,7 +563,7 @@ gst_message_new_error_with_details (GstObject * src, GError * error,
 
 /**
  * gst_message_new_error:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @error: (transfer none): The GError for this message.
  * @debug: A debugging string.
  *
@@ -468,7 +585,7 @@ gst_message_new_error (GstObject * src, GError * error, const gchar * debug)
 /**
  * gst_message_parse_error_details:
  * @message: The message object
- * @structure: (transfer none) (out): A pointer to the returned details
+ * @structure: (optional) (nullable) (transfer none) (out): A pointer to the returned details
  *
  * Returns the optional details structure, may be NULL if none.
  * The returned structure must not be freed.
@@ -479,31 +596,46 @@ void
 gst_message_parse_error_details (GstMessage * message,
     const GstStructure ** structure)
 {
-  const GValue *v;
-
   g_return_if_fail (GST_IS_MESSAGE (message));
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_ERROR);
   g_return_if_fail (structure != NULL);
 
-  *structure = NULL;
-  v = gst_structure_id_get_value (GST_MESSAGE_STRUCTURE (message),
-      details_quark);
-  if (v) {
-    *structure = g_value_get_boxed (v);
-  }
+  message_parse_details (message, (GstStructure **) structure, FALSE);
+}
+
+/**
+ * gst_message_parse_error_writable_details:
+ * @message: The writable message object
+ * @structure: (optional) (nullable) (transfer none) (out): A pointer to the returned details
+ *
+ * Returns the details structure if present or will create one if not present.
+ * The returned structure must not be freed.
+ *
+ * Since: 1.26
+ */
+void
+gst_message_parse_error_writable_details (GstMessage * message,
+    GstStructure ** structure)
+{
+  g_return_if_fail (GST_IS_MESSAGE (message));
+  g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_ERROR);
+  g_return_if_fail (gst_message_is_writable (message));
+  g_return_if_fail (structure != NULL);
+
+  message_parse_details (message, (GstStructure **) structure, TRUE);
 }
 
 /**
  * gst_message_new_warning_with_details:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @error: (transfer none): The GError for this message.
  * @debug: A debugging string.
- * @details: (transfer full) (allow-none): A GstStructure with details
+ * @details: (transfer full) (nullable): A GstStructure with details
  *
  * Create a new warning message. The message will make copies of @error and
  * @debug.
  *
- * Returns: (transfer full) (nullable): the new warning message.
+ * Returns: (transfer full): the new warning message.
  *
  * Since: 1.10
  */
@@ -520,17 +652,11 @@ gst_message_new_warning_with_details (GstObject * src, GError * error,
         "string is not valid UTF-8. Please file a bug.");
   }
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_WARNING),
-      GST_QUARK (GERROR), G_TYPE_ERROR, error,
-      GST_QUARK (DEBUG), G_TYPE_STRING, debug, NULL);
+  structure = gst_structure_new_static_str ("GstMessageWarning",
+      "gerror", G_TYPE_ERROR, error, "debug", G_TYPE_STRING, debug, NULL);
   message = gst_message_new_custom (GST_MESSAGE_WARNING, src, structure);
   if (details) {
-    GValue v = G_VALUE_INIT;
-
-    g_value_init (&v, GST_TYPE_STRUCTURE);
-    g_value_take_boxed (&v, details);
-    gst_structure_id_take_value (GST_MESSAGE_STRUCTURE (message), details_quark,
-        &v);
+    message_set_details (message, details);
   }
 
   return message;
@@ -538,7 +664,7 @@ gst_message_new_warning_with_details (GstObject * src, GError * error,
 
 /**
  * gst_message_new_warning:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @error: (transfer none): The GError for this message.
  * @debug: A debugging string.
  *
@@ -558,7 +684,7 @@ gst_message_new_warning (GstObject * src, GError * error, const gchar * debug)
 /**
  * gst_message_parse_warning_details:
  * @message: The message object
- * @structure: (transfer none) (out): A pointer to the returned details structure
+ * @structure: (optional) (nullable) (transfer none) (out): A pointer to the returned details
  *
  * Returns the optional details structure, may be NULL if none
  * The returned structure must not be freed.
@@ -569,31 +695,46 @@ void
 gst_message_parse_warning_details (GstMessage * message,
     const GstStructure ** structure)
 {
-  const GValue *v;
-
   g_return_if_fail (GST_IS_MESSAGE (message));
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_WARNING);
   g_return_if_fail (structure != NULL);
 
-  *structure = NULL;
-  v = gst_structure_id_get_value (GST_MESSAGE_STRUCTURE (message),
-      details_quark);
-  if (v) {
-    *structure = g_value_get_boxed (v);
-  }
+  message_parse_details (message, (GstStructure **) structure, FALSE);
+}
+
+/**
+ * gst_message_parse_warning_writable_details:
+ * @message: The writable message object
+ * @structure: (optional) (nullable) (transfer none) (out): A pointer to the returned details
+ *
+ * Returns the details structure if present or will create one if not present.
+ * The returned structure must not be freed.
+ *
+ * Since: 1.26
+ */
+void
+gst_message_parse_warning_writable_details (GstMessage * message,
+    GstStructure ** structure)
+{
+  g_return_if_fail (GST_IS_MESSAGE (message));
+  g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_WARNING);
+  g_return_if_fail (gst_message_is_writable (message));
+  g_return_if_fail (structure != NULL);
+
+  message_parse_details (message, (GstStructure **) structure, TRUE);
 }
 
 /**
  * gst_message_new_info_with_details:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @error: (transfer none): The GError for this message.
  * @debug: A debugging string.
- * @details: (transfer full) (allow-none): A GstStructure with details
+ * @details: (transfer full) (nullable): A GstStructure with details
  *
  * Create a new info message. The message will make copies of @error and
  * @debug.
  *
- * Returns: (transfer full) (nullable): the new warning message.
+ * Returns: (transfer full): the new warning message.
  *
  * Since: 1.10
  */
@@ -610,17 +751,11 @@ gst_message_new_info_with_details (GstObject * src, GError * error,
         "string is not valid UTF-8. Please file a bug.");
   }
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_INFO),
-      GST_QUARK (GERROR), G_TYPE_ERROR, error,
-      GST_QUARK (DEBUG), G_TYPE_STRING, debug, NULL);
+  structure = gst_structure_new_static_str ("GstMessageInfo",
+      "gerror", G_TYPE_ERROR, error, "debug", G_TYPE_STRING, debug, NULL);
   message = gst_message_new_custom (GST_MESSAGE_INFO, src, structure);
   if (details) {
-    GValue v = G_VALUE_INIT;
-
-    g_value_init (&v, GST_TYPE_STRUCTURE);
-    g_value_take_boxed (&v, details);
-    gst_structure_id_take_value (GST_MESSAGE_STRUCTURE (message), details_quark,
-        &v);
+    message_set_details (message, details);
   }
 
   return message;
@@ -628,7 +763,7 @@ gst_message_new_info_with_details (GstObject * src, GError * error,
 
 /**
  * gst_message_new_info:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @error: (transfer none): The GError for this message.
  * @debug: A debugging string.
  *
@@ -648,7 +783,7 @@ gst_message_new_info (GstObject * src, GError * error, const gchar * debug)
 /**
  * gst_message_parse_info_details:
  * @message: The message object
- * @structure: (transfer none) (out): A pointer to the returned details structure
+ * @structure: (optional) (nullable) (transfer none) (out): A pointer to the returned details
  *
  * Returns the optional details structure, may be NULL if none
  * The returned structure must not be freed.
@@ -659,23 +794,38 @@ void
 gst_message_parse_info_details (GstMessage * message,
     const GstStructure ** structure)
 {
-  const GValue *v;
-
   g_return_if_fail (GST_IS_MESSAGE (message));
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_INFO);
   g_return_if_fail (structure != NULL);
 
-  *structure = NULL;
-  v = gst_structure_id_get_value (GST_MESSAGE_STRUCTURE (message),
-      details_quark);
-  if (v) {
-    *structure = g_value_get_boxed (v);
-  }
+  message_parse_details (message, (GstStructure **) structure, FALSE);
+}
+
+/**
+ * gst_message_parse_info_writable_details:
+ * @message: The writable message object
+ * @structure: (optional) (nullable) (transfer none) (out): A pointer to the returned details
+ *
+ * Returns the details structure if present or will create one if not present.
+ * The returned structure must not be freed.
+ *
+ * Since: 1.26
+ */
+void
+gst_message_parse_info_writable_details (GstMessage * message,
+    GstStructure ** structure)
+{
+  g_return_if_fail (GST_IS_MESSAGE (message));
+  g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_INFO);
+  g_return_if_fail (gst_message_is_writable (message));
+  g_return_if_fail (structure != NULL);
+
+  message_parse_details (message, (GstStructure **) structure, TRUE);
 }
 
 /**
  * gst_message_new_tag:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @tag_list: (transfer full): the tag list for the message.
  *
  * Create a new tag message. The message will take ownership of the tag list.
@@ -694,17 +844,17 @@ gst_message_new_tag (GstObject * src, GstTagList * tag_list)
 
   g_return_val_if_fail (GST_IS_TAG_LIST (tag_list), NULL);
 
-  s = gst_structure_new_id_empty (GST_QUARK (MESSAGE_TAG));
+  s = gst_structure_new_static_str_empty ("GstMessageTag");
   g_value_init (&val, GST_TYPE_TAG_LIST);
   g_value_take_boxed (&val, tag_list);
-  gst_structure_id_take_value (s, GST_QUARK (TAGLIST), &val);
+  gst_structure_take_value (s, "taglist", &val);
   message = gst_message_new_custom (GST_MESSAGE_TAG, src, s);
   return message;
 }
 
 /**
  * gst_message_new_buffering:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @percent: The buffering percent
  *
  * Create a new buffering message. This message can be posted by an element that
@@ -720,7 +870,7 @@ gst_message_new_tag (GstObject * src, GstTagList * tag_list)
  *
  * MT safe.
  *
- * Returns: (transfer full) (nullable): The new buffering message.
+ * Returns: (transfer full): The new buffering message.
  */
 GstMessage *
 gst_message_new_buffering (GstObject * src, gint percent)
@@ -733,12 +883,12 @@ gst_message_new_buffering (GstObject * src, gint percent)
 
   buffering_left = (percent == 100 ? 0 : -1);
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_BUFFERING),
-      GST_QUARK (BUFFER_PERCENT), G_TYPE_INT, percent,
-      GST_QUARK (BUFFERING_MODE), GST_TYPE_BUFFERING_MODE, GST_BUFFERING_STREAM,
-      GST_QUARK (AVG_IN_RATE), G_TYPE_INT, -1,
-      GST_QUARK (AVG_OUT_RATE), G_TYPE_INT, -1,
-      GST_QUARK (BUFFERING_LEFT), G_TYPE_INT64, buffering_left, NULL);
+  structure = gst_structure_new_static_str ("GstMessageBuffering",
+      "buffer-percent", G_TYPE_INT, percent,
+      "buffering-mode", GST_TYPE_BUFFERING_MODE, GST_BUFFERING_STREAM,
+      "avg-in-rate", G_TYPE_INT, -1,
+      "avg-out-rate", G_TYPE_INT, -1,
+      "buffering-left", G_TYPE_INT64, buffering_left, NULL);
   message = gst_message_new_custom (GST_MESSAGE_BUFFERING, src, structure);
 
   return message;
@@ -746,7 +896,7 @@ gst_message_new_buffering (GstObject * src, gint percent)
 
 /**
  * gst_message_new_state_changed:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @oldstate: the previous state
  * @newstate: the new (current) state
  * @pending: the pending (target) state
@@ -765,10 +915,10 @@ gst_message_new_state_changed (GstObject * src,
   GstMessage *message;
   GstStructure *structure;
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_STATE_CHANGED),
-      GST_QUARK (OLD_STATE), GST_TYPE_STATE, (gint) oldstate,
-      GST_QUARK (NEW_STATE), GST_TYPE_STATE, (gint) newstate,
-      GST_QUARK (PENDING_STATE), GST_TYPE_STATE, (gint) pending, NULL);
+  structure = gst_structure_new_static_str ("GstMessageStateChanged",
+      "old-state", GST_TYPE_STATE, (gint) oldstate,
+      "new-state", GST_TYPE_STATE, (gint) newstate,
+      "pending-state", GST_TYPE_STATE, (gint) pending, NULL);
   message = gst_message_new_custom (GST_MESSAGE_STATE_CHANGED, src, structure);
 
   return message;
@@ -776,7 +926,7 @@ gst_message_new_state_changed (GstObject * src,
 
 /**
  * gst_message_new_state_dirty:
- * @src: (transfer none) (allow-none): The object originating the message
+ * @src: (transfer none) (nullable): The object originating the message
  *
  * Create a state dirty message. This message is posted whenever an element
  * changed its state asynchronously and is used internally to update the
@@ -798,7 +948,7 @@ gst_message_new_state_dirty (GstObject * src)
 
 /**
  * gst_message_new_clock_provide:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @clock: (transfer none): the clock it provides
  * @ready: %TRUE if the sender can provide a clock
  *
@@ -820,9 +970,8 @@ gst_message_new_clock_provide (GstObject * src, GstClock * clock,
   GstMessage *message;
   GstStructure *structure;
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_CLOCK_PROVIDE),
-      GST_QUARK (CLOCK), GST_TYPE_CLOCK, clock,
-      GST_QUARK (READY), G_TYPE_BOOLEAN, ready, NULL);
+  structure = gst_structure_new_static_str ("GstMessageClockProvide",
+      "clock", GST_TYPE_CLOCK, clock, "ready", G_TYPE_BOOLEAN, ready, NULL);
   message = gst_message_new_custom (GST_MESSAGE_CLOCK_PROVIDE, src, structure);
 
   return message;
@@ -830,7 +979,7 @@ gst_message_new_clock_provide (GstObject * src, GstClock * clock,
 
 /**
  * gst_message_new_clock_lost:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @clock: (transfer none): the clock that was lost
  *
  * Create a clock lost message. This message is posted whenever the
@@ -850,8 +999,8 @@ gst_message_new_clock_lost (GstObject * src, GstClock * clock)
   GstMessage *message;
   GstStructure *structure;
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_CLOCK_LOST),
-      GST_QUARK (CLOCK), GST_TYPE_CLOCK, clock, NULL);
+  structure = gst_structure_new_static_str ("GstMessageClockLost",
+      "clock", GST_TYPE_CLOCK, clock, NULL);
   message = gst_message_new_custom (GST_MESSAGE_CLOCK_LOST, src, structure);
 
   return message;
@@ -859,7 +1008,7 @@ gst_message_new_clock_lost (GstObject * src, GstClock * clock)
 
 /**
  * gst_message_new_new_clock:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @clock: (transfer none): the new selected clock
  *
  * Create a new clock message. This message is posted whenever the
@@ -875,8 +1024,8 @@ gst_message_new_new_clock (GstObject * src, GstClock * clock)
   GstMessage *message;
   GstStructure *structure;
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_NEW_CLOCK),
-      GST_QUARK (CLOCK), GST_TYPE_CLOCK, clock, NULL);
+  structure = gst_structure_new_static_str ("GstMessageNewClock",
+      "clock", GST_TYPE_CLOCK, clock, NULL);
   message = gst_message_new_custom (GST_MESSAGE_NEW_CLOCK, src, structure);
 
   return message;
@@ -884,7 +1033,7 @@ gst_message_new_new_clock (GstObject * src, GstClock * clock)
 
 /**
  * gst_message_new_structure_change:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @type: The change type.
  * @owner: (transfer none): The owner element of @src.
  * @busy: Whether the structure change is busy.
@@ -910,10 +1059,9 @@ gst_message_new_structure_change (GstObject * src, GstStructureChangeType type,
   /* g_return_val_if_fail (GST_PAD_DIRECTION (src) == GST_PAD_SINK, NULL); */
   g_return_val_if_fail (GST_IS_ELEMENT (owner), NULL);
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_STRUCTURE_CHANGE),
-      GST_QUARK (TYPE), GST_TYPE_STRUCTURE_CHANGE_TYPE, type,
-      GST_QUARK (OWNER), GST_TYPE_ELEMENT, owner,
-      GST_QUARK (BUSY), G_TYPE_BOOLEAN, busy, NULL);
+  structure = gst_structure_new_static_str ("GstMessageStructureChange",
+      "type", GST_TYPE_STRUCTURE_CHANGE_TYPE, type,
+      "owner", GST_TYPE_ELEMENT, owner, "busy", G_TYPE_BOOLEAN, busy, NULL);
 
   message = gst_message_new_custom (GST_MESSAGE_STRUCTURE_CHANGE, src,
       structure);
@@ -923,7 +1071,7 @@ gst_message_new_structure_change (GstObject * src, GstStructureChangeType type,
 
 /**
  * gst_message_new_segment_start:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @format: The format of the position being played
  * @position: The position of the segment being played
  *
@@ -943,9 +1091,9 @@ gst_message_new_segment_start (GstObject * src, GstFormat format,
   GstMessage *message;
   GstStructure *structure;
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_SEGMENT_START),
-      GST_QUARK (FORMAT), GST_TYPE_FORMAT, format,
-      GST_QUARK (POSITION), G_TYPE_INT64, position, NULL);
+  structure = gst_structure_new_static_str ("GstMessageSegmentStart",
+      "format", GST_TYPE_FORMAT, format,
+      "position", G_TYPE_INT64, position, NULL);
   message = gst_message_new_custom (GST_MESSAGE_SEGMENT_START, src, structure);
 
   return message;
@@ -953,7 +1101,7 @@ gst_message_new_segment_start (GstObject * src, GstFormat format,
 
 /**
  * gst_message_new_segment_done:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @format: The format of the position being done
  * @position: The position of the segment being done
  *
@@ -973,9 +1121,9 @@ gst_message_new_segment_done (GstObject * src, GstFormat format,
   GstMessage *message;
   GstStructure *structure;
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_SEGMENT_DONE),
-      GST_QUARK (FORMAT), GST_TYPE_FORMAT, format,
-      GST_QUARK (POSITION), G_TYPE_INT64, position, NULL);
+  structure = gst_structure_new_static_str ("GstMessageSegmentDone",
+      "format", GST_TYPE_FORMAT, format,
+      "position", G_TYPE_INT64, position, NULL);
   message = gst_message_new_custom (GST_MESSAGE_SEGMENT_DONE, src, structure);
 
   return message;
@@ -983,14 +1131,14 @@ gst_message_new_segment_done (GstObject * src, GstFormat format,
 
 /**
  * gst_message_new_application:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @structure: (transfer full): the structure for the message. The message
  *     will take ownership of the structure.
  *
  * Create a new application-typed message. GStreamer will never create these
  * messages; they are a gift from us to you. Enjoy.
  *
- * Returns: (transfer full) (nullable): The new application message.
+ * Returns: (transfer full): The new application message.
  *
  * MT safe.
  */
@@ -1004,7 +1152,7 @@ gst_message_new_application (GstObject * src, GstStructure * structure)
 
 /**
  * gst_message_new_element:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @structure: (transfer full): The structure for the
  *     message. The message will take ownership of the structure.
  *
@@ -1013,7 +1161,7 @@ gst_message_new_application (GstObject * src, GstStructure * structure)
  * "the firewire cable was unplugged". The format of the message should be
  * documented in the element's documentation. The structure field can be %NULL.
  *
- * Returns: (transfer full) (nullable): The new element message.
+ * Returns: (transfer full): The new element message.
  *
  * MT safe.
  */
@@ -1027,7 +1175,7 @@ gst_message_new_element (GstObject * src, GstStructure * structure)
 
 /**
  * gst_message_new_duration_changed:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  *
  * Create a new duration changed message. This message is posted by elements
  * that know the duration of a stream when the duration changes. This message
@@ -1044,14 +1192,14 @@ gst_message_new_duration_changed (GstObject * src)
   GstMessage *message;
 
   message = gst_message_new_custom (GST_MESSAGE_DURATION_CHANGED, src,
-      gst_structure_new_id_empty (GST_QUARK (MESSAGE_DURATION_CHANGED)));
+      gst_structure_new_static_str_empty ("GstMessageDurationChanged"));
 
   return message;
 }
 
 /**
  * gst_message_new_async_start:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  *
  * This message is posted by elements when they start an ASYNC state change.
  *
@@ -1071,7 +1219,7 @@ gst_message_new_async_start (GstObject * src)
 
 /**
  * gst_message_new_async_done:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @running_time: the desired running_time
  *
  * The message is posted when elements completed an ASYNC state change.
@@ -1090,8 +1238,8 @@ gst_message_new_async_done (GstObject * src, GstClockTime running_time)
   GstMessage *message;
   GstStructure *structure;
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_ASYNC_DONE),
-      GST_QUARK (RUNNING_TIME), G_TYPE_UINT64, running_time, NULL);
+  structure = gst_structure_new_static_str ("GstMessageAsyncDone",
+      "running-time", G_TYPE_UINT64, running_time, NULL);
   message = gst_message_new_custom (GST_MESSAGE_ASYNC_DONE, src, structure);
 
   return message;
@@ -1099,7 +1247,7 @@ gst_message_new_async_done (GstObject * src, GstClockTime running_time)
 
 /**
  * gst_message_new_latency:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  *
  * This message can be posted by elements when their latency requirements have
  * changed.
@@ -1120,7 +1268,7 @@ gst_message_new_latency (GstObject * src)
 
 /**
  * gst_message_new_request_state:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @state: The new requested state
  *
  * This message can be posted by elements when they want to have their state
@@ -1137,8 +1285,8 @@ gst_message_new_request_state (GstObject * src, GstState state)
   GstMessage *message;
   GstStructure *structure;
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_REQUEST_STATE),
-      GST_QUARK (NEW_STATE), GST_TYPE_STATE, (gint) state, NULL);
+  structure = gst_structure_new_static_str ("GstMessageRequestState",
+      "new-state", GST_TYPE_STATE, (gint) state, NULL);
   message = gst_message_new_custom (GST_MESSAGE_REQUEST_STATE, src, structure);
 
   return message;
@@ -1166,15 +1314,15 @@ gst_message_get_structure (GstMessage * message)
 
 /**
  * gst_message_writable_structure:
- * @message: The #GstMessage.
+ * @message: A writable #GstMessage.
  *
  * Get a writable version of the structure.
  *
  * Returns: (transfer none): The structure of the message. The structure
  * is still owned by the message, which means that you should not free
  * it and that the pointer becomes invalid when you free the message.
- * This function checks if @message is writable and will never return
- * %NULL.
+ * This function ensures that @message is writable, and if so, will
+ * never return %NULL.
  *
  * MT safe.
  *
@@ -1192,8 +1340,8 @@ gst_message_writable_structure (GstMessage * message)
 
   if (structure == NULL) {
     structure =
-        gst_structure_new_id_empty (gst_message_type_to_quark (GST_MESSAGE_TYPE
-            (message)));
+        gst_structure_new_static_str_empty (gst_message_type_get_name
+        (GST_MESSAGE_TYPE (message)));
     gst_structure_set_parent_refcount (structure,
         &message->mini_object.refcount);
     GST_MESSAGE_STRUCTURE (message) = structure;
@@ -1260,14 +1408,14 @@ gst_message_parse_tag (GstMessage * message, GstTagList ** tag_list)
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_TAG);
   g_return_if_fail (tag_list != NULL);
 
-  gst_structure_id_get (GST_MESSAGE_STRUCTURE (message),
-      GST_QUARK (TAGLIST), GST_TYPE_TAG_LIST, tag_list, NULL);
+  gst_structure_get (GST_MESSAGE_STRUCTURE (message),
+      "taglist", GST_TYPE_TAG_LIST, tag_list, NULL);
 }
 
 /**
  * gst_message_parse_buffering:
  * @message: A valid #GstMessage of type GST_MESSAGE_BUFFERING.
- * @percent: (out) (allow-none): Return location for the percent.
+ * @percent: (out) (optional): Return location for the percent.
  *
  * Extracts the buffering percent from the GstMessage. see also
  * gst_message_new_buffering().
@@ -1282,8 +1430,8 @@ gst_message_parse_buffering (GstMessage * message, gint * percent)
 
   if (percent)
     *percent =
-        g_value_get_int (gst_structure_id_get_value (GST_MESSAGE_STRUCTURE
-            (message), GST_QUARK (BUFFER_PERCENT)));
+        g_value_get_int (gst_structure_get_value (GST_MESSAGE_STRUCTURE
+            (message), "buffer-percent"));
 }
 
 /**
@@ -1303,20 +1451,20 @@ gst_message_set_buffering_stats (GstMessage * message, GstBufferingMode mode,
   g_return_if_fail (GST_IS_MESSAGE (message));
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_BUFFERING);
 
-  gst_structure_id_set (GST_MESSAGE_STRUCTURE (message),
-      GST_QUARK (BUFFERING_MODE), GST_TYPE_BUFFERING_MODE, mode,
-      GST_QUARK (AVG_IN_RATE), G_TYPE_INT, avg_in,
-      GST_QUARK (AVG_OUT_RATE), G_TYPE_INT, avg_out,
-      GST_QUARK (BUFFERING_LEFT), G_TYPE_INT64, buffering_left, NULL);
+  gst_structure_set (GST_MESSAGE_STRUCTURE (message),
+      "buffering-mode", GST_TYPE_BUFFERING_MODE, mode,
+      "avg-in-rate", G_TYPE_INT, avg_in,
+      "avg-out-rate", G_TYPE_INT, avg_out,
+      "buffering-left", G_TYPE_INT64, buffering_left, NULL);
 }
 
 /**
  * gst_message_parse_buffering_stats:
  * @message: A valid #GstMessage of type GST_MESSAGE_BUFFERING.
- * @mode: (out) (allow-none): a buffering mode, or %NULL
- * @avg_in: (out) (allow-none): the average input rate, or %NULL
- * @avg_out: (out) (allow-none): the average output rate, or %NULL
- * @buffering_left: (out) (allow-none): amount of buffering time left in
+ * @mode: (out) (optional): a buffering mode, or %NULL
+ * @avg_in: (out) (optional): the average input rate, or %NULL
+ * @avg_out: (out) (optional): the average output rate, or %NULL
+ * @buffering_left: (out) (optional): amount of buffering time left in
  *     milliseconds, or %NULL
  *
  * Extracts the buffering stats values from @message.
@@ -1333,26 +1481,26 @@ gst_message_parse_buffering_stats (GstMessage * message,
   structure = GST_MESSAGE_STRUCTURE (message);
   if (mode)
     *mode = (GstBufferingMode)
-        g_value_get_enum (gst_structure_id_get_value (structure,
-            GST_QUARK (BUFFERING_MODE)));
+        g_value_get_enum (gst_structure_get_value (structure,
+            "buffering-mode"));
   if (avg_in)
-    *avg_in = g_value_get_int (gst_structure_id_get_value (structure,
-            GST_QUARK (AVG_IN_RATE)));
+    *avg_in = g_value_get_int (gst_structure_get_value (structure,
+            "avg-in-rate"));
   if (avg_out)
-    *avg_out = g_value_get_int (gst_structure_id_get_value (structure,
-            GST_QUARK (AVG_OUT_RATE)));
+    *avg_out = g_value_get_int (gst_structure_get_value (structure,
+            "avg-out-rate"));
   if (buffering_left)
     *buffering_left =
-        g_value_get_int64 (gst_structure_id_get_value (structure,
-            GST_QUARK (BUFFERING_LEFT)));
+        g_value_get_int64 (gst_structure_get_value (structure,
+            "buffering-left"));
 }
 
 /**
  * gst_message_parse_state_changed:
  * @message: a valid #GstMessage of type GST_MESSAGE_STATE_CHANGED
- * @oldstate: (out) (allow-none): the previous state, or %NULL
- * @newstate: (out) (allow-none): the new (current) state, or %NULL
- * @pending: (out) (allow-none): the pending (target) state, or %NULL
+ * @oldstate: (out) (optional): the previous state, or %NULL
+ * @newstate: (out) (optional): the new (current) state, or %NULL
+ * @pending: (out) (optional): the pending (target) state, or %NULL
  *
  * Extracts the old and new states from the GstMessage.
  *
@@ -1389,24 +1537,21 @@ gst_message_parse_state_changed (GstMessage * message,
   structure = GST_MESSAGE_STRUCTURE (message);
   if (oldstate)
     *oldstate = (GstState)
-        g_value_get_enum (gst_structure_id_get_value (structure,
-            GST_QUARK (OLD_STATE)));
+        g_value_get_enum (gst_structure_get_value (structure, "old-state"));
   if (newstate)
     *newstate = (GstState)
-        g_value_get_enum (gst_structure_id_get_value (structure,
-            GST_QUARK (NEW_STATE)));
+        g_value_get_enum (gst_structure_get_value (structure, "new-state"));
   if (pending)
     *pending = (GstState)
-        g_value_get_enum (gst_structure_id_get_value (structure,
-            GST_QUARK (PENDING_STATE)));
+        g_value_get_enum (gst_structure_get_value (structure, "pending-state"));
 }
 
 /**
  * gst_message_parse_clock_provide:
  * @message: A valid #GstMessage of type GST_MESSAGE_CLOCK_PROVIDE.
- * @clock: (out) (allow-none) (transfer none): a pointer to  hold a clock
+ * @clock: (out) (optional) (transfer none): a pointer to  hold a clock
  *     object, or %NULL
- * @ready: (out) (allow-none): a pointer to hold the ready flag, or %NULL
+ * @ready: (out) (optional): a pointer to hold the ready flag, or %NULL
  *
  * Extracts the clock and ready flag from the GstMessage.
  * The clock object returned remains valid until the message is freed.
@@ -1424,14 +1569,12 @@ gst_message_parse_clock_provide (GstMessage * message, GstClock ** clock,
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_CLOCK_PROVIDE);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  clock_gvalue = gst_structure_id_get_value (structure, GST_QUARK (CLOCK));
+  clock_gvalue = gst_structure_get_value (structure, "clock");
   g_return_if_fail (clock_gvalue != NULL);
   g_return_if_fail (G_VALUE_TYPE (clock_gvalue) == GST_TYPE_CLOCK);
 
   if (ready)
-    *ready =
-        g_value_get_boolean (gst_structure_id_get_value (structure,
-            GST_QUARK (READY)));
+    *ready = g_value_get_boolean (gst_structure_get_value (structure, "ready"));
   if (clock)
     *clock = (GstClock *) g_value_get_object (clock_gvalue);
 }
@@ -1439,7 +1582,7 @@ gst_message_parse_clock_provide (GstMessage * message, GstClock ** clock,
 /**
  * gst_message_parse_clock_lost:
  * @message: A valid #GstMessage of type GST_MESSAGE_CLOCK_LOST.
- * @clock: (out) (allow-none) (transfer none): a pointer to hold the lost clock
+ * @clock: (out) (optional) (transfer none): a pointer to hold the lost clock
  *
  * Extracts the lost clock from the GstMessage.
  * The clock object returned remains valid until the message is freed.
@@ -1456,7 +1599,7 @@ gst_message_parse_clock_lost (GstMessage * message, GstClock ** clock)
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_CLOCK_LOST);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  clock_gvalue = gst_structure_id_get_value (structure, GST_QUARK (CLOCK));
+  clock_gvalue = gst_structure_get_value (structure, "clock");
   g_return_if_fail (clock_gvalue != NULL);
   g_return_if_fail (G_VALUE_TYPE (clock_gvalue) == GST_TYPE_CLOCK);
 
@@ -1467,7 +1610,7 @@ gst_message_parse_clock_lost (GstMessage * message, GstClock ** clock)
 /**
  * gst_message_parse_new_clock:
  * @message: A valid #GstMessage of type GST_MESSAGE_NEW_CLOCK.
- * @clock: (out) (allow-none) (transfer none): a pointer to hold the selected
+ * @clock: (out) (optional) (transfer none): a pointer to hold the selected
  *     new clock
  *
  * Extracts the new clock from the GstMessage.
@@ -1485,7 +1628,7 @@ gst_message_parse_new_clock (GstMessage * message, GstClock ** clock)
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_NEW_CLOCK);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  clock_gvalue = gst_structure_id_get_value (structure, GST_QUARK (CLOCK));
+  clock_gvalue = gst_structure_get_value (structure, "clock");
   g_return_if_fail (clock_gvalue != NULL);
   g_return_if_fail (G_VALUE_TYPE (clock_gvalue) == GST_TYPE_CLOCK);
 
@@ -1497,9 +1640,9 @@ gst_message_parse_new_clock (GstMessage * message, GstClock ** clock)
  * gst_message_parse_structure_change:
  * @message: A valid #GstMessage of type GST_MESSAGE_STRUCTURE_CHANGE.
  * @type: (out): A pointer to hold the change type
- * @owner: (out) (allow-none) (transfer none): The owner element of the
+ * @owner: (out) (optional) (transfer none): The owner element of the
  *     message source
- * @busy: (out) (allow-none): a pointer to hold whether the change is in
+ * @busy: (out) (optional): a pointer to hold whether the change is in
  *     progress or has been completed
  *
  * Extracts the change type and completion status from the GstMessage.
@@ -1517,27 +1660,24 @@ gst_message_parse_structure_change (GstMessage * message,
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_STRUCTURE_CHANGE);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  owner_gvalue = gst_structure_id_get_value (structure, GST_QUARK (OWNER));
+  owner_gvalue = gst_structure_get_value (structure, "owner");
   g_return_if_fail (owner_gvalue != NULL);
   g_return_if_fail (G_VALUE_TYPE (owner_gvalue) == GST_TYPE_ELEMENT);
 
   if (type)
     *type = (GstStructureChangeType)
-        g_value_get_enum (gst_structure_id_get_value (structure,
-            GST_QUARK (TYPE)));
+        g_value_get_enum (gst_structure_get_value (structure, "type"));
   if (owner)
     *owner = (GstElement *) g_value_get_object (owner_gvalue);
   if (busy)
-    *busy =
-        g_value_get_boolean (gst_structure_id_get_value (structure,
-            GST_QUARK (BUSY)));
+    *busy = g_value_get_boolean (gst_structure_get_value (structure, "busy"));
 }
 
 /**
  * gst_message_parse_error:
  * @message: A valid #GstMessage of type GST_MESSAGE_ERROR.
- * @gerror: (out) (allow-none) (transfer full): location for the GError
- * @debug: (out) (allow-none) (transfer full): location for the debug message,
+ * @gerror: (out) (optional) (transfer full): location for the GError
+ * @debug: (out) (optional) (nullable) (transfer full): location for the debug message,
  *     or %NULL
  *
  * Extracts the GError and debug string from the GstMessage. The values returned
@@ -1572,16 +1712,15 @@ gst_message_parse_error (GstMessage * message, GError ** gerror, gchar ** debug)
   g_return_if_fail (GST_IS_MESSAGE (message));
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_ERROR);
 
-  gst_structure_id_get (GST_MESSAGE_STRUCTURE (message),
-      GST_QUARK (GERROR), G_TYPE_ERROR, gerror,
-      GST_QUARK (DEBUG), G_TYPE_STRING, debug, NULL);
+  gst_structure_get (GST_MESSAGE_STRUCTURE (message),
+      "gerror", G_TYPE_ERROR, gerror, "debug", G_TYPE_STRING, debug, NULL);
 }
 
 /**
  * gst_message_parse_warning:
  * @message: A valid #GstMessage of type GST_MESSAGE_WARNING.
- * @gerror: (out) (allow-none) (transfer full): location for the GError
- * @debug: (out) (allow-none) (transfer full): location for the debug message,
+ * @gerror: (out) (optional) (transfer full): location for the GError
+ * @debug: (out) (optional) (nullable) (transfer full): location for the debug message,
  *     or %NULL
  *
  * Extracts the GError and debug string from the GstMessage. The values returned
@@ -1596,16 +1735,15 @@ gst_message_parse_warning (GstMessage * message, GError ** gerror,
   g_return_if_fail (GST_IS_MESSAGE (message));
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_WARNING);
 
-  gst_structure_id_get (GST_MESSAGE_STRUCTURE (message),
-      GST_QUARK (GERROR), G_TYPE_ERROR, gerror,
-      GST_QUARK (DEBUG), G_TYPE_STRING, debug, NULL);
+  gst_structure_get (GST_MESSAGE_STRUCTURE (message),
+      "gerror", G_TYPE_ERROR, gerror, "debug", G_TYPE_STRING, debug, NULL);
 }
 
 /**
  * gst_message_parse_info:
  * @message: A valid #GstMessage of type GST_MESSAGE_INFO.
- * @gerror: (out) (allow-none) (transfer full): location for the GError
- * @debug: (out) (allow-none) (transfer full): location for the debug message,
+ * @gerror: (out) (optional) (transfer full): location for the GError
+ * @debug: (out) (optional) (nullable) (transfer full): location for the debug message,
  *     or %NULL
  *
  * Extracts the GError and debug string from the GstMessage. The values returned
@@ -1619,16 +1757,15 @@ gst_message_parse_info (GstMessage * message, GError ** gerror, gchar ** debug)
   g_return_if_fail (GST_IS_MESSAGE (message));
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_INFO);
 
-  gst_structure_id_get (GST_MESSAGE_STRUCTURE (message),
-      GST_QUARK (GERROR), G_TYPE_ERROR, gerror,
-      GST_QUARK (DEBUG), G_TYPE_STRING, debug, NULL);
+  gst_structure_get (GST_MESSAGE_STRUCTURE (message),
+      "gerror", G_TYPE_ERROR, gerror, "debug", G_TYPE_STRING, debug, NULL);
 }
 
 /**
  * gst_message_parse_segment_start:
  * @message: A valid #GstMessage of type GST_MESSAGE_SEGMENT_START.
- * @format: (out) (allow-none): Result location for the format, or %NULL
- * @position: (out) (allow-none): Result location for the position, or %NULL
+ * @format: (out) (optional): Result location for the format, or %NULL
+ * @position: (out) (optional): Result location for the position, or %NULL
  *
  * Extracts the position and format from the segment start message.
  *
@@ -1646,19 +1783,17 @@ gst_message_parse_segment_start (GstMessage * message, GstFormat * format,
   structure = GST_MESSAGE_STRUCTURE (message);
   if (format)
     *format = (GstFormat)
-        g_value_get_enum (gst_structure_id_get_value (structure,
-            GST_QUARK (FORMAT)));
+        g_value_get_enum (gst_structure_get_value (structure, "format"));
   if (position)
     *position =
-        g_value_get_int64 (gst_structure_id_get_value (structure,
-            GST_QUARK (POSITION)));
+        g_value_get_int64 (gst_structure_get_value (structure, "position"));
 }
 
 /**
  * gst_message_parse_segment_done:
  * @message: A valid #GstMessage of type GST_MESSAGE_SEGMENT_DONE.
- * @format: (out) (allow-none): Result location for the format, or %NULL
- * @position: (out) (allow-none): Result location for the position, or %NULL
+ * @format: (out) (optional): Result location for the format, or %NULL
+ * @position: (out) (optional): Result location for the position, or %NULL
  *
  * Extracts the position and format from the segment done message.
  *
@@ -1676,18 +1811,16 @@ gst_message_parse_segment_done (GstMessage * message, GstFormat * format,
   structure = GST_MESSAGE_STRUCTURE (message);
   if (format)
     *format = (GstFormat)
-        g_value_get_enum (gst_structure_id_get_value (structure,
-            GST_QUARK (FORMAT)));
+        g_value_get_enum (gst_structure_get_value (structure, "format"));
   if (position)
     *position =
-        g_value_get_int64 (gst_structure_id_get_value (structure,
-            GST_QUARK (POSITION)));
+        g_value_get_int64 (gst_structure_get_value (structure, "position"));
 }
 
 /**
  * gst_message_parse_async_done:
  * @message: A valid #GstMessage of type GST_MESSAGE_ASYNC_DONE.
- * @running_time: (out) (allow-none): Result location for the running_time or %NULL
+ * @running_time: (out) (optional): Result location for the running_time or %NULL
  *
  * Extract the running_time from the async_done message.
  *
@@ -1704,14 +1837,14 @@ gst_message_parse_async_done (GstMessage * message, GstClockTime * running_time)
   structure = GST_MESSAGE_STRUCTURE (message);
   if (running_time)
     *running_time =
-        g_value_get_uint64 (gst_structure_id_get_value (structure,
-            GST_QUARK (RUNNING_TIME)));
+        g_value_get_uint64 (gst_structure_get_value (structure,
+            "running-time"));
 }
 
 /**
  * gst_message_parse_request_state:
  * @message: A valid #GstMessage of type GST_MESSAGE_REQUEST_STATE.
- * @state: (out) (allow-none): Result location for the requested state or %NULL
+ * @state: (out) (optional): Result location for the requested state or %NULL
  *
  * Extract the requested state from the request_state message.
  *
@@ -1728,13 +1861,12 @@ gst_message_parse_request_state (GstMessage * message, GstState * state)
   structure = GST_MESSAGE_STRUCTURE (message);
   if (state)
     *state = (GstState)
-        g_value_get_enum (gst_structure_id_get_value (structure,
-            GST_QUARK (NEW_STATE)));
+        g_value_get_enum (gst_structure_get_value (structure, "new-state"));
 }
 
 /**
  * gst_message_new_stream_status:
- * @src: The object originating the message.
+ * @src:  (transfer none) (nullable): The object originating the message.
  * @type: The stream status type.
  * @owner: (transfer none): the owner element of @src.
  *
@@ -1752,9 +1884,9 @@ gst_message_new_stream_status (GstObject * src, GstStreamStatusType type,
   GstMessage *message;
   GstStructure *structure;
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_STREAM_STATUS),
-      GST_QUARK (TYPE), GST_TYPE_STREAM_STATUS_TYPE, (gint) type,
-      GST_QUARK (OWNER), GST_TYPE_ELEMENT, owner, NULL);
+  structure = gst_structure_new_static_str ("GstMessageStreamStatus",
+      "type", GST_TYPE_STREAM_STATUS_TYPE, (gint) type,
+      "owner", GST_TYPE_ELEMENT, owner, NULL);
   message = gst_message_new_custom (GST_MESSAGE_STREAM_STATUS, src, structure);
 
   return message;
@@ -1783,13 +1915,12 @@ gst_message_parse_stream_status (GstMessage * message,
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_STREAM_STATUS);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  owner_gvalue = gst_structure_id_get_value (structure, GST_QUARK (OWNER));
+  owner_gvalue = gst_structure_get_value (structure, "owner");
   g_return_if_fail (owner_gvalue != NULL);
 
   if (type)
     *type = (GstStreamStatusType)
-        g_value_get_enum (gst_structure_id_get_value (structure,
-            GST_QUARK (TYPE)));
+        g_value_get_enum (gst_structure_get_value (structure, "type"));
   if (owner)
     *owner = (GstElement *) g_value_get_object (owner_gvalue);
 }
@@ -1812,7 +1943,7 @@ gst_message_set_stream_status_object (GstMessage * message,
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_STREAM_STATUS);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  gst_structure_id_set_value (structure, GST_QUARK (OBJECT), object);
+  gst_structure_set_value_static_str (structure, "object", object);
 }
 
 /**
@@ -1837,14 +1968,14 @@ gst_message_get_stream_status_object (GstMessage * message)
       NULL);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  result = gst_structure_id_get_value (structure, GST_QUARK (OBJECT));
+  result = gst_structure_get_value (structure, "object");
 
   return result;
 }
 
 /**
  * gst_message_new_step_done:
- * @src: The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @format: the format of @amount
  * @amount: the amount of stepped data
  * @rate: the rate of the stepped amount
@@ -1871,14 +2002,13 @@ gst_message_new_step_done (GstObject * src, GstFormat format, guint64 amount,
   GstMessage *message;
   GstStructure *structure;
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_STEP_DONE),
-      GST_QUARK (FORMAT), GST_TYPE_FORMAT, format,
-      GST_QUARK (AMOUNT), G_TYPE_UINT64, amount,
-      GST_QUARK (RATE), G_TYPE_DOUBLE, rate,
-      GST_QUARK (FLUSH), G_TYPE_BOOLEAN, flush,
-      GST_QUARK (INTERMEDIATE), G_TYPE_BOOLEAN, intermediate,
-      GST_QUARK (DURATION), G_TYPE_UINT64, duration,
-      GST_QUARK (EOS), G_TYPE_BOOLEAN, eos, NULL);
+  structure = gst_structure_new_static_str ("GstMessageStepDone",
+      "format", GST_TYPE_FORMAT, format,
+      "amount", G_TYPE_UINT64, amount,
+      "rate", G_TYPE_DOUBLE, rate,
+      "flush", G_TYPE_BOOLEAN, flush,
+      "intermediate", G_TYPE_BOOLEAN, intermediate,
+      "duration", G_TYPE_UINT64, duration, "eos", G_TYPE_BOOLEAN, eos, NULL);
   message = gst_message_new_custom (GST_MESSAGE_STEP_DONE, src, structure);
 
   return message;
@@ -1887,13 +2017,13 @@ gst_message_new_step_done (GstObject * src, GstFormat format, guint64 amount,
 /**
  * gst_message_parse_step_done:
  * @message: A valid #GstMessage of type GST_MESSAGE_STEP_DONE.
- * @format: (out) (allow-none): result location for the format
- * @amount: (out) (allow-none): result location for the amount
- * @rate: (out) (allow-none): result location for the rate
- * @flush: (out) (allow-none): result location for the flush flag
- * @intermediate: (out) (allow-none): result location for the intermediate flag
- * @duration: (out) (allow-none): result location for the duration
- * @eos: (out) (allow-none): result location for the EOS flag
+ * @format: (out) (optional): result location for the format
+ * @amount: (out) (optional): result location for the amount
+ * @rate: (out) (optional): result location for the rate
+ * @flush: (out) (optional): result location for the flush flag
+ * @intermediate: (out) (optional): result location for the intermediate flag
+ * @duration: (out) (optional): result location for the duration
+ * @eos: (out) (optional): result location for the EOS flag
  *
  * Extract the values the step_done message.
  *
@@ -1910,19 +2040,18 @@ gst_message_parse_step_done (GstMessage * message, GstFormat * format,
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_STEP_DONE);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  gst_structure_id_get (structure,
-      GST_QUARK (FORMAT), GST_TYPE_FORMAT, format,
-      GST_QUARK (AMOUNT), G_TYPE_UINT64, amount,
-      GST_QUARK (RATE), G_TYPE_DOUBLE, rate,
-      GST_QUARK (FLUSH), G_TYPE_BOOLEAN, flush,
-      GST_QUARK (INTERMEDIATE), G_TYPE_BOOLEAN, intermediate,
-      GST_QUARK (DURATION), G_TYPE_UINT64, duration,
-      GST_QUARK (EOS), G_TYPE_BOOLEAN, eos, NULL);
+  gst_structure_get (structure,
+      "format", GST_TYPE_FORMAT, format,
+      "amount", G_TYPE_UINT64, amount,
+      "rate", G_TYPE_DOUBLE, rate,
+      "flush", G_TYPE_BOOLEAN, flush,
+      "intermediate", G_TYPE_BOOLEAN, intermediate,
+      "duration", G_TYPE_UINT64, duration, "eos", G_TYPE_BOOLEAN, eos, NULL);
 }
 
 /**
  * gst_message_new_step_start:
- * @src: The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @active: if the step is active or queued
  * @format: the format of @amount
  * @amount: the amount of stepped data
@@ -1952,13 +2081,13 @@ gst_message_new_step_start (GstObject * src, gboolean active, GstFormat format,
   GstMessage *message;
   GstStructure *structure;
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_STEP_START),
-      GST_QUARK (ACTIVE), G_TYPE_BOOLEAN, active,
-      GST_QUARK (FORMAT), GST_TYPE_FORMAT, format,
-      GST_QUARK (AMOUNT), G_TYPE_UINT64, amount,
-      GST_QUARK (RATE), G_TYPE_DOUBLE, rate,
-      GST_QUARK (FLUSH), G_TYPE_BOOLEAN, flush,
-      GST_QUARK (INTERMEDIATE), G_TYPE_BOOLEAN, intermediate, NULL);
+  structure = gst_structure_new_static_str ("GstMessageStepStart",
+      "active", G_TYPE_BOOLEAN, active,
+      "format", GST_TYPE_FORMAT, format,
+      "amount", G_TYPE_UINT64, amount,
+      "rate", G_TYPE_DOUBLE, rate,
+      "flush", G_TYPE_BOOLEAN, flush,
+      "intermediate", G_TYPE_BOOLEAN, intermediate, NULL);
   message = gst_message_new_custom (GST_MESSAGE_STEP_START, src, structure);
 
   return message;
@@ -1967,12 +2096,12 @@ gst_message_new_step_start (GstObject * src, gboolean active, GstFormat format,
 /**
  * gst_message_parse_step_start:
  * @message: A valid #GstMessage of type GST_MESSAGE_STEP_DONE.
- * @active: (out) (allow-none): result location for the active flag
- * @format: (out) (allow-none): result location for the format
- * @amount: (out) (allow-none): result location for the amount
- * @rate: (out) (allow-none): result location for the rate
- * @flush: (out) (allow-none): result location for the flush flag
- * @intermediate: (out) (allow-none): result location for the intermediate flag
+ * @active: (out) (optional): result location for the active flag
+ * @format: (out) (optional): result location for the format
+ * @amount: (out) (optional): result location for the amount
+ * @rate: (out) (optional): result location for the rate
+ * @flush: (out) (optional): result location for the flush flag
+ * @intermediate: (out) (optional): result location for the intermediate flag
  *
  * Extract the values from step_start message.
  *
@@ -1989,18 +2118,18 @@ gst_message_parse_step_start (GstMessage * message, gboolean * active,
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_STEP_START);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  gst_structure_id_get (structure,
-      GST_QUARK (ACTIVE), G_TYPE_BOOLEAN, active,
-      GST_QUARK (FORMAT), GST_TYPE_FORMAT, format,
-      GST_QUARK (AMOUNT), G_TYPE_UINT64, amount,
-      GST_QUARK (RATE), G_TYPE_DOUBLE, rate,
-      GST_QUARK (FLUSH), G_TYPE_BOOLEAN, flush,
-      GST_QUARK (INTERMEDIATE), G_TYPE_BOOLEAN, intermediate, NULL);
+  gst_structure_get (structure,
+      "active", G_TYPE_BOOLEAN, active,
+      "format", GST_TYPE_FORMAT, format,
+      "amount", G_TYPE_UINT64, amount,
+      "rate", G_TYPE_DOUBLE, rate,
+      "flush", G_TYPE_BOOLEAN, flush,
+      "intermediate", G_TYPE_BOOLEAN, intermediate, NULL);
 }
 
 /**
  * gst_message_new_qos:
- * @src: The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @live: if the message was generated by a live element
  * @running_time: the running time of the buffer that generated the message
  * @stream_time: the stream time of the buffer that generated the message
@@ -2032,18 +2161,18 @@ gst_message_new_qos (GstObject * src, gboolean live, guint64 running_time,
   GstMessage *message;
   GstStructure *structure;
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_QOS),
-      GST_QUARK (LIVE), G_TYPE_BOOLEAN, live,
-      GST_QUARK (RUNNING_TIME), G_TYPE_UINT64, running_time,
-      GST_QUARK (STREAM_TIME), G_TYPE_UINT64, stream_time,
-      GST_QUARK (TIMESTAMP), G_TYPE_UINT64, timestamp,
-      GST_QUARK (DURATION), G_TYPE_UINT64, duration,
-      GST_QUARK (JITTER), G_TYPE_INT64, (gint64) 0,
-      GST_QUARK (PROPORTION), G_TYPE_DOUBLE, (gdouble) 1.0,
-      GST_QUARK (QUALITY), G_TYPE_INT, (gint) 1000000,
-      GST_QUARK (FORMAT), GST_TYPE_FORMAT, GST_FORMAT_UNDEFINED,
-      GST_QUARK (PROCESSED), G_TYPE_UINT64, (guint64) - 1,
-      GST_QUARK (DROPPED), G_TYPE_UINT64, (guint64) - 1, NULL);
+  structure = gst_structure_new_static_str ("GstMessageQOS",
+      "live", G_TYPE_BOOLEAN, live,
+      "running-time", G_TYPE_UINT64, running_time,
+      "stream-time", G_TYPE_UINT64, stream_time,
+      "timestamp", G_TYPE_UINT64, timestamp,
+      "duration", G_TYPE_UINT64, duration,
+      "jitter", G_TYPE_INT64, (gint64) 0,
+      "proportion", G_TYPE_DOUBLE, (gdouble) 1.0,
+      "quality", G_TYPE_INT, (gint) 1000000,
+      "format", GST_TYPE_FORMAT, GST_FORMAT_UNDEFINED,
+      "processed", G_TYPE_UINT64, (guint64) - 1,
+      "dropped", G_TYPE_UINT64, (guint64) - 1, NULL);
   message = gst_message_new_custom (GST_MESSAGE_QOS, src, structure);
 
   return message;
@@ -2072,10 +2201,10 @@ gst_message_set_qos_values (GstMessage * message, gint64 jitter,
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_QOS);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  gst_structure_id_set (structure,
-      GST_QUARK (JITTER), G_TYPE_INT64, jitter,
-      GST_QUARK (PROPORTION), G_TYPE_DOUBLE, proportion,
-      GST_QUARK (QUALITY), G_TYPE_INT, quality, NULL);
+  gst_structure_set_static_str (structure,
+      "jitter", G_TYPE_INT64, jitter,
+      "proportion", G_TYPE_DOUBLE, proportion,
+      "quality", G_TYPE_INT, quality, NULL);
 }
 
 /**
@@ -2107,23 +2236,23 @@ gst_message_set_qos_stats (GstMessage * message, GstFormat format,
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_QOS);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  gst_structure_id_set (structure,
-      GST_QUARK (FORMAT), GST_TYPE_FORMAT, format,
-      GST_QUARK (PROCESSED), G_TYPE_UINT64, processed,
-      GST_QUARK (DROPPED), G_TYPE_UINT64, dropped, NULL);
+  gst_structure_set_static_str (structure,
+      "format", GST_TYPE_FORMAT, format,
+      "processed", G_TYPE_UINT64, processed,
+      "dropped", G_TYPE_UINT64, dropped, NULL);
 }
 
 /**
  * gst_message_parse_qos:
  * @message: A valid #GstMessage of type GST_MESSAGE_QOS.
- * @live: (out) (allow-none): if the message was generated by a live element
- * @running_time: (out) (allow-none): the running time of the buffer that
+ * @live: (out) (optional): if the message was generated by a live element
+ * @running_time: (out) (optional): the running time of the buffer that
  *     generated the message
- * @stream_time: (out) (allow-none): the stream time of the buffer that
+ * @stream_time: (out) (optional): the stream time of the buffer that
  *     generated the message
- * @timestamp: (out) (allow-none): the timestamps of the buffer that
+ * @timestamp: (out) (optional): the timestamps of the buffer that
  *     generated the message
- * @duration: (out) (allow-none): the duration of the buffer that
+ * @duration: (out) (optional): the duration of the buffer that
  *     generated the message
  *
  * Extract the timestamps and live status from the QoS message.
@@ -2145,22 +2274,22 @@ gst_message_parse_qos (GstMessage * message, gboolean * live,
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_QOS);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  gst_structure_id_get (structure,
-      GST_QUARK (LIVE), G_TYPE_BOOLEAN, live,
-      GST_QUARK (RUNNING_TIME), G_TYPE_UINT64, running_time,
-      GST_QUARK (STREAM_TIME), G_TYPE_UINT64, stream_time,
-      GST_QUARK (TIMESTAMP), G_TYPE_UINT64, timestamp,
-      GST_QUARK (DURATION), G_TYPE_UINT64, duration, NULL);
+  gst_structure_get (structure,
+      "live", G_TYPE_BOOLEAN, live,
+      "running-time", G_TYPE_UINT64, running_time,
+      "stream-time", G_TYPE_UINT64, stream_time,
+      "timestamp", G_TYPE_UINT64, timestamp,
+      "duration", G_TYPE_UINT64, duration, NULL);
 }
 
 /**
  * gst_message_parse_qos_values:
  * @message: A valid #GstMessage of type GST_MESSAGE_QOS.
- * @jitter: (out) (allow-none): The difference of the running-time against
+ * @jitter: (out) (optional): The difference of the running-time against
  *     the deadline.
- * @proportion: (out) (allow-none): Long term prediction of the ideal rate
+ * @proportion: (out) (optional): Long term prediction of the ideal rate
  *     relative to normal rate to get optimal quality.
- * @quality: (out) (allow-none): An element dependent integer value that
+ * @quality: (out) (optional): An element dependent integer value that
  *     specifies the current quality level of the element. The default
  *     maximum quality is 1000000.
  *
@@ -2178,22 +2307,22 @@ gst_message_parse_qos_values (GstMessage * message, gint64 * jitter,
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_QOS);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  gst_structure_id_get (structure,
-      GST_QUARK (JITTER), G_TYPE_INT64, jitter,
-      GST_QUARK (PROPORTION), G_TYPE_DOUBLE, proportion,
-      GST_QUARK (QUALITY), G_TYPE_INT, quality, NULL);
+  gst_structure_get (structure,
+      "jitter", G_TYPE_INT64, jitter,
+      "proportion", G_TYPE_DOUBLE, proportion,
+      "quality", G_TYPE_INT, quality, NULL);
 }
 
 /**
  * gst_message_parse_qos_stats:
  * @message: A valid #GstMessage of type GST_MESSAGE_QOS.
- * @format: (out) (allow-none): Units of the 'processed' and 'dropped' fields.
+ * @format: (out) (optional): Units of the 'processed' and 'dropped' fields.
  *     Video sinks and video filters will use GST_FORMAT_BUFFERS (frames).
  *     Audio sinks and audio filters will likely use GST_FORMAT_DEFAULT
  *     (samples).
- * @processed: (out) (allow-none): Total number of units correctly processed
+ * @processed: (out) (optional): Total number of units correctly processed
  *     since the last state change to READY or a flushing operation.
- * @dropped: (out) (allow-none): Total number of units dropped since the last
+ * @dropped: (out) (optional): Total number of units dropped since the last
  *     state change to READY or a flushing operation.
  *
  * Extract the QoS stats representing the history of the current continuous
@@ -2214,15 +2343,15 @@ gst_message_parse_qos_stats (GstMessage * message, GstFormat * format,
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_QOS);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  gst_structure_id_get (structure,
-      GST_QUARK (FORMAT), GST_TYPE_FORMAT, format,
-      GST_QUARK (PROCESSED), G_TYPE_UINT64, processed,
-      GST_QUARK (DROPPED), G_TYPE_UINT64, dropped, NULL);
+  gst_structure_get (structure,
+      "format", GST_TYPE_FORMAT, format,
+      "processed", G_TYPE_UINT64, processed,
+      "dropped", G_TYPE_UINT64, dropped, NULL);
 }
 
 /**
  * gst_message_new_progress:
- * @src: The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @type: a #GstProgressType
  * @code: a progress code
  * @text: free, user visible text describing the progress
@@ -2233,7 +2362,7 @@ gst_message_parse_qos_stats (GstMessage * message, GstFormat * format,
  * @code contains a well defined string describing the action.
  * @text should contain a user visible string detailing the current action.
  *
- * Returns: (transfer full) (nullable): The new qos message.
+ * Returns: (transfer full): The new qos message.
  */
 GstMessage *
 gst_message_new_progress (GstObject * src, GstProgressType type,
@@ -2249,12 +2378,11 @@ gst_message_new_progress (GstObject * src, GstProgressType type,
   if (type == GST_PROGRESS_TYPE_START || type == GST_PROGRESS_TYPE_CONTINUE)
     percent = 0;
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_PROGRESS),
-      GST_QUARK (TYPE), GST_TYPE_PROGRESS_TYPE, type,
-      GST_QUARK (CODE), G_TYPE_STRING, code,
-      GST_QUARK (TEXT), G_TYPE_STRING, text,
-      GST_QUARK (PERCENT), G_TYPE_INT, percent,
-      GST_QUARK (TIMEOUT), G_TYPE_INT, timeout, NULL);
+  structure = gst_structure_new_static_str ("GstMessageProgress",
+      "type", GST_TYPE_PROGRESS_TYPE, type,
+      "code", G_TYPE_STRING, code,
+      "text", G_TYPE_STRING, text,
+      "percent", G_TYPE_INT, percent, "timeout", G_TYPE_INT, timeout, NULL);
   message = gst_message_new_custom (GST_MESSAGE_PROGRESS, src, structure);
 
   return message;
@@ -2263,9 +2391,9 @@ gst_message_new_progress (GstObject * src, GstProgressType type,
 /**
  * gst_message_parse_progress:
  * @message: A valid #GstMessage of type GST_MESSAGE_PROGRESS.
- * @type: (out) (allow-none): location for the type
- * @code: (out) (allow-none) (transfer full): location for the code
- * @text: (out) (allow-none) (transfer full): location for the text
+ * @type: (out) (optional): location for the type
+ * @code: (out) (optional) (transfer full): location for the code
+ * @text: (out) (optional) (transfer full): location for the text
  *
  * Parses the progress @type, @code and @text.
  */
@@ -2279,15 +2407,14 @@ gst_message_parse_progress (GstMessage * message, GstProgressType * type,
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_PROGRESS);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  gst_structure_id_get (structure,
-      GST_QUARK (TYPE), GST_TYPE_PROGRESS_TYPE, type,
-      GST_QUARK (CODE), G_TYPE_STRING, code,
-      GST_QUARK (TEXT), G_TYPE_STRING, text, NULL);
+  gst_structure_get (structure,
+      "type", GST_TYPE_PROGRESS_TYPE, type,
+      "code", G_TYPE_STRING, code, "text", G_TYPE_STRING, text, NULL);
 }
 
 /**
  * gst_message_new_toc:
- * @src: the object originating the message.
+ * @src: (transfer none) (nullable): the object originating the message.
  * @toc: (transfer none): #GstToc structure for the message.
  * @updated: whether TOC was updated or not.
  *
@@ -2305,9 +2432,8 @@ gst_message_new_toc (GstObject * src, GstToc * toc, gboolean updated)
 
   g_return_val_if_fail (toc != NULL, NULL);
 
-  toc_struct = gst_structure_new_id (GST_QUARK (MESSAGE_TOC),
-      GST_QUARK (TOC), GST_TYPE_TOC, toc,
-      GST_QUARK (UPDATED), G_TYPE_BOOLEAN, updated, NULL);
+  toc_struct = gst_structure_new_static_str ("GstMessageToc",
+      "toc", GST_TYPE_TOC, toc, "updated", G_TYPE_BOOLEAN, updated, NULL);
 
   return gst_message_new_custom (GST_MESSAGE_TOC, src, toc_struct);
 }
@@ -2331,14 +2457,13 @@ gst_message_parse_toc (GstMessage * message, GstToc ** toc, gboolean * updated)
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_TOC);
   g_return_if_fail (toc != NULL);
 
-  gst_structure_id_get (GST_MESSAGE_STRUCTURE (message),
-      GST_QUARK (TOC), GST_TYPE_TOC, toc,
-      GST_QUARK (UPDATED), G_TYPE_BOOLEAN, updated, NULL);
+  gst_structure_get (GST_MESSAGE_STRUCTURE (message),
+      "toc", GST_TYPE_TOC, toc, "updated", G_TYPE_BOOLEAN, updated, NULL);
 }
 
 /**
  * gst_message_new_reset_time:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @running_time: the requested running-time
  *
  * This message is posted when the pipeline running-time should be reset to
@@ -2356,8 +2481,8 @@ gst_message_new_reset_time (GstObject * src, GstClockTime running_time)
 
   g_return_val_if_fail (GST_CLOCK_TIME_IS_VALID (running_time), NULL);
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_RESET_TIME),
-      GST_QUARK (RUNNING_TIME), G_TYPE_UINT64, running_time, NULL);
+  structure = gst_structure_new_static_str ("GstMessageResetTime",
+      "running-time", G_TYPE_UINT64, running_time, NULL);
   message = gst_message_new_custom (GST_MESSAGE_RESET_TIME, src, structure);
 
   return message;
@@ -2366,7 +2491,7 @@ gst_message_new_reset_time (GstObject * src, GstClockTime running_time)
 /**
  * gst_message_parse_reset_time:
  * @message: A valid #GstMessage of type GST_MESSAGE_RESET_TIME.
- * @running_time: (out) (allow-none): Result location for the running_time or
+ * @running_time: (out) (optional): Result location for the running_time or
  *      %NULL
  *
  * Extract the running-time from the RESET_TIME message.
@@ -2384,13 +2509,13 @@ gst_message_parse_reset_time (GstMessage * message, GstClockTime * running_time)
   structure = GST_MESSAGE_STRUCTURE (message);
   if (running_time)
     *running_time =
-        g_value_get_uint64 (gst_structure_id_get_value (structure,
-            GST_QUARK (RUNNING_TIME)));
+        g_value_get_uint64 (gst_structure_get_value (structure,
+            "running-time"));
 }
 
 /**
  * gst_message_new_stream_start:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  *
  * Create a new stream_start message. This message is generated and posted in
  * the sink elements of a GstBin. The bin will only forward the STREAM_START
@@ -2406,7 +2531,7 @@ gst_message_new_stream_start (GstObject * src)
   GstMessage *message;
   GstStructure *s;
 
-  s = gst_structure_new_id_empty (GST_QUARK (MESSAGE_STREAM_START));
+  s = gst_structure_new_static_str_empty ("GstMessageStreamStart");
   message = gst_message_new_custom (GST_MESSAGE_STREAM_START, src, s);
 
   return message;
@@ -2441,14 +2566,13 @@ gst_message_set_group_id (GstMessage * message, guint group_id)
   g_return_if_fail (group_id != GST_GROUP_ID_INVALID);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  gst_structure_id_set (structure, GST_QUARK (GROUP_ID), G_TYPE_UINT, group_id,
-      NULL);
+  gst_structure_set (structure, "group-id", G_TYPE_UINT, group_id, NULL);
 }
 
 /**
  * gst_message_parse_group_id:
  * @message: A valid #GstMessage of type GST_MESSAGE_STREAM_START.
- * @group_id: (out) (allow-none): Result location for the group id or
+ * @group_id: (out) (optional): Result location for the group id or
  *      %NULL
  *
  * Extract the group from the STREAM_START message.
@@ -2476,7 +2600,7 @@ gst_message_parse_group_id (GstMessage * message, guint * group_id)
 
   structure = GST_MESSAGE_STRUCTURE (message);
 
-  v = gst_structure_id_get_value (structure, GST_QUARK (GROUP_ID));
+  v = gst_structure_get_value (structure, "group-id");
   if (!v)
     return FALSE;
 
@@ -2486,7 +2610,7 @@ gst_message_parse_group_id (GstMessage * message, guint * group_id)
 
 /**
  * gst_message_new_need_context:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @context_type: The context type that is needed
  *
  * This message is posted when an element needs a specific #GstContext.
@@ -2505,8 +2629,8 @@ gst_message_new_need_context (GstObject * src, const gchar * context_type)
 
   g_return_val_if_fail (context_type != NULL, NULL);
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_NEED_CONTEXT),
-      GST_QUARK (CONTEXT_TYPE), G_TYPE_STRING, context_type, NULL);
+  structure = gst_structure_new_static_str ("GstMessageNeedContext",
+      "context-type", G_TYPE_STRING, context_type, NULL);
   message = gst_message_new_custom (GST_MESSAGE_NEED_CONTEXT, src, structure);
 
   return message;
@@ -2515,7 +2639,7 @@ gst_message_new_need_context (GstObject * src, const gchar * context_type)
 /**
  * gst_message_parse_context_type:
  * @message: a GST_MESSAGE_NEED_CONTEXT type message
- * @context_type: (out) (transfer none) (allow-none): the context type, or %NULL
+ * @context_type: (out) (transfer none) (optional): the context type, or %NULL
  *
  * Parse a context type from an existing GST_MESSAGE_NEED_CONTEXT message.
  *
@@ -2536,7 +2660,7 @@ gst_message_parse_context_type (GstMessage * message,
   structure = GST_MESSAGE_STRUCTURE (message);
 
   if (context_type) {
-    value = gst_structure_id_get_value (structure, GST_QUARK (CONTEXT_TYPE));
+    value = gst_structure_get_value (structure, "context-type");
     *context_type = g_value_get_string (value);
   }
 
@@ -2545,7 +2669,7 @@ gst_message_parse_context_type (GstMessage * message,
 
 /**
  * gst_message_new_have_context:
- * @src: (transfer none) (allow-none): The object originating the message.
+ * @src: (transfer none) (nullable): The object originating the message.
  * @context: (transfer full): the context
  *
  * This message is posted when an element has a new local #GstContext.
@@ -2562,8 +2686,8 @@ gst_message_new_have_context (GstObject * src, GstContext * context)
   GstMessage *message;
   GstStructure *structure;
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_HAVE_CONTEXT),
-      GST_QUARK (CONTEXT), GST_TYPE_CONTEXT, context, NULL);
+  structure = gst_structure_new_static_str ("GstMessageHaveContext",
+      "context", GST_TYPE_CONTEXT, context, NULL);
   message = gst_message_new_custom (GST_MESSAGE_HAVE_CONTEXT, src, structure);
   gst_context_unref (context);
 
@@ -2573,7 +2697,7 @@ gst_message_new_have_context (GstObject * src, GstContext * context)
 /**
  * gst_message_parse_have_context:
  * @message: A valid #GstMessage of type GST_MESSAGE_HAVE_CONTEXT.
- * @context: (out) (transfer full) (allow-none): Result location for the
+ * @context: (out) (transfer full) (optional): Result location for the
  *      context or %NULL
  *
  * Extract the context from the HAVE_CONTEXT message.
@@ -2589,21 +2713,21 @@ gst_message_parse_have_context (GstMessage * message, GstContext ** context)
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_HAVE_CONTEXT);
 
   if (context)
-    gst_structure_id_get (GST_MESSAGE_STRUCTURE (message),
-        GST_QUARK (CONTEXT), GST_TYPE_CONTEXT, context, NULL);
+    gst_structure_get (GST_MESSAGE_STRUCTURE (message),
+        "context", GST_TYPE_CONTEXT, context, NULL);
 }
 
 #ifndef GSTREAMER_LITE
 /**
  * gst_message_new_device_added:
- * @src: The #GstObject that created the message
+ * @src: (transfer none) (nullable): The #GstObject that created the message
  * @device: (transfer none): The new #GstDevice
  *
  * Creates a new device-added message. The device-added message is produced by
  * #GstDeviceProvider or a #GstDeviceMonitor. They announce the appearance
  * of monitored devices.
  *
- * Returns: a newly allocated #GstMessage
+ * Returns: (transfer full): a newly allocated #GstMessage
  *
  * Since: 1.4
  */
@@ -2616,8 +2740,8 @@ gst_message_new_device_added (GstObject * src, GstDevice * device)
   g_return_val_if_fail (device != NULL, NULL);
   g_return_val_if_fail (GST_IS_DEVICE (device), NULL);
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_DEVICE_ADDED),
-      GST_QUARK (DEVICE), GST_TYPE_DEVICE, device, NULL);
+  structure = gst_structure_new_static_str ("GstMessageDeviceAdded",
+      "device", GST_TYPE_DEVICE, device, NULL);
   message = gst_message_new_custom (GST_MESSAGE_DEVICE_ADDED, src, structure);
 
   return message;
@@ -2626,7 +2750,7 @@ gst_message_new_device_added (GstObject * src, GstDevice * device)
 /**
  * gst_message_parse_device_added:
  * @message: a #GstMessage of type %GST_MESSAGE_DEVICE_ADDED
- * @device: (out) (allow-none) (transfer full): A location where to store a
+ * @device: (out) (optional) (transfer full): A location where to store a
  *  pointer to the new #GstDevice, or %NULL
  *
  * Parses a device-added message. The device-added message is produced by
@@ -2642,20 +2766,20 @@ gst_message_parse_device_added (GstMessage * message, GstDevice ** device)
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_DEVICE_ADDED);
 
   if (device)
-    gst_structure_id_get (GST_MESSAGE_STRUCTURE (message),
-        GST_QUARK (DEVICE), GST_TYPE_DEVICE, device, NULL);
+    gst_structure_get (GST_MESSAGE_STRUCTURE (message),
+        "device", GST_TYPE_DEVICE, device, NULL);
 }
 
 /**
  * gst_message_new_device_removed:
- * @src: The #GstObject that created the message
+ * @src: (transfer none) (nullable): The #GstObject that created the message
  * @device: (transfer none): The removed #GstDevice
  *
  * Creates a new device-removed message. The device-removed message is produced
  * by #GstDeviceProvider or a #GstDeviceMonitor. They announce the
  * disappearance of monitored devices.
  *
- * Returns: a newly allocated #GstMessage
+ * Returns: (transfer full): a newly allocated #GstMessage
  *
  * Since: 1.4
  */
@@ -2668,8 +2792,8 @@ gst_message_new_device_removed (GstObject * src, GstDevice * device)
   g_return_val_if_fail (device != NULL, NULL);
   g_return_val_if_fail (GST_IS_DEVICE (device), NULL);
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_DEVICE_REMOVED),
-      GST_QUARK (DEVICE), GST_TYPE_DEVICE, device, NULL);
+  structure = gst_structure_new_static_str ("GstMessageDeviceRemoved",
+      "device", GST_TYPE_DEVICE, device, NULL);
   message = gst_message_new_custom (GST_MESSAGE_DEVICE_REMOVED, src, structure);
 
   return message;
@@ -2678,7 +2802,7 @@ gst_message_new_device_removed (GstObject * src, GstDevice * device)
 /**
  * gst_message_parse_device_removed:
  * @message: a #GstMessage of type %GST_MESSAGE_DEVICE_REMOVED
- * @device: (out) (allow-none) (transfer full): A location where to store a
+ * @device: (out) (optional) (transfer full): A location where to store a
  *  pointer to the removed #GstDevice, or %NULL
  *
  * Parses a device-removed message. The device-removed message is produced by
@@ -2694,21 +2818,22 @@ gst_message_parse_device_removed (GstMessage * message, GstDevice ** device)
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_DEVICE_REMOVED);
 
   if (device)
-    gst_structure_id_get (GST_MESSAGE_STRUCTURE (message),
-        GST_QUARK (DEVICE), GST_TYPE_DEVICE, device, NULL);
+    gst_structure_get (GST_MESSAGE_STRUCTURE (message),
+        "device", GST_TYPE_DEVICE, device, NULL);
 }
 
 /**
  * gst_message_new_device_changed:
- * @src: The #GstObject that created the message
- * @device: (transfer none): The newly created device representing @replaced_device
+ * @src: (transfer none) (nullable): The #GstObject that created the message
+ * @device: (transfer none): The newly created device representing @changed_device
  *         with its new configuration.
+ * @changed_device: (transfer none): The old version of the device.
  *
  * Creates a new device-changed message. The device-changed message is produced
  * by #GstDeviceProvider or a #GstDeviceMonitor. They announce that a device
  * properties has changed and @device represent the new modified version of @changed_device.
  *
- * Returns: a newly allocated #GstMessage
+ * Returns: (transfer full): a newly allocated #GstMessage
  *
  * Since: 1.16
  */
@@ -2722,9 +2847,9 @@ gst_message_new_device_changed (GstObject * src, GstDevice * device,
   g_return_val_if_fail (device != NULL, NULL);
   g_return_val_if_fail (GST_IS_DEVICE (device), NULL);
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_DEVICE_CHANGED),
-      GST_QUARK (DEVICE), GST_TYPE_DEVICE, device,
-      GST_QUARK (DEVICE_CHANGED), GST_TYPE_DEVICE, changed_device, NULL);
+  structure = gst_structure_new_static_str ("GstMessageDeviceChanged",
+      "device", GST_TYPE_DEVICE, device,
+      "device-changed", GST_TYPE_DEVICE, changed_device, NULL);
   message = gst_message_new_custom (GST_MESSAGE_DEVICE_CHANGED, src, structure);
 
   return message;
@@ -2733,9 +2858,9 @@ gst_message_new_device_changed (GstObject * src, GstDevice * device,
 /**
  * gst_message_parse_device_changed:
  * @message: a #GstMessage of type %GST_MESSAGE_DEVICE_CHANGED
- * @device: (out) (allow-none) (transfer full): A location where to store a
+ * @device: (out) (optional) (transfer full): A location where to store a
  *  pointer to the updated version of the #GstDevice, or %NULL
- * @changed_device: (out) (allow-none) (transfer full): A location where to store a
+ * @changed_device: (out) (optional) (transfer full): A location where to store a
  *  pointer to the old version of the #GstDevice, or %NULL
  *
  * Parses a device-changed message. The device-changed message is produced by
@@ -2753,22 +2878,22 @@ gst_message_parse_device_changed (GstMessage * message, GstDevice ** device,
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_DEVICE_CHANGED);
 
   if (device)
-    gst_structure_id_get (GST_MESSAGE_STRUCTURE (message),
-        GST_QUARK (DEVICE), GST_TYPE_DEVICE, device, NULL);
+    gst_structure_get (GST_MESSAGE_STRUCTURE (message),
+        "device", GST_TYPE_DEVICE, device, NULL);
 
   if (changed_device)
-    gst_structure_id_get (GST_MESSAGE_STRUCTURE (message),
-        GST_QUARK (DEVICE_CHANGED), GST_TYPE_DEVICE, changed_device, NULL);
+    gst_structure_get (GST_MESSAGE_STRUCTURE (message),
+        "device-changed", GST_TYPE_DEVICE, changed_device, NULL);
 }
 #endif // GSTREAMER_LITE
 
 /**
  * gst_message_new_property_notify:
- * @src: The #GstObject whose property changed (may or may not be a #GstElement)
+ * @src: (transfer none): The #GstObject whose property changed (may or may not be a #GstElement)
  * @property_name: name of the property that changed
- * @val: (allow-none) (transfer full): new property value, or %NULL
+ * @val: (nullable) (transfer full): new property value, or %NULL
  *
- * Returns: a newly allocated #GstMessage
+ * Returns: (transfer full): a newly allocated #GstMessage
  *
  * Since: 1.10
  */
@@ -2779,15 +2904,16 @@ gst_message_new_property_notify (GstObject * src, const gchar * property_name,
   GstStructure *structure;
   GValue name_val = G_VALUE_INIT;
 
+  g_return_val_if_fail (GST_IS_OBJECT (src), NULL);
   g_return_val_if_fail (property_name != NULL, NULL);
 
-  structure = gst_structure_new_id_empty (GST_QUARK (MESSAGE_PROPERTY_NOTIFY));
+  structure = gst_structure_new_static_str_empty ("GstMessagePropertyNotify");
   g_value_init (&name_val, G_TYPE_STRING);
   /* should already be interned, but let's make sure */
   g_value_set_static_string (&name_val, g_intern_string (property_name));
-  gst_structure_id_take_value (structure, GST_QUARK (PROPERTY_NAME), &name_val);
+  gst_structure_take_value (structure, "property-name", &name_val);
   if (val != NULL)
-    gst_structure_id_take_value (structure, GST_QUARK (PROPERTY_VALUE), val);
+    gst_structure_take_value (structure, "property-value", val);
 
   return gst_message_new_custom (GST_MESSAGE_PROPERTY_NOTIFY, src, structure);
 }
@@ -2795,11 +2921,11 @@ gst_message_new_property_notify (GstObject * src, const gchar * property_name,
 /**
  * gst_message_parse_property_notify:
  * @message: a #GstMessage of type %GST_MESSAGE_PROPERTY_NOTIFY
- * @object: (out) (allow-none) (transfer none): location where to store a
+ * @object: (out) (optional) (transfer none): location where to store a
  *     pointer to the object whose property got changed, or %NULL
- * @property_name: (out) (transfer none) (allow-none): return location for
+ * @property_name: (out) (transfer none) (optional): return location for
  *     the name of the property that got changed, or %NULL
- * @property_value: (out) (transfer none) (allow-none): return location for
+ * @property_value: (out) (transfer none) (optional) (nullable): return location for
  *     the new value of the property that got changed, or %NULL. This will
  *     only be set if the property notify watch was told to include the value
  *     when it was set up
@@ -2825,24 +2951,23 @@ gst_message_parse_property_notify (GstMessage * message, GstObject ** object,
   if (property_name) {
     const GValue *name_value;
 
-    name_value = gst_structure_id_get_value (s, GST_QUARK (PROPERTY_NAME));
+    name_value = gst_structure_get_value (s, "property-name");
     *property_name = g_value_get_string (name_value);
   }
 
   if (property_value)
-    *property_value =
-        gst_structure_id_get_value (s, GST_QUARK (PROPERTY_VALUE));
+    *property_value = gst_structure_get_value (s, "property-value");
 }
 
 /**
  * gst_message_new_stream_collection:
- * @src: The #GstObject that created the message
+ * @src: (transfer none) (nullable): The #GstObject that created the message
  * @collection: (transfer none): The #GstStreamCollection
  *
  * Creates a new stream-collection message. The message is used to announce new
  * #GstStreamCollection
  *
- * Returns: a newly allocated #GstMessage
+ * Returns: (transfer full): a newly allocated #GstMessage
  *
  * Since: 1.10
  */
@@ -2857,8 +2982,8 @@ gst_message_new_stream_collection (GstObject * src,
   g_return_val_if_fail (GST_IS_STREAM_COLLECTION (collection), NULL);
 
   structure =
-      gst_structure_new_id (GST_QUARK (MESSAGE_STREAM_COLLECTION),
-      GST_QUARK (COLLECTION), GST_TYPE_STREAM_COLLECTION, collection, NULL);
+      gst_structure_new_static_str ("GstMessageStreamCollection",
+      "collection", GST_TYPE_STREAM_COLLECTION, collection, NULL);
   message =
       gst_message_new_custom (GST_MESSAGE_STREAM_COLLECTION, src, structure);
 
@@ -2868,7 +2993,7 @@ gst_message_new_stream_collection (GstObject * src,
 /**
  * gst_message_parse_stream_collection:
  * @message: a #GstMessage of type %GST_MESSAGE_STREAM_COLLECTION
- * @collection: (out) (allow-none) (transfer full): A location where to store a
+ * @collection: (out) (optional) (transfer full): A location where to store a
  *  pointer to the #GstStreamCollection, or %NULL
  *
  * Parses a stream-collection message.
@@ -2884,13 +3009,13 @@ gst_message_parse_stream_collection (GstMessage * message,
       GST_MESSAGE_STREAM_COLLECTION);
 
   if (collection)
-    gst_structure_id_get (GST_MESSAGE_STRUCTURE (message),
-        GST_QUARK (COLLECTION), GST_TYPE_STREAM_COLLECTION, collection, NULL);
+    gst_structure_get (GST_MESSAGE_STRUCTURE (message),
+        "collection", GST_TYPE_STREAM_COLLECTION, collection, NULL);
 }
 
 /**
  * gst_message_new_streams_selected:
- * @src: The #GstObject that created the message
+ * @src: (transfer none) (nullable): The #GstObject that created the message
  * @collection: (transfer none): The #GstStreamCollection
  *
  * Creates a new steams-selected message. The message is used to announce
@@ -2904,7 +3029,7 @@ gst_message_parse_stream_collection (GstMessage * message,
  * Users of gst_message_new_streams_selected() can add the selected streams with
  * gst_message_streams_selected_add().
  *
- * Returns: a newly allocated #GstMessage
+ * Returns: (transfer full): a newly allocated #GstMessage
  *
  * Since: 1.10
  */
@@ -2920,10 +3045,10 @@ gst_message_new_streams_selected (GstObject * src,
   g_return_val_if_fail (GST_IS_STREAM_COLLECTION (collection), NULL);
 
   structure =
-      gst_structure_new_id (GST_QUARK (MESSAGE_STREAMS_SELECTED),
-      GST_QUARK (COLLECTION), GST_TYPE_STREAM_COLLECTION, collection, NULL);
+      gst_structure_new_static_str ("GstMessageStreamsSelected",
+      "collection", GST_TYPE_STREAM_COLLECTION, collection, NULL);
   g_value_init (&val, GST_TYPE_ARRAY);
-  gst_structure_id_take_value (structure, GST_QUARK (STREAMS), &val);
+  gst_structure_take_value (structure, "streams", &val);
   message =
       gst_message_new_custom (GST_MESSAGE_STREAMS_SELECTED, src, structure);
 
@@ -2949,9 +3074,7 @@ gst_message_streams_selected_get_size (GstMessage * msg)
   g_return_val_if_fail (GST_MESSAGE_TYPE (msg) == GST_MESSAGE_STREAMS_SELECTED,
       0);
 
-  val =
-      gst_structure_id_get_value (GST_MESSAGE_STRUCTURE (msg),
-      GST_QUARK (STREAMS));
+  val = gst_structure_get_value (GST_MESSAGE_STRUCTURE (msg), "streams");
   return gst_value_array_get_size (val);
 }
 
@@ -2975,8 +3098,8 @@ gst_message_streams_selected_add (GstMessage * msg, GstStream * stream)
   g_return_if_fail (GST_IS_STREAM (stream));
 
   val =
-      (GValue *) gst_structure_id_get_value (GST_MESSAGE_STRUCTURE (msg),
-      GST_QUARK (STREAMS));
+      (GValue *) gst_structure_get_value (GST_MESSAGE_STRUCTURE (msg),
+      "streams");
   g_value_init (&to_add, GST_TYPE_STREAM);
   g_value_set_object (&to_add, stream);
   gst_value_array_append_and_take_value (val, &to_add);
@@ -3002,9 +3125,7 @@ gst_message_streams_selected_get_stream (GstMessage * msg, guint idx)
   g_return_val_if_fail (GST_MESSAGE_TYPE (msg) == GST_MESSAGE_STREAMS_SELECTED,
       NULL);
 
-  streams =
-      gst_structure_id_get_value (GST_MESSAGE_STRUCTURE (msg),
-      GST_QUARK (STREAMS));
+  streams = gst_structure_get_value (GST_MESSAGE_STRUCTURE (msg), "streams");
   val = gst_value_array_get_value (streams, idx);
   if (val) {
     return (GstStream *) g_value_dup_object (val);
@@ -3016,7 +3137,7 @@ gst_message_streams_selected_get_stream (GstMessage * msg, guint idx)
 /**
  * gst_message_parse_streams_selected:
  * @message: a #GstMessage of type %GST_MESSAGE_STREAMS_SELECTED
- * @collection: (out) (allow-none) (transfer full): A location where to store a
+ * @collection: (out) (optional) (transfer full): A location where to store a
  *  pointer to the #GstStreamCollection, or %NULL
  *
  * Parses a streams-selected message.
@@ -3031,16 +3152,16 @@ gst_message_parse_streams_selected (GstMessage * message,
   g_return_if_fail (GST_MESSAGE_TYPE (message) == GST_MESSAGE_STREAMS_SELECTED);
 
   if (collection)
-    gst_structure_id_get (GST_MESSAGE_STRUCTURE (message),
-        GST_QUARK (COLLECTION), GST_TYPE_STREAM_COLLECTION, collection, NULL);
+    gst_structure_get (GST_MESSAGE_STRUCTURE (message),
+        "collection", GST_TYPE_STREAM_COLLECTION, collection, NULL);
 }
 
 /**
  * gst_message_new_redirect:
- * @src: The #GstObject whose property changed (may or may not be a #GstElement)
+ * @src: (transfer none) (nullable): The #GstObject whose property changed (may or may not be a #GstElement)
  * @location: (transfer none): location string for the new entry
- * @tag_list: (transfer full) (allow-none): tag list for the new entry
- * @entry_struct: (transfer full) (allow-none): structure for the new entry
+ * @tag_list: (transfer full) (nullable): tag list for the new entry
+ * @entry_struct: (transfer full) (nullable): structure for the new entry
  *
  * Creates a new redirect message and adds a new entry to it. Redirect messages
  * are posted when an element detects that the actual data has to be retrieved
@@ -3068,7 +3189,7 @@ gst_message_parse_streams_selected (GstMessage * message,
  * The specified location string is copied. However, ownership over the tag
  * list and structure are transferred to the message.
  *
- * Returns: a newly allocated #GstMessage
+ * Returns: (transfer full): a newly allocated #GstMessage
  *
  * Since: 1.10
  */
@@ -3088,12 +3209,12 @@ gst_message_new_redirect (GstObject * src, const gchar * location,
   g_value_init (&entry_taglists_gvalue, GST_TYPE_LIST);
   g_value_init (&entry_structures_gvalue, GST_TYPE_LIST);
 
-  structure = gst_structure_new_id_empty (GST_QUARK (MESSAGE_REDIRECT));
-  gst_structure_id_take_value (structure, GST_QUARK (REDIRECT_ENTRY_LOCATIONS),
+  structure = gst_structure_new_static_str_empty ("GstMessageRedirect");
+  gst_structure_take_value_static_str (structure, "redirect-entry-locations",
       &entry_locations_gvalue);
-  gst_structure_id_take_value (structure, GST_QUARK (REDIRECT_ENTRY_TAGLISTS),
+  gst_structure_take_value_static_str (structure, "redirect-entry-taglists",
       &entry_taglists_gvalue);
-  gst_structure_id_take_value (structure, GST_QUARK (REDIRECT_ENTRY_STRUCTURES),
+  gst_structure_take_value_static_str (structure, "redirect-entry-structures",
       &entry_structures_gvalue);
 
   message = gst_message_new_custom (GST_MESSAGE_REDIRECT, src, structure);
@@ -3108,8 +3229,8 @@ gst_message_new_redirect (GstObject * src, const gchar * location,
  * gst_message_add_redirect_entry:
  * @message: a #GstMessage of type %GST_MESSAGE_REDIRECT
  * @location: (transfer none): location string for the new entry
- * @tag_list: (transfer full) (allow-none): tag list for the new entry
- * @entry_struct: (transfer full) (allow-none): structure for the new entry
+ * @tag_list: (transfer full) (nullable): tag list for the new entry
+ * @entry_struct: (transfer full) (nullable): structure for the new entry
  *
  * Creates and appends a new entry.
  *
@@ -3135,16 +3256,15 @@ gst_message_add_redirect_entry (GstMessage * message, const gchar * location,
   structure = GST_MESSAGE_STRUCTURE (message);
 
   entry_locations_gvalue =
-      (GValue *) gst_structure_id_get_value (structure,
-      GST_QUARK (REDIRECT_ENTRY_LOCATIONS));
+      (GValue *) gst_structure_get_value (structure,
+      "redirect-entry-locations");
   g_return_if_fail (GST_VALUE_HOLDS_LIST (entry_locations_gvalue));
   entry_taglists_gvalue =
-      (GValue *) gst_structure_id_get_value (structure,
-      GST_QUARK (REDIRECT_ENTRY_TAGLISTS));
+      (GValue *) gst_structure_get_value (structure, "redirect-entry-taglists");
   g_return_if_fail (GST_VALUE_HOLDS_LIST (entry_taglists_gvalue));
   entry_structures_gvalue =
-      (GValue *) gst_structure_id_get_value (structure,
-      GST_QUARK (REDIRECT_ENTRY_STRUCTURES));
+      (GValue *) gst_structure_get_value (structure,
+      "redirect-entry-structures");
   g_return_if_fail (GST_VALUE_HOLDS_LIST (entry_structures_gvalue));
 
   g_value_init (&val, G_TYPE_STRING);
@@ -3167,11 +3287,11 @@ gst_message_add_redirect_entry (GstMessage * message, const gchar * location,
  * gst_message_parse_redirect_entry:
  * @message: a #GstMessage of type %GST_MESSAGE_REDIRECT
  * @entry_index: index of the entry to parse
- * @location: (out) (transfer none) (allow-none): return location for
+ * @location: (out) (transfer none) (optional): return location for
  *     the pointer to the entry's location string, or %NULL
- * @tag_list: (out) (transfer none) (allow-none): return location for
+ * @tag_list: (out) (transfer none) (optional) (nullable): return location for
  *     the pointer to the entry's tag list, or %NULL
- * @entry_struct: (out) (transfer none) (allow-none): return location
+ * @entry_struct: (out) (transfer none) (optional) (nullable): return location
  *     for the pointer to the entry's structure, or %NULL
  *
  * Parses the location and/or structure from the entry with the given index.
@@ -3200,16 +3320,13 @@ gst_message_parse_redirect_entry (GstMessage * message, gsize entry_index,
   structure = GST_MESSAGE_STRUCTURE (message);
 
   entry_locations_gvalue =
-      gst_structure_id_get_value (structure,
-      GST_QUARK (REDIRECT_ENTRY_LOCATIONS));
+      gst_structure_get_value (structure, "redirect-entry-locations");
   g_return_if_fail (GST_VALUE_HOLDS_LIST (entry_locations_gvalue));
   entry_taglists_gvalue =
-      gst_structure_id_get_value (structure,
-      GST_QUARK (REDIRECT_ENTRY_TAGLISTS));
+      gst_structure_get_value (structure, "redirect-entry-taglists");
   g_return_if_fail (GST_VALUE_HOLDS_LIST (entry_taglists_gvalue));
   entry_structures_gvalue =
-      gst_structure_id_get_value (structure,
-      GST_QUARK (REDIRECT_ENTRY_STRUCTURES));
+      gst_structure_get_value (structure, "redirect-entry-structures");
   g_return_if_fail (GST_VALUE_HOLDS_LIST (entry_structures_gvalue));
 
   if (location) {
@@ -3254,16 +3371,13 @@ gst_message_get_num_redirect_entries (GstMessage * message)
   structure = GST_MESSAGE_STRUCTURE (message);
 
   entry_locations_gvalue =
-      gst_structure_id_get_value (structure,
-      GST_QUARK (REDIRECT_ENTRY_LOCATIONS));
+      gst_structure_get_value (structure, "redirect-entry-locations");
   g_return_val_if_fail (GST_VALUE_HOLDS_LIST (entry_locations_gvalue), 0);
   entry_taglists_gvalue =
-      gst_structure_id_get_value (structure,
-      GST_QUARK (REDIRECT_ENTRY_TAGLISTS));
+      gst_structure_get_value (structure, "redirect-entry-taglists");
   g_return_val_if_fail (GST_VALUE_HOLDS_LIST (entry_taglists_gvalue), 0);
   entry_structures_gvalue =
-      gst_structure_id_get_value (structure,
-      GST_QUARK (REDIRECT_ENTRY_STRUCTURES));
+      gst_structure_get_value (structure, "redirect-entry-structures");
   g_return_val_if_fail (GST_VALUE_HOLDS_LIST (entry_structures_gvalue), 0);
 
   size = gst_value_list_get_size (entry_locations_gvalue);
@@ -3277,7 +3391,7 @@ gst_message_get_num_redirect_entries (GstMessage * message)
 
 /**
  * gst_message_new_instant_rate_request:
- * @src: The #GstObject that posted the message
+ * @src: (transfer none) (nullable): The #GstObject that posted the message
  * @rate_multiplier: the rate multiplier factor that should be applied
  *
  * Creates a new instant-rate-request message. Elements handling the
@@ -3287,7 +3401,7 @@ gst_message_get_num_redirect_entries (GstMessage * message)
  * @GST_EVENT_INSTANT_RATE_SYNC_TIME event to notify the elements
  * in the pipeline.
  *
- * Returns: a newly allocated #GstMessage
+ * Returns: (transfer full): a newly allocated #GstMessage
  *
  * Since: 1.18
  */
@@ -3299,8 +3413,8 @@ gst_message_new_instant_rate_request (GstObject * src, gdouble rate_multiplier)
 
   g_return_val_if_fail (rate_multiplier != 0.0, NULL);
 
-  structure = gst_structure_new_id (GST_QUARK (MESSAGE_INSTANT_RATE_REQUEST),
-      GST_QUARK (RATE), G_TYPE_DOUBLE, rate_multiplier, NULL);
+  structure = gst_structure_new_static_str ("GstMessageInstantRateRequest",
+      "rate", G_TYPE_DOUBLE, rate_multiplier, NULL);
   message =
       gst_message_new_custom (GST_MESSAGE_INSTANT_RATE_REQUEST, src, structure);
 
@@ -3310,7 +3424,7 @@ gst_message_new_instant_rate_request (GstObject * src, gdouble rate_multiplier)
 /**
  * gst_message_parse_instant_rate_request:
  * @message: a #GstMessage of type %GST_MESSAGE_INSTANT_RATE_REQUEST
- * @rate_multiplier: (out) (allow-none): return location for the rate, or %NULL
+ * @rate_multiplier: (out) (optional): return location for the rate, or %NULL
  *
  * Parses the rate_multiplier from the instant-rate-request message.
  *
@@ -3327,8 +3441,7 @@ gst_message_parse_instant_rate_request (GstMessage * message,
       GST_MESSAGE_INSTANT_RATE_REQUEST);
 
   structure = GST_MESSAGE_STRUCTURE (message);
-  gst_structure_id_get (structure, GST_QUARK (RATE), G_TYPE_DOUBLE,
-      rate_multiplier, NULL);
+  gst_structure_get (structure, "rate", G_TYPE_DOUBLE, rate_multiplier, NULL);
 }
 
 /**
@@ -3399,7 +3512,7 @@ gst_message_copy (const GstMessage * msg)
  * gst_message_replace: (skip)
  * @old_message: (inout) (transfer full) (nullable): pointer to a
  *     pointer to a #GstMessage to be replaced.
- * @new_message: (allow-none) (transfer none): pointer to a #GstMessage that will
+ * @new_message: (nullable) (transfer none): pointer to a #GstMessage that will
  *     replace the message pointed to by @old_message.
  *
  * Modifies a pointer to a #GstMessage to point to a different #GstMessage. The
@@ -3422,7 +3535,7 @@ gst_message_replace (GstMessage ** old_message, GstMessage * new_message)
  * gst_message_take:
  * @old_message: (inout) (transfer full): pointer to a pointer to a #GstMessage
  *     to be replaced.
- * @new_message: (transfer full) (allow-none): pointer to a #GstMessage that
+ * @new_message: (transfer full) (nullable): pointer to a #GstMessage that
  *     will replace the message pointed to by @old_message.
  *
  * Modifies a pointer to a #GstMessage to point to a different #GstMessage. This

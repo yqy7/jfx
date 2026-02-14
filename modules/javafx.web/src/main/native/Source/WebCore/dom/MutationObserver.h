@@ -31,12 +31,11 @@
 
 #pragma once
 
-#include "ExceptionOr.h"
 #include "GCReachableRef.h"
 #include <wtf/Forward.h>
 #include <wtf/HashSet.h>
-#include <wtf/IsoMalloc.h>
 #include <wtf/OptionSet.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/Vector.h>
 #include <wtf/WeakHashSet.h>
 
@@ -53,6 +52,7 @@ class MutationObserverRegistration;
 class MutationRecord;
 class Node;
 class WindowEventLoop;
+template<typename> class ExceptionOr;
 
 enum class MutationObserverOptionType : uint8_t {
     // MutationType
@@ -73,7 +73,7 @@ using MutationObserverOptions = OptionSet<MutationObserverOptionType>;
 using MutationRecordDeliveryOptions = OptionSet<MutationObserverOptionType>;
 
 class MutationObserver final : public RefCounted<MutationObserver> {
-    WTF_MAKE_ISO_ALLOCATED(MutationObserver);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(MutationObserver);
 public:
     static Ref<MutationObserver> create(Ref<MutationCallback>&&);
 
@@ -86,7 +86,7 @@ public:
         bool subtree;
         std::optional<bool> attributeOldValue;
         std::optional<bool> characterDataOldValue;
-        std::optional<Vector<String>> attributeFilter;
+        std::optional<Vector<AtomString>> attributeFilter;
     };
 
     ExceptionOr<void> observe(Node&, const Init&);
@@ -123,7 +123,7 @@ private:
 
     static bool validateOptions(MutationObserverOptions);
 
-    Ref<MutationCallback> m_callback;
+    const Ref<MutationCallback> m_callback;
     Vector<Ref<MutationRecord>> m_records;
     HashSet<GCReachableRef<Node>> m_pendingTargets;
     WeakHashSet<MutationObserverRegistration> m_registrations;

@@ -22,24 +22,23 @@
 #pragma once
 
 #include "SVGFilterPrimitiveStandardAttributes.h"
+#include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
 
 class SVGFEFloodElement final : public SVGFilterPrimitiveStandardAttributes {
-    WTF_MAKE_ISO_ALLOCATED(SVGFEFloodElement);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(SVGFEFloodElement);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(SVGFEFloodElement);
 public:
     static Ref<SVGFEFloodElement> create(const QualifiedName&, Document&);
+
+    using PropertyRegistry = SVGPropertyOwnerRegistry<SVGFEFloodElement, SVGFilterPrimitiveStandardAttributes>;
 
 private:
     SVGFEFloodElement(const QualifiedName&, Document&);
 
-    using PropertyRegistry = SVGPropertyOwnerRegistry<SVGFEFloodElement, SVGFilterPrimitiveStandardAttributes>;
-    const SVGPropertyRegistry& propertyRegistry() const final { return m_propertyRegistry; }
-
-    bool setFilterEffectAttribute(FilterEffect*, const QualifiedName& attrName) override;
-    RefPtr<FilterEffect> filterEffect(const SVGFilterBuilder&, const FilterEffectVector&) const override;
-
-    PropertyRegistry m_propertyRegistry { *this };
+    bool setFilterEffectAttribute(FilterEffect&, const QualifiedName& attrName) override;
+    RefPtr<FilterEffect> createFilterEffect(const FilterEffectVector&, const GraphicsContext& destinationContext) const override;
 };
 
 } // namespace WebCore

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2021-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,7 +25,6 @@
 
 #pragma once
 
-#include "GPUCommandBuffer.h"
 #include "GPUCommandBufferDescriptor.h"
 #include "GPUComputePassDescriptor.h"
 #include "GPUComputePassEncoder.h"
@@ -35,8 +34,8 @@
 #include "GPUIntegralTypes.h"
 #include "GPURenderPassDescriptor.h"
 #include "GPURenderPassEncoder.h"
+#include "WebGPUCommandEncoder.h"
 #include <optional>
-#include <pal/graphics/WebGPU/WebGPUCommandEncoder.h>
 #include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
 #include <wtf/text/WTFString.h>
@@ -44,27 +43,37 @@
 namespace WebCore {
 
 class GPUBuffer;
+class GPUCommandBuffer;
 class GPUQuerySet;
+
+namespace WebGPU {
+class Device;
+}
 
 class GPUCommandEncoder : public RefCounted<GPUCommandEncoder> {
 public:
-    static Ref<GPUCommandEncoder> create(Ref<PAL::WebGPU::CommandEncoder>&& backing)
+    static Ref<GPUCommandEncoder> create(Ref<WebGPU::CommandEncoder>&& backing, WebGPU::Device& device)
     {
-        return adoptRef(*new GPUCommandEncoder(WTFMove(backing)));
+        return adoptRef(*new GPUCommandEncoder(WTFMove(backing), device));
     }
 
     String label() const;
     void setLabel(String&&);
 
-    Ref<GPURenderPassEncoder> beginRenderPass(const GPURenderPassDescriptor&);
-    Ref<GPUComputePassEncoder> beginComputePass(const std::optional<GPUComputePassDescriptor>&);
+    ExceptionOr<Ref<GPURenderPassEncoder>> beginRenderPass(const GPURenderPassDescriptor&);
+    ExceptionOr<Ref<GPUComputePassEncoder>> beginComputePass(const std::optional<GPUComputePassDescriptor>&);
+
+    void copyBufferToBuffer(
+        const GPUBuffer& source,
+        const GPUBuffer& destination,
+        std::optional<GPUSize64>);
 
     void copyBufferToBuffer(
         const GPUBuffer& source,
         GPUSize64 sourceOffset,
         const GPUBuffer& destination,
         GPUSize64 destinationOffset,
-        GPUSize64);
+        std::optional<GPUSize64>);
 
     void copyBufferToTexture(
         const GPUImageCopyBuffer& source,
@@ -83,7 +92,7 @@ public:
 
     void clearBuffer(
         const GPUBuffer&,
-        GPUSize64 offset,
+        std::optional<GPUSize64> offset,
         std::optional<GPUSize64>);
 
     void pushDebugGroup(String&& groupLabel);
@@ -99,18 +108,19 @@ public:
         const GPUBuffer& destination,
         GPUSize64 destinationOffset);
 
-    Ref<GPUCommandBuffer> finish(const std::optional<GPUCommandBufferDescriptor>&);
+    ExceptionOr<Ref<GPUCommandBuffer>> finish(const std::optional<GPUCommandBufferDescriptor>&);
 
-    PAL::WebGPU::CommandEncoder& backing() { return m_backing; }
-    const PAL::WebGPU::CommandEncoder& backing() const { return m_backing; }
+    WebGPU::CommandEncoder& backing() { return m_backing; }
+    const WebGPU::CommandEncoder& backing() const { return m_backing; }
+    void setBacking(WebGPU::CommandEncoder&);
 
 private:
-    GPUCommandEncoder(Ref<PAL::WebGPU::CommandEncoder>&& backing)
-        : m_backing(WTFMove(backing))
-    {
-    }
+    GPUCommandEncoder(Ref<WebGPU::CommandEncoder>&&, WebGPU::Device&);
 
-    Ref<PAL::WebGPU::CommandEncoder> m_backing;
+    Ref<WebGPU::CommandEncoder> protectedBacking() { return m_backing; }
+
+    Ref<WebGPU::CommandEncoder> m_backing;
+    WeakPtr<WebGPU::Device> m_device;
 };
 
 }

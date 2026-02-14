@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,35 +25,43 @@
 
 package javafx.scene.control.skin;
 
-import com.sun.javafx.scene.control.Properties;
+import java.lang.ref.WeakReference;
+import java.util.List;
+
 import javafx.application.Platform;
 import javafx.beans.InvalidationListener;
 import javafx.beans.Observable;
+import javafx.beans.WeakInvalidationListener;
+import javafx.beans.property.ObjectProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
-import javafx.collections.MapChangeListener;
 import javafx.collections.ObservableList;
 import javafx.collections.ObservableMap;
+import javafx.collections.WeakListChangeListener;
+import javafx.geometry.HPos;
+import javafx.geometry.VPos;
 import javafx.scene.AccessibleAttribute;
 import javafx.scene.Node;
-import javafx.scene.control.*;
-
+import javafx.scene.control.Control;
+import javafx.scene.control.FocusModel;
+import javafx.scene.control.IndexedCell;
+import javafx.scene.control.Label;
+import javafx.scene.control.ResizeFeaturesBase;
+import javafx.scene.control.ScrollToEvent;
+import javafx.scene.control.SelectionModel;
+import javafx.scene.control.TableColumnBase;
+import javafx.scene.control.TableFocusModel;
+import javafx.scene.control.TablePositionBase;
+import javafx.scene.control.TableSelectionModel;
+import javafx.scene.control.TableView;
+import javafx.scene.control.TreeTableView;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.util.Callback;
 
-import javafx.collections.WeakListChangeListener;
+import com.sun.javafx.scene.control.ListenerHelper;
+import com.sun.javafx.scene.control.Properties;
 import com.sun.javafx.scene.control.skin.resources.ControlResources;
-
-import java.lang.ref.WeakReference;
-import java.util.List;
-import javafx.beans.WeakInvalidationListener;
-import javafx.beans.property.ObjectProperty;
-import javafx.geometry.HPos;
-import javafx.geometry.VPos;
-
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 
 /**
  * TableViewSkinBase is the base skin class used by controls such as
@@ -87,16 +95,12 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
 
     private static final double GOLDEN_RATIO_MULTIPLIER = 0.618033987;
 
-    // RT-34744 : IS_PANNABLE will be false unless
+    // JDK-8094803 : IS_PANNABLE will be false unless
     // javafx.scene.control.skin.TableViewSkin.pannable
     // is set to true. This is done in order to make TableView functional
     // on embedded systems with touch screens which do not generate scroll
     // events for touch drag gestures.
-    @SuppressWarnings("removal")
-    private static final boolean IS_PANNABLE =
-            AccessController.doPrivileged((PrivilegedAction<Boolean>) () -> Boolean.getBoolean("javafx.scene.control.skin.TableViewSkin.pannable"));
-
-
+    private static final boolean IS_PANNABLE = Boolean.getBoolean("javafx.scene.control.skin.TableViewSkin.pannable");
 
     /* *************************************************************************
      *                                                                         *
@@ -148,7 +152,6 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
 
     private int visibleColCount;
 
-    boolean needCellsRecreated = true;
     boolean needCellsReconfigured = false;
 
     private int itemCount = -1;
@@ -161,27 +164,15 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
      *                                                                         *
      **************************************************************************/
 
-    private MapChangeListener<Object, Object> propertiesMapListener = c -> {
-        if (! c.wasAdded()) return;
-        if (Properties.REFRESH.equals(c.getKey())) {
-            refreshView();
-            getSkinnable().getProperties().remove(Properties.REFRESH);
-        } else if (Properties.RECREATE.equals(c.getKey())) {
-            needCellsRecreated = true;
-            refreshView();
-            getSkinnable().getProperties().remove(Properties.RECREATE);
-        }
-    };
-
     private ListChangeListener<S> rowCountListener = c -> {
         while (c.next()) {
             if (c.wasReplaced()) {
-                // RT-28397: Support for when an item is replaced with itself (but
+                // JDK-8118897: Support for when an item is replaced with itself (but
                 // updated internal values that should be shown visually).
 
                 // The ListViewSkin equivalent code here was updated to use the
                 // flow.setDirtyCell(int) API, but it was left alone here, otherwise
-                // our unit test for RT-36220 fails as we do not handle the case
+                // our unit test for JDK-8093027 fails as we do not handle the case
                 // where the TableCell gets updated (only the TableRow does).
                 // Ideally we would use the dirtyCell API:
                 //
@@ -191,7 +182,7 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
                 itemCount = 0;
                 break;
             } else if (c.getRemovedSize() == itemCount) {
-                // RT-22463: If the user clears out an items list then we
+                // JDK-8098235: If the user clears out an items list then we
                 // should reset all cells (in particular their contained
                 // items) such that a subsequent addition to the list of
                 // an item which equals the old item (but is rendered
@@ -202,7 +193,7 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
             }
         }
 
-        // fix for RT-37853
+        // fix for JDK-8094887
         if (getSkinnable() instanceof TableView) {
             ((TableView)getSkinnable()).edit(-1, null);
         }
@@ -211,34 +202,22 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
         getSkinnable().requestLayout();
     };
 
-    private ListChangeListener<TC> visibleLeafColumnsListener = c -> {
-        updateVisibleColumnCount();
-        while (c.next()) {
-            updateVisibleLeafColumnWidthListeners(c.getAddedSubList(), c.getRemoved());
-        }
-    };
-
     private InvalidationListener widthListener = observable -> {
         // This forces the horizontal scrollbar to show when the column
         // resizing occurs. It is not ideal, but will work for now.
 
         // using 'needCellsReconfigured' here rather than 'needCellsRebuilt'
-        // as otherwise performance suffers massively (RT-27831)
+        // as otherwise performance suffers massively (JDK-8124403)
         needCellsReconfigured = true;
         if (getSkinnable() != null) {
             getSkinnable().requestLayout();
         }
     };
 
-    private InvalidationListener itemsChangeListener;
-
     private WeakListChangeListener<S> weakRowCountListener =
             new WeakListChangeListener<>(rowCountListener);
-    private WeakListChangeListener<TC> weakVisibleLeafColumnsListener =
-            new WeakListChangeListener<>(visibleLeafColumnsListener);
     private WeakInvalidationListener weakWidthListener =
             new WeakInvalidationListener(widthListener);
-    private WeakInvalidationListener weakItemsChangeListener;
 
 
 
@@ -258,15 +237,18 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
         // init the VirtualFlow
         flow = getVirtualFlow();
         flow.setPannable(IS_PANNABLE);
-//        flow.setCellFactory(flow1 -> TableViewSkinBase.this.createCell());
+
+        ListenerHelper lh = ListenerHelper.get(this);
 
         /*
          * Listening for scrolling along the X axis, but we need to be careful
          * to handle the situation appropriately when the hbar is invisible.
          */
-        flow.getHbar().valueProperty().addListener(o -> horizontalScroll());
+        lh.addInvalidationListener(flow.getHbar().valueProperty(), (o) -> {
+            horizontalScroll();
+        });
 
-        // RT-37152
+        // JDK-8095370
         flow.getHbar().setUnitIncrement(15);
         flow.getHbar().setBlockIncrement(TableColumnHeader.DEFAULT_COLUMN_WIDTH);
 
@@ -289,15 +271,21 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
         updateVisibleColumnCount();
         updateVisibleLeafColumnWidthListeners(getVisibleLeafColumns(), FXCollections.<TC>emptyObservableList());
 
-        tableHeaderRow.reorderingProperty().addListener(valueModel -> {
+        lh.addInvalidationListener(tableHeaderRow.reorderingProperty(), (ob) -> {
             getSkinnable().requestLayout();
         });
 
-        getVisibleLeafColumns().addListener(weakVisibleLeafColumnsListener);
+        lh.addListChangeListener(getVisibleLeafColumns(), (c) -> {
+            updateVisibleColumnCount();
+            while (c.next()) {
+                updateVisibleLeafColumnWidthListeners(c.getAddedSubList(), c.getRemoved());
+            }
+        });
 
         final ObjectProperty<ObservableList<S>> itemsProperty = TableSkinUtils.itemsProperty(this);
         updateTableItems(null, itemsProperty.get());
-        itemsChangeListener = new InvalidationListener() {
+
+        lh.addInvalidationListener(itemsProperty, new InvalidationListener() {
             private WeakReference<ObservableList<S>> weakItemsRef = new WeakReference<>(itemsProperty.get());
 
             @Override public void invalidated(Observable observable) {
@@ -305,40 +293,59 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
                 weakItemsRef = new WeakReference<>(itemsProperty.get());
                 updateTableItems(oldItems, itemsProperty.get());
             }
-        };
-        weakItemsChangeListener = new WeakInvalidationListener(itemsChangeListener);
-        itemsProperty.addListener(weakItemsChangeListener);
+        });
 
         final ObservableMap<Object, Object> properties = control.getProperties();
-        properties.remove(Properties.REFRESH);
         properties.remove(Properties.RECREATE);
-        properties.addListener(propertiesMapListener);
+        properties.remove(Properties.REBUILD);
+        lh.addMapChangeListener(properties, (c) -> {
+            if (!c.wasAdded()) {
+                return;
+            }
+            if (Properties.RECREATE.equals(c.getKey())) {
+                requestRecreateCells();
+                getSkinnable().getProperties().remove(Properties.RECREATE);
+            } else if (Properties.REBUILD.equals(c.getKey())) {
+                requestRebuildCells();
+                getSkinnable().getProperties().remove(Properties.REBUILD);
+            }
+        });
 
-        control.addEventHandler(ScrollToEvent.<TC>scrollToColumn(), event -> {
-            scrollHorizontally(event.getScrollTarget());
+        lh.addEventHandler(control, ScrollToEvent.<TC>scrollToColumn(), (ev) -> {
+            scrollHorizontally(ev.getScrollTarget());
         });
 
         // flow and flow.vbar width observer
-        InvalidationListener widthObserver = valueModel -> {
-            contentWidthDirty = true;
-            getSkinnable().requestLayout();
-        };
-        flow.widthProperty().addListener(widthObserver);
-        flow.getVbar().widthProperty().addListener(widthObserver);
+        lh.addInvalidationListener(
+            () -> {
+                contentWidthDirty = true;
+                getSkinnable().requestLayout();
+            },
+            flow.widthProperty(),
+            flow.getVbar().widthProperty()
+        );
 
         final ObjectProperty<Callback<C, I>> rowFactoryProperty = TableSkinUtils.rowFactoryProperty(this);
-        registerChangeListener(rowFactoryProperty, e -> {
+        lh.addChangeListener(rowFactoryProperty, e -> {
             Callback<C, I> oldFactory = rowFactory;
             rowFactory = rowFactoryProperty.get();
             if (oldFactory != rowFactory) {
-                requestRebuildCells();
+                flow.recreateCells();
             }
         });
-        registerChangeListener(TableSkinUtils.placeholderProperty(this), e -> updatePlaceholderRegionVisibility());
-        registerChangeListener(flow.getVbar().visibleProperty(), e -> updateContentWidth());
-        registerChangeListener(TableSkinUtils.columnResizePolicyProperty(this), (v) -> {
+
+        lh.addChangeListener(TableSkinUtils.placeholderProperty(this), (ev) -> {
+            updatePlaceholderRegionVisibility();
+        });
+
+        lh.addChangeListener(flow.getVbar().visibleProperty(), (ev) -> {
+            updateContentWidth();
+        });
+
+        lh.addChangeListener(TableSkinUtils.columnResizePolicyProperty(this), (ev) -> {
             updateSuppressBreadthBar();
         });
+
         updateSuppressBreadthBar();
     }
 
@@ -361,13 +368,19 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
      **************************************************************************/
 
     /** {@inheritDoc} */
-    @Override public void dispose() {
-        if (getSkinnable() == null) return;
-        final ObjectProperty<ObservableList<S>> itemsProperty = TableSkinUtils.itemsProperty(this);
+    @Override
+    public void dispose() {
+        if (getSkinnable() == null) {
+            return;
+        }
 
-        getVisibleLeafColumns().removeListener(weakVisibleLeafColumnsListener);
-        itemsProperty.removeListener(weakItemsChangeListener);
-        getSkinnable().getProperties().removeListener(propertiesMapListener);
+        if (placeholderRegion != null) {
+            getChildren().remove(placeholderRegion);
+        }
+
+        getChildren().removeAll(tableHeaderRow, flow, columnReorderOverlay, columnReorderLine);
+
+        final ObjectProperty<ObservableList<S>> itemsProperty = TableSkinUtils.itemsProperty(this);
         updateTableItems(itemsProperty.get(), null);
 
         super.dispose();
@@ -410,13 +423,10 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
 
         super.layoutChildren(x, y, w, h);
 
-        if (needCellsRecreated) {
-            flow.recreateCells();
-        } else if (needCellsReconfigured) {
+        if (needCellsReconfigured) {
             flow.reconfigureCells();
         }
 
-        needCellsRecreated = false;
         needCellsReconfigured = false;
 
         final double baselineOffset = table.getLayoutBounds().getHeight() / 2;
@@ -425,20 +435,21 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
         double tableHeaderRowHeight = tableHeaderRow.prefHeight(-1);
         layoutInArea(tableHeaderRow, x, y, w, tableHeaderRowHeight, baselineOffset,
                 HPos.CENTER, VPos.CENTER);
-        y += tableHeaderRowHeight;
+
+        double yWithTableHeaderRowHeight = y + tableHeaderRowHeight;
 
         // let the virtual flow take up all remaining space
         // TODO this calculation is to ensure the bottom border is visible when
         // placed in a Pane. It is not ideal, but will suffice for now. See
-        // RT-14335 for more information.
+        // JDK-8112896 for more information.
         double flowHeight = Math.floor(h - tableHeaderRowHeight);
         if (getItemCount() == 0 || visibleColCount == 0) {
             // show message overlay instead of empty table
-            layoutInArea(placeholderRegion, x, y,
+            layoutInArea(placeholderRegion, x, yWithTableHeaderRowHeight,
                     w, flowHeight,
                     baselineOffset, HPos.CENTER, VPos.CENTER);
         } else {
-            layoutInArea(flow, x, y,
+            layoutInArea(flow, x, yWithTableHeaderRowHeight,
                     w, flowHeight,
                     baselineOffset, HPos.CENTER, VPos.CENTER);
         }
@@ -454,38 +465,36 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
                 // either from the left-edge of the column, or 0, if the column
                 // is off the left-side of the TableView (i.e. horizontal
                 // scrolling has occured).
-                double minX = tableHeaderRow.sceneToLocal(n.localToScene(n.getBoundsInLocal())).getMinX();
+                double tableHeaderRowX = tableHeaderRow.sceneToLocal(n.localToScene(n.getBoundsInLocal())).getMinX();
                 double overlayWidth = reorderingColumnHeader.getWidth();
-                if (minX < 0) {
-                    overlayWidth += minX;
+                if (tableHeaderRowX < 0) {
+                    overlayWidth += tableHeaderRowX;
                 }
-                minX = minX < 0 ? 0 : minX;
+                tableHeaderRowX = tableHeaderRowX < 0 ? 0 : tableHeaderRowX;
 
                 // prevent the overlay going out the right-hand side of the
                 // TableView
-                if (minX + overlayWidth > w) {
-                    overlayWidth = w - minX;
+                if (tableHeaderRowX + overlayWidth > w) {
+                    overlayWidth = w - tableHeaderRowX;
 
                     if (flow.getVbar().isVisible()) {
                         overlayWidth -= flow.getVbar().getWidth() - 1;
                     }
                 }
 
-                double contentAreaHeight = flowHeight;
+                double overlayHeight = flowHeight;
                 if (flow.getHbar().isVisible()) {
-                    contentAreaHeight -= flow.getHbar().getHeight();
+                    overlayHeight -= flow.getHbar().getHeight();
                 }
 
-                columnReorderOverlay.resize(overlayWidth, contentAreaHeight);
-
-                columnReorderOverlay.setLayoutX(minX);
-                columnReorderOverlay.setLayoutY(tableHeaderRow.getHeight());
+                double columnReorderOverlayX = x + tableHeaderRowX;
+                columnReorderOverlay.resizeRelocate(columnReorderOverlayX, yWithTableHeaderRowHeight, overlayWidth, overlayHeight);
             }
 
             // paint the reorder line as well
-            double cw = columnReorderLine.snappedLeftInset() + columnReorderLine.snappedRightInset();
+            double lineWidth = columnReorderLine.snappedLeftInset() + columnReorderLine.snappedRightInset();
             double lineHeight = h - (flow.getHbar().isVisible() ? flow.getHbar().getHeight() - 1 : 0);
-            columnReorderLine.resizeRelocate(0, columnReorderLine.snappedTopInset(), cw, lineHeight);
+            columnReorderLine.resizeRelocate(x, y, lineWidth, lineHeight);
         }
 
         columnReorderLine.setVisible(tableHeaderRow.isReordering());
@@ -567,7 +576,7 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
     }
 
     private void checkContentWidthState() {
-        // we test for item count here to resolve RT-14855, where the column
+        // we test for item count here to resolve JDK-8113886, where the column
         // widths weren't being resized properly when in constrained layout mode
         // if there were no items.
         if (contentWidthDirty || getItemCount() == 0) {
@@ -735,7 +744,7 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
 
         // we include this test here as the virtual flow will return cells that
         // exceed past the item count, so we need to clamp here (and further down
-        // in this method also). See RT-19053 for more information.
+        // in this method also). See JDK-8127405 for more information.
         lastVisibleCellIndex = lastVisibleCellIndex >= itemCount ? itemCount - 1 : lastVisibleCellIndex;
 
         // isSelected represents focus OR selection
@@ -809,6 +818,10 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
 
     private boolean isLeadIndex(boolean isFocusDriven, int index) {
         final TableSelectionModel<S> sm = getSelectionModel();
+        if (sm == null) {
+            return false;
+        }
+
         final FocusModel<M> fm = getFocusModel();
 
         return (isFocusDriven && fm.getFocusedIndex() == index)
@@ -882,15 +895,15 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
             contentWidth -= flow.getVbar().getWidth();
         }
 
-        if (contentWidth <= 0) {
-            // Fix for RT-14855 when there is no content in the TableView.
+        if ((contentWidth <= 0) || (getItemCount() == 0)) {
+            // when there is no content in the TableView.
             Control c = getSkinnable();
             contentWidth = c.getWidth() - (snappedLeftInset() + snappedRightInset());
         }
 
         contentWidth = Math.max(0.0, contentWidth);
 
-        // FIXME this isn't perfect, but it prevents RT-14885, which results in
+        // this isn't perfect, but it prevents JDK-8089280/JDK-8089280, which results in
         // undesired horizontal scrollbars when in constrained resize mode
         getSkinnable().getProperties().put("TableView.contentWidth", Math.floor(contentWidth));
     }
@@ -937,7 +950,7 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
 
         final Control control = getSkinnable();
 
-        // RT-37060 - if we are trying to scroll to a column that has not
+        // JDK-8096491 - if we are trying to scroll to a column that has not
         // yet even been rendered, we must wait until the layout pass has
         // happened and then do the scroll. The laziest way to do this is to
         // queue up the task to run later, at which point we will have hopefully
@@ -1023,6 +1036,9 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
         switch (attribute) {
             case FOCUS_ITEM: {
                 TableFocusModel<M,?> fm = getFocusModel();
+                if (fm == null) {
+                    return null;
+                }
                 int focusedIndex = fm.getFocusedIndex();
                 if (focusedIndex == -1) {
                     if (placeholderRegion != null && placeholderRegion.isVisible()) {
@@ -1055,5 +1071,4 @@ public abstract class TableViewSkinBase<M, S, C extends Control, I extends Index
             default: return super.queryAccessibleAttribute(attribute, parameters);
         }
     }
-
 }

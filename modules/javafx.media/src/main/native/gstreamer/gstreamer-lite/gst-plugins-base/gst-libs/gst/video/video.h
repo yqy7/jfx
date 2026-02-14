@@ -37,6 +37,9 @@ typedef struct _GstVideoAlignment GstVideoAlignment;
 #include <gst/video/video-scaler.h>
 #endif // GSTREAMER_LITE
 #include <gst/video/video-multiview.h>
+#ifndef GSTREAMER_LITE
+#include <gst/video/video-info-dma.h>
+#endif // GSTREAMER_LITE
 
 G_BEGIN_DECLS
 
@@ -69,8 +72,8 @@ struct _GstVideoAlignment
  * @GST_VIDEO_ORIENTATION_90L: Rotate counter-clockwise 90 degrees
  * @GST_VIDEO_ORIENTATION_HORIZ: Flip horizontally
  * @GST_VIDEO_ORIENTATION_VERT: Flip vertically
- * @GST_VIDEO_ORIENTATION_UL_LR: Flip across upper left/lower right diagonal
- * @GST_VIDEO_ORIENTATION_UR_LL: Flip across upper right/lower left diagonal
+ * @GST_VIDEO_ORIENTATION_UL_LR: Rotate counter-clockwise 90 degrees and flip vertically
+ * @GST_VIDEO_ORIENTATION_UR_LL: Rotate clockwise 90 degrees and flip vertically
  * @GST_VIDEO_ORIENTATION_AUTO: Select flip method based on image-orientation tag
  * @GST_VIDEO_ORIENTATION_CUSTOM: Current status depends on plugin internal setup
  *
@@ -151,6 +154,9 @@ GST_VIDEO_API
 gboolean       gst_video_guess_framerate (GstClockTime duration,
                                           gint * dest_n, gint * dest_d);
 
+GST_VIDEO_API
+gboolean       gst_video_is_common_aspect_ratio (gint width, gint height, gint par_n, gint par_d);
+
 /* convert/encode video sample from one format to another */
 
 typedef void (*GstVideoConvertSampleCallback) (GstSample * sample, GError *error, gpointer user_data);
@@ -182,9 +188,9 @@ G_END_DECLS
 #include <gst/video/gstvideoaffinetransformationmeta.h>
 #include <gst/video/gstvideoaggregator.h>
 #include <gst/video/gstvideocodecalphameta.h>
-#endif // GSTREAMER_LITE
 #include <gst/video/gstvideodecoder.h>
 #include <gst/video/gstvideoencoder.h>
+#endif // GSTREAMER_LITE
 #include <gst/video/gstvideofilter.h>
 #include <gst/video/gstvideometa.h>
 #include <gst/video/gstvideopool.h>
@@ -204,5 +210,8 @@ G_END_DECLS
 #include <gst/video/videoorientation.h>
 #include <gst/video/video-overlay-composition.h>
 #include <gst/video/videooverlay.h>
+#ifndef GSTREAMER_LITE
+#include <gst/video/video-sei.h>
+#endif // GSTREAMER_LITE
 
 #endif /* __GST_VIDEO_H__ */

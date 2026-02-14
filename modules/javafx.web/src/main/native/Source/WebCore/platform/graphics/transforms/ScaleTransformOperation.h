@@ -33,17 +33,14 @@ struct BlendingContext;
 
 class ScaleTransformOperation final : public TransformOperation {
 public:
-    static Ref<ScaleTransformOperation> create(double sx, double sy, OperationType type)
+    static Ref<ScaleTransformOperation> create(double sx, double sy, TransformOperation::Type type)
     {
         return adoptRef(*new ScaleTransformOperation(sx, sy, 1, type));
     }
 
-    static Ref<ScaleTransformOperation> create(double sx, double sy, double sz, OperationType type)
-    {
-        return adoptRef(*new ScaleTransformOperation(sx, sy, sz, type));
-    }
+    WEBCORE_EXPORT static Ref<ScaleTransformOperation> create(double, double, double, TransformOperation::Type);
 
-    Ref<TransformOperation> clone() const override
+    Ref<TransformOperation> clone() const final
     {
         return adoptRef(*new ScaleTransformOperation(m_x, m_y, m_z, type()));
     }
@@ -52,7 +49,7 @@ public:
     double y() const { return m_y; }
     double z() const { return m_z; }
 
-    OperationType primitiveType() const final { return isRepresentableIn2D() ? SCALE : SCALE_3D; }
+    TransformOperation::Type primitiveType() const final { return (type() == Type::ScaleZ || type() == Type::Scale3D) ? Type::Scale3D : Type::Scale; }
 
     bool operator==(const ScaleTransformOperation& other) const { return operator==(static_cast<const TransformOperation&>(other)); }
     bool operator==(const TransformOperation&) const final;
@@ -63,10 +60,9 @@ public:
 
     bool isRepresentableIn2D() const final { return m_z == 1; }
 
-private:
-    bool isAffectedByTransformOrigin() const override { return !isIdentity(); }
+    bool isAffectedByTransformOrigin() const final { return !isIdentity(); }
 
-    bool apply(TransformationMatrix& transform, const FloatSize&) const override
+    bool apply(TransformationMatrix& transform, const FloatSize&) const final
     {
         transform.scale3d(m_x, m_y, m_z);
         return false;
@@ -74,14 +70,8 @@ private:
 
     void dump(WTF::TextStream&) const final;
 
-    ScaleTransformOperation(double sx, double sy, double sz, OperationType type)
-        : TransformOperation(type)
-        , m_x(sx)
-        , m_y(sy)
-        , m_z(sz)
-    {
-        ASSERT(isScaleTransformOperationType());
-    }
+private:
+    ScaleTransformOperation(double, double, double, TransformOperation::Type);
 
     double m_x;
     double m_y;
@@ -90,4 +80,4 @@ private:
 
 } // namespace WebCore
 
-SPECIALIZE_TYPE_TRAITS_TRANSFORMOPERATION(WebCore::ScaleTransformOperation, isScaleTransformOperationType())
+SPECIALIZE_TYPE_TRAITS_TRANSFORMOPERATION(WebCore::ScaleTransformOperation, WebCore::TransformOperation::isScaleTransformOperationType)

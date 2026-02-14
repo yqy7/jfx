@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,14 +30,14 @@ import javafx.beans.binding.*;
 import javafx.beans.property.*;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class BindingToStringTest {
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
     }
 
@@ -155,8 +155,8 @@ public class BindingToStringTest {
     public void testObjectToString() {
         final Object value1 = new Object();
         final Object value2 = new Object();
-        final ObjectProperty<Object> v = new SimpleObjectProperty<Object>(value1);
-        final ObjectBinding<Object> binding = new ObjectBinding<Object>() {
+        final ObjectProperty<Object> v = new SimpleObjectProperty<>(value1);
+        final ObjectBinding<Object> binding = new ObjectBinding<>() {
             {bind(v);}
             @Override
             protected Object computeValue() {
@@ -199,8 +199,8 @@ public class BindingToStringTest {
     public void testListToString() {
         final ObservableList<Object> value1 = FXCollections.observableArrayList(new Object());
         final ObservableList<Object> value2 = FXCollections.observableArrayList(new Object(), new Object());
-        final ListProperty<Object> v = new SimpleListProperty<Object>(value1);
-        final ListBinding<Object> binding = new ListBinding<Object>() {
+        final ListProperty<Object> v = new SimpleListProperty<>(value1);
+        final ListBinding<Object> binding = new ListBinding<>() {
             {bind(v);}
             @Override
             protected ObservableList<Object> computeValue() {

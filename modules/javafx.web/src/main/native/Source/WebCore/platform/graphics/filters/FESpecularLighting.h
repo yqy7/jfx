@@ -2,7 +2,7 @@
  * Copyright (C) 2004, 2005, 2006, 2007 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2004, 2005 Rob Buis <buis@kde.org>
  * Copyright (C) 2005 Eric Seidel <eric@webkit.org>
- * Copyright (C) 2021 Apple Inc.  All rights reserved.
+ * Copyright (C) 2021-2023 Apple Inc.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -26,10 +26,13 @@
 
 namespace WebCore {
 
-class FESpecularLighting : public FELighting {
+class FESpecularLighting final : public FELighting {
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(FESpecularLighting);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(FESpecularLighting);
 public:
-    WEBCORE_EXPORT static Ref<FESpecularLighting> create(const Color& lightingColor, float surfaceScale, float, float specularConstant, float specularExponent, float kernelUnitLengthX, float kernelUnitLengthY, Ref<LightSource>&&);
-    static Ref<FESpecularLighting> create(const Color& lightingColor, float surfaceScale, float specularConstant, float specularExponent, float kernelUnitLengthX, float kernelUnitLengthY, Ref<LightSource>&&);
+    WEBCORE_EXPORT static Ref<FESpecularLighting> create(const Color& lightingColor, float surfaceScale, float specularConstant, float specularExponent, float kernelUnitLengthX, float kernelUnitLengthY, Ref<LightSource>&&, DestinationColorSpace = DestinationColorSpace::SRGB());
+
+    bool operator==(const FESpecularLighting& other) const { return FELighting::operator==(other); }
 
     float specularConstant() const { return m_specularConstant; }
     bool setSpecularConstant(float);
@@ -39,18 +42,12 @@ public:
 
     WTF::TextStream& externalRepresentation(WTF::TextStream&, FilterRepresentation) const override;
 
-    template<class Decoder> static std::optional<Ref<FESpecularLighting>> decode(Decoder&);
-
 private:
-    FESpecularLighting(const Color& lightingColor, float surfaceScale, float specularConstant, float specularExponent, float kernelUnitLengthX, float kernelUnitLengthY, Ref<LightSource>&&);
-};
+    FESpecularLighting(const Color& lightingColor, float surfaceScale, float specularConstant, float specularExponent, float kernelUnitLengthX, float kernelUnitLengthY, Ref<LightSource>&&, DestinationColorSpace);
 
-template<class Decoder>
-std::optional<Ref<FESpecularLighting>> FESpecularLighting::decode(Decoder& decoder)
-{
-    return FELighting::decode<Decoder, FESpecularLighting>(decoder);
-}
+    bool operator==(const FilterEffect& other) const override { return areEqual<FESpecularLighting>(*this, other); }
+};
 
 } // namespace WebCore
 
-SPECIALIZE_TYPE_TRAITS_FILTER_EFFECT(FESpecularLighting)
+SPECIALIZE_TYPE_TRAITS_FILTER_FUNCTION(FESpecularLighting)

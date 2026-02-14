@@ -34,13 +34,14 @@
 #include "WebSocketExtensionProcessor.h"
 #include "WebSocketFrame.h"
 #include <wtf/HashMap.h>
+#include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/StringHash.h>
 #include <wtf/text/StringToIntegerConversion.h>
 
 namespace WebCore {
 
 class WebSocketExtensionDeflateFrame final : public WebSocketExtensionProcessor {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(WebSocketExtensionDeflateFrame);
 public:
     explicit WebSocketExtensionDeflateFrame(WebSocketDeflateFramer&);
 
@@ -48,17 +49,25 @@ private:
     String handshakeString() final;
     bool processResponse(const HashMap<String, String>&) final;
     String failureReason() final { return m_failureReason; }
-
+#if !PLATFORM(JAVA)
     WebSocketDeflateFramer& m_framer;
     bool m_responseProcessed { false };
+#endif
     String m_failureReason;
 };
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(WebSocketExtensionDeflateFrame);
 
 // FXIME: Remove vendor prefix after the specification matured.
 WebSocketExtensionDeflateFrame::WebSocketExtensionDeflateFrame(WebSocketDeflateFramer& framer)
     : WebSocketExtensionProcessor("x-webkit-deflate-frame"_s)
+#if !PLATFORM(JAVA)
     , m_framer(framer)
+#endif
 {
+#if PLATFORM(JAVA)
+     UNUSED_PARAM(framer);
+#endif
 }
 
 String WebSocketExtensionDeflateFrame::handshakeString()
@@ -77,7 +86,7 @@ bool WebSocketExtensionDeflateFrame::processResponse(const HashMap<String, Strin
 
     unsigned expectedNumParameters = 0;
     int windowBits = 15;
-    auto parameter = serverParameters.find("max_window_bits");
+    auto parameter = serverParameters.find<HashTranslatorASCIILiteral>("max_window_bits"_s);
     if (parameter != serverParameters.end()) {
         windowBits = parseIntegerAllowingTrailingJunk<int>(parameter->value).value_or(0);
         if (windowBits < 8 || windowBits > 15) {
@@ -88,7 +97,7 @@ bool WebSocketExtensionDeflateFrame::processResponse(const HashMap<String, Strin
     }
 
     WebSocketDeflater::ContextTakeOverMode mode = WebSocketDeflater::TakeOverContext;
-    parameter = serverParameters.find("no_context_takeover");
+    parameter = serverParameters.find<HashTranslatorASCIILiteral>("no_context_takeover"_s);
     if (parameter != serverParameters.end()) {
         if (!parameter->value.isNull()) {
             m_failureReason = "Received invalid no_context_takeover parameter"_s;
@@ -106,9 +115,12 @@ bool WebSocketExtensionDeflateFrame::processResponse(const HashMap<String, Strin
     m_framer.enableDeflate(windowBits, mode);
     return true;
 #else
+    UNUSED_PARAM(serverParameters);
     return false;
 #endif
 }
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(DeflateResultHolder);
 
 DeflateResultHolder::DeflateResultHolder(WebSocketDeflateFramer& framer)
     : m_framer(framer)
@@ -125,6 +137,8 @@ void DeflateResultHolder::fail(const String& failureReason)
     m_succeeded = false;
     m_failureReason = failureReason;
 }
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(InflateResultHolder);
 
 InflateResultHolder::InflateResultHolder(WebSocketDeflateFramer& framer)
     : m_framer(framer)
@@ -165,17 +179,17 @@ std::unique_ptr<DeflateResultHolder> WebSocketDeflateFramer::deflate(WebSocketFr
 {
 #if !PLATFORM(JAVA)
     auto result = makeUnique<DeflateResultHolder>(*this);
-    if (!enabled() || !WebSocketFrame::isNonControlOpCode(frame.opCode) || !frame.payloadLength)
+    if (!enabled() || !WebSocketFrame::isNonControlOpCode(frame.opCode) || !frame.payload.size())
         return result;
-    if (!m_deflater->addBytes(frame.payload, frame.payloadLength) || !m_deflater->finish()) {
-        result->fail("Failed to compress frame");
+    if (!m_deflater->addBytes(frame.payload) || !m_deflater->finish()) {
+        result->fail("Failed to compress frame"_s);
         return result;
     }
     frame.compress = true;
-    frame.payload = m_deflater->data();
-    frame.payloadLength = m_deflater->size();
+    frame.payload = m_deflater->span();
     return result;
 #else
+    UNUSED_PARAM(frame);
     return makeUnique<DeflateResultHolder>(*this);
 #endif
 }
@@ -192,23 +206,22 @@ std::unique_ptr<InflateResultHolder> WebSocketDeflateFramer::inflate(WebSocketFr
 {
     auto result = makeUnique<InflateResultHolder>(*this);
     if (!enabled() && frame.compress) {
-        result->fail("Compressed bit must be 0 if no negotiated deflate-frame extension");
+        result->fail("Compressed bit must be 0 if no negotiated deflate-frame extension"_s);
         return result;
     }
 #if !PLATFORM(JAVA)
     if (!frame.compress)
         return result;
     if (!WebSocketFrame::isNonControlOpCode(frame.opCode)) {
-        result->fail("Received unexpected compressed frame");
+        result->fail("Received unexpected compressed frame"_s);
         return result;
     }
-    if (!m_inflater->addBytes(frame.payload, frame.payloadLength) || !m_inflater->finish()) {
-        result->fail("Failed to decompress frame");
+    if (!m_inflater->addBytes(frame.payload) || !m_inflater->finish()) {
+        result->fail("Failed to decompress frame"_s);
         return result;
     }
     frame.compress = false;
-    frame.payload = m_inflater->data();
-    frame.payloadLength = m_inflater->size();
+    frame.payload = m_inflater->span();
     return result;
 #else
     return result;

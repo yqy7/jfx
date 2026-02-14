@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,26 +25,21 @@
 
 package test.javafx.beans.property;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import javafx.beans.InvalidationListener;
-import javafx.beans.binding.ObjectExpression;
 import javafx.beans.property.ReadOnlyIntegerProperty;
 import javafx.beans.property.ReadOnlyIntegerWrapper;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.value.ChangeListener;
-import static org.junit.Assert.assertEquals;
-
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class ReadOnlyIntegerPropertyTest {
 
     private static final int DEFAULT = 0;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
     }
 
@@ -86,7 +81,7 @@ public class ReadOnlyIntegerPropertyTest {
 
     @Test
     public void testObjectToInteger() {
-        final ReadOnlyObjectWrapper<Integer> valueModel = new ReadOnlyObjectWrapper<Integer>();
+        final ReadOnlyObjectWrapper<Integer> valueModel = new ReadOnlyObjectWrapper<>();
         final ReadOnlyIntegerProperty exp = ReadOnlyIntegerProperty.readOnlyIntegerProperty(valueModel.getReadOnlyProperty());
 
         assertEquals(0, exp.intValue());

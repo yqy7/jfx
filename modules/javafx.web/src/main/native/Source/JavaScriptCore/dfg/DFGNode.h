@@ -51,6 +51,7 @@
 #include "DOMJITSignature.h"
 #include "DeleteByVariant.h"
 #include "GetByVariant.h"
+#include "InlineCacheCompiler.h"
 #include "JSCJSValue.h"
 #include "JSPropertyNameEnumerator.h"
 #include "Operands.h"
@@ -81,9 +82,9 @@ class Snippet;
 
 namespace DFG {
 
+class BasicBlock;
 class Graph;
 class PromotedLocationDescriptor;
-struct BasicBlock;
 
 struct StorageAccessData {
     PropertyOffset offset;
@@ -106,6 +107,16 @@ struct MultiDeleteByOffsetData {
     bool allVariantsStoreEmpty() const;
 };
 
+struct MultiGetByValData {
+    ArrayModes m_arrayModes { };
+    DFG::ArrayMode m_arrayMode { };
+};
+
+struct MultiPutByValData {
+    ArrayModes m_arrayModes { };
+    DFG::ArrayMode m_arrayMode { };
+};
+
 struct MatchStructureVariant {
     RegisteredStructure structure;
     bool result;
@@ -124,29 +135,34 @@ struct NewArrayBufferData {
         uint64_t asQuadWord;
     };
 };
-static_assert(sizeof(IndexingType) <= sizeof(unsigned), "");
-static_assert(sizeof(NewArrayBufferData) == sizeof(uint64_t), "");
+static_assert(sizeof(IndexingType) <= sizeof(unsigned));
+static_assert(sizeof(NewArrayBufferData) == sizeof(uint64_t));
+
+struct NewArrayWithSpeciesData {
+    unsigned arrayMode { 0 };
+    unsigned indexingMode { 0 };
+
+    uint64_t asQuadWord() const { return std::bit_cast<uint64_t>(*this); }
+};
+static_assert(sizeof(IndexingType) <= sizeof(unsigned));
+static_assert(sizeof(ArrayMode) <= sizeof(unsigned));
 
 struct DataViewData {
     union {
         struct {
             uint8_t byteSize;
             bool isSigned;
+            bool isResizable;
             bool isFloatingPoint; // Used for the DataViewSet node.
             TriState isLittleEndian;
         };
         uint64_t asQuadWord;
     };
 };
-static_assert(sizeof(DataViewData) == sizeof(uint64_t), "");
+static_assert(sizeof(DataViewData) == sizeof(uint64_t));
 
 struct BranchTarget {
-    BranchTarget()
-        : block(nullptr)
-        , count(PNaN)
-    {
-    }
-
+    BranchTarget() = default;
     explicit BranchTarget(BasicBlock* block)
         : block(block)
         , count(PNaN)
@@ -155,14 +171,14 @@ struct BranchTarget {
 
     void setBytecodeIndex(unsigned bytecodeIndex)
     {
-        block = bitwise_cast<BasicBlock*>(static_cast<uintptr_t>(bytecodeIndex));
+        block = std::bit_cast<BasicBlock*>(static_cast<uintptr_t>(bytecodeIndex));
     }
-    unsigned bytecodeIndex() const { return bitwise_cast<uintptr_t>(block); }
+    unsigned bytecodeIndex() const { return std::bit_cast<uintptr_t>(block); }
 
     void dump(PrintStream&) const;
 
-    BasicBlock* block;
-    float count;
+    BasicBlock* block { nullptr };
+    float count { PNaN };
 };
 
 struct BranchData {
@@ -170,8 +186,8 @@ struct BranchData {
         unsigned takenBytecodeIndex, unsigned notTakenBytecodeIndex)
     {
         BranchData result;
-        result.taken.block = bitwise_cast<BasicBlock*>(static_cast<uintptr_t>(takenBytecodeIndex));
-        result.notTaken.block = bitwise_cast<BasicBlock*>(static_cast<uintptr_t>(notTakenBytecodeIndex));
+        result.taken.block = std::bit_cast<BasicBlock*>(static_cast<uintptr_t>(takenBytecodeIndex));
+        result.notTaken.block = std::bit_cast<BasicBlock*>(static_cast<uintptr_t>(notTakenBytecodeIndex));
         return result;
     }
 
@@ -227,18 +243,19 @@ struct SwitchData {
     // Initializes most fields to obviously invalid values. Anyone
     // constructing this should make sure to initialize everything they
     // care about manually.
-    SwitchData()
-        : switchTableIndex(UINT_MAX)
-        , kind(static_cast<SwitchKind>(-1))
-        , didUseJumpTable(false)
+    SwitchData() = default;
+
+    bool hasSwitchTableIndex() const { return switchTableIndex != std::numeric_limits<size_t>::max(); }
+    void clearSwitchTableIndex()
     {
+        switchTableIndex = std::numeric_limits<size_t>::max();
     }
 
     Vector<SwitchCase> cases;
     BranchTarget fallThrough;
-    size_t switchTableIndex;
-    SwitchKind kind;
-    bool didUseJumpTable;
+    size_t switchTableIndex { std::numeric_limits<size_t>::max() };
+    SwitchKind kind { static_cast<SwitchKind>(-1) };
+    bool didUseJumpTable { false };
 };
 
 struct EntrySwitchData {
@@ -279,11 +296,21 @@ struct StackAccessData {
 };
 
 struct CallDOMGetterData {
-    FunctionPtr<CustomAccessorPtrTag> customAccessorGetter;
+    CodePtr<CustomAccessorPtrTag> customAccessorGetter;
     const DOMJIT::GetterSetter* domJIT { nullptr };
     DOMJIT::CallDOMGetterSnippet* snippet { nullptr };
     unsigned identifierNumber { 0 };
     const ClassInfo* requiredClassInfo { nullptr };
+};
+
+struct CallCustomAccessorData {
+    CodePtr<CustomAccessorPtrTag> m_customAccessor;
+    CacheableIdentifier m_identifier;
+};
+
+struct GetByIdData {
+    CacheableIdentifier m_identifier;
+    CacheType m_cacheType;
 };
 
 enum class BucketOwnerType : uint32_t {
@@ -296,13 +323,15 @@ enum class BucketOwnerType : uint32_t {
 // Node represents a single operation in the data flow graph.
 DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(DFGNode);
 struct Node {
-    WTF_MAKE_STRUCT_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(DFGNode);
+    WTF_DEPRECATED_MAKE_STRUCT_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(DFGNode, DFGNode);
 public:
     static const char HashSetTemplateInstantiationString[];
 
     enum VarArgTag { VarArg };
 
     Node() { }
+
+    Node(const Node&) = default;
 
     Node(NodeType op, NodeOrigin nodeOrigin, const AdjacencyList& children)
         : origin(nodeOrigin)
@@ -507,6 +536,10 @@ public:
     void convertToIdentity();
     void convertToIdentityOn(Node*);
 
+    void convertToGetByIdMaybeMegamorphic(Graph&, CacheableIdentifier);
+    void convertToPutByIdMaybeMegamorphic(Graph&, CacheableIdentifier);
+    void convertToInByIdMaybeMegamorphic(Graph&, CacheableIdentifier);
+
     bool mustGenerate() const
     {
         return m_flags & NodeMustGenerate;
@@ -544,6 +577,37 @@ public:
             // otherwise wouldn't take kindly to a node that doesn't compute a value.
             return true;
 
+        default:
+            return false;
+        }
+    }
+
+    bool isCheckNode()
+    {
+        switch (op()) {
+        case Check:
+        case CheckVarargs:
+        case CheckTierUpInLoop:
+        case CheckTierUpAndOSREnter:
+        case CheckTierUpAtReturn:
+        case CheckPrivateBrand:
+        case CheckStructure:
+        case CheckStructureOrEmpty:
+        case CheckArray:
+        case CheckArrayOrEmpty:
+        case CheckDetached:
+        case CheckIsConstant:
+        case CheckNotEmpty:
+        case CheckBadValue:
+        case CheckInBounds:
+        case CheckInBoundsInt52:
+        case CheckIdent:
+        case CheckTypeInfoFlags:
+        case CheckJSCast:
+        case CheckNotJSCast:
+        case CheckStructureImmediate:
+        case CheckTraps:
+            return true;
         default:
             return false;
         }
@@ -605,7 +669,7 @@ public:
 
     void convertToGetByOffset(StorageAccessData& data, Edge storage, Edge base)
     {
-        ASSERT(m_op == GetById || m_op == GetByIdFlush || m_op == GetByIdDirect || m_op == GetByIdDirectFlush || m_op == GetPrivateNameById || m_op == MultiGetByOffset);
+        ASSERT(m_op == GetById || m_op == GetByIdFlush || m_op == GetByIdDirect || m_op == GetByIdDirectFlush || m_op == GetPrivateNameById || m_op == MultiGetByOffset || m_op == GetByIdMegamorphic);
         m_opInfo = &data;
         children.setChild1(storage);
         children.setChild2(base);
@@ -615,7 +679,7 @@ public:
 
     void convertToMultiGetByOffset(MultiGetByOffsetData* data)
     {
-        RELEASE_ASSERT(m_op == GetById || m_op == GetByIdFlush || m_op == GetByIdDirect || m_op == GetByIdDirectFlush || m_op == GetPrivateNameById);
+        RELEASE_ASSERT(m_op == GetById || m_op == GetByIdFlush || m_op == GetByIdDirect || m_op == GetByIdDirectFlush || m_op == GetPrivateNameById || m_op == GetByIdMegamorphic);
         m_opInfo = data;
         child1().setUseKind(CellUse);
         m_op = MultiGetByOffset;
@@ -624,7 +688,7 @@ public:
 
     void convertToPutByOffset(StorageAccessData& data, Edge storage, Edge base)
     {
-        ASSERT(m_op == PutById || m_op == PutByIdDirect || m_op == PutByIdFlush || m_op == MultiPutByOffset || m_op == PutPrivateNameById);
+        ASSERT(m_op == PutById || m_op == PutByIdDirect || m_op == PutByIdFlush || m_op == MultiPutByOffset || m_op == PutPrivateNameById || m_op == PutByIdMegamorphic);
         m_opInfo = &data;
         children.setChild3(children.child2());
         children.setChild2(base);
@@ -634,9 +698,44 @@ public:
 
     void convertToMultiPutByOffset(MultiPutByOffsetData* data)
     {
-        ASSERT(m_op == PutById || m_op == PutByIdDirect || m_op == PutByIdFlush || m_op == PutPrivateNameById);
+        ASSERT(m_op == PutById || m_op == PutByIdDirect || m_op == PutByIdFlush || m_op == PutPrivateNameById || m_op == PutByIdMegamorphic);
         m_opInfo = data;
         m_op = MultiPutByOffset;
+    }
+
+    void convertToMultiGetByVal(MultiGetByValData* data)
+    {
+        ASSERT(m_op == GetByVal);
+        m_opInfo = data;
+        m_op = MultiGetByVal;
+    }
+
+    void convertToMultiPutByVal(MultiPutByValData* data)
+    {
+        ASSERT(m_op == PutByVal);
+        m_opInfo = data;
+        m_op = MultiPutByVal;
+    }
+
+    void convertToNewRegExp(FrozenValue* regExp, Edge index)
+    {
+        ASSERT(m_op == NewRegExpUntyped);
+        setOpAndDefaultFlags(NewRegExp);
+        m_opInfo = OpInfoWrapper(regExp);
+        m_opInfo2 = OpInfoWrapper();
+        children = AdjacencyList();
+        children.setChild1(index);
+    }
+
+    void convertToPhantomNewArrayWithConstantSize()
+    {
+        ASSERT(m_op == NewArrayWithConstantSize);
+        m_op = PhantomNewArrayWithConstantSize;
+        m_flags &= ~NodeHasVarArgs;
+        m_flags |= NodeMustGenerate;
+        // No need to clear the infos, as the indexing type and array
+        // size are still required for materialization when an OSR exit occurs.
+        children = AdjacencyList();
     }
 
     void convertToPhantomNewObject()
@@ -712,10 +811,10 @@ public:
         children = AdjacencyList();
     }
 
-    void convertToPhantomNewRegexp()
+    void convertToPhantomNewRegExp()
     {
-        ASSERT(m_op == NewRegexp);
-        setOpAndDefaultFlags(PhantomNewRegexp);
+        ASSERT(m_op == NewRegExp);
+        setOpAndDefaultFlags(PhantomNewRegExp);
         m_opInfo = OpInfoWrapper();
         m_opInfo2 = OpInfoWrapper();
         children = AdjacencyList();
@@ -738,7 +837,7 @@ public:
 
     void convertToToString()
     {
-        ASSERT(m_op == ToPrimitive || m_op == StringValueOf || m_op == ToPropertyKey);
+        ASSERT(m_op == ToPrimitive || m_op == StringValueOf || m_op == ToPropertyKey || m_op == ToPropertyKeyOrNumber);
         m_op = ToString;
     }
 
@@ -790,7 +889,7 @@ public:
 
     void convertToNewObject(RegisteredStructure structure)
     {
-        ASSERT(m_op == CallObjectConstructor || m_op == CreateThis || m_op == ObjectCreate);
+        ASSERT(m_op == CallObjectConstructor || m_op == CreateThis || m_op == ObjectCreate || m_op == Construct);
         setOpAndDefaultFlags(NewObject);
         children.reset();
         m_opInfo = structure;
@@ -816,8 +915,15 @@ public:
     }
 
     void convertToNewArrayBuffer(FrozenValue* immutableButterfly);
+    void convertToNewArrayWithSize();
+    void convertToNewArrayWithConstantSize(Graph&, uint32_t);
+    void convertToNewArrayWithSizeAndStructure(Graph&, RegisteredStructure);
+
+    void convertToNewBoundFunction(FrozenValue*);
 
     void convertToDirectCall(FrozenValue*);
+
+    void convertToCallWasm(FrozenValue*);
 
     void convertToCallDOM(Graph&);
 
@@ -831,13 +937,11 @@ public:
         m_opInfo = false;
     }
 
-    void convertToInById(CacheableIdentifier identifier)
+    void convertToPurifyNaN(Node* input)
     {
-        ASSERT(m_op == InByVal);
-        setOpAndDefaultFlags(InById);
-        children.setChild2(Edge());
-        m_opInfo = identifier;
-        m_opInfo2 = OpInfoWrapper();
+        setOpAndDefaultFlags(PurifyNaN);
+        children.reset();
+        children.setChild1(Edge(input, DoubleRepUse));
     }
 
     JSValue asJSValue()
@@ -911,11 +1015,11 @@ public:
     }
 
     template<typename T>
-    T dynamicCastConstant(VM& vm)
+    T dynamicCastConstant()
     {
         if (!isCellConstant())
             return nullptr;
-        return jsDynamicCast<T>(vm, asCell());
+        return jsDynamicCast<T>(asCell());
     }
 
     bool hasLazyJSValue()
@@ -988,6 +1092,7 @@ public:
     {
         switch (op()) {
         case MovHint:
+        case ZombieHint:
             return true;
         default:
             return false;
@@ -1030,6 +1135,7 @@ public:
         switch (op()) {
         case ExtractOSREntryLocal:
         case MovHint:
+        case ZombieHint:
         case KillStack:
             return true;
         default:
@@ -1088,17 +1194,23 @@ public:
         case TryGetById:
         case GetById:
         case GetByIdFlush:
+        case GetByIdMegamorphic:
         case GetByIdWithThis:
+        case GetByIdWithThisMegamorphic:
         case GetByIdDirect:
         case GetByIdDirectFlush:
         case GetPrivateNameById:
         case DeleteById:
         case InById:
+        case InByIdMegamorphic:
         case PutById:
         case PutByIdFlush:
         case PutByIdDirect:
+        case PutByIdMegamorphic:
         case PutByIdWithThis:
         case PutPrivateNameById:
+        case CallCustomAccessorGetter:
+        case CallCustomAccessorSetter:
             return true;
         default:
             return false;
@@ -1108,7 +1220,34 @@ public:
     CacheableIdentifier cacheableIdentifier()
     {
         ASSERT(hasCacheableIdentifier());
+        switch (op()) {
+        case TryGetById:
+        case GetById:
+        case GetByIdFlush:
+        case GetByIdWithThis:
+        case GetByIdDirect:
+        case GetByIdDirectFlush:
+        case GetPrivateNameById:
+        case GetByIdMegamorphic:
+        case GetByIdWithThisMegamorphic:
+            return getByIdData().m_identifier;
+        case DeleteById:
+        case InById:
+        case InByIdMegamorphic:
+        case PutById:
+        case PutByIdFlush:
+        case PutByIdDirect:
+        case PutByIdMegamorphic:
+        case PutByIdWithThis:
+        case PutPrivateNameById:
         return CacheableIdentifier::createFromRawBits(m_opInfo.as<uintptr_t>());
+        case CallCustomAccessorGetter:
+        case CallCustomAccessorSetter:
+            return callCustomAccessorData()->m_identifier;
+        default:
+            RELEASE_ASSERT_NOT_REACHED();
+            return { };
+    }
     }
 
     bool hasIdentifier()
@@ -1126,6 +1265,41 @@ public:
         default:
             return false;
         }
+    }
+
+    bool hasGetByIdData() const
+    {
+        switch (op()) {
+        case TryGetById:
+        case GetById:
+        case GetByIdFlush:
+        case GetByIdWithThis:
+        case GetByIdDirect:
+        case GetByIdDirectFlush:
+        case GetPrivateNameById:
+        case GetByIdMegamorphic:
+        case GetByIdWithThisMegamorphic:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    GetByIdData& getByIdData()
+    {
+        ASSERT(hasGetByIdData());
+        return *m_opInfo.as<GetByIdData*>();
+    }
+
+    bool hasCacheType() const
+    {
+        return hasGetByIdData();
+    }
+
+    CacheType cacheType()
+    {
+        ASSERT(hasCacheType());
+        return getByIdData().m_cacheType;
     }
 
     unsigned identifierNumber()
@@ -1195,9 +1369,28 @@ public:
     NodeFlags arithNodeFlags()
     {
         NodeFlags result = m_flags & NodeArithFlagsMask;
-        if (op() == ArithMul || op() == ArithDiv || op() == ValueDiv || op() == ArithMod || op() == ArithNegate || op() == ArithPow || op() == ArithRound || op() == ArithFloor || op() == ArithCeil || op() == ArithTrunc || op() == DoubleAsInt32 || op() == ValueNegate || op() == ValueMul || op() == ValueDiv)
+        switch (op()) {
+        case ArithMul:
+        case ArithDiv:
+        case ArithMod:
+        case ArithNegate:
+        case ArithPow:
+        case ArithRound:
+        case ArithFloor:
+        case ArithCeil:
+        case ArithTrunc:
+        case ValueMul:
+        case ValueDiv:
+        case ValueMod:
+        case ValueNegate:
+        case ValuePow:
+        case DoubleAsInt32:
+        case Int52Rep:
+        case MultiGetByVal:
             return result;
+        default:
         return result & ~NodeBytecodeNeedsNegZero;
+    }
     }
 
     bool mayHaveNonIntResult()
@@ -1261,17 +1454,50 @@ public:
         return newArrayBufferData().vectorLengthHint;
     }
 
+    unsigned hasNewArraySize()
+    {
+        switch (op()) {
+        case NewArrayWithConstantSize:
+        case PhantomNewArrayWithConstantSize:
+        case MaterializeNewArrayWithConstantSize:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    unsigned newArraySize()
+    {
+        ASSERT(hasNewArraySize());
+        return op() == MaterializeNewArrayWithConstantSize ? objectMaterializationData().m_newArraySize : m_opInfo2.as<unsigned>();
+    }
+
     bool hasIndexingType()
     {
         switch (op()) {
         case NewArray:
         case NewArrayWithSize:
+        case NewArrayWithConstantSize:
+        case PhantomNewArrayWithConstantSize:
+        case MaterializeNewArrayWithConstantSize:
         case NewArrayBuffer:
         case PhantomNewArrayBuffer:
+        case NewArrayWithSpecies:
             return true;
         default:
             return false;
         }
+    }
+
+    bool hasNewArrayWithSpeciesData()
+    {
+        return op() == NewArrayWithSpecies;
+    }
+
+    NewArrayWithSpeciesData newArrayWithSpeciesData()
+    {
+        ASSERT(hasNewArrayWithSpeciesData());
+        return m_opInfo.asNewArrayWithSpeciesData();
     }
 
     BitVector* bitVector()
@@ -1293,6 +1519,8 @@ public:
         ASSERT(hasIndexingType());
         if (op() == NewArrayBuffer || op() == PhantomNewArrayBuffer)
             return static_cast<IndexingType>(newArrayBufferData().indexingMode) & IndexingTypeMask;
+        if (op() == NewArrayWithSpecies)
+            return static_cast<IndexingType>(newArrayWithSpeciesData().indexingMode) & IndexingTypeMask;
         return static_cast<IndexingType>(m_opInfo.as<uint32_t>());
     }
 
@@ -1301,6 +1529,8 @@ public:
         ASSERT(hasIndexingType());
         if (op() == NewArrayBuffer || op() == PhantomNewArrayBuffer)
             return static_cast<IndexingType>(newArrayBufferData().indexingMode);
+        if (op() == NewArrayWithSpecies)
+            return static_cast<IndexingType>(newArrayWithSpeciesData().indexingMode);
         return static_cast<IndexingType>(m_opInfo.as<uint32_t>());
     }
 
@@ -1454,6 +1684,17 @@ public:
         return speculationFromJSType(queriedType());
     }
 
+    bool hasStructureFlags()
+    {
+        return op() == HasStructureWithFlags;
+    }
+
+    uint32_t structureFlags()
+    {
+        ASSERT(hasStructureFlags());
+        return m_opInfo.as<uint32_t>();
+    }
+
     bool hasResult()
     {
         return !!result();
@@ -1490,6 +1731,7 @@ public:
         case ValueBitNot:
         case ValueBitLShift:
         case ValueBitRShift:
+        case ValueBitURShift:
         case ValueNegate:
             return true;
         default:
@@ -1525,6 +1767,52 @@ public:
     Edge defaultEdge()
     {
         return Edge(this, defaultUseKind());
+    }
+
+    bool isTuple() const
+    {
+        return op() == EnumeratorNextUpdateIndexAndMode;
+    }
+
+    void setTupleOffset(unsigned tupleOffset)
+    {
+        m_virtualRegister = virtualRegisterForLocal(tupleOffset);
+    }
+
+    // This is the start of the tuple in the graph's/phases' various tuple buffers.
+    unsigned tupleOffset() const
+    {
+        ASSERT(isTuple());
+        return m_virtualRegister.toLocal();
+    }
+
+    bool hasExtractOffset() const
+    {
+        return op() == ExtractFromTuple;
+    }
+
+    unsigned extractOffset() const
+    {
+        ASSERT(hasExtractOffset());
+        ASSERT(m_opInfo.as<unsigned>() < const_cast<Node*>(this)->child1()->tupleSize());
+        return m_opInfo.as<unsigned>();
+    }
+
+    unsigned tupleIndex() const
+    {
+        return const_cast<Node*>(this)->child1()->tupleOffset() + extractOffset();
+    }
+
+    unsigned tupleSize() const
+    {
+        ASSERT(isTuple());
+        switch (op()) {
+        case EnumeratorNextUpdateIndexAndMode:
+            return 2;
+        default:
+            break;
+        }
+        RELEASE_ASSERT_NOT_REACHED();
     }
 
     bool isJump()
@@ -1601,7 +1889,7 @@ public:
     BasicBlock*& targetBlock()
     {
         ASSERT(isJump());
-        return *bitwise_cast<BasicBlock**>(&m_opInfo.u.pointer);
+        return *std::bit_cast<BasicBlock**>(&m_opInfo.u.pointer);
     }
 
     BranchData* branchData()
@@ -1721,10 +2009,6 @@ public:
                 return m_index == other.m_index;
             }
 
-            bool operator!=(const iterator& other) const
-            {
-                return !(*this == other);
-            }
         private:
             Node* m_terminal;
             unsigned m_index;
@@ -1761,21 +2045,25 @@ public:
     bool hasHeapPrediction()
     {
         switch (op()) {
-        case ArithAbs:
         case ArithRound:
         case ArithFloor:
         case ArithCeil:
         case ArithTrunc:
         case GetById:
         case GetByIdFlush:
+        case GetByIdMegamorphic:
         case GetByIdWithThis:
+        case GetByIdWithThisMegamorphic:
         case GetByIdDirect:
         case GetByIdDirectFlush:
         case GetPrototypeOf:
         case TryGetById:
         case EnumeratorGetByVal:
         case GetByVal:
+        case GetByValMegamorphic:
         case GetByValWithThis:
+        case GetByValWithThisMegamorphic:
+        case MultiGetByVal:
         case GetPrivateName:
         case GetPrivateNameById:
         case Call:
@@ -1785,11 +2073,13 @@ public:
         case Construct:
         case DirectConstruct:
         case CallVarargs:
-        case CallEval:
+        case CallDirectEval:
         case TailCallVarargsInlinedCaller:
         case ConstructVarargs:
         case CallForwardVarargs:
         case TailCallForwardVarargsInlinedCaller:
+        case CallWasm:
+        case CallCustomAccessorGetter:
         case GetByOffset:
         case MultiGetByOffset:
         case GetClosureVar:
@@ -1798,32 +2088,34 @@ public:
         case GetArgument:
         case ArrayPop:
         case ArrayPush:
+        case ArraySplice:
         case RegExpExec:
         case RegExpExecNonGlobalOrSticky:
         case RegExpTest:
         case RegExpTestInline:
         case RegExpMatchFast:
         case RegExpMatchFastGlobal:
+        case RegExpSearch:
         case GetGlobalVar:
         case GetGlobalLexicalVariable:
         case StringReplace:
+        case StringReplaceAll:
         case StringReplaceRegExp:
-        case ToNumber:
-        case ToNumeric:
+        case StringReplaceString:
         case ToObject:
         case CallNumberConstructor:
-        case ValueBitAnd:
-        case ValueBitOr:
-        case ValueBitXor:
-        case ValueBitNot:
-        case ValueBitLShift:
-        case ValueBitRShift:
         case CallObjectConstructor:
-        case LoadKeyFromMapBucket:
-        case LoadValueFromMapBucket:
+        case MapGet:
+        case LoadMapValue:
+        case MapIteratorKey:
+        case MapIteratorValue:
+        case MapIterationEntryKey:
+        case MapIterationEntryValue:
         case CallDOMGetter:
         case CallDOM:
         case ParseInt:
+        case ToIntegerOrInfinity:
+        case ToLength:
         case AtomicsAdd:
         case AtomicsAnd:
         case AtomicsCompareExchange:
@@ -1839,6 +2131,7 @@ public:
         case DataViewGetInt:
         case DataViewGetFloat:
         case DateGetInt32OrNaN:
+        case NewArrayWithSpecies:
             return true;
         default:
             return false;
@@ -1885,9 +2178,10 @@ public:
         case NewGeneratorFunction:
         case NewAsyncFunction:
         case NewAsyncGeneratorFunction:
+        case NewBoundFunction:
         case CreateActivation:
         case MaterializeCreateActivation:
-        case NewRegexp:
+        case NewRegExp:
         case NewArrayBuffer:
         case PhantomNewArrayBuffer:
         case CompareEqPtr:
@@ -1896,6 +2190,7 @@ public:
         case DirectTailCall:
         case DirectConstruct:
         case DirectTailCallInlinedCaller:
+        case CallWasm:
         case RegExpExecNonGlobalOrSticky:
         case RegExpMatchFastGlobal:
         case RegExpTestInline:
@@ -1965,14 +2260,14 @@ public:
     bool hasStorageChild() const
     {
         switch (op()) {
-        case StringCharAt:
-        case StringCharCodeAt:
-        case StringCodePointAt:
         case EnumeratorGetByVal:
+        case EnumeratorPutByVal:
         case GetByVal:
+        case GetByValMegamorphic:
         case PutByValDirect:
         case PutByVal:
         case PutByValAlias:
+        case PutByValMegamorphic:
         case AtomicsAdd:
         case AtomicsAnd:
         case AtomicsCompareExchange:
@@ -1985,9 +2280,11 @@ public:
         case ArrayPush:
         case ArrayPop:
         case GetArrayLength:
+        case GetUndetachedTypeArrayLength:
         case GetTypedArrayLengthAsInt52:
         case HasIndexedProperty:
         case EnumeratorNextUpdateIndexAndMode:
+        case ArrayIncludes:
         case ArrayIndexOf:
             return true;
         default:
@@ -2000,15 +2297,15 @@ public:
     {
         ASSERT(hasStorageChild());
         switch (op()) {
-        case StringCharAt:
-        case StringCharCodeAt:
-        case StringCodePointAt:
         case EnumeratorGetByVal:
         case GetByVal:
+        case GetByValMegamorphic:
             return 2;
+        case EnumeratorPutByVal:
         case PutByValDirect:
         case PutByVal:
         case PutByValAlias:
+        case PutByValMegamorphic:
             return 3;
         case AtomicsAdd:
         case AtomicsAnd:
@@ -2025,6 +2322,7 @@ public:
 
         case ArrayPop:
         case GetArrayLength:
+        case GetUndetachedTypeArrayLength:
         case GetTypedArrayLengthAsInt52:
             return 2;
 
@@ -2109,6 +2407,11 @@ public:
         case NewAsyncGenerator:
         case NewInternalFieldObject:
         case NewStringObject:
+        case NewRegExpUntyped:
+        case NewMap:
+        case NewSet:
+        case NewArrayWithSizeAndStructure:
+        case NewTypedArrayBuffer:
             return true;
         default:
             return false;
@@ -2172,6 +2475,28 @@ public:
         return *m_opInfo.as<MultiDeleteByOffsetData*>();
     }
 
+    bool hasMultiGetByValData()
+    {
+        return op() == MultiGetByVal;
+    }
+
+    MultiGetByValData& multiGetByValData()
+    {
+        ASSERT(hasMultiGetByValData());
+        return *m_opInfo.as<MultiGetByValData*>();
+    }
+
+    bool hasMultiPutByValData()
+    {
+        return op() == MultiPutByVal;
+    }
+
+    MultiPutByValData& multiPutByValData()
+    {
+        ASSERT(hasMultiPutByValData());
+        return *m_opInfo.as<MultiPutByValData*>();
+    }
+
     bool hasMatchStructureData()
     {
         return op() == MatchStructure;
@@ -2187,6 +2512,7 @@ public:
     {
         switch (op()) {
         case MaterializeNewObject:
+        case MaterializeNewArrayWithConstantSize:
         case MaterializeNewInternalFieldObject:
         case MaterializeCreateActivation:
             return true;
@@ -2246,6 +2572,7 @@ public:
 
     bool isFunctionAllocation()
     {
+        // Do not include NewBoundFunction right now since it is allocating with NativeExecutable.
         switch (op()) {
         case NewFunction:
         case NewGeneratorFunction:
@@ -2273,6 +2600,7 @@ public:
     bool isPhantomAllocation()
     {
         switch (op()) {
+        case PhantomNewArrayWithConstantSize:
         case PhantomNewObject:
         case PhantomDirectArguments:
         case PhantomCreateRest:
@@ -2286,10 +2614,34 @@ public:
         case PhantomNewAsyncGeneratorFunction:
         case PhantomNewInternalFieldObject:
         case PhantomCreateActivation:
-        case PhantomNewRegexp:
+        case PhantomNewRegExp:
             return true;
         default:
             return false;
+        }
+    }
+
+    bool hasArrayModes()
+    {
+        switch (op()) {
+        case MultiGetByVal:
+        case MultiPutByVal:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    ArrayModes arrayModes()
+    {
+        ASSERT(hasArrayModes());
+        switch (op()) {
+        case MultiGetByVal:
+            return multiGetByValData().m_arrayModes;
+        case MultiPutByVal:
+            return multiPutByValData().m_arrayModes;
+        default:
+            return { };
         }
     }
 
@@ -2298,17 +2650,27 @@ public:
         switch (op()) {
         case GetIndexedPropertyStorage:
         case GetArrayLength:
+        case GetUndetachedTypeArrayLength:
         case GetTypedArrayLengthAsInt52:
+        case GetTypedArrayByteOffset:
+        case GetTypedArrayByteOffsetAsInt52:
         case GetVectorLength:
         case InByVal:
+        case InByValMegamorphic:
         case PutByValDirect:
         case PutByVal:
         case PutByValAlias:
+        case PutByValMegamorphic:
+        case EnumeratorPutByVal:
         case GetByVal:
+        case GetByValMegamorphic:
+        case MultiGetByVal:
+        case MultiPutByVal:
         case EnumeratorNextUpdateIndexAndMode:
         case EnumeratorGetByVal:
         case EnumeratorInByVal:
         case EnumeratorHasOwnProperty:
+        case StringAt:
         case StringCharAt:
         case StringCharCodeAt:
         case StringCodePointAt:
@@ -2318,6 +2680,7 @@ public:
         case ArrayifyToStructure:
         case ArrayPush:
         case ArrayPop:
+        case ArrayIncludes:
         case ArrayIndexOf:
         case HasIndexedProperty:
         case AtomicsAdd:
@@ -2329,6 +2692,7 @@ public:
         case AtomicsStore:
         case AtomicsSub:
         case AtomicsXor:
+        case NewArrayWithSpecies:
             return true;
         default:
             return false;
@@ -2338,9 +2702,18 @@ public:
     ArrayMode arrayMode()
     {
         ASSERT(hasArrayMode());
-        if (op() == ArrayifyToStructure)
+        switch (op()) {
+        case ArrayifyToStructure:
             return ArrayMode::fromWord(m_opInfo2.as<uint32_t>());
+        case NewArrayWithSpecies:
+            return ArrayMode::fromWord(newArrayWithSpeciesData().arrayMode);
+        case MultiGetByVal:
+            return multiGetByValData().m_arrayMode;
+        case MultiPutByVal:
+            return multiPutByValData().m_arrayMode;
+        default:
         return ArrayMode::fromWord(m_opInfo.as<uint32_t>());
+    }
     }
 
     bool setArrayMode(ArrayMode arrayMode)
@@ -2348,24 +2721,52 @@ public:
         ASSERT(hasArrayMode());
         if (this->arrayMode() == arrayMode)
             return false;
+
+        switch (op()) {
+        case ArrayifyToStructure:
+            m_opInfo2 = arrayMode.asWord();
+            return true;
+        case NewArrayWithSpecies: {
+            auto data = newArrayWithSpeciesData();
+            data.arrayMode = arrayMode.asWord();
+            m_opInfo = data.asQuadWord();
+            return true;
+        }
+        case MultiGetByVal:
+            multiGetByValData().m_arrayMode = arrayMode;
+            return true;
+        case MultiPutByVal:
+            multiPutByValData().m_arrayMode = arrayMode;
+            return true;
+        default:
         m_opInfo = arrayMode.asWord();
         return true;
+    }
+    }
+
+    bool mayBeResizableOrGrowableSharedArrayBuffer()
+    {
+        ASSERT(op() == DataViewGetByteLength || op() == DataViewGetByteLengthAsInt52);
+        return m_opInfo.as<bool>();
     }
 
     bool hasECMAMode()
     {
         switch (op()) {
-        case CallEval:
         case DeleteById:
         case DeleteByVal:
         case PutById:
         case PutByIdDirect:
         case PutByIdFlush:
+        case PutByIdMegamorphic:
         case PutByIdWithThis:
         case PutByVal:
         case PutByValAlias:
+        case PutByValMegamorphic:
         case PutByValDirect:
         case PutByValWithThis:
+        case EnumeratorPutByVal:
+        case MultiPutByVal:
         case PutDynamicVar:
         case ToThis:
             return true;
@@ -2378,7 +2779,6 @@ public:
     {
         ASSERT(hasECMAMode());
         switch (op()) {
-        case CallEval:
         case DeleteByVal:
         case PutByValWithThis:
         case ToThis:
@@ -2387,10 +2787,14 @@ public:
         case PutById:
         case PutByIdDirect:
         case PutByIdFlush:
+        case PutByIdMegamorphic:
         case PutByIdWithThis:
         case PutByVal:
         case PutByValAlias:
+        case PutByValMegamorphic:
         case PutByValDirect:
+        case EnumeratorPutByVal:
+        case MultiPutByVal:
         case PutDynamicVar:
             return ECMAMode::fromByte(m_opInfo2.as<uint8_t>());
         default:
@@ -2471,20 +2875,20 @@ public:
 
     bool hasVirtualRegister()
     {
-        return m_virtualRegister.isValid();
+        return m_virtualRegister.isValid() && !isTuple();
     }
 
     VirtualRegister virtualRegister()
     {
         ASSERT(hasResult());
-        ASSERT(m_virtualRegister.isValid());
+        ASSERT(hasVirtualRegister());
         return m_virtualRegister;
     }
 
     void setVirtualRegister(VirtualRegister virtualRegister)
     {
         ASSERT(hasResult());
-        ASSERT(!m_virtualRegister.isValid());
+        ASSERT(!m_virtualRegister.isValid() && !isTuple());
         m_virtualRegister = virtualRegister;
     }
 
@@ -2504,10 +2908,16 @@ public:
         return m_opInfo.as<unsigned>();
     }
 
+    LexicallyScopedFeatures lexicallyScopedFeatures()
+    {
+        ASSERT(op() == CallDirectEval);
+        return m_opInfo.as<uint8_t>();
+    }
+
     DataViewData dataViewData()
     {
         ASSERT(op() == DataViewGetInt || op() == DataViewGetFloat || op() == DataViewSet);
-        return bitwise_cast<DataViewData>(m_opInfo.as<uint64_t>());
+        return std::bit_cast<DataViewData>(m_opInfo.as<uint64_t>());
     }
 
     bool shouldGenerate()
@@ -2525,6 +2935,11 @@ public:
     unsigned refCount()
     {
         return m_refCount;
+    }
+
+    unsigned decRef()
+    {
+        return m_refCount--;
     }
 
     unsigned postfixRef()
@@ -2596,6 +3011,17 @@ public:
         return isBinaryUseKind(useKind, useKind);
     }
 
+    bool isSymmetricBinaryUseKind(UseKind left, UseKind right)
+    {
+        return isBinaryUseKind(left, right) || isBinaryUseKind(right, left);
+    }
+
+    // Can handle both Int32Use and KnownInt32Use
+    bool isBinaryInt32UseKind()
+    {
+        return isInt32(child1().useKind()) && isInt32(child2().useKind());
+    }
+
     Edge childFor(UseKind useKind)
     {
         if (child1().useKind() == useKind)
@@ -2637,19 +3063,36 @@ public:
         return isInt32OrBooleanSpeculation(prediction());
     }
 
+    bool shouldSpeculateInt32OrOther()
+    {
+        return isInt32OrOtherSpeculation(prediction());
+    }
+
     bool shouldSpeculateInt32ForArithmetic()
     {
         return isInt32SpeculationForArithmetic(prediction());
     }
 
-    bool shouldSpeculateInt32OrBooleanForArithmetic()
+    bool shouldSpeculateInt32OrBooleanForArithmetic(bool mayHaveDoubleResult = true)
     {
-        return isInt32OrBooleanSpeculationForArithmetic(prediction());
+        if (isInt32OrBooleanSpeculationForArithmetic(prediction()))
+            return true;
+        if (!mayHaveDoubleResult && isInt32OrBooleanSpeculationForArithmetic(prediction() & ~SpecDoubleNaN))
+            return true;
+        return false;
     }
 
-    bool shouldSpeculateInt32OrBooleanExpectingDefined()
+    bool shouldSpeculateInt32OrBooleanExpectingDefined(bool mayHaveDoubleResult)
     {
-        return isInt32OrBooleanSpeculationExpectingDefined(prediction());
+        if (isInt32OrBooleanSpeculationExpectingDefined(prediction()))
+            return true;
+
+        // We found that NaN can be used as an error value (as the same to Other), and it can pollute the graph with Double.
+        // But NaN compuation always produces NaN. So if we do not observe DoubleResult, then likely this site never sees
+        // NaN. We relax Int32 speculation condition based on this behavior.
+        if (!mayHaveDoubleResult && isInt32OrBooleanSpeculationExpectingDefined(prediction() & ~SpecDoubleNaN))
+            return true;
+        return false;
     }
 
     bool shouldSpeculateInt52()
@@ -2672,6 +3115,11 @@ public:
         // can trivially become Int52.
         //
         return enableInt52() && isInt32OrInt52Speculation(prediction());
+    }
+
+    bool shouldSpeculateInt52OrOther()
+    {
+        return enableInt52() && isInt32OrInt52OrOtherSpeculation(prediction());
     }
 
     bool shouldSpeculateDouble()
@@ -2806,6 +3254,11 @@ public:
         return isProxyObjectSpeculation(prediction());
     }
 
+    bool shouldSpeculateGlobalProxy()
+    {
+        return isGlobalProxySpeculation(prediction());
+    }
+
     bool shouldSpeculateDerivedArray()
     {
         return isDerivedArraySpeculation(prediction());
@@ -2854,6 +3307,11 @@ public:
     bool shouldSpeculateUint32Array()
     {
         return isUint32ArraySpeculation(prediction());
+    }
+
+    bool shouldSpeculateFloat16Array()
+    {
+        return isFloat16ArraySpeculation(prediction());
     }
 
     bool shouldSpeculateFloat32Array()
@@ -2956,12 +3414,6 @@ public:
     {
         return op1->shouldSpeculateInt32OrBooleanForArithmetic()
             && op2->shouldSpeculateInt32OrBooleanForArithmetic();
-    }
-
-    static bool shouldSpeculateInt32OrBooleanExpectingDefined(Node* op1, Node* op2)
-    {
-        return op1->shouldSpeculateInt32OrBooleanExpectingDefined()
-            && op2->shouldSpeculateInt32OrBooleanExpectingDefined();
     }
 
     static bool shouldSpeculateInt52(Node* op1, Node* op2)
@@ -3124,6 +3576,29 @@ public:
         return nullptr;
     }
 
+    bool hasCallCustomAccessorData() const
+    {
+        switch (op()) {
+        case CallCustomAccessorGetter:
+        case CallCustomAccessorSetter:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    CallCustomAccessorData* callCustomAccessorData()
+    {
+        ASSERT(hasCallCustomAccessorData());
+        return m_opInfo.as<CallCustomAccessorData*>();
+    }
+
+    CodePtr<CustomAccessorPtrTag> customAccessor()
+    {
+        ASSERT(hasCallCustomAccessorData());
+        return callCustomAccessorData()->m_customAccessor;
+    }
+
     Node* replacement() const
     {
         return m_misc.replacement;
@@ -3168,7 +3643,18 @@ public:
 
     bool hasBucketOwnerType()
     {
-        return op() == GetMapBucketNext || op() == LoadKeyFromMapBucket || op() == LoadValueFromMapBucket;
+        return op() == MapIterationNext || op() == MapIterationEntry || op() == MapIterationEntryKey || op() == MapIterationEntryValue || op() == MapStorage || op() == MapStorageOrSentinel;
+    }
+
+    unsigned numberOfBoundArguments()
+    {
+        ASSERT(hasNumberOfBoundArguments());
+        return m_opInfo2.as<unsigned>();
+    }
+
+    bool hasNumberOfBoundArguments()
+    {
+        return op() == FunctionBind || op() == NewBoundFunction;
     }
 
     BucketOwnerType bucketOwnerType()
@@ -3301,6 +3787,34 @@ public:
         return OptionSet<JSPropertyNameEnumerator::Flag>::fromRaw(m_opInfo2.as<unsigned>());
     }
 
+    CachedPropertyNamesKind cachedPropertyNamesKind() const
+    {
+        switch (op()) {
+        case ObjectKeys:
+            return CachedPropertyNamesKind::EnumerableStrings;
+        case ObjectGetOwnPropertyNames:
+            return CachedPropertyNamesKind::Strings;
+        case ObjectGetOwnPropertySymbols:
+            return CachedPropertyNamesKind::Symbols;
+        case ReflectOwnKeys:
+            return CachedPropertyNamesKind::StringsAndSymbols;
+        default:
+            RELEASE_ASSERT_NOT_REACHED();
+            break;
+        }
+    }
+
+    void resetOpInfo()
+    {
+        m_opInfo = OpInfoWrapper();
+        m_opInfo2 = OpInfoWrapper();
+    }
+
+    void setOpInfo(OpInfo info)
+    {
+        m_opInfo = info.m_value;
+    }
+
     void dumpChildren(PrintStream& out)
     {
         if (!child1())
@@ -3314,21 +3828,25 @@ public:
         out.printf(", @%u", child3()->index());
     }
 
-    NodeOrigin origin;
+    NO_UNIQUE_ADDRESS NodeOrigin origin;
 
+private:
+    NO_UNIQUE_ADDRESS NodeType m_op;
+
+    NO_UNIQUE_ADDRESS unsigned m_index { std::numeric_limits<unsigned>::max() };
+
+public:
     // References to up to 3 children, or links to a variable length set of children.
     AdjacencyList children;
 
 private:
     friend class B3::SparseCollection<Node>;
 
-    unsigned m_index { std::numeric_limits<unsigned>::max() };
-    unsigned m_op : 10; // real type is NodeType
-    unsigned m_flags : 21;
-    // The virtual register number (spill location) associated with this .
+    // The virtual register number (spill location) associated with this node. For tuples this is the offset into the graph's out of line tuple buffers.
     VirtualRegister m_virtualRegister;
     // The number of uses of the result of this operation (+1 for 'must generate' nodes, which have side-effects).
     unsigned m_refCount;
+    NodeFlags m_flags { 0 };
     // The prediction ascribed to this node after propagation.
     SpeculatedType m_prediction { SpecNone };
     // Immediate values, accesses type-checked via accessors above.
@@ -3359,12 +3877,12 @@ private:
         OpInfoWrapper(RegisteredStructure structure)
         {
             u.int64 = 0;
-            u.pointer = bitwise_cast<void*>(structure);
+            u.pointer = std::bit_cast<void*>(structure);
         }
         OpInfoWrapper(CacheableIdentifier identifier)
         {
             u.int64 = 0;
-            u.pointer = bitwise_cast<void*>(identifier.rawBits());
+            u.pointer = std::bit_cast<void*>(identifier.rawBits());
         }
         OpInfoWrapper& operator=(uint32_t int32)
         {
@@ -3398,18 +3916,18 @@ private:
         OpInfoWrapper& operator=(RegisteredStructure structure)
         {
             u.int64 = 0;
-            u.pointer = bitwise_cast<void*>(structure);
+            u.pointer = std::bit_cast<void*>(structure);
             return *this;
         }
         OpInfoWrapper& operator=(CacheableIdentifier identifier)
         {
             u.int64 = 0;
-            u.pointer = bitwise_cast<void*>(identifier.rawBits());
+            u.pointer = std::bit_cast<void*>(identifier.rawBits());
             return *this;
         }
         OpInfoWrapper& operator=(NewArrayBufferData newArrayBufferData)
         {
-            u.int64 = bitwise_cast<uint64_t>(newArrayBufferData);
+            u.int64 = std::bit_cast<uint64_t>(newArrayBufferData);
             return *this;
         }
         template <typename T>
@@ -3434,11 +3952,16 @@ private:
         }
         ALWAYS_INLINE RegisteredStructure asRegisteredStructure() const
         {
-            return bitwise_cast<RegisteredStructure>(u.pointer);
+            return std::bit_cast<RegisteredStructure>(u.pointer);
         }
         ALWAYS_INLINE NewArrayBufferData asNewArrayBufferData() const
         {
-            return bitwise_cast<NewArrayBufferData>(u.int64);
+            return std::bit_cast<NewArrayBufferData>(u.int64);
+        }
+
+        ALWAYS_INLINE NewArrayWithSpeciesData asNewArrayWithSpeciesData() const
+        {
+            return std::bit_cast<NewArrayWithSpeciesData>(u.int64);
         }
 
         union {
@@ -3472,7 +3995,7 @@ public:
 
 // Uncomment this to log NodeSet operations.
 // typedef LoggingHashSet<Node::HashSetTemplateInstantiationString, Node*> NodeSet;
-typedef HashSet<Node*> NodeSet;
+typedef UncheckedKeyHashSet<Node*> NodeSet;
 
 struct NodeComparator {
     template<typename NodePtrType>
@@ -3500,7 +4023,7 @@ CString nodeMapDump(const T& nodeMap, DumpContext* context = nullptr)
     StringPrintStream out;
     CommaPrinter comma;
     for(unsigned i = 0; i < keys.size(); ++i)
-        out.print(comma, keys[i], "=>", inContext(nodeMap.get(keys[i]), context));
+        out.print(comma, keys[i], "=>"_s, inContext(nodeMap.get(keys[i]), context));
     return out.toCString();
 }
 
@@ -3516,7 +4039,7 @@ CString nodeValuePairListDump(const T& nodeValuePairList, DumpContext* context =
     StringPrintStream out;
     CommaPrinter comma;
     for (const auto& pair : sortedList)
-        out.print(comma, pair.node, "=>", inContext(pair.value, context));
+        out.print(comma, pair.node, "=>"_s, inContext(pair.value, context));
     return out.toCString();
 }
 
@@ -3533,7 +4056,7 @@ template<>
 struct LoggingHashKeyTraits<JSC::DFG::Node*> {
     static void print(PrintStream& out, JSC::DFG::Node* key)
     {
-        out.print("bitwise_cast<::JSC::DFG::Node*>(", RawPointer(key), "lu)");
+        out.print("std::bit_cast<::JSC::DFG::Node*>(", RawPointer(key), "lu)");
     }
 };
 

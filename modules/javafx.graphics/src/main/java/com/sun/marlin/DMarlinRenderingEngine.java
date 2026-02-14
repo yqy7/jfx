@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,14 +25,12 @@
 
 package com.sun.marlin;
 
-import java.security.AccessController;
 import static com.sun.marlin.MarlinUtils.logInfo;
 import com.sun.util.reentrant.ReentrantContextProvider;
 import com.sun.util.reentrant.ReentrantContextProviderCLQ;
 import com.sun.util.reentrant.ReentrantContextProviderTL;
 import com.sun.javafx.geom.PathIterator;
 import com.sun.prism.BasicStroke;
-import java.security.PrivilegedAction;
 
 /**
  * Marlin RendererEngine implementation (derived from Pisces)
@@ -74,12 +72,8 @@ public final class DMarlinRenderingEngine implements MarlinConst
         USE_THREAD_LOCAL = MarlinProperties.isUseThreadLocal();
 
         // Soft reference by default:
-        @SuppressWarnings("removal")
-        final String refType = AccessController.doPrivileged(
-            (PrivilegedAction<String>) () -> {
-                String value = System.getProperty("prism.marlin.useRef");
-                return (value == null) ? "soft" : value;
-            });
+        String value = System.getProperty("prism.marlin.useRef");
+        final String refType = (value == null) ? "soft" : value;
         switch (refType) {
             default:
             case "soft":
@@ -94,7 +88,7 @@ public final class DMarlinRenderingEngine implements MarlinConst
         }
 
         if (USE_THREAD_LOCAL) {
-            RDR_CTX_PROVIDER = new ReentrantContextProviderTL<RendererContext>(REF_TYPE)
+            RDR_CTX_PROVIDER = new ReentrantContextProviderTL<>(REF_TYPE)
                 {
                     @Override
                     protected RendererContext newContext() {
@@ -102,7 +96,7 @@ public final class DMarlinRenderingEngine implements MarlinConst
                     }
                 };
         } else {
-            RDR_CTX_PROVIDER = new ReentrantContextProviderCLQ<RendererContext>(REF_TYPE)
+            RDR_CTX_PROVIDER = new ReentrantContextProviderCLQ<>(REF_TYPE)
                 {
                     @Override
                     protected RendererContext newContext() {
@@ -225,8 +219,8 @@ public final class DMarlinRenderingEngine implements MarlinConst
                 + MarlinConst.USE_LOGGER);
         logInfo("prism.marlin.logCreateContext = "
                 + MarlinConst.LOG_CREATE_CONTEXT);
-        logInfo("prism.marlin.logUnsafeMalloc  = "
-                + MarlinConst.LOG_UNSAFE_MALLOC);
+        logInfo("prism.marlin.logOffHeapMalloc  = "
+                + MarlinConst.LOG_OFF_HEAP_MALLOC);
 
         // quality settings
         logInfo("prism.marlin.curve_len_err    = "
@@ -257,7 +251,6 @@ public final class DMarlinRenderingEngine implements MarlinConst
      * Get the RendererContext instance dedicated to the current thread
      * @return RendererContext instance
      */
-    @SuppressWarnings({"unchecked"})
     public static RendererContext getRendererContext() {
         final RendererContext rdrCtx = RDR_CTX_PROVIDER.acquire();
         if (DO_MONITORS) {

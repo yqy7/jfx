@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,161 +27,153 @@
 #define WEBGPUEXT_H_
 
 #ifdef __cplusplus
-extern "C" {
+
+#include <CoreGraphics/CGImage.h>
+#ifndef __swift__
+// Swift C++ Interop does not support extern C. This header has that.
+#include <CoreVideo/CoreVideo.h>
+#endif
+#include <IOSurface/IOSurfaceRef.h>
+
+#ifdef NDEBUG
+#define WGPU_FUZZER_ASSERT_NOT_REACHED(...) (WTFLogAlways(__VA_ARGS__), ASSERT_WITH_SECURITY_IMPLICATION(0))
+#else
+#define WGPU_FUZZER_ASSERT_NOT_REACHED(...) WTFLogAlways(__VA_ARGS__)
 #endif
 
-typedef void (^WGPUBufferMapBlockCallback)(WGPUBufferMapAsyncStatus status);
-typedef void (^WGPUCompilationInfoBlockCallback)(WGPUCompilationInfoRequestStatus status, WGPUCompilationInfo const * compilationInfo);
-typedef void (^WGPUCreateComputePipelineAsyncBlockCallback)(WGPUCreatePipelineAsyncStatus status, WGPUComputePipeline pipeline, char const * message);
-typedef void (^WGPUCreateRenderPipelineAsyncBlockCallback)(WGPUCreatePipelineAsyncStatus status, WGPURenderPipeline pipeline, char const * message);
+#include <optional>
+#include <wtf/MachSendRight.h>
+#include <wtf/RetainPtr.h>
+#include <wtf/Vector.h>
+
+#ifdef __swift__
+typedef struct CF_BRIDGED_TYPE(id) __CVBuffer* CVPixelBufferRef;
+#endif
+
+typedef struct WGPUExternalTextureImpl* WGPUExternalTexture;
+
+typedef void (^WGPUWorkItem)(void);
+typedef void (^WGPUScheduleWorkBlock)(WGPUWorkItem workItem);
 typedef void (^WGPUDeviceLostBlockCallback)(WGPUDeviceLostReason reason, char const * message);
-typedef void (^WGPUErrorBlockCallback)(WGPUErrorType type, char const * message);
-typedef void (^WGPUQueueWorkDoneBlockCallback)(WGPUQueueWorkDoneStatus status);
-typedef void (^WGPURequestAdapterBlockCallback)(WGPURequestAdapterStatus status, WGPUAdapter adapter, char const * message);
-typedef void (^WGPURequestDeviceBlockCallback)(WGPURequestDeviceStatus status, WGPUDevice device, char const * message);
+
+typedef enum WGPUBufferBindingTypeExtended {
+    WGPUBufferBindingType_Float3x2 = WGPUBufferBindingType_Force32 - 1,
+    WGPUBufferBindingType_Float4x3 = WGPUBufferBindingType_Force32 - 2,
+    WGPUBufferBindingType_ArrayLength = WGPUBufferBindingType_Force32 - 3,
+} WGPUBufferBindingTypeExtended;
 
 typedef enum WGPUSTypeExtended {
-    WGPUSTypeExtended_ShaderModuleDescriptorHints = 0x348970F3, // Random
-    WGPUSTypeExtended_TextureDescriptorViewFormats = 0x1D5BC57, // Random
+    WGPUSTypeExtended_InstanceCocoaDescriptor = 0x151BBC00, // Random
+    WGPUSTypeExtended_SurfaceDescriptorCocoaSurfaceBacking = 0x017E9710, // Random
+    WGPUSTypeExtended_BindGroupEntryExternalTexture = 0xF7A6EBF9, // Random
+    WGPUSTypeExtended_BindGroupLayoutEntryExternalTexture = 0x645C3DAA, // Random
     WGPUSTypeExtended_Force32 = 0x7FFFFFFF
 } WGPUSTypeExtended;
 
-typedef struct WGPUShaderModuleCompilationHint {
-    WGPUPipelineLayout layout;
-} WGPUShaderModuleCompilationHint;
+typedef struct WGPUInstanceCocoaDescriptor {
+    WGPUChainedStruct chain;
+    // The API contract is: callers must call WebGPU's functions in a non-racey way with respect
+    // to each other. This scheduleWorkBlock will execute on a background thread, and it must
+    // schedule the block it's passed to be run in a non-racey way with regards to all the other
+    // WebGPU calls. If calls to scheduleWorkBlock are ordered (e.g. multiple calls on the same
+    // thread), then the work that is scheduled must also be ordered in the same order.
+    // It's fine to pass NULL here, but if you do, you must periodically call
+    // wgpuInstanceProcessEvents() to synchronously run the queued callbacks.
+    __unsafe_unretained WGPUScheduleWorkBlock scheduleWorkBlock;
+    const void* webProcessResourceOwner;
+} WGPUInstanceCocoaDescriptor;
 
-typedef struct WGPUShaderModuleCompilationHintEntry {
+const int WGPUTextureSampleType_ExternalTexture = WGPUTextureSampleType_Force32 - 1;
+
+typedef void (^WGPURenderBuffersWereRecreatedBlockCallback)(CFArrayRef ioSurfaces);
+typedef void (^WGPUOnSubmittedWorkScheduledCallback)(WGPUWorkItem);
+typedef void (^WGPUCompositorIntegrationRegisterBlockCallback)(WGPURenderBuffersWereRecreatedBlockCallback renderBuffersWereRecreated, WGPUOnSubmittedWorkScheduledCallback onSubmittedWorkScheduledCallback);
+typedef struct WGPUSurfaceDescriptorCocoaCustomSurface {
+    WGPUChainedStruct chain;
+    WGPUCompositorIntegrationRegisterBlockCallback compositorIntegrationRegister;
+} WGPUSurfaceDescriptorCocoaCustomSurface;
+
+typedef struct WGPUExternalTextureBindingLayout {
     WGPUChainedStruct const * nextInChain;
-    char const * key;
-    WGPUShaderModuleCompilationHint hint;
-} WGPUShaderModuleCompilationHintEntry;
+} WGPUExternalTextureBindingLayout;
 
-typedef struct WGPUShaderModuleDescriptorHints {
+typedef struct WGPUBindGroupExternalTextureEntry {
     WGPUChainedStruct chain;
-    uint32_t hintsCount;
-    WGPUShaderModuleCompilationHintEntry const * hints;
-} WGPUShaderModuleDescriptorHints;
+    WGPUExternalTexture externalTexture;
+} WGPUBindGroupExternalTextureEntry;
 
-typedef struct WGPUTextureDescriptorViewFormats {
-    WGPUChainedStruct chain;
-    uint32_t viewFormatsCount;
-    WGPUTextureFormat const * viewFormats;
-} WGPUTextureDescriptorViewFormats;
+typedef struct WGPUExternalTextureDescriptor {
+    WGPUChainedStruct const * nextInChain;
+    char const * label; // nullable
+    CVPixelBufferRef pixelBuffer;
+    WGPUColorSpace colorSpace;
+} WGPUExternalTextureDescriptor;
 
 #if !defined(WGPU_SKIP_PROCS)
 
-typedef void (*WGPUProcAdapterRelease)(WGPUAdapter adapter);
-typedef void (*WGPUProcBindGroupLayoutRelease)(WGPUBindGroupLayout bindGroupLayout);
-typedef void (*WGPUProcBindGroupRelease)(WGPUBindGroup bindGroup);
-typedef void (*WGPUProcBufferRelease)(WGPUBuffer buffer);
-typedef void (*WGPUProcCommandBufferRelease)(WGPUCommandBuffer commandBuffer);
-typedef void (*WGPUProcCommandEncoderRelease)(WGPUCommandEncoder commandEncoder);
-typedef void (*WGPUProcComputePassEncoderRelease)(WGPUComputePassEncoder computePassEncoder);
-typedef void (*WGPUProcComputePipelineRelease)(WGPUComputePipeline computePipeline);
-typedef void (*WGPUProcDeviceRelease)(WGPUDevice device);
-typedef void (*WGPUProcInstanceRelease)(WGPUInstance instance);
-typedef void (*WGPUProcPipelineLayoutRelease)(WGPUPipelineLayout pipelineLayout);
-typedef void (*WGPUProcQuerySetRelease)(WGPUQuerySet querySet);
-typedef void (*WGPUProcQueueRelease)(WGPUQueue queue);
-typedef void (*WGPUProcRenderBundleEncoderRelease)(WGPURenderBundleEncoder renderBundleEncoder);
-typedef void (*WGPUProcRenderBundleRelease)(WGPURenderBundle renderBundle);
-typedef void (*WGPUProcRenderPassEncoderRelease)(WGPURenderPassEncoder renderPassEncoder);
-typedef void (*WGPUProcRenderPipelineRelease)(WGPURenderPipeline renderPipeline);
-typedef void (*WGPUProcSamplerRelease)(WGPUSampler sampler);
-typedef void (*WGPUProcShaderModuleRelease)(WGPUShaderModule shaderModule);
-typedef void (*WGPUProcSurfaceRelease)(WGPUSurface surface);
-typedef void (*WGPUProcSwapChainRelease)(WGPUSwapChain swapChain);
-typedef void (*WGPUProcTextureRelease)(WGPUTexture texture);
-typedef void (*WGPUProcTextureViewRelease)(WGPUTextureView textureView);
-
-typedef void (*WGPUProcBindGroupLayoutSetLabel)(WGPUBindGroupLayout bindGroupLayout, char const * label);
-typedef void (*WGPUProcBindGroupSetLabel)(WGPUBindGroup bindGroup, char const * label);
-typedef void (*WGPUProcBufferSetLabel)(WGPUBuffer buffer, char const * label);
-typedef void (*WGPUProcCommandBufferSetLabel)(WGPUCommandBuffer commandBuffer, char const * label);
-typedef void (*WGPUProcCommandEncoderSetLabel)(WGPUCommandEncoder commandEncoder, char const * label);
-typedef void (*WGPUProcComputePassEncoderSetLabel)(WGPUComputePassEncoder computePassEncoder, char const * label);
-typedef void (*WGPUProcDeviceSetLabel)(WGPUDevice queue, char const * label);
-typedef void (*WGPUProcPipelineLayoutSetLabel)(WGPUPipelineLayout pipelineLayout, char const * label);
-typedef void (*WGPUProcQuerySetSetLabel)(WGPUQuerySet querySet, char const * label);
-typedef void (*WGPUProcQueueSetLabel)(WGPUQueue queue, char const * label);
-typedef void (*WGPUProcRenderBundleEncoderSetLabel)(WGPURenderBundleEncoder renderBundleEncoder, char const * label);
 typedef void (*WGPUProcRenderBundleSetLabel)(WGPURenderBundle renderBundle, char const * label);
-typedef void (*WGPUProcRenderPassEncoderSetLabel)(WGPURenderPassEncoder renderBundleEncoder, char const * label);
-typedef void (*WGPUProcSamplerSetLabel)(WGPUSampler sampler, char const * label);
-typedef void (*WGPUProcTextureSetLabel)(WGPUTexture sampler, char const * label);
-typedef void (*WGPUProcTextureViewSetLabel)(WGPUTextureView sampler, char const * label);
 
-typedef void (*WGPUProcAdapterRequestDeviceWithBlock)(WGPUAdapter adapter, WGPUDeviceDescriptor const * descriptor, WGPURequestDeviceBlockCallback callback);
-typedef void (*WGPUProcBufferMapAsyncWithBlock)(WGPUBuffer buffer, WGPUMapModeFlags mode, size_t offset, size_t size, WGPUBufferMapBlockCallback callback);
-typedef void (*WGPUProcDeviceCreateComputePipelineAsyncWithBlock)(WGPUDevice device, WGPUComputePipelineDescriptor const * descriptor, WGPUCreateComputePipelineAsyncBlockCallback callback);
-typedef void (*WGPUProcDeviceCreateRenderPipelineAsyncWithBlock)(WGPUDevice device, WGPURenderPipelineDescriptor const * descriptor, WGPUCreateRenderPipelineAsyncBlockCallback callback);
-typedef bool (*WGPUProcDevicePopErrorScopeWithBlock)(WGPUDevice device, WGPUErrorBlockCallback callback);
-typedef void (*WGPUProcDeviceSetDeviceLostCallbackWithBlock)(WGPUDevice device, WGPUDeviceLostBlockCallback callback);
-typedef void (*WGPUProcDeviceSetUncapturedErrorCallbackWithBlock)(WGPUDevice device, WGPUErrorBlockCallback callback);
-typedef void (*WGPUProcInstanceRequestAdapterWithBlock)(WGPUInstance instance, WGPURequestAdapterOptions const * options, WGPURequestAdapterBlockCallback callback);
-typedef void (*WGPUProcQueueOnSubmittedWorkDoneWithBlock)(WGPUQueue queue, uint64_t signalValue, WGPUQueueWorkDoneBlockCallback callback);
-typedef void (*WGPUProcShaderModuleGetCompilationInfoWithBlock)(WGPUShaderModule shaderModule, WGPUCompilationInfoBlockCallback callback);
+typedef WGPUExternalTexture (*WGPUProcDeviceImportExternalTexture)(WGPUSwapChain swapChain);
+
+// FIXME: https://github.com/webgpu-native/webgpu-headers/issues/89 is about moving this from WebGPUExt.h to WebGPU.h
+typedef WGPUTexture (*WGPUProcSwapChainGetCurrentTexture)(WGPUSwapChain swapChain);
 
 #endif  // !defined(WGPU_SKIP_PROCS)
 
 #if !defined(WGPU_SKIP_DECLARATIONS)
 
-WGPU_EXPORT void wgpuAdapterRelease(WGPUAdapter adapter);
-WGPU_EXPORT void wgpuBindGroupLayoutRelease(WGPUBindGroupLayout bindGroupLayout);
-WGPU_EXPORT void wgpuBindGroupRelease(WGPUBindGroup bindGroup);
-WGPU_EXPORT void wgpuBufferRelease(WGPUBuffer buffer);
-WGPU_EXPORT void wgpuCommandBufferRelease(WGPUCommandBuffer commandBuffer);
-WGPU_EXPORT void wgpuCommandEncoderRelease(WGPUCommandEncoder commandEncoder);
-WGPU_EXPORT void wgpuComputePassEncoderRelease(WGPUComputePassEncoder computePassEncoder);
-WGPU_EXPORT void wgpuComputePipelineRelease(WGPUComputePipeline computePipeline);
-WGPU_EXPORT void wgpuDeviceRelease(WGPUDevice device);
-WGPU_EXPORT void wgpuInstanceRelease(WGPUInstance instance);
-WGPU_EXPORT void wgpuPipelineLayoutRelease(WGPUPipelineLayout pipelineLayout);
-WGPU_EXPORT void wgpuQuerySetRelease(WGPUQuerySet querySet);
-WGPU_EXPORT void wgpuQueueRelease(WGPUQueue queue);
-WGPU_EXPORT void wgpuRenderBundleEncoderRelease(WGPURenderBundleEncoder renderBundleEncoder);
-WGPU_EXPORT void wgpuRenderBundleRelease(WGPURenderBundle renderBundle);
-WGPU_EXPORT void wgpuRenderPassEncoderRelease(WGPURenderPassEncoder renderPassEncoder);
-WGPU_EXPORT void wgpuRenderPipelineRelease(WGPURenderPipeline renderPipeline);
-WGPU_EXPORT void wgpuSamplerRelease(WGPUSampler sampler);
-WGPU_EXPORT void wgpuShaderModuleRelease(WGPUShaderModule shaderModule);
-WGPU_EXPORT void wgpuSurfaceRelease(WGPUSurface surface);
-WGPU_EXPORT void wgpuSwapChainRelease(WGPUSwapChain swapChain);
-WGPU_EXPORT void wgpuTextureRelease(WGPUTexture texture);
-WGPU_EXPORT void wgpuTextureViewRelease(WGPUTextureView textureView);
-
-WGPU_EXPORT void wgpuBindGroupLayoutSetLabel(WGPUBindGroupLayout bindGroupLayout, char const * label);
-WGPU_EXPORT void wgpuBindGroupSetLabel(WGPUBindGroup bindGroup, char const * label);
-WGPU_EXPORT void wgpuBufferSetLabel(WGPUBuffer buffer, char const * label);
-WGPU_EXPORT void wgpuCommandBufferSetLabel(WGPUCommandBuffer commandBuffer, char const * label);
-WGPU_EXPORT void wgpuCommandEncoderSetLabel(WGPUCommandEncoder commandEncoder, char const * label);
-WGPU_EXPORT void wgpuComputePassEncoderSetLabel(WGPUComputePassEncoder computePassEncoder, char const * label);
-WGPU_EXPORT void wgpuDeviceSetLabel(WGPUDevice queue, char const * label);
-WGPU_EXPORT void wgpuPipelineLayoutSetLabel(WGPUPipelineLayout pipelineLayout, char const * label);
-WGPU_EXPORT void wgpuQuerySetSetLabel(WGPUQuerySet querySet, char const * label);
-WGPU_EXPORT void wgpuQueueSetLabel(WGPUQueue queue, char const * label);
-WGPU_EXPORT void wgpuRenderBundleEncoderSetLabel(WGPURenderBundleEncoder renderBundleEncoder, char const * label);
 WGPU_EXPORT void wgpuRenderBundleSetLabel(WGPURenderBundle renderBundle, char const * label);
-WGPU_EXPORT void wgpuRenderPassEncoderSetLabel(WGPURenderPassEncoder renderBundleEncoder, char const * label);
-WGPU_EXPORT void wgpuSamplerSetLabel(WGPUSampler sampler, char const * label);
-WGPU_EXPORT void wgpuTextureSetLabel(WGPUTexture sampler, char const * label);
-WGPU_EXPORT void wgpuTextureViewSetLabel(WGPUTextureView sampler, char const * label);
 
-WGPU_EXPORT void wgpuAdapterRequestDeviceWithBlock(WGPUAdapter adapter, WGPUDeviceDescriptor const * descriptor, WGPURequestDeviceBlockCallback callback);
-WGPU_EXPORT void wgpuBufferMapAsyncWithBlock(WGPUBuffer buffer, WGPUMapModeFlags mode, size_t offset, size_t size, WGPUBufferMapBlockCallback callback);
-WGPU_EXPORT void wgpuDeviceCreateComputePipelineAsyncWithBlock(WGPUDevice device, WGPUComputePipelineDescriptor const * descriptor, WGPUCreateComputePipelineAsyncBlockCallback callback);
-WGPU_EXPORT void wgpuDeviceCreateRenderPipelineAsyncWithBlock(WGPUDevice device, WGPURenderPipelineDescriptor const * descriptor, WGPUCreateRenderPipelineAsyncBlockCallback callback);
-WGPU_EXPORT bool wgpuDevicePopErrorScopeWithBlock(WGPUDevice device, WGPUErrorBlockCallback callback);
+// FIXME: https://github.com/webgpu-native/webgpu-headers/issues/89 is about moving this from WebGPUExt.h to WebGPU.h
+WGPU_EXPORT WGPUTexture wgpuSwapChainGetCurrentTexture(WGPUSwapChain swapChain, uint32_t frameIndex);
+
+WGPU_EXPORT WGPUExternalTexture wgpuDeviceImportExternalTexture(WGPUDevice device, const WGPUExternalTextureDescriptor* descriptor);
+
+WGPU_EXPORT void wgpuDeviceSetDeviceLostCallback(WGPUDevice device, WGPUDeviceLostCallback callback, void* userdata);
 WGPU_EXPORT void wgpuDeviceSetDeviceLostCallbackWithBlock(WGPUDevice device, WGPUDeviceLostBlockCallback callback);
-WGPU_EXPORT void wgpuDeviceSetUncapturedErrorCallbackWithBlock(WGPUDevice device, WGPUErrorBlockCallback callback);
-WGPU_EXPORT void wgpuInstanceRequestAdapterWithBlock(WGPUInstance instance, WGPURequestAdapterOptions const * options, WGPURequestAdapterBlockCallback callback);
-WGPU_EXPORT void wgpuQueueOnSubmittedWorkDoneWithBlock(WGPUQueue queue, uint64_t signalValue, WGPUQueueWorkDoneBlockCallback callback);
-WGPU_EXPORT void wgpuShaderModuleGetCompilationInfoWithBlock(WGPUShaderModule shaderModule, WGPUCompilationInfoBlockCallback callback);
+WGPU_EXPORT void wgpuExternalTextureReference(WGPUExternalTexture externalTexture);
+WGPU_EXPORT void wgpuExternalTextureRelease(WGPUExternalTexture externalTexture);
+WGPU_EXPORT void wgpuRenderBundleEncoderSetBindGroupWithDynamicOffsets(WGPURenderBundleEncoder renderBundleEncoder, uint32_t groupIndex, WGPU_NULLABLE WGPUBindGroup group, std::optional<Vector<uint32_t>>&& dynamicOffsets) WGPU_FUNCTION_ATTRIBUTE;
+WGPU_EXPORT void wgpuExternalTextureDestroy(WGPUExternalTexture texture) WGPU_FUNCTION_ATTRIBUTE;
+WGPU_EXPORT void wgpuExternalTextureUndestroy(WGPUExternalTexture texture) WGPU_FUNCTION_ATTRIBUTE;
+WGPU_EXPORT void wgpuExternalTextureUpdate(WGPUExternalTexture texture, CVPixelBufferRef) WGPU_FUNCTION_ATTRIBUTE;
+WGPU_EXPORT WGPULimits wgpuDefaultLimits() WGPU_FUNCTION_ATTRIBUTE;
+WGPU_EXPORT bool wgpuBindGroupUpdateExternalTextures(WGPUBindGroup bindGroup, WGPUExternalTexture externalTexture) WGPU_FUNCTION_ATTRIBUTE;
+
+WGPU_EXPORT WGPUXRBinding wgpuDeviceCreateXRBinding(WGPUDevice device) WGPU_FUNCTION_ATTRIBUTE;
+WGPU_EXPORT void wgpuDevicePauseErrorReporting(WGPUDevice device, WGPUBool pauseErrors) WGPU_FUNCTION_ATTRIBUTE;
+
+WGPU_EXPORT WGPUXRProjectionLayer wgpuBindingCreateXRProjectionLayer(WGPUXRBinding binding, WGPUTextureFormat colorFormat, WGPUTextureFormat* optionalDepthStencilFormat, WGPUTextureUsageFlags flags, double scale) WGPU_FUNCTION_ATTRIBUTE;
+WGPU_EXPORT WGPUXRSubImage wgpuBindingGetViewSubImage(WGPUXRBinding binding, WGPUXRProjectionLayer layer) WGPU_FUNCTION_ATTRIBUTE;
+
+WGPU_EXPORT WGPUTexture wgpuXRSubImageGetColorTexture(WGPUXRSubImage subImage) WGPU_FUNCTION_ATTRIBUTE;
+WGPU_EXPORT WGPUTexture wgpuXRSubImageGetDepthStencilTexture(WGPUXRSubImage subImage) WGPU_FUNCTION_ATTRIBUTE;
+
+WGPU_EXPORT WGPUBool wgpuAdapterXRCompatible(WGPUAdapter adapter) WGPU_FUNCTION_ATTRIBUTE;
+
+WGPU_EXPORT void wgpuXRProjectionLayerStartFrame(WGPUXRProjectionLayer layer, size_t frameIndex, WTF::MachSendRight&& colorBuffer, WTF::MachSendRight&& depthBuffer, WTF::MachSendRight&& completionSyncEvent, size_t reusableTextureIndex) WGPU_FUNCTION_ATTRIBUTE;
+
+WGPU_EXPORT RetainPtr<CGImageRef> wgpuSwapChainGetTextureAsNativeImage(WGPUSwapChain swapChain, uint32_t bufferIndex, bool& isIOSurfaceSupportedFormat);
+WGPU_EXPORT WGPUBool wgpuExternalTextureIsValid(WGPUExternalTexture externalTexture) WGPU_FUNCTION_ATTRIBUTE;
+
+WGPU_EXPORT void wgpuDeviceClearDeviceLostCallback(WGPUDevice device) WGPU_FUNCTION_ATTRIBUTE;
+WGPU_EXPORT void wgpuDeviceClearUncapturedErrorCallback(WGPUDevice device) WGPU_FUNCTION_ATTRIBUTE;
 
 #endif  // !defined(WGPU_SKIP_DECLARATIONS)
 
-#ifdef __cplusplus
-} // extern "C"
+WGPU_EXPORT String wgpuAdapterFeatureName(WGPUFeatureName feature) WGPU_FUNCTION_ATTRIBUTE;
+
+// Current Swift-C++ encapsulation rules prevent Swift from accessing non-public data members,
+// even in extensions. When building WebGPU, use these macros to allow our Swift module to break
+// encapsulation.
+#if defined(__swift__) && __swift__ && \
+    defined(__WEBGPU__) && __WEBGPU__ && \
+    defined(ENABLE_WEBGPU_SWIFT) && ENABLE_WEBGPU_SWIFT
+#define PUBLIC_IN_WEBGPU_SWIFT  : public
+#else
+#define PUBLIC_IN_WEBGPU_SWIFT
+#endif
+
 #endif
 
 #endif // WEBGPUEXT_H_

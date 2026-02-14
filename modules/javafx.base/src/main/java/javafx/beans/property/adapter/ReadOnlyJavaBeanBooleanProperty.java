@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,10 +32,6 @@ import javafx.beans.property.ReadOnlyBooleanPropertyBase;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.UndeclaredThrowableException;
-
-import java.security.AccessController;
-import java.security.AccessControlContext;
-import java.security.PrivilegedAction;
 
 /**
  * A {@code ReadOnlyJavaBeanBooleanProperty} provides an adapter between a regular
@@ -82,17 +78,14 @@ import java.security.PrivilegedAction;
  */
 public final class ReadOnlyJavaBeanBooleanProperty extends ReadOnlyBooleanPropertyBase implements ReadOnlyJavaBeanProperty<Boolean> {
 
-    private final ReadOnlyPropertyDescriptor descriptor;
-    private final ReadOnlyPropertyDescriptor.ReadOnlyListener<Boolean> listener;
+    private final ReadOnlyPropertyDescriptor<Boolean> descriptor;
+    private final ReadOnlyPropertyDescriptor<Boolean>.ReadOnlyListener listener;
 
-    @SuppressWarnings("removal")
-    private final AccessControlContext acc = AccessController.getContext();
-
-    ReadOnlyJavaBeanBooleanProperty(ReadOnlyPropertyDescriptor descriptor, Object bean) {
+    ReadOnlyJavaBeanBooleanProperty(ReadOnlyPropertyDescriptor<Boolean> descriptor, Object bean) {
         this.descriptor = descriptor;
-        this.listener = descriptor.new ReadOnlyListener<Boolean>(bean, this);
+        this.listener = descriptor.new ReadOnlyListener(bean, this);
         descriptor.addListener(listener);
-        Disposer.addRecord(this, new DescriptorListenerCleaner(descriptor, listener));
+        Disposer.addRecord(this, new DescriptorListenerCleaner<>(descriptor, listener));
     }
 
     /**
@@ -102,18 +95,15 @@ public final class ReadOnlyJavaBeanBooleanProperty extends ReadOnlyBooleanProper
      * property throws an {@code IllegalAccessException} or an
      * {@code InvocationTargetException}.
      */
-    @SuppressWarnings("removal")
     @Override
     public boolean get() {
-        return AccessController.doPrivileged((PrivilegedAction<Boolean>) () -> {
-            try {
-                return (Boolean)MethodHelper.invoke(descriptor.getGetter(), getBean(), (Object[])null);
-            } catch (IllegalAccessException e) {
-                throw new UndeclaredThrowableException(e);
-            } catch (InvocationTargetException e) {
-                throw new UndeclaredThrowableException(e);
-            }
-        }, acc);
+        try {
+            return (Boolean)MethodHelper.invoke(descriptor.getGetter(), getBean(), (Object[])null);
+        } catch (IllegalAccessException e) {
+            throw new UndeclaredThrowableException(e);
+        } catch (InvocationTargetException e) {
+            throw new UndeclaredThrowableException(e);
+        }
     }
 
     /**

@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2022 Metrological Group B.V.
- * Copyright (C) 2022 Igalia S.L.
+ * Copyright (C) 2025 Igalia S.L.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,27 +25,29 @@
 
 #pragma once
 
-#if USE(ANGLE) && USE(NICOSIA)
+#if USE(GBM)
+#include <wtf/ThreadSafeRefCounted.h>
+#include <wtf/text/CString.h>
+#include <wtf/unix/UnixFileDescriptor.h>
 
 struct gbm_device;
 
 namespace WebCore {
 
-class GBMDevice {
-    WTF_MAKE_NONCOPYABLE(GBMDevice);
-    WTF_MAKE_FAST_ALLOCATED();
+class GBMDevice final : public ThreadSafeRefCounted<GBMDevice, WTF::DestructionThread::Main> {
 public:
-    static const GBMDevice& get();
-
-    GBMDevice();
+    static RefPtr<GBMDevice> create(const CString&);
     ~GBMDevice();
 
     struct gbm_device* device() const { return m_device; }
 
 private:
+    GBMDevice(WTF::UnixFileDescriptor&&, struct gbm_device*);
+
+    WTF::UnixFileDescriptor m_fd;
     struct gbm_device* m_device { nullptr };
 };
 
 } // namespace WebCore
 
-#endif // USE(ANGLE) && USE(NICOSIA)
+#endif // USE(GBM)

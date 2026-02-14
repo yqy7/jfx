@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,10 +24,10 @@
  */
 package com.sun.media.jfxmedia.locator;
 
+import com.sun.javafx.PlatformUtil;
 import com.sun.media.jfxmedia.MediaException;
 import com.sun.media.jfxmedia.MediaManager;
 import com.sun.media.jfxmedia.logging.Logger;
-import com.sun.media.jfxmediaimpl.HostUtils;
 import com.sun.media.jfxmediaimpl.MediaUtils;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -42,8 +42,6 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLConnection;
 import java.nio.ByteBuffer;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.CountDownLatch;
@@ -167,14 +165,12 @@ public class Locator {
     }
 
     private static long getContentLengthLong(URLConnection connection) {
-        @SuppressWarnings("removal")
-        Method method = AccessController.doPrivileged((PrivilegedAction<Method>) () -> {
-            try {
-                return URLConnection.class.getMethod("getContentLengthLong");
-            } catch (NoSuchMethodException ex) {
-                return null;
-            }
-        });
+        Method method;
+        try {
+            method = URLConnection.class.getMethod("getContentLengthLong");
+        } catch (NoSuchMethodException ex) {
+            method = null;
+        }
 
         try {
             if (method != null) {
@@ -232,7 +228,7 @@ public class Locator {
             protocol = scheme; // scheme is already lower case.
         }
 
-        if (HostUtils.isIOS() && protocol.equals("ipod-library")) {
+        if (PlatformUtil.isIOS() && protocol.equals("ipod-library")) {
             isIpod = true;
         }
 
@@ -349,7 +345,7 @@ public class Locator {
             if (firstSlash != -1 && uriString.charAt(firstSlash + 1) != '/') {
                 // Only one '/' after the ':'.
                 if (protocol.equals("file")) {
-                    // Map file:/somepath to file:///somepath
+                    // Map "file:/somepath" to "file:///somepath"
                     uriString = uriString.replaceFirst("/", "///");
                 } else if (protocol.equals("http") || protocol.equals("https")) {
                     // Map http:/somepath to http://somepath
@@ -358,8 +354,7 @@ public class Locator {
             }
 
             // On non-Windows systems, replace "/~/" with home directory path + "/".
-            if (System.getProperty("os.name").toLowerCase().indexOf("win") == -1
-                    && protocol.equals("file")) {
+            if (!PlatformUtil.isWindows() && protocol.equals("file")) {
                 int index = uriString.indexOf("/~/");
                 if (index != -1) {
                     uriString = uriString.substring(0, index)
@@ -590,7 +585,7 @@ public class Locator {
     public void setConnectionProperty(String property, Object value) {
         synchronized (propertyLock) {
             if (connectionProperties == null) {
-                connectionProperties = new TreeMap<String, Object>();
+                connectionProperties = new TreeMap<>();
             }
 
             connectionProperties.put(property, value);
@@ -630,6 +625,14 @@ public class Locator {
         synchronized  (propertyLock) {
             return ConnectionHolder.createURIConnectionHolder(uri, connectionProperties);
         }
+    }
+
+    public ConnectionHolder getAudioStreamConnectionHolder(ConnectionHolder connectionHolder) throws IOException {
+        if (connectionHolder == null) {
+            return null;
+        }
+
+        return connectionHolder.getAudioStream();
     }
 
     private String getContentTypeFromFileSignature(URI uri) throws MalformedURLException, IOException {

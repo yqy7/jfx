@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2010 Google Inc. All rights reserved.
- * Copyright (C) 2011-2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -35,8 +35,11 @@
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
 #include "RenderButton.h"
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(BaseButtonInputType);
 
 using namespace HTMLNames;
 
@@ -54,7 +57,8 @@ bool BaseButtonInputType::appendFormData(DOMFormData&) const
 RenderPtr<RenderElement> BaseButtonInputType::createInputRenderer(RenderStyle&& style)
 {
     ASSERT(element());
-    return createRenderer<RenderButton>(*element(), WTFMove(style));
+    // FIXME: https://github.com/llvm/llvm-project/pull/142471 Moving style is not unsafe.
+    SUPPRESS_UNCOUNTED_ARG return createRenderer<RenderButton>(*protectedElement(), WTFMove(style));
 }
 
 bool BaseButtonInputType::storesValueSeparateFromAttribute()
@@ -62,10 +66,15 @@ bool BaseButtonInputType::storesValueSeparateFromAttribute()
     return false;
 }
 
-void BaseButtonInputType::setValue(const String& sanitizedValue, bool, TextFieldEventBehavior)
+void BaseButtonInputType::setValue(const String& sanitizedValue, bool, TextFieldEventBehavior, TextControlSetValueSelection)
 {
     ASSERT(element());
-    element()->setAttributeWithoutSynchronization(valueAttr, sanitizedValue);
+    protectedElement()->setAttributeWithoutSynchronization(valueAttr, AtomString { sanitizedValue });
+}
+
+bool BaseButtonInputType::dirAutoUsesValue() const
+{
+    return true;
 }
 
 } // namespace WebCore

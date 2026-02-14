@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,26 +25,20 @@
 
 package test.javafx.binding.expression;
 
-import java.util.Locale;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import javafx.beans.binding.BooleanBinding;
 import javafx.beans.binding.ObjectBinding;
 import javafx.beans.binding.ObjectExpression;
 import javafx.beans.binding.StringBinding;
-import javafx.beans.property.DoubleProperty;
-import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleDoubleProperty;
-import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ObservableObjectValueStub;
 import test.javafx.binding.DependencyUtils;
 import javafx.collections.FXCollections;
-import static org.junit.Assert.assertEquals;
-
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class ObjectExpressionTest {
 
@@ -53,12 +47,12 @@ public class ObjectExpressionTest {
     private ObjectProperty<Object> op1;
     private ObjectProperty<Object> op2;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         data1 = new Object();
         data2 = new Object();
-        op1 = new SimpleObjectProperty<Object>(data1);
-        op2 = new SimpleObjectProperty<Object>(data2);
+        op1 = new SimpleObjectProperty<>(data1);
+        op2 = new SimpleObjectProperty<>(data2);
     }
 
     @Test
@@ -96,7 +90,7 @@ public class ObjectExpressionTest {
         BooleanBinding binding = op1.isNull();
         assertEquals(false, binding.get());
 
-        ObjectProperty<Object> op3 = new SimpleObjectProperty<Object>(null);
+        ObjectProperty<Object> op3 = new SimpleObjectProperty<>(null);
         binding = op3.isNull();
         assertEquals(true, binding.get());
     }
@@ -106,14 +100,14 @@ public class ObjectExpressionTest {
         BooleanBinding binding = op1.isNotNull();
         assertEquals(true, binding.get());
 
-        ObjectProperty<Object> op3 = new SimpleObjectProperty<Object>(null);
+        ObjectProperty<Object> op3 = new SimpleObjectProperty<>(null);
         binding = op3.isNotNull();
         assertEquals(false, binding.get());
     }
 
     @Test
     public void testFactory() {
-        final ObservableObjectValueStub<Object> valueModel = new ObservableObjectValueStub<Object>();
+        final ObservableObjectValueStub<Object> valueModel = new ObservableObjectValueStub<>();
         final ObjectExpression<Object> exp = ObjectExpression.objectExpression(valueModel);
 
         assertTrue(exp instanceof ObjectBinding);
@@ -129,12 +123,15 @@ public class ObjectExpressionTest {
         assertEquals(op1, ObjectExpression.objectExpression(op1));
     }
 
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testFactory_Null() {
-        ObjectExpression.objectExpression(null);
+        assertThrows(NullPointerException.class, () -> {
+            ObjectExpression.objectExpression(null);
+        });
     }
 
-     @Test
+
+    @Test
     public void testAsString() {
         final StringBinding binding = op1.asString();
         DependencyUtils.checkDependencies(binding.getDependencies(), op1);

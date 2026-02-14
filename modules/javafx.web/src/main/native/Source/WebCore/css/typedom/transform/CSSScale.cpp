@@ -30,40 +30,163 @@
 #include "config.h"
 #include "CSSScale.h"
 
-#if ENABLE(CSS_TYPED_OM)
-
+#include "CSSFunctionValue.h"
+#include "CSSMathValue.h"
+#include "CSSNumericFactory.h"
+#include "CSSNumericValue.h"
+#include "CSSStyleValueFactory.h"
+#include "CSSUnitValue.h"
+#include "CSSUnits.h"
 #include "DOMMatrix.h"
 #include "ExceptionOr.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(CSSScale);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(CSSScale);
 
-Ref<CSSScale> CSSScale::create(CSSNumberish&& x, CSSNumberish&& y, std::optional<CSSNumberish>&& z)
+static bool isValidScaleCoord(const CSSNumericValue& coord)
 {
-    return adoptRef(*new CSSScale(WTFMove(x), WTFMove(y), WTFMove(z)));
+    return coord.type().matchesNumber();
 }
 
-CSSScale::CSSScale(CSSNumberish&& x, CSSNumberish&& y, std::optional<CSSNumberish>&& z)
-    : m_x(WTFMove(x))
+ExceptionOr<Ref<CSSScale>> CSSScale::create(CSSNumberish x, CSSNumberish y, std::optional<CSSNumberish>&& z)
+{
+    auto rectifiedX = CSSNumericValue::rectifyNumberish(WTFMove(x));
+    auto rectifiedY = CSSNumericValue::rectifyNumberish(WTFMove(y));
+    auto rectifiedZ = z ? CSSNumericValue::rectifyNumberish(WTFMove(*z)) : Ref<CSSNumericValue> { CSSUnitValue::create(1.0, CSSUnitType::CSS_NUMBER) };
+
+    // https://drafts.css-houdini.org/css-typed-om/#dom-cssscale-cssscale
+    if (!isValidScaleCoord(rectifiedX) || !isValidScaleCoord(rectifiedY) || !isValidScaleCoord(rectifiedZ))
+        return Exception { ExceptionCode::TypeError };
+
+    return adoptRef(*new CSSScale(z ? Is2D::No : Is2D::Yes, WTFMove(rectifiedX), WTFMove(rectifiedY), WTFMove(rectifiedZ)));
+}
+
+ExceptionOr<Ref<CSSScale>> CSSScale::create(Ref<const CSSFunctionValue> cssFunctionValue, Document& document)
+{
+    auto makeScale = [&](NOESCAPE const Function<ExceptionOr<Ref<CSSScale>>(Vector<RefPtr<CSSNumericValue>>&&)>& create, size_t minNumberOfComponents, std::optional<size_t> maxNumberOfComponents = std::nullopt) -> ExceptionOr<Ref<CSSScale>> {
+        Vector<RefPtr<CSSNumericValue>> components;
+        for (auto& componentCSSValue : cssFunctionValue.get()) {
+            auto valueOrException = CSSStyleValueFactory::reifyValue(document, componentCSSValue, std::nullopt);
+            if (valueOrException.hasException())
+                return valueOrException.releaseException();
+            RefPtr numericValue = dynamicDowncast<CSSNumericValue>(valueOrException.releaseReturnValue());
+            if (!numericValue)
+                return Exception { ExceptionCode::TypeError, "Expected a CSSNumericValue."_s };
+            components.append(WTFMove(numericValue));
+        }
+        if (!maxNumberOfComponents)
+            maxNumberOfComponents = minNumberOfComponents;
+        auto numberOfComponents = components.size();
+        if (numberOfComponents < minNumberOfComponents || numberOfComponents > maxNumberOfComponents) {
+            ASSERT_NOT_REACHED();
+            return Exception { ExceptionCode::TypeError, "Unexpected number of values."_s };
+        }
+        return create(WTFMove(components));
+    };
+
+    switch (cssFunctionValue->name()) {
+    case CSSValueScaleX:
+        return makeScale([](Vector<RefPtr<CSSNumericValue>>&& components) {
+            return CSSScale::create(components[0], CSSNumericFactory::number(1), std::nullopt);
+        }, 1);
+    case CSSValueScaleY:
+        return makeScale([](Vector<RefPtr<CSSNumericValue>>&& components) {
+            return CSSScale::create(CSSNumericFactory::number(1), components[0], std::nullopt);
+        }, 1);
+    case CSSValueScaleZ:
+        return makeScale([](Vector<RefPtr<CSSNumericValue>>&& components) {
+            return CSSScale::create(CSSNumericFactory::number(1), CSSNumericFactory::number(1), components[0]);
+        }, 1);
+    case CSSValueScale:
+        return makeScale([](Vector<RefPtr<CSSNumericValue>>&& components) {
+            return CSSScale::create(components[0], components.size() == 2 ? components[1] : components[0], std::nullopt);
+        }, 1, 2);
+    case CSSValueScale3d:
+        return makeScale([](Vector<RefPtr<CSSNumericValue>>&& components) {
+            return CSSScale::create(components[0], components[1], components[2]);
+        }, 3);
+    default:
+        ASSERT_NOT_REACHED();
+        return CSSScale::create(CSSNumericFactory::number(1), CSSNumericFactory::number(1), std::nullopt);
+    }
+}
+
+CSSScale::CSSScale(CSSTransformComponent::Is2D is2D, Ref<CSSNumericValue> x, Ref<CSSNumericValue> y, Ref<CSSNumericValue> z)
+    : CSSTransformComponent(is2D)
+    , m_x(WTFMove(x))
     , m_y(WTFMove(y))
     , m_z(WTFMove(z))
 {
 }
 
-// FIXME: Fix all the following virtual functions
-
-String CSSScale::toString() const
+void CSSScale::setX(CSSNumberish x)
 {
-    return emptyString();
+    m_x = CSSNumericValue::rectifyNumberish(WTFMove(x));
+}
+
+void CSSScale::setY(CSSNumberish y)
+{
+    m_y = CSSNumericValue::rectifyNumberish(WTFMove(y));
+}
+
+void CSSScale::setZ(CSSNumberish z)
+{
+    m_z = CSSNumericValue::rectifyNumberish(WTFMove(z));
+}
+
+void CSSScale::serialize(StringBuilder& builder) const
+{
+    // https://drafts.css-houdini.org/css-typed-om/#serialize-a-cssscale
+    builder.append(is2D() ? "scale("_s : "scale3d("_s);
+    m_x->serialize(builder);
+    builder.append(", "_s);
+    m_y->serialize(builder);
+    if (!is2D()) {
+        builder.append(", "_s);
+        m_z->serialize(builder);
+    }
+    builder.append(')');
 }
 
 ExceptionOr<Ref<DOMMatrix>> CSSScale::toMatrix()
 {
-    return DOMMatrix::fromMatrix(DOMMatrixInit { });
+    auto* xUnitValue = dynamicDowncast<CSSUnitValue>(m_x.get());
+    auto* yUnitValue = dynamicDowncast<CSSUnitValue>(m_y.get());
+    auto* zUnitValue = dynamicDowncast<CSSUnitValue>(m_z.get());
+    if (!xUnitValue || !yUnitValue || !zUnitValue)
+        return Exception { ExceptionCode::TypeError };
+
+    TransformationMatrix matrix { };
+
+    auto x = xUnitValue->value();
+    auto y = yUnitValue->value();
+    auto z = zUnitValue->value();
+
+    if (is2D())
+        matrix.scaleNonUniform(x, y);
+    else
+        matrix.scale3d(x, y, z);
+
+    return { DOMMatrix::create(WTFMove(matrix), is2D() ? DOMMatrixReadOnly::Is2D::Yes : DOMMatrixReadOnly::Is2D::No) };
+}
+
+RefPtr<CSSValue> CSSScale::toCSSValue() const
+{
+    auto x = m_x->toCSSValue();
+    auto y = m_y->toCSSValue();
+    if (!x || !y)
+        return nullptr;
+
+    if (is2D())
+        return CSSFunctionValue::create(CSSValueScale, x.releaseNonNull(), y.releaseNonNull());
+
+        auto z = m_z->toCSSValue();
+        if (!z)
+            return nullptr;
+
+    return CSSFunctionValue::create(CSSValueScale3d, x.releaseNonNull(), y.releaseNonNull(), z.releaseNonNull());
 }
 
 } // namespace WebCore
-
-#endif

@@ -27,18 +27,29 @@
 
 #if ENABLE(SPEECH_SYNTHESIS)
 
+#include "ActiveDOMObject.h"
 #include "ContextDestructionObserver.h"
 #include "EventTarget.h"
 #include "PlatformSpeechSynthesisUtterance.h"
+#include "SpeechSynthesisErrorCode.h"
 #include "SpeechSynthesisVoice.h"
 #include <wtf/RefCounted.h>
+#include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
 
-class SpeechSynthesisUtterance final : public PlatformSpeechSynthesisUtteranceClient, public RefCounted<SpeechSynthesisUtterance>, public ContextDestructionObserver, public EventTargetWithInlineData {
-    WTF_MAKE_ISO_ALLOCATED(SpeechSynthesisUtterance);
+class WEBCORE_EXPORT SpeechSynthesisUtterance final : public PlatformSpeechSynthesisUtteranceClient, public RefCounted<SpeechSynthesisUtterance>, public ActiveDOMObject, public EventTarget {
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED_EXPORT(SpeechSynthesisUtterance, WEBCORE_EXPORT);
 public:
+    void ref() const final;
+    void deref() const final;
+
+    using UtteranceCompletionHandler = Function<void(const SpeechSynthesisUtterance&)>;
+    static Ref<SpeechSynthesisUtterance> create(ScriptExecutionContext&, const String&, UtteranceCompletionHandler&&);
     static Ref<SpeechSynthesisUtterance> create(ScriptExecutionContext&, const String&);
+
+    // Create an empty default constructor so SpeechSynthesisEventInit compiles.
+    SpeechSynthesisUtterance();
 
     virtual ~SpeechSynthesisUtterance();
 
@@ -63,21 +74,52 @@ public:
     MonotonicTime startTime() const { return m_platformUtterance->startTime(); }
     void setStartTime(MonotonicTime startTime) { m_platformUtterance->setStartTime(startTime); }
 
-    using RefCounted::ref;
-    using RefCounted::deref;
+    PlatformSpeechSynthesisUtterance& platformUtterance() const { return m_platformUtterance.get(); }
 
-    PlatformSpeechSynthesisUtterance* platformUtterance() const { return m_platformUtterance.get(); }
+    void eventOccurred(const AtomString& type, unsigned long charIndex, unsigned long charLength, const String& name);
+    void errorEventOccurred(const AtomString& type, SpeechSynthesisErrorCode);
+    void setIsActiveForEventDispatch(bool);
 
 private:
-    SpeechSynthesisUtterance(ScriptExecutionContext&, const String&);
+    SpeechSynthesisUtterance(ScriptExecutionContext&, const String&, UtteranceCompletionHandler&&);
+    void dispatchEventAndUpdateState(Event&);
+    void incrementActivityCountForEventDispatch();
+    void decrementActivityCountForEventDispatch();
 
-    ScriptExecutionContext* scriptExecutionContext() const final { return ContextDestructionObserver::scriptExecutionContext(); }
-    EventTargetInterface eventTargetInterface() const final { return SpeechSynthesisUtteranceEventTargetInterfaceType; }
+    // ActiveDOMObject
+    bool virtualHasPendingActivity() const final;
+
+    // EventTarget
+    ScriptExecutionContext* scriptExecutionContext() const final;
+    EventTargetInterfaceType eventTargetInterface() const final;
     void refEventTarget() final { ref(); }
     void derefEventTarget() final { deref(); }
 
-    RefPtr<PlatformSpeechSynthesisUtterance> m_platformUtterance;
+    friend class SpeechSynthesisUtteranceActivity;
+    const Ref<PlatformSpeechSynthesisUtterance> m_platformUtterance;
     RefPtr<SpeechSynthesisVoice> m_voice;
+    UtteranceCompletionHandler m_completionHandler;
+    unsigned m_activityCountForEventDispatch { 0 };
+};
+
+class SpeechSynthesisUtteranceActivity {
+    WTF_MAKE_TZONE_ALLOCATED(SpeechSynthesisUtteranceActivity);
+public:
+    SpeechSynthesisUtteranceActivity(Ref<SpeechSynthesisUtterance>&& utterance)
+        : m_utterance(utterance)
+    {
+        m_utterance->incrementActivityCountForEventDispatch();
+    }
+
+    ~SpeechSynthesisUtteranceActivity()
+    {
+        m_utterance->decrementActivityCountForEventDispatch();
+    }
+
+    SpeechSynthesisUtterance& utterance() { return m_utterance.get(); }
+
+private:
+    const Ref<SpeechSynthesisUtterance> m_utterance;
 };
 
 } // namespace WebCore

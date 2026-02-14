@@ -34,21 +34,32 @@
 #include "ScriptExecutionContext.h"
 #include <memory>
 #include <wtf/MessageQueue.h>
+#include <wtf/TZoneMalloc.h>
+
+namespace WebCore {
+class WorkerMainRunLoop;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::WorkerMainRunLoop> : std::true_type { };
+}
 
 namespace WebCore {
 
+class WeakPtrImplWithEventTargetData;
 class ModePredicate;
 class WorkerOrWorkletGlobalScope;
 class WorkerSharedTimer;
 
 class WorkerRunLoop {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(WorkerRunLoop);
 public:
     enum class Type : bool { WorkerDedicatedRunLoop, WorkerMainRunLoop };
 
     virtual ~WorkerRunLoop() = default;
 
-    virtual bool runInMode(WorkerOrWorkletGlobalScope*, const String& mode) = 0;
+    virtual bool runInMode(WorkerOrWorkletGlobalScope*, const String& mode, bool allowEventLoopTasks = false) = 0;
     virtual void postTaskAndTerminate(ScriptExecutionContext::Task&&) = 0;
     virtual void postTaskForMode(ScriptExecutionContext::Task&&, const String& mode) = 0;
     virtual void terminate() = 0;
@@ -67,6 +78,7 @@ private:
 };
 
 class WorkerDedicatedRunLoop final : public WorkerRunLoop {
+    WTF_MAKE_TZONE_ALLOCATED(WorkerDedicatedRunLoop);
 public:
     WorkerDedicatedRunLoop();
     ~WorkerDedicatedRunLoop();
@@ -75,7 +87,7 @@ public:
     void run(WorkerOrWorkletGlobalScope*);
 
     // Waits for a single task and returns.
-    bool runInMode(WorkerOrWorkletGlobalScope*, const String& mode) final;
+    bool runInMode(WorkerOrWorkletGlobalScope*, const String& mode, bool) final;
     MessageQueueWaitResult runInDebuggerMode(WorkerOrWorkletGlobalScope&);
 
     void terminate() final;
@@ -86,7 +98,8 @@ public:
     WEBCORE_EXPORT void postTaskForMode(ScriptExecutionContext::Task&&, const String& mode) final;
 
     class Task {
-        WTF_MAKE_NONCOPYABLE(Task); WTF_MAKE_FAST_ALLOCATED;
+        WTF_MAKE_TZONE_ALLOCATED(Task);
+        WTF_MAKE_NONCOPYABLE(Task);
     public:
         Task(ScriptExecutionContext::Task&&, const String& mode);
         const String& mode() const { return m_mode; }
@@ -102,7 +115,15 @@ public:
 
 private:
     friend class RunLoopSetup;
-    MessageQueueWaitResult runInMode(WorkerOrWorkletGlobalScope*, const ModePredicate&);
+
+    struct RunInModeResult {
+        MessageQueueWaitResult messageQueueResult;
+        bool firedSharedTimer { false };
+        bool firedRunLoopTimer { false };
+        String activeRunLoopTimersBeforeFiring;
+        String activeRunLoopTimersAfterFiring;
+    };
+    RunInModeResult runInMode(WorkerOrWorkletGlobalScope*, const ModePredicate&);
 
     // Runs any clean up tasks that are currently in the queue and returns.
     // This should only be called when the context is closed or loop has been terminated.
@@ -116,7 +137,7 @@ private:
     int m_debugCount { 0 };
 };
 
-class WorkerMainRunLoop final : public WorkerRunLoop, public CanMakeWeakPtr<WorkerMainRunLoop> {
+class WorkerMainRunLoop final : public WorkerRunLoop, public CanMakeWeakPtr<WorkerMainRunLoop, WeakPtrFactoryInitialization::Eager> {
 public:
     WorkerMainRunLoop();
 
@@ -125,7 +146,7 @@ public:
     void terminate() final { m_terminated = true; }
     bool terminated() const final { return m_terminated; }
 
-    bool runInMode(WorkerOrWorkletGlobalScope*, const String& mode);
+    bool runInMode(WorkerOrWorkletGlobalScope*, const String& mode, bool);
     void postTaskAndTerminate(ScriptExecutionContext::Task&&) final;
     void postTaskForMode(ScriptExecutionContext::Task&&, const String& mode) final;
     Type type() const final { return Type::WorkerMainRunLoop; }

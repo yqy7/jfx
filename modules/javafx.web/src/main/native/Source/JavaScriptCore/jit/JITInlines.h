@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -87,30 +87,6 @@ ALWAYS_INLINE void JIT::emitLoadCharacterString(RegisterID src, RegisterID dst, 
     done.link(this);
 }
 
-ALWAYS_INLINE JIT::Call JIT::emitNakedNearCall(CodePtr<NoPtrTag> target)
-{
-    ASSERT(m_bytecodeIndex); // This method should only be called during hot/cold path generation, so that m_bytecodeIndex is set.
-    Call nakedCall = nearCall();
-    m_nearCalls.append(NearCallRecord(nakedCall, FunctionPtr<JSInternalPtrTag>(target.retagged<JSInternalPtrTag>())));
-    return nakedCall;
-}
-
-ALWAYS_INLINE JIT::Call JIT::emitNakedNearTailCall(CodePtr<NoPtrTag> target)
-{
-    ASSERT(m_bytecodeIndex); // This method should only be called during hot/cold path generation, so that m_bytecodeIndex is set.
-    Call nakedCall = nearTailCall();
-    m_nearCalls.append(NearCallRecord(nakedCall, FunctionPtr<JSInternalPtrTag>(target.retagged<JSInternalPtrTag>())));
-    return nakedCall;
-}
-
-ALWAYS_INLINE JIT::Jump JIT::emitNakedNearJump(CodePtr<JITThunkPtrTag> target)
-{
-    ASSERT(m_bytecodeIndex); // This method should only be called during hot/cold path generation, so that m_bytecodeIndex is set.
-    Jump nakedJump = jump();
-    m_nearJumps.append(NearJumpRecord(nakedJump, CodeLocationLabel(target)));
-    return nakedJump;
-}
-
 ALWAYS_INLINE void JIT::updateTopCallFrame()
 {
     uint32_t locationBits = CallSiteIndex(m_bytecodeIndex.offset()).bits();
@@ -118,65 +94,84 @@ ALWAYS_INLINE void JIT::updateTopCallFrame()
     prepareCallOperation(*m_vm);
 }
 
-ALWAYS_INLINE MacroAssembler::Call JIT::appendCallWithExceptionCheck(const FunctionPtr<CFunctionPtrTag> function)
+template<typename OperationType>
+ALWAYS_INLINE MacroAssembler::Call JIT::appendCallWithExceptionCheck(const CodePtr<CFunctionPtrTag> function)
 {
     updateTopCallFrame();
     MacroAssembler::Call call = appendCall(function);
+    using ResultType = typename FunctionTraits<OperationType>::ResultType;
+    if constexpr (isExceptionOperationResult<ResultType>) {
+#if ASSERT_ENABLED
+        Jump ok = branchPtr(Equal, AbsoluteAddress(vm().addressOfException()), operationExceptionRegister<ResultType>());
+        breakpoint();
+        ok.link(this);
+#endif
+        exceptionCheck(branchTestPtr(NonZero, operationExceptionRegister<ResultType>()));
+    } else
     exceptionCheck();
     return call;
 }
 
+template<typename OperationType>
 ALWAYS_INLINE void JIT::appendCallWithExceptionCheck(Address function)
 {
     updateTopCallFrame();
     appendCall(function);
-    exceptionCheck();
-}
-
-#if OS(WINDOWS) && CPU(X86_64)
-ALWAYS_INLINE MacroAssembler::Call JIT::appendCallWithExceptionCheckAndSlowPathReturnType(const FunctionPtr<CFunctionPtrTag> function)
-{
-    updateTopCallFrame();
-    MacroAssembler::Call call = appendCallWithSlowPathReturnType(function);
-    exceptionCheck();
-    return call;
-}
+    using ResultType = typename FunctionTraits<OperationType>::ResultType;
+    if constexpr (isExceptionOperationResult<ResultType>) {
+#if ASSERT_ENABLED
+        Jump ok = branchPtr(Equal, AbsoluteAddress(vm().addressOfException()), operationExceptionRegister<ResultType>());
+        breakpoint();
+        ok.link(this);
 #endif
-
-ALWAYS_INLINE MacroAssembler::Call JIT::appendCallWithCallFrameRollbackOnException(const FunctionPtr<CFunctionPtrTag> function)
-{
-    updateTopCallFrame(); // The callee is responsible for setting topCallFrame to their caller
-    MacroAssembler::Call call = appendCall(function);
-    exceptionCheckWithCallFrameRollback();
-    return call;
+        exceptionCheck(branchTestPtr(NonZero, operationExceptionRegister<ResultType>()));
+    } else
+    exceptionCheck();
 }
 
-ALWAYS_INLINE MacroAssembler::Call JIT::appendCallWithExceptionCheckSetJSValueResult(const FunctionPtr<CFunctionPtrTag> function, VirtualRegister dst)
+template<typename OperationType>
+ALWAYS_INLINE MacroAssembler::Call JIT::appendCallSetJSValueResult(const CodePtr<CFunctionPtrTag> function, VirtualRegister dst)
 {
-    MacroAssembler::Call call = appendCallWithExceptionCheck(function);
+    MacroAssembler::Call call = appendCallWithExceptionCheck<OperationType>(function);
     emitPutVirtualRegister(dst, returnValueJSR);
     return call;
 }
 
+template<typename OperationType>
+ALWAYS_INLINE void JIT::appendCallSetJSValueResult(Address function, VirtualRegister dst)
+{
+    appendCallWithExceptionCheck<OperationType>(function);
+    emitPutVirtualRegister(dst, returnValueJSR);
+}
+
+template<typename OperationType>
+ALWAYS_INLINE MacroAssembler::Call JIT::appendCallWithExceptionCheckSetJSValueResult(const CodePtr<CFunctionPtrTag> function, VirtualRegister dst)
+{
+    MacroAssembler::Call call = appendCallWithExceptionCheck<OperationType>(function);
+    emitPutVirtualRegister(dst, returnValueJSR);
+    return call;
+}
+
+template<typename OperationType>
 ALWAYS_INLINE void JIT::appendCallWithExceptionCheckSetJSValueResult(Address function, VirtualRegister dst)
 {
-    appendCallWithExceptionCheck(function);
+    appendCallWithExceptionCheck<OperationType>(function);
     emitPutVirtualRegister(dst, returnValueJSR);
 }
 
-template<typename Bytecode>
-ALWAYS_INLINE MacroAssembler::Call JIT::appendCallWithExceptionCheckSetJSValueResultWithProfile(const Bytecode& bytecode, const FunctionPtr<CFunctionPtrTag> function, VirtualRegister dst)
+template<typename OperationType, typename Bytecode>
+ALWAYS_INLINE MacroAssembler::Call JIT::appendCallWithExceptionCheckSetJSValueResultWithProfile(const Bytecode& bytecode, const CodePtr<CFunctionPtrTag> function, VirtualRegister dst)
 {
-    MacroAssembler::Call call = appendCallWithExceptionCheck(function);
+    MacroAssembler::Call call = appendCallWithExceptionCheck<OperationType>(function);
     emitValueProfilingSite(bytecode, returnValueJSR);
     emitPutVirtualRegister(dst, returnValueJSR);
     return call;
 }
 
-template<typename Bytecode>
+template<typename OperationType, typename Bytecode>
 ALWAYS_INLINE void JIT::appendCallWithExceptionCheckSetJSValueResultWithProfile(const Bytecode& bytecode, Address function, VirtualRegister dst)
 {
-    appendCallWithExceptionCheck(function);
+    appendCallWithExceptionCheck<OperationType>(function);
     emitValueProfilingSite(bytecode, returnValueJSR);
     emitPutVirtualRegister(dst, returnValueJSR);
 }
@@ -212,6 +207,7 @@ inline void JIT::emitJumpSlowToHotForCheckpoint(Jump jump)
 
     auto iter = m_checkpointLabels.find(m_bytecodeIndex);
     ASSERT(iter != m_checkpointLabels.end());
+    if (jump.isSet())
     jump.linkTo(iter->value, this);
 }
 
@@ -230,7 +226,7 @@ inline MacroAssembler::Label JIT::fastPathResumePoint() const
     if (iter != m_fastPathResumeLabels.end())
         return iter->value;
     // Next instruction in sequence
-    const Instruction* currentInstruction = m_unlinkedCodeBlock->instructions().at(m_bytecodeIndex).ptr();
+    const auto* currentInstruction = m_unlinkedCodeBlock->instructions().at(m_bytecodeIndex).ptr();
     return m_labels[m_bytecodeIndex.offset() + currentInstruction->size()];
 }
 
@@ -313,13 +309,19 @@ ALWAYS_INLINE bool JIT::isOperandConstantChar(VirtualRegister src)
 }
 
 template<typename Bytecode>
-inline void JIT::emitValueProfilingSite(const Bytecode& bytecode, JSValueRegs value)
+inline void JIT::emitValueProfilingSite(const Bytecode& bytecode, BytecodeIndex bytecodeIndex, JSValueRegs value)
 {
     if (!shouldEmitProfiling())
         return;
 
-    ptrdiff_t offset = m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + valueProfileOffsetFor<Bytecode>(m_bytecodeIndex.checkpoint()) + ValueProfile::offsetOfFirstBucket();
-    storeValue(value, Address(s_metadataGPR, offset));
+    ptrdiff_t offset = -static_cast<ptrdiff_t>(valueProfileOffsetFor<Bytecode>(bytecode, bytecodeIndex.checkpoint())) * sizeof(ValueProfile) + ValueProfile::offsetOfFirstBucket() - sizeof(UnlinkedMetadataTable::LinkingData);
+    storeValue(value, Address(GPRInfo::metadataTableRegister, offset));
+}
+
+template<typename Bytecode>
+inline void JIT::emitValueProfilingSite(const Bytecode& bytecode, JSValueRegs value)
+{
+    emitValueProfilingSite(bytecode, m_bytecodeIndex, value);
 }
 
 template <typename Bytecode>
@@ -335,6 +337,14 @@ template <typename Bytecode>
 inline void JIT::emitArrayProfilingSiteWithCell(const Bytecode& bytecode, RegisterID cellGPR, RegisterID scratchGPR)
 {
     emitArrayProfilingSiteWithCell(bytecode, Bytecode::Metadata::offsetOfArrayProfile() + ArrayProfile::offsetOfLastSeenStructureID(), cellGPR, scratchGPR);
+}
+
+inline void JIT::emitArrayProfilingSiteWithCellAndProfile(RegisterID cellGPR, RegisterID profileGPR, RegisterID scratchGPR)
+{
+    if (shouldEmitProfiling()) {
+        load32(Address(cellGPR, JSCell::structureIDOffset()), scratchGPR);
+        store32(scratchGPR, Address(profileGPR, ArrayProfile::offsetOfLastSeenStructureID()));
+    }
 }
 
 ALWAYS_INLINE int32_t JIT::getOperandConstantInt(VirtualRegister src)
@@ -410,8 +420,7 @@ ALWAYS_INLINE void JIT::emitPutVirtualRegister(VirtualRegister dst, RegisterID f
 
 ALWAYS_INLINE JIT::Jump JIT::emitJumpIfNotInt(RegisterID reg1, RegisterID reg2, RegisterID scratch)
 {
-    move(reg1, scratch);
-    and64(reg2, scratch);
+    and64(reg1, reg2, scratch);
     return branchIfNotInt32(scratch);
 }
 
@@ -442,7 +451,7 @@ ALWAYS_INLINE void JIT::emitJumpSlowCaseIfNotJSCell(JSValueRegs jsReg, VirtualRe
         emitJumpSlowCaseIfNotJSCell(jsReg);
 }
 
-ALWAYS_INLINE int JIT::jumpTarget(const Instruction* instruction, int target)
+ALWAYS_INLINE int JIT::jumpTarget(const JSInstruction* instruction, int target)
 {
     if (target)
         return target;
@@ -467,50 +476,123 @@ ALWAYS_INLINE ECMAMode JIT::ecmaMode<OpPutPrivateName>(OpPutPrivateName)
     return ECMAMode::strict();
 }
 
+template<size_t minAlign, typename Bytecode>
+ALWAYS_INLINE MacroAssembler::Address JIT::computeBaseAddressForMetadata(const Bytecode& bytecode, GPRReg metadataGPR)
+{
+    // This function attempts to decide what the best base address is when
+    // loading fields from a bytecode instruction's metadata. If offsets are
+    // small enough, we want to emit a single load directly offset from the
+    // metadata table register. But if they're too big, we want to materialize
+    // the metadata offset of the current instruction into a register only
+    // once, so repeated loads don't need to redo that arithmetic.
+
+    // Note: minAlign is very important to get right, but hard to check for
+    // automatically. It should be the minimum alignment or access size across
+    // all the operations we use this address for. This is critical on ARM64
+    // (where this function is most useful) because we have a substantially
+    // larger addressible range when we can assume the access is aligned to
+    // the access size. One important note is that we assume that any accesses
+    // larger than the specified minAlign are also aligned - only then is it
+    // the case that an offset being encodable at a smaller access size also
+    // implies that it is encodable at a larger access size.
+
+    using Metadata = typename Bytecode::Metadata;
+    static_assert(WTF::roundUpToMultipleOf<minAlign>(alignof(Metadata)) == alignof(Metadata));
+    uint32_t metadataOffset = m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode);
+
+#if CPU(X86) || CPU(X86_64)
+    // On x86 and x86_64, we can directly encode up to a 32-bit displacement.
+    // We use 1 << 30 to be extra conservative that adding a further offset
+    // won't cause a signed overflow.
+    bool shouldEncodeMetadataOffsetInline = metadataOffset < (1u << 30);
+#elif CPU(ARM64)
+    // On arm64, we can only encode a 9-bit signed unaligned offset, or a
+    // 12-bit unsigned aligned offset. We use the same checks used elsewhere
+    // in the macro assembler to see if our offset fits one of those.
+    auto canEncodeOffset = [](int32_t offset) -> bool {
+        return ARM64Assembler::canEncodePImmOffset<minAlign * 8>(offset) || ARM64Assembler::canEncodeSImmOffset(offset);
+    };
+    bool shouldEncodeMetadataOffsetInline = canEncodeOffset(metadataOffset + sizeof(Metadata));
+#else
+    bool shouldEncodeMetadataOffsetInline = false;
+#endif
+
+    if (shouldEncodeMetadataOffsetInline)
+        return Address(GPRInfo::metadataTableRegister, metadataOffset);
+    addPtr(TrustedImm32(metadataOffset), GPRInfo::metadataTableRegister, metadataGPR);
+    return Address(metadataGPR);
+}
+
 template <typename Bytecode>
 ALWAYS_INLINE void JIT::loadPtrFromMetadata(const Bytecode& bytecode, size_t offset, GPRReg result)
 {
-    loadPtr(Address(s_metadataGPR, m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + offset), result);
+    loadPtr(Address(GPRInfo::metadataTableRegister, m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + offset), result);
 }
 
 template <typename Bytecode>
 ALWAYS_INLINE void JIT::load32FromMetadata(const Bytecode& bytecode, size_t offset, GPRReg result)
 {
-    load32(Address(s_metadataGPR, m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + offset), result);
+    load32(Address(GPRInfo::metadataTableRegister, m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + offset), result);
 }
 
 template <typename Bytecode>
 ALWAYS_INLINE void JIT::load8FromMetadata(const Bytecode& bytecode, size_t offset, GPRReg result)
 {
-    load8(Address(s_metadataGPR, m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + offset), result);
+    load8(Address(GPRInfo::metadataTableRegister, m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + offset), result);
 }
 
 template <typename ValueType, typename Bytecode>
 ALWAYS_INLINE void JIT::store8ToMetadata(ValueType value, const Bytecode& bytecode, size_t offset)
 {
-    store8(value, Address(s_metadataGPR, m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + offset));
+    store8(value, Address(GPRInfo::metadataTableRegister, m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + offset));
 }
 
 template <typename Bytecode>
 ALWAYS_INLINE void JIT::store32ToMetadata(GPRReg value, const Bytecode& bytecode, size_t offset)
 {
-    store32(value, Address(s_metadataGPR, m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + offset));
+    store32(value, Address(GPRInfo::metadataTableRegister, m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + offset));
+}
+
+template <typename Bytecode>
+ALWAYS_INLINE void JIT::storePtrToMetadata(GPRReg value, const Bytecode& bytecode, size_t offset)
+{
+    storePtr(value, Address(GPRInfo::metadataTableRegister, m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + offset));
 }
 
 template <typename Bytecode>
 ALWAYS_INLINE void JIT::materializePointerIntoMetadata(const Bytecode& bytecode, size_t offset, GPRReg result)
 {
-    addPtr(TrustedImm32(m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + offset), s_metadataGPR, result);
+    addPtr(TrustedImm32(m_profiledCodeBlock->metadataTable()->offsetInMetadataTable(bytecode) + offset), GPRInfo::metadataTableRegister, result);
+}
+
+ALWAYS_INLINE void JIT::loadConstant(CCallHelpers& jit, JITConstantPool::Constant constantIndex, GPRReg result)
+{
+    jit.loadPtr(Address(GPRInfo::jitDataRegister, BaselineJITData::offsetOfTrailingData() + static_cast<uintptr_t>(constantIndex) * sizeof(void*)), result);
+}
+
+ALWAYS_INLINE void JIT::loadGlobalObject(CCallHelpers& jit, GPRReg result)
+{
+    jit.loadPtr(Address(GPRInfo::jitDataRegister, BaselineJITData::offsetOfGlobalObject()), result);
 }
 
 ALWAYS_INLINE void JIT::loadConstant(JITConstantPool::Constant constantIndex, GPRReg result)
 {
-    loadPtr(Address(s_constantsGPR, BaselineJITData::offsetOfData() + static_cast<uintptr_t>(constantIndex) * sizeof(void*)), result);
+    loadConstant(*this, constantIndex, result);
 }
 
 ALWAYS_INLINE void JIT::loadGlobalObject(GPRReg result)
 {
-    loadConstant(m_globalObjectConstant, result);
+    loadGlobalObject(*this, result);
+}
+
+ALWAYS_INLINE void JIT::loadStructureStubInfo(CCallHelpers& jit, StructureStubInfoIndex index, GPRReg result)
+{
+    jit.subPtr(GPRInfo::jitDataRegister, TrustedImm32(static_cast<uintptr_t>(index.m_index + 1) * sizeof(StructureStubInfo)), result);
+}
+
+ALWAYS_INLINE void JIT::loadStructureStubInfo(StructureStubInfoIndex index, GPRReg result)
+{
+    loadStructureStubInfo(*this, index, result);
 }
 
 ALWAYS_INLINE static void loadAddrOfCodeBlockConstantBuffer(JIT &jit, GPRReg dst)

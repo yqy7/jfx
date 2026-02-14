@@ -23,7 +23,6 @@
 
 #pragma once
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
 #include "RenderSVGModelObject.h"
 #include "SVGBoundingBoxComputation.h"
 
@@ -32,45 +31,46 @@ namespace WebCore {
 class SVGElement;
 
 class RenderSVGContainer : public RenderSVGModelObject {
-    WTF_MAKE_ISO_ALLOCATED(RenderSVGContainer);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(RenderSVGContainer);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(RenderSVGContainer);
 public:
     virtual ~RenderSVGContainer();
 
     void paint(PaintInfo&, const LayoutPoint&) override;
+
     bool isObjectBoundingBoxValid() const { return m_objectBoundingBoxValid; }
+    bool isLayoutSizeChanged() const { return m_isLayoutSizeChanged; }
+    bool didTransformToRootUpdate() const { return m_didTransformToRootUpdate; }
 
     FloatRect objectBoundingBox() const final { return m_objectBoundingBox; }
-    FloatRect strokeBoundingBox() const final { return m_strokeBoundingBox; }
-    FloatRect repaintRectInLocalCoordinates() const final { return SVGBoundingBoxComputation::computeRepaintBoundingBox(*this); }
+    FloatRect objectBoundingBoxWithoutTransformations() const final { return m_objectBoundingBoxWithoutTransformations; }
+    FloatRect strokeBoundingBox() const final;
+    FloatRect repaintRectInLocalCoordinates(RepaintRectCalculation = RepaintRectCalculation::Fast) const final { return SVGBoundingBoxComputation::computeRepaintBoundingBox(*this); }
 
 protected:
-    RenderSVGContainer(SVGElement&, RenderStyle&&);
+    RenderSVGContainer(Type, Document&, RenderStyle&&, OptionSet<SVGModelObjectFlag> = { });
+    RenderSVGContainer(Type, SVGElement&, RenderStyle&&, OptionSet<SVGModelObjectFlag> = { });
 
-    const char* renderName() const override { return "RenderSVGContainer"; }
+    ASCIILiteral renderName() const override { return "RenderSVGContainer"_s; }
     bool canHaveChildren() const final { return true; }
 
-    void styleDidChange(StyleDifference, const RenderStyle* oldStyle) override;
-
     void layout() override;
+
     virtual void layoutChildren();
+    virtual bool pointIsInsideViewportClip(const FloatPoint&) { return true; }
+    virtual bool updateLayoutSizeIfNeeded() { return false; }
+    virtual std::optional<FloatRect> overridenObjectBoundingBoxWithoutTransformations() const { return std::nullopt; }
     bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) override;
 
-    virtual void updateLayerInformation() { }
-    virtual void calculateViewport();
-    virtual bool pointIsInsideViewportClip(const FloatPoint&) { return true; }
-
-    bool selfWillPaint();
-
     bool m_objectBoundingBoxValid { false };
+    bool m_isLayoutSizeChanged { false };
+    bool m_didTransformToRootUpdate { false };
     FloatRect m_objectBoundingBox;
-    FloatRect m_strokeBoundingBox;
-
-private:
-    bool isSVGContainer() const final { return true; }
+    FloatRect m_objectBoundingBoxWithoutTransformations;
+    mutable Markable<FloatRect> m_strokeBoundingBox;
 };
 
 } // namespace WebCore
 
-SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSVGContainer, isSVGContainer())
+SPECIALIZE_TYPE_TRAITS_RENDER_OBJECT(RenderSVGContainer, isRenderSVGContainer())
 
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)

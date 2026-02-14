@@ -25,32 +25,41 @@
 
 #pragma once
 
-#if ENABLE(SERVICE_WORKER)
-
+#include "CookieStore.h"
+#include "FetchIdentifier.h"
 #include "NotificationClient.h"
 #include "ScriptExecutionContextIdentifier.h"
 #include "ServiceWorkerContextData.h"
+#include "ServiceWorkerFetch.h"
 #include "ServiceWorkerRegistration.h"
 #include "WorkerGlobalScope.h"
+#include <wtf/MonotonicTime.h>
 #include <wtf/URLHash.h>
 
 namespace WebCore {
 
 class DeferredPromise;
 class ExtendableEvent;
+class FetchEvent;
 class Page;
+class PushEvent;
 class ServiceWorkerClient;
 class ServiceWorkerClients;
 class ServiceWorkerThread;
+class WorkerClient;
+
+#if ENABLE(DECLARATIVE_WEB_PUSH)
+class DeclarativePushEvent;
+#endif
 
 enum class NotificationEventType : bool;
 
 struct ServiceWorkerClientData;
 
 class ServiceWorkerGlobalScope final : public WorkerGlobalScope {
-    WTF_MAKE_ISO_ALLOCATED(ServiceWorkerGlobalScope);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(ServiceWorkerGlobalScope);
 public:
-    static Ref<ServiceWorkerGlobalScope> create(ServiceWorkerContextData&&, ServiceWorkerData&&, const WorkerParameters&, Ref<SecurityOrigin>&&, ServiceWorkerThread&, Ref<SecurityOrigin>&& topOrigin, IDBClient::IDBConnectionProxy*, SocketProvider*, std::unique_ptr<NotificationClient>&&, PAL::SessionID);
+    static Ref<ServiceWorkerGlobalScope> create(ServiceWorkerContextData&&, ServiceWorkerData&&, const WorkerParameters&, Ref<SecurityOrigin>&&, ServiceWorkerThread&, Ref<SecurityOrigin>&& topOrigin, IDBClient::IDBConnectionProxy*, SocketProvider*, std::unique_ptr<NotificationClient>&&, std::unique_ptr<WorkerClient>&&);
 
     ~ServiceWorkerGlobalScope();
 
@@ -62,13 +71,9 @@ public:
 
     void skipWaiting(Ref<DeferredPromise>&&);
 
-    EventTargetInterface eventTargetInterface() const final;
+    enum EventTargetInterfaceType eventTargetInterface() const final;
 
     ServiceWorkerThread& thread();
-
-    ServiceWorkerClient* serviceWorkerClient(ScriptExecutionContextIdentifier);
-    void addServiceWorkerClient(ServiceWorkerClient&);
-    void removeServiceWorkerClient(ServiceWorkerClient&);
 
     void updateExtendedEventsSet(ExtendableEvent* newEvent = nullptr);
 
@@ -84,38 +89,91 @@ public:
 
     WEBCORE_EXPORT Page* serviceWorkerPage();
 
-#if ENABLE(NOTIFICATION_EVENT)
-    void postTaskToFireNotificationEvent(NotificationEventType, Notification&, const String& action);
+    void dispatchPushEvent(PushEvent&);
+    PushEvent* pushEvent() { return m_pushEvent.get(); }
+
+#if ENABLE(DECLARATIVE_WEB_PUSH)
+    void dispatchDeclarativePushEvent(PushEvent&);
+    PushEvent* declarativePushEvent() { return m_declarativePushEvent.get(); }
+    void clearDeclarativePushEvent();
 #endif
 
+    bool hasPendingSilentPushEvent() const { return m_hasPendingSilentPushEvent; }
+    void setHasPendingSilentPushEvent(bool value) { m_hasPendingSilentPushEvent = value; }
+
+    constexpr static Seconds userGestureLifetime  { 2_s };
+    bool isProcessingUserGesture() const { return m_isProcessingUserGesture; }
+    void recordUserGesture();
+    void setIsProcessingUserGestureForTesting(bool value) { m_isProcessingUserGesture = value; }
+
+    bool didFirePushEventRecently() const;
+
+    WEBCORE_EXPORT void addConsoleMessage(MessageSource, MessageLevel, const String& message, unsigned long requestIdentifier) final;
+    void enableConsoleMessageReporting() { m_consoleMessageReportingEnabled = true; }
+
+    CookieStore& cookieStore();
+
+    using FetchKey = std::pair<SWServerConnectionIdentifier, FetchIdentifier>;
+    void addFetchTask(FetchKey, Ref<ServiceWorkerFetch::Client>&&);
+    void addFetchEvent(FetchKey, FetchEvent&);
+    RefPtr<ServiceWorkerFetch::Client> fetchTask(FetchKey);
+    bool hasFetchTask() const;
+    void removeFetchTask(FetchKey);
+    RefPtr<ServiceWorkerFetch::Client> takeFetchTask(FetchKey);
+    void navigationPreloadFailed(FetchKey, ResourceError&&);
+    void navigationPreloadIsReady(FetchKey, ResourceResponse&&);
+
+    bool hasFetchEventHandler() const { return m_hasFetchEventHandler; }
+    void storeEventTypesToHandle();
+
 private:
-    ServiceWorkerGlobalScope(ServiceWorkerContextData&&, ServiceWorkerData&&, const WorkerParameters&, Ref<SecurityOrigin>&&, ServiceWorkerThread&, Ref<SecurityOrigin>&& topOrigin, IDBClient::IDBConnectionProxy*, SocketProvider*, std::unique_ptr<NotificationClient>&&, PAL::SessionID);
+    ServiceWorkerGlobalScope(ServiceWorkerContextData&&, ServiceWorkerData&&, const WorkerParameters&, Ref<SecurityOrigin>&&, ServiceWorkerThread&, Ref<SecurityOrigin>&& topOrigin, IDBClient::IDBConnectionProxy*, SocketProvider*, std::unique_ptr<NotificationClient>&&, std::unique_ptr<WorkerClient>&&);
     void notifyServiceWorkerPageOfCreationIfNecessary();
+
+    void prepareForDestruction() final;
 
     Type type() const final { return Type::ServiceWorker; }
     bool hasPendingEvents() const { return !m_extendedEvents.isEmpty(); }
 
     NotificationClient* notificationClient() final { return m_notificationClient.get(); }
-    std::optional<PAL::SessionID> sessionID() const final { return m_sessionID; }
+
+    void resetUserGesture() { m_isProcessingUserGesture = false; }
 
     ServiceWorkerContextData m_contextData;
-    Ref<ServiceWorkerRegistration> m_registration;
-    Ref<ServiceWorker> m_serviceWorker;
-    Ref<ServiceWorkerClients> m_clients;
-    HashMap<ScriptExecutionContextIdentifier, ServiceWorkerClient*> m_clientMap;
+    const Ref<ServiceWorkerRegistration> m_registration;
+    const Ref<ServiceWorker> m_serviceWorker;
+    const Ref<ServiceWorkerClients> m_clients;
     Vector<Ref<ExtendableEvent>> m_extendedEvents;
 
     uint64_t m_lastRequestIdentifier { 0 };
     HashMap<uint64_t, RefPtr<DeferredPromise>> m_pendingSkipWaitingPromises;
-    PAL::SessionID m_sessionID;
     std::unique_ptr<NotificationClient> m_notificationClient;
+    bool m_hasPendingSilentPushEvent { false };
+    bool m_isProcessingUserGesture { false };
+    Timer m_userGestureTimer;
+    RefPtr<PushEvent> m_pushEvent;
+#if ENABLE(DECLARATIVE_WEB_PUSH)
+    RefPtr<PushEvent> m_declarativePushEvent;
+#endif
+    MonotonicTime m_lastPushEventTime;
+    bool m_consoleMessageReportingEnabled { false };
+    RefPtr<CookieStore> m_cookieStore;
+    bool m_hasFetchEventHandler { false };
+
+    struct FetchTask {
+        RefPtr<ServiceWorkerFetch::Client> client;
+        Variant<std::nullptr_t, Ref<FetchEvent>, UniqueRef<ResourceError>, UniqueRef<ResourceResponse>> navigationPreload;
+    };
+    HashMap<FetchKey, FetchTask> m_ongoingFetchTasks;
 };
 
 } // namespace WebCore
 
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::ServiceWorkerGlobalScope)
-    static bool isType(const WebCore::ScriptExecutionContext& context) { return is<WebCore::WorkerGlobalScope>(context) && downcast<WebCore::WorkerGlobalScope>(context).type() == WebCore::WorkerGlobalScope::Type::ServiceWorker; }
+    static bool isType(const WebCore::ScriptExecutionContext& context)
+    {
+        auto* global = dynamicDowncast<WebCore::WorkerGlobalScope>(context);
+        return global && global->type() == WebCore::WorkerGlobalScope::Type::ServiceWorker;
+    }
     static bool isType(const WebCore::WorkerGlobalScope& context) { return context.type() == WebCore::WorkerGlobalScope::Type::ServiceWorker; }
 SPECIALIZE_TYPE_TRAITS_END()
-
-#endif // ENABLE(SERVICE_WORKER)

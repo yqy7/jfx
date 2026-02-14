@@ -25,10 +25,11 @@
 
 #pragma once
 
-#include "ExecutableToCodeBlockEdge.h"
 #include "GlobalExecutable.h"
 
 namespace JSC {
+
+class UnlinkedModuleProgramCodeBlock;
 
 class ModuleProgramExecutable final : public GlobalExecutable {
     friend class LLIntOffsetsExtractor;
@@ -42,28 +43,33 @@ public:
         return vm.moduleProgramExecutableSpace<mode>();
     }
 
-    static ModuleProgramExecutable* create(JSGlobalObject*, const SourceCode&);
+    static ModuleProgramExecutable* tryCreate(JSGlobalObject*, const SourceCode&);
 
     static void destroy(JSCell*);
 
-    ModuleProgramCodeBlock* codeBlock()
+    ModuleProgramCodeBlock* codeBlock() const
     {
-        return bitwise_cast<ModuleProgramCodeBlock*>(ExecutableToCodeBlockEdge::unwrap(m_moduleProgramCodeBlock.get()));
+        return std::bit_cast<ModuleProgramCodeBlock*>(Base::codeBlock());
     }
 
-    Ref<JITCode> generatedJITCode()
+    UnlinkedModuleProgramCodeBlock* getUnlinkedCodeBlock(JSGlobalObject*);
+
+    UnlinkedModuleProgramCodeBlock* unlinkedCodeBlock() const
+    {
+        return std::bit_cast<UnlinkedModuleProgramCodeBlock*>(Base::unlinkedCodeBlock());
+    }
+
+    Ref<JSC::JITCode> generatedJITCode()
     {
         return generatedJITCodeForCall();
     }
 
-    static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue proto)
-    {
-        return Structure::create(vm, globalObject, proto, TypeInfo(ModuleProgramExecutableType, StructureFlags), info());
-    }
+    inline static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
     DECLARE_INFO;
 
-    UnlinkedModuleProgramCodeBlock* unlinkedModuleProgramCodeBlock() { return m_unlinkedModuleProgramCodeBlock.get(); }
+    DECLARE_VISIT_CHILDREN;
+
     bool isAsync() const { return features() & AwaitFeature; }
 
     SymbolTable* moduleEnvironmentSymbolTable() { return m_moduleEnvironmentSymbolTable.get(); }
@@ -76,11 +82,7 @@ private:
 
     ModuleProgramExecutable(JSGlobalObject*, const SourceCode&);
 
-    DECLARE_VISIT_CHILDREN;
-
-    WriteBarrier<UnlinkedModuleProgramCodeBlock> m_unlinkedModuleProgramCodeBlock;
     WriteBarrier<SymbolTable> m_moduleEnvironmentSymbolTable;
-    WriteBarrier<ExecutableToCodeBlockEdge> m_moduleProgramCodeBlock;
     std::unique_ptr<TemplateObjectMap> m_templateObjectMap;
 };
 

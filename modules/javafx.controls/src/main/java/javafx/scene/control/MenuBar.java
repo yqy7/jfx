@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,26 +25,21 @@
 
 package javafx.scene.control;
 
-import javafx.css.converter.BooleanConverter;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-
 import javafx.beans.DefaultProperty;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.value.ObservableValue;
-import javafx.beans.value.WritableValue;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.css.CssMetaData;
-import javafx.css.StyleableBooleanProperty;
-
-import javafx.scene.control.skin.MenuBarSkin;
-
 import javafx.css.Styleable;
+import javafx.css.StyleableBooleanProperty;
 import javafx.css.StyleableProperty;
+import javafx.css.converter.BooleanConverter;
 import javafx.scene.AccessibleRole;
+import javafx.scene.control.skin.MenuBarSkin;
 
 /**
  * <p>
@@ -106,7 +101,7 @@ public class MenuBar extends Control {
         // makes it look to css like the user set the value and css will not
         // override. Initializing focusTraversable by calling applyStyle with null
         // StyleOrigin ensures that css will be able to override the value.
-        ((StyleableProperty<Boolean>)(WritableValue<Boolean>)focusTraversableProperty()).applyStyle(null, Boolean.FALSE);
+        ((StyleableProperty<Boolean>)focusTraversableProperty()).applyStyle(null, Boolean.FALSE);
     }
 
 
@@ -162,15 +157,12 @@ public class MenuBar extends Control {
 
                 @Override
                 public void bind(final ObservableValue<? extends Boolean> rawObservable) {
-                    throw new RuntimeException(BIND_MSG);
+                    throw new RuntimeException("cannot uni-directionally bind to the system menu bar - use bindBidrectional instead");
                 }
-
             };
         }
         return useSystemMenuBar;
     }
-    private String BIND_MSG =
-        "cannot uni-directionally bind to the system menu bar - use bindBidrectional instead";
 
     private BooleanProperty useSystemMenuBar;
     public final void setUseSystemMenuBar(boolean value) {
@@ -212,7 +204,7 @@ public class MenuBar extends Control {
 
     private static class StyleableProperties {
         private static final CssMetaData<MenuBar, Boolean> USE_SYSTEM_MENU_BAR =
-                new CssMetaData<MenuBar, Boolean>("-fx-use-system-menu-bar",
+                new CssMetaData<>("-fx-use-system-menu-bar",
                                                         BooleanConverter.getInstance(),
                                                         false) {
             @Override public boolean isSettable(MenuBar n) {
@@ -220,14 +212,14 @@ public class MenuBar extends Control {
             }
 
             @Override public StyleableProperty<Boolean> getStyleableProperty(MenuBar n) {
-                return (StyleableProperty<Boolean>)(WritableValue<Boolean>)n.useSystemMenuBarProperty();
+                return (StyleableProperty<Boolean>)n.useSystemMenuBarProperty();
             }
         };
 
         private static final List<CssMetaData<? extends Styleable, ?>> STYLEABLES;
         static {
             final List<CssMetaData<? extends Styleable, ?>> styleables =
-                new ArrayList<CssMetaData<? extends Styleable, ?>>(Control.getClassCssMetaData());
+                new ArrayList<>(Control.getClassCssMetaData());
             styleables.add(USE_SYSTEM_MENU_BAR);
             STYLEABLES = Collections.unmodifiableList(styleables);
         }
@@ -263,6 +255,4 @@ public class MenuBar extends Control {
     @Override protected Boolean getInitialFocusTraversable() {
         return Boolean.FALSE;
     }
-
 }
-

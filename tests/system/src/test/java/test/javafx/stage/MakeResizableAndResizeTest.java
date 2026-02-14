@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,11 +28,9 @@ package test.javafx.stage;
 import java.io.FileNotFoundException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.util.TimerTask;
 import java.util.Timer;
+import java.util.TimerTask;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
@@ -43,41 +41,41 @@ import javafx.scene.control.TextArea;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.Priority;
 import javafx.stage.Stage;
-
-import org.junit.BeforeClass;
-import org.junit.Test;
-
-import static junit.framework.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import test.util.Util;
 
 public class MakeResizableAndResizeTest {
-    static CountDownLatch startupLatch;
+    static CountDownLatch startupLatch = new CountDownLatch(1);
     static Timer timer;
     static Runnable runNext;
     static volatile Alert alert;
 
     public static void main(String[] args) {
         initFX();
-        new MakeResizableAndResizeTest().testSize();
+        try {
+            new MakeResizableAndResizeTest().testSize();
+        } finally {
+            shutdown();
+        }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void initFX() {
-        startupLatch = new CountDownLatch(1);
-        new Thread(() -> Application.launch(TestApp.class, (String[])null)).start();
-        try {
-            if (!startupLatch.await(15, TimeUnit.SECONDS)) {
-                fail("Timeout waiting for FX runtime to start");
-            }
-        } catch (InterruptedException ex) {
-            fail("Unexpected exception: " + ex);
-        }
+        Util.launch(startupLatch, TestApp.class);
+    }
+
+    @AfterAll
+    public static void shutdown() {
+        Util.shutdown();
     }
 
     @Test
     public void testSize() {
-        assertTrue("Wrong window width", alert.getWidth() >= alert.getDialogPane().getWidth());
-        assertTrue("Wrong window height", alert.getHeight() >= alert.getDialogPane().getHeight());
+        Assertions.assertTrue(alert.getWidth() >= alert.getDialogPane().getWidth(), "Wrong window width");
+        Assertions.assertTrue(alert.getHeight() >= alert.getDialogPane().getHeight(), "Wrong window height");
     }
 
     public static class TestApp extends Application implements ChangeListener {

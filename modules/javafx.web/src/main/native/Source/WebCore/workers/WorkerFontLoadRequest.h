@@ -30,6 +30,7 @@
 #include "ResourceLoaderOptions.h"
 #include "SharedBuffer.h"
 #include "ThreadableLoaderClient.h"
+#include <wtf/TZoneMalloc.h>
 #include <wtf/URL.h>
 #include <wtf/WeakPtr.h>
 
@@ -41,8 +42,9 @@ class WorkerGlobalScope;
 
 struct FontCustomPlatformData;
 
-class WorkerFontLoadRequest : public FontLoadRequest, public ThreadableLoaderClient {
-    WTF_MAKE_FAST_ALLOCATED;
+class WorkerFontLoadRequest final : public FontLoadRequest, public ThreadableLoaderClient {
+    WTF_MAKE_TZONE_ALLOCATED(WorkerFontLoadRequest);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(WorkerFontLoadRequest);
 public:
     WorkerFontLoadRequest(URL&&, LoadedFromOpaqueSource);
     ~WorkerFontLoadRequest() = default;
@@ -55,17 +57,19 @@ private:
     bool isLoading() const final { return m_isLoading; }
     bool errorOccurred() const final { return m_errorOccurred; }
 
-    bool ensureCustomFontData(const AtomString& remoteURI) final;
-    RefPtr<Font> createFont(const FontDescription&, const AtomString& remoteURI, bool syntheticBold, bool syntheticItalic, const FontCreationContext&) final;
+    bool ensureCustomFontData() final;
+    RefPtr<Font> createFont(const FontDescription&, bool syntheticBold, bool syntheticItalic, const FontCreationContext&) final;
 
     void setClient(FontLoadRequestClient*) final;
 
     bool isWorkerFontLoadRequest() const final { return true; }
 
-    void didReceiveResponse(ResourceLoaderIdentifier, const ResourceResponse&) final;
+    void didReceiveResponse(ScriptExecutionContextIdentifier, std::optional<ResourceLoaderIdentifier>, const ResourceResponse&) final;
     void didReceiveData(const SharedBuffer&) final;
-    void didFinishLoading(ResourceLoaderIdentifier, const NetworkLoadMetrics&) final;
-    void didFail(const ResourceError&) final;
+    void didFinishLoading(ScriptExecutionContextIdentifier, std::optional<ResourceLoaderIdentifier>, const NetworkLoadMetrics&) final;
+    void didFail(std::optional<ScriptExecutionContextIdentifier>, const ResourceError&) final;
+
+    RefPtr<FontCustomPlatformData> loadCustomFont(SharedBuffer&, const String&);
 
     URL m_url;
     LoadedFromOpaqueSource m_loadedFromOpaqueSource;
@@ -77,7 +81,7 @@ private:
 
     WeakPtr<ScriptExecutionContext> m_context;
     SharedBufferBuilder m_data;
-    std::unique_ptr<FontCustomPlatformData> m_fontCustomPlatformData;
+    const RefPtr<FontCustomPlatformData> m_fontCustomPlatformData;
 };
 
 } // namespace WebCore

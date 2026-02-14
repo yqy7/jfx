@@ -27,10 +27,17 @@
 
 #if ENABLE(IMAGE_ANALYSIS)
 
-#include <wtf/FastMalloc.h>
+#include "Timer.h"
 #include <wtf/PriorityQueue.h>
-#include <wtf/WeakHashSet.h>
+#include <wtf/TZoneMalloc.h>
+#include <wtf/URL.h>
+#include <wtf/URLHash.h>
+#include <wtf/WeakHashMap.h>
 #include <wtf/WeakPtr.h>
+
+namespace PAL {
+class HysteresisActivity;
+}
 
 namespace WebCore {
 
@@ -38,25 +45,33 @@ class Document;
 class HTMLImageElement;
 class Page;
 class Timer;
+class WeakPtrImplWithEventTargetData;
 
-class ImageAnalysisQueue {
-    WTF_MAKE_FAST_ALLOCATED;
+class ImageAnalysisQueue final : public RefCounted<ImageAnalysisQueue> {
+    WTF_MAKE_TZONE_ALLOCATED_EXPORT(ImageAnalysisQueue, WEBCORE_EXPORT);
 public:
-    ImageAnalysisQueue(Page&);
-    ~ImageAnalysisQueue();
+    static Ref<ImageAnalysisQueue> create(Page&);
+    WEBCORE_EXPORT ~ImageAnalysisQueue();
 
-    WEBCORE_EXPORT void enqueueAllImages(Document&, const String& identifier);
+    WEBCORE_EXPORT void enqueueAllImagesIfNeeded(Document&, const String& sourceLanguageIdentifier, const String& targetLanguageIdentifier);
     void clear();
 
     void enqueueIfNeeded(HTMLImageElement&);
 
+    WEBCORE_EXPORT void setDidBecomeEmptyCallback(Function<void()>&&);
+    WEBCORE_EXPORT void clearDidBecomeEmptyCallback();
+
 private:
+    explicit ImageAnalysisQueue(Page&);
+
     void resumeProcessingSoon();
     void resumeProcessing();
 
+    void enqueueAllImagesRecursive(Document&);
+
     enum class Priority : bool { Low, High };
     struct Task {
-        WeakPtr<HTMLImageElement> element;
+        WeakPtr<HTMLImageElement, WeakPtrImplWithEventTargetData> element;
         Priority priority { Priority::Low };
         unsigned taskNumber { 0 };
     };
@@ -64,13 +79,17 @@ private:
     static bool firstIsHigherPriority(const Task&, const Task&);
     unsigned nextTaskNumber() { return ++m_currentTaskNumber; }
 
-    String m_identifier;
+    // FIXME: Refactor the source and target LIDs into either a std::pair<> of strings, or its own named struct.
+    String m_sourceLanguageIdentifier;
+    String m_targetLanguageIdentifier;
     WeakPtr<Page> m_page;
     Timer m_resumeProcessingTimer;
-    WeakHashSet<HTMLImageElement> m_queuedElements;
+    WeakHashMap<HTMLImageElement, URL, WeakPtrImplWithEventTargetData> m_queuedElements;
     PriorityQueue<Task, firstIsHigherPriority> m_queue;
     unsigned m_pendingRequestCount { 0 };
     unsigned m_currentTaskNumber { 0 };
+    std::unique_ptr<PAL::HysteresisActivity> m_imageQueueEmptyHysteresis;
+    bool m_analysisOfAllImagesOnPageHasStarted { false };
 };
 
 inline bool ImageAnalysisQueue::firstIsHigherPriority(const Task& first, const Task& second)

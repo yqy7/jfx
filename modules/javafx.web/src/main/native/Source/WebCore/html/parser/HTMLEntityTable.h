@@ -1,5 +1,6 @@
-/*
- * Copyright (C) 2010 Google, Inc. All Rights Reserved.
+/**
+ * Copyright (C) 2010-2014 Google, Inc. All rights reserved.
+ * Copyright (C) 2023 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,26 +26,26 @@
 
 #pragma once
 
-#include <wtf/text/WTFString.h>
+#include <unicode/umachine.h>
 
 namespace WebCore {
 
+// Optimize packing since there are over 2000 of these.
 struct HTMLEntityTableEntry {
-    LChar lastCharacter() const { return entity[length - 1]; }
+    std::span<const char> nameCharacters() const;
+    unsigned nameLength() const { return nameLengthExcludingSemicolon + nameIncludesTrailingSemicolon; }
 
-    const LChar* entity;
-    int length;
-    UChar32 firstValue;
-    UChar32 secondValue;
+    unsigned firstCharacter : 21; // All Unicode characters fit in 21 bits.
+    unsigned optionalSecondCharacter : 16; // Two-character sequences are all BMP characters.
+    unsigned nameCharactersOffset : 14;
+    unsigned nameLengthExcludingSemicolon : 5;
+    unsigned nameIncludesTrailingSemicolon : 1;
 };
 
 class HTMLEntityTable {
 public:
-    static const HTMLEntityTableEntry* firstEntry();
-    static const HTMLEntityTableEntry* lastEntry();
-
-    static const HTMLEntityTableEntry* firstEntryStartingWith(UChar);
-    static const HTMLEntityTableEntry* lastEntryStartingWith(UChar);
+    static std::span<const HTMLEntityTableEntry> entries();
+    static std::span<const HTMLEntityTableEntry> entriesStartingWith(char16_t);
 };
 
 } // namespace WebCore

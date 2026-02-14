@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -58,7 +58,7 @@ class DefaultTreeCell<T> extends TreeCell<T> {
             TreeItem<T> newTreeItem = getTreeItem();
             if (newTreeItem != null) {
                 newTreeItem.graphicProperty().addListener(weakTreeItemGraphicListener);
-                treeItemRef = new WeakReference<TreeItem<T>>(newTreeItem);
+                treeItemRef = new WeakReference<>(newTreeItem);
             }
         }
     };
@@ -91,7 +91,7 @@ class DefaultTreeCell<T> extends TreeCell<T> {
 
                     // the item is a Node, and the graphic exists, so
                     // we must insert both into an HBox and present that
-                    // to the user (see RT-15910)
+                    // to the user (see JDK-8115941)
                     if (hbox == null) {
                         hbox = new HBox(3);
                     }

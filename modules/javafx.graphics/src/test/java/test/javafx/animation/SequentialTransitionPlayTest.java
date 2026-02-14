@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,6 @@ package test.javafx.animation;
 
 import com.sun.javafx.animation.TickCalculation;
 import javafx.animation.Animation.Status;
-import javafx.animation.AnimationShim;
 import javafx.animation.Interpolator;
 import javafx.animation.SequentialTransition;
 import javafx.animation.SequentialTransitionShim;
@@ -36,9 +35,10 @@ import javafx.animation.TransitionShim;
 import javafx.beans.property.LongProperty;
 import javafx.beans.property.SimpleLongProperty;
 import javafx.util.Duration;
-import org.junit.Before;
-import org.junit.Test;
-import static org.junit.Assert.*;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class SequentialTransitionPlayTest {
 
@@ -54,7 +54,7 @@ public class SequentialTransitionPlayTest {
     Transition childByX;
     Transition childByX2;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         amt = new AbstractPrimaryTimerMock();
         st = SequentialTransitionShim.getSequentialTransition(amt);

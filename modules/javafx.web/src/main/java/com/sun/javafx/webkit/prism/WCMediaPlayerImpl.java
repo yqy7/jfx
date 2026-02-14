@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -121,12 +121,20 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
                     locator.setConnectionProperty("User-Agent", userAgent);
                 }
                 locator.init();
-                    log.fine("CreateThread: locator created");
+                log.fine("CreateThread: locator created");
 
                 p = MediaManager.getPlayer(locator);
             } catch (Exception ex) {
                 log.warning("CreateThread ERROR: {0}", ex.toString());
-                onError(this, 0, ex.getMessage());
+                String errorString = "Unsupported protocol";
+                String mesg = ex.toString();
+                int index = mesg.indexOf(errorString);
+                if (index != -1) {
+                    log.warning("Unsupported protocol");
+                    onError(this, 4, ex.getMessage());
+                } else {
+                    onError(this, 0, ex.getMessage());
+                }
                 return;
             }
 
@@ -150,6 +158,7 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
     }
 
 
+    @Override
     protected void load(String url, String userAgent) {
         synchronized (lock) {
             if (createThread != null) {
@@ -165,6 +174,7 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
         }
     }
 
+    @Override
     protected void cancelLoad() {
         synchronized (lock) {
             if (createThread != null) {
@@ -179,6 +189,7 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
         notifyReadyStateChanged(READY_STATE_HAVE_NOTHING);
     }
 
+    @Override
     protected void disposePlayer() {
         MediaPlayer old;
         synchronized (lock) {
@@ -220,6 +231,7 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
         }
     }
 
+    @Override
     protected void prepareToPlay() {
         synchronized (lock) {
             if (player == null) {
@@ -232,6 +244,7 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
         }
     }
 
+    @Override
     protected void play() {
         MediaPlayer p = getPlayer();
         if (p != null) {
@@ -241,6 +254,7 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
         }
     }
 
+    @Override
     protected void pause() {
         MediaPlayer p = getPlayer();
         if (p != null) {
@@ -250,6 +264,7 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
         }
     }
 
+    @Override
     protected float getCurrentTime() {
         MediaPlayer p = getPlayer();
         if (p == null) {
@@ -260,6 +275,7 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
                 : 0f;
     }
 
+    @Override
     protected void seek(float time) {
         MediaPlayer p = getPlayer();
         if (p != null) {
@@ -275,6 +291,7 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
             // while seeking fx player returns 0 as current time
             final float seekTime = time;
             Thread seekCompletedThread = new Thread(new Runnable() {
+                @Override
                 public void run() {
                     while (isSeeking()) {
                         MediaPlayer p = getPlayer();
@@ -298,6 +315,7 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
         }
     }
 
+    @Override
     protected void setRate(float rate) {
         MediaPlayer p = getPlayer();
         if (p != null) {
@@ -305,6 +323,7 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
         }
     }
 
+    @Override
     protected void setVolume(float volume) {
         MediaPlayer p = getPlayer();
         if (p != null) {
@@ -312,6 +331,7 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
         }
     }
 
+    @Override
     protected void setMute(boolean mute) {
         MediaPlayer p = getPlayer();
         if (p != null) {
@@ -319,14 +339,17 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
         }
     }
 
+    @Override
     protected void setSize(int w, int h) {
         // nothing to do
     }
 
+    @Override
     protected void setPreservesPitch(boolean preserve) {
         // nothing to do
     }
 
+    @Override
     protected void renderCurrentFrame(WCGraphicsContext gc, int x, int y, int w, int h) {
         // TODO: need a render lock in MediaFrameHandler
         synchronized (lock) {
@@ -447,10 +470,14 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
     public void onError(Object source, int errCode, String message) {
         //MediaPlayer p = getPlayer();
         log.warning("onError, errCode={0}, msg={1}", new Object[]{errCode, message});
-        // TODO: parse errCode to detect NETWORK_STATE_FORMAT_ERROR/
-        // NETWORK_STATE_NETWORK_ERROR/NETWORK_STATE_DECODE_ERROR
-        notifyNetworkStateChanged(NETWORK_STATE_NETWORK_ERROR);
-        notifyReadyStateChanged(READY_STATE_HAVE_NOTHING);
+        if (errCode == 4) {
+            notifyNetworkStateChanged(NETWORK_STATE_FORMAT_ERROR);
+            notifyReadyStateChanged(READY_STATE_HAVE_NOTHING);
+        }
+        else {
+            notifyNetworkStateChanged(NETWORK_STATE_NETWORK_ERROR);
+            notifyReadyStateChanged(READY_STATE_HAVE_NOTHING);
+        }
     }
 
     //PlayerTimeListener
@@ -509,7 +536,7 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
         if (event.getDuration() < 0) {
             return;
         }
-        double bytes2seconds = event.getDuration() / (double)event.getBufferStop();
+        double bytes2seconds = event.getDuration() / event.getBufferStop();
         bufferedStart = (float)(bytes2seconds * event.getBufferStart());
         bufferedEnd = (float)(bytes2seconds * event.getBufferPosition());
         buffering = event.getBufferPosition() < event.getBufferStop();
@@ -537,6 +564,7 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
         private VideoDataBuffer currentFrame;
         private VideoDataBuffer nextFrame;
 
+        @Override
         public void videoFrameUpdated(NewFrameEvent nfe) {
             synchronized (frameLock) {
                 if (null != nextFrame) {
@@ -552,6 +580,7 @@ final class WCMediaPlayerImpl extends WCMediaPlayer
             notifyFrameArrived();
         }
 
+        @Override
         public void releaseVideoFrames() {
             synchronized (frameLock) {
                 if (null != nextFrame) {

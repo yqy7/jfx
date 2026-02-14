@@ -30,69 +30,57 @@
 #include "CSSPaintImageValue.h"
 #include "CSSPrimitiveValueMappings.h"
 #include "CSSValuePool.h"
+#include "ComputedStyleDependencies.h"
 #include "PaintWorkletGlobalScope.h"
 #include "PropertyAllowlist.h"
 #include "StyleBuilderGenerated.h"
 #include "StylePropertyShorthand.h"
+#include <ranges>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 namespace Style {
 
-static inline bool shouldApplyPropertyInParseOrder(CSSPropertyID propertyID)
-{
-    switch (propertyID) {
-    case CSSPropertyWebkitBackgroundClip:
-    case CSSPropertyBackgroundClip:
-    case CSSPropertyWebkitBackgroundOrigin:
-    case CSSPropertyBackgroundOrigin:
-    case CSSPropertyWebkitBackgroundSize:
-    case CSSPropertyBackgroundSize:
-    case CSSPropertyWebkitBorderImage:
-    case CSSPropertyBorderImage:
-    case CSSPropertyBorderImageSlice:
-    case CSSPropertyBorderImageSource:
-    case CSSPropertyBorderImageOutset:
-    case CSSPropertyBorderImageRepeat:
-    case CSSPropertyBorderImageWidth:
-    case CSSPropertyWebkitBoxShadow:
-    case CSSPropertyBoxShadow:
-    case CSSPropertyWebkitTextDecoration:
-    case CSSPropertyTextDecorationLine:
-    case CSSPropertyTextDecorationStyle:
-    case CSSPropertyTextDecorationColor:
-    case CSSPropertyTextDecorationSkip:
-    case CSSPropertyTextDecorationSkipInk:
-    case CSSPropertyTextUnderlinePosition:
-    case CSSPropertyTextUnderlineOffset:
-    case CSSPropertyTextDecorationThickness:
-    case CSSPropertyTextDecoration:
-        return true;
-    default:
-        return false;
-    }
-}
+WTF_MAKE_TZONE_ALLOCATED_IMPL(PropertyCascade);
 
-PropertyCascade::PropertyCascade(const MatchResult& matchResult, CascadeLevel maximumCascadeLevel, IncludedProperties includedProperties, Direction direction)
+PropertyCascade::PropertyCascade(const MatchResult& matchResult, CascadeLevel maximumCascadeLevel, IncludedProperties&& includedProperties, const HashSet<AnimatableCSSProperty>* animatedProperties, const StyleProperties* positionTryFallbackProperties)
     : m_matchResult(matchResult)
-    , m_includedProperties(includedProperties)
+    , m_includedProperties(WTFMove(includedProperties))
     , m_maximumCascadeLevel(maximumCascadeLevel)
-    , m_direction(direction)
+    , m_animationLayer(animatedProperties ? std::optional { AnimationLayer { *animatedProperties } } : std::nullopt)
 {
+    ASSERT(!m_includedProperties.isEmpty());
+
+    if (positionTryFallbackProperties)
+        m_positionTryFallbackProperties = MatchedProperties { *positionTryFallbackProperties };
+
     buildCascade();
 }
 
-PropertyCascade::PropertyCascade(const PropertyCascade& parent, CascadeLevel maximumCascadeLevel, std::optional<CascadeLayerPriority> maximumCascadeLayerPriorityForRollback)
+PropertyCascade::PropertyCascade(const PropertyCascade& parent, CascadeLevel maximumCascadeLevel, std::optional<ScopeOrdinal> rollbackScope, std::optional<CascadeLayerPriority> maximumCascadeLayerPriorityForRollback)
     : m_matchResult(parent.m_matchResult)
-    , m_includedProperties(parent.m_includedProperties)
+    , m_includedProperties(normalProperties()) // Include all properties to the rollback cascade, lower prority layers may not get included otherwise.
     , m_maximumCascadeLevel(maximumCascadeLevel)
+    , m_rollbackScope(rollbackScope)
     , m_maximumCascadeLayerPriorityForRollback(maximumCascadeLayerPriorityForRollback)
-    , m_direction(parent.direction())
-    , m_directionIsUnresolved(false)
+    , m_animationLayer(parent.m_animationLayer)
+    , m_positionTryFallbackProperties(parent.m_positionTryFallbackProperties)
 {
     buildCascade();
 }
 
 PropertyCascade::~PropertyCascade() = default;
+
+PropertyCascade::AnimationLayer::AnimationLayer(const HashSet<AnimatableCSSProperty>& properties)
+    : properties(properties)
+{
+    hasCustomProperties = std::ranges::find_if(properties, [](auto& property) {
+        return std::holds_alternative<AtomString>(property);
+    }) != properties.end();
+
+    hasFontSize = properties.contains(CSSPropertyFontSize);
+    hasLineHeight = properties.contains(CSSPropertyLineHeight);
+}
 
 void PropertyCascade::buildCascade()
 {
@@ -106,11 +94,16 @@ void PropertyCascade::buildCascade()
             cascadeLevelsWithImportant.add(cascadeLevel);
     }
 
+    if (m_positionTryFallbackProperties)
+        addPositionTryFallbackProperties();
+
     for (auto cascadeLevel : { CascadeLevel::Author, CascadeLevel::User, CascadeLevel::UserAgent }) {
         if (!cascadeLevelsWithImportant.contains(cascadeLevel))
             continue;
         addImportantMatches(cascadeLevel);
     }
+
+    sortLogicalGroupPropertyIDs();
 }
 
 void PropertyCascade::setPropertyInternal(Property& property, CSSPropertyID id, CSSValue& cssValue, const MatchedProperties& matchedProperties, CascadeLevel cascadeLevel)
@@ -123,110 +116,240 @@ void PropertyCascade::setPropertyInternal(Property& property, CSSPropertyID id, 
     property.fromStyleAttribute = matchedProperties.fromStyleAttribute;
 
     if (matchedProperties.linkMatchType == SelectorChecker::MatchAll) {
-        property.cssValue[0] = &cssValue;
+        property.cascadeLevels[SelectorChecker::MatchDefault] = cascadeLevel;
+        property.cssValue[SelectorChecker::MatchDefault] = &cssValue;
+
+        property.cascadeLevels[SelectorChecker::MatchLink] = cascadeLevel;
         property.cssValue[SelectorChecker::MatchLink] = &cssValue;
+
+        property.cascadeLevels[SelectorChecker::MatchVisited] = cascadeLevel;
         property.cssValue[SelectorChecker::MatchVisited] = &cssValue;
-    } else
+    } else {
+        property.cascadeLevels[matchedProperties.linkMatchType] = cascadeLevel;
         property.cssValue[matchedProperties.linkMatchType] = &cssValue;
+    }
 }
 
 void PropertyCascade::set(CSSPropertyID id, CSSValue& cssValue, const MatchedProperties& matchedProperties, CascadeLevel cascadeLevel)
 {
-    if (CSSProperty::isDirectionAwareProperty(id)) {
-        auto direction = this->direction();
-        id = CSSProperty::resolveDirectionAwareProperty(id, direction.textDirection, direction.writingMode);
-    }
+    ASSERT(!CSSProperty::isInLogicalPropertyGroup(id));
+    ASSERT(id < firstLogicalGroupProperty);
 
-    ASSERT(!shouldApplyPropertyInParseOrder(id));
-
-    auto& property = m_properties[id];
     ASSERT(id < m_propertyIsPresent.size());
     if (id == CSSPropertyCustom) {
         m_propertyIsPresent.set(id);
         const auto& customValue = downcast<CSSCustomPropertyValue>(cssValue);
-        bool hasValue = m_customProperties.contains(customValue.name());
-        if (!hasValue) {
+        auto result = m_customProperties.ensure(customValue.name(), [&]() {
             Property property;
-            property.id = id;
-            memset(property.cssValue, 0, sizeof(property.cssValue));
+            property.cssValue = { };
             setPropertyInternal(property, id, cssValue, matchedProperties, cascadeLevel);
-            m_customProperties.set(customValue.name(), property);
-        } else {
-            Property property = customProperty(customValue.name());
-            setPropertyInternal(property, id, cssValue, matchedProperties, cascadeLevel);
-            m_customProperties.set(customValue.name(), property);
-        }
+            return property;
+        });
+        if (!result.isNewEntry)
+            setPropertyInternal(result.iterator->value, id, cssValue, matchedProperties, cascadeLevel);
         return;
     }
 
-    if (!m_propertyIsPresent[id])
-        memset(property.cssValue, 0, sizeof(property.cssValue));
-    m_propertyIsPresent.set(id);
+    auto& property = m_properties[id];
+    if (!m_propertyIsPresent.testAndSet(id))
+        property.cssValue = { };
     setPropertyInternal(property, id, cssValue, matchedProperties, cascadeLevel);
 }
 
-void PropertyCascade::setDeferred(CSSPropertyID id, CSSValue& cssValue, const MatchedProperties& matchedProperties, CascadeLevel cascadeLevel)
+void PropertyCascade::setLogicalGroupProperty(CSSPropertyID id, CSSValue& cssValue, const MatchedProperties& matchedProperties, CascadeLevel cascadeLevel)
 {
-    ASSERT(!CSSProperty::isDirectionAwareProperty(id));
-    ASSERT(shouldApplyPropertyInParseOrder(id));
+    ASSERT(id >= firstLogicalGroupProperty);
+    ASSERT(id <= lastLogicalGroupProperty);
 
-    Property property;
-    memset(property.cssValue, 0, sizeof(property.cssValue));
+    auto& property = m_properties[id];
+    if (!hasLogicalGroupProperty(id)) {
+        property.cssValue = { };
+        m_lowestSeenLogicalGroupProperty = std::min(m_lowestSeenLogicalGroupProperty, id);
+        m_highestSeenLogicalGroupProperty = std::max(m_highestSeenLogicalGroupProperty, id);
+    }
+    setLogicalGroupPropertyIndex(id, ++m_lastIndexForLogicalGroup);
     setPropertyInternal(property, id, cssValue, matchedProperties, cascadeLevel);
-    m_deferredProperties.append(property);
 }
 
-
-bool PropertyCascade::addMatch(const MatchedProperties& matchedProperties, CascadeLevel cascadeLevel, bool important)
+bool PropertyCascade::hasProperty(CSSPropertyID propertyID, const CSSValue& value)
 {
-    auto skipForRollback = [&] {
-        if (!m_maximumCascadeLayerPriorityForRollback)
-            return false;
-        if (matchedProperties.styleScopeOrdinal != ScopeOrdinal::Element)
-            return false;
-        if (cascadeLevel < m_maximumCascadeLevel)
-            return false;
-        if (matchedProperties.fromStyleAttribute == FromStyleAttribute::Yes)
+    if (propertyID == CSSPropertyCustom)
+        return hasCustomProperty(downcast<CSSCustomPropertyValue>(value).name());
+    return propertyID < firstLogicalGroupProperty ? hasNormalProperty(propertyID) : hasLogicalGroupProperty(propertyID);
+}
+
+bool PropertyCascade::mayOverrideExistingProperty(CSSPropertyID propertyID, const CSSValue& value)
+{
+    if (propertyID == CSSPropertyCustom)
+        return hasCustomProperty(downcast<CSSCustomPropertyValue>(value).name());
+    if (propertyID < firstLogicalGroupProperty)
+        return hasNormalProperty(propertyID);
+
+    // Apply all logical group properties if we have applied any. They may override the ones we already applied.
+    // FIXME: This could check if any existing properties are actually in the same group.
+    return !!m_lastIndexForLogicalGroup;
+}
+
+const PropertyCascade::Property* PropertyCascade::lastPropertyResolvingLogicalPropertyPair(CSSPropertyID propertyID, WritingMode writingMode) const
+{
+    ASSERT(CSSProperty::isInLogicalPropertyGroup(propertyID));
+
+    auto pairID = [&] {
+        if (CSSProperty::isDirectionAwareProperty(propertyID))
+            return CSSProperty::resolveDirectionAwareProperty(propertyID, writingMode);
+        return CSSProperty::unresolvePhysicalProperty(propertyID, writingMode);
+    }();
+    ASSERT(pairID != CSSPropertyInvalid);
+
+    auto indexForPropertyID = logicalGroupPropertyIndex(propertyID);
+    auto indexForPairID = logicalGroupPropertyIndex(pairID);
+    if (indexForPropertyID > indexForPairID)
+        return &logicalGroupProperty(propertyID);
+    if (indexForPropertyID < indexForPairID)
+        return &logicalGroupProperty(pairID);
+    ASSERT(!hasLogicalGroupProperty(propertyID));
+    ASSERT(!hasLogicalGroupProperty(pairID));
+    return nullptr;
+}
+
+bool PropertyCascade::addMatch(const MatchedProperties& matchedProperties, CascadeLevel cascadeLevel, IsImportant important)
+{
+    auto includePropertiesForRollback = [&] {
+        if (m_rollbackScope && matchedProperties.styleScopeOrdinal > *m_rollbackScope)
             return true;
-        return matchedProperties.cascadeLayerPriority > *m_maximumCascadeLayerPriorityForRollback;
+        if (cascadeLevel < m_maximumCascadeLevel)
+            return true;
+        if (matchedProperties.fromStyleAttribute == FromStyleAttribute::Yes)
+            return false;
+        return matchedProperties.cascadeLayerPriority <= *m_maximumCascadeLayerPriorityForRollback;
     };
-    if (skipForRollback())
+    if (m_maximumCascadeLayerPriorityForRollback && !includePropertiesForRollback())
         return false;
 
-    auto& styleProperties = *matchedProperties.properties;
+    if (matchedProperties.isStartingStyle == IsStartingStyle::Yes && !m_includedProperties.types.contains(PropertyType::StartingStyle))
+        return false;
+
     auto propertyAllowlist = matchedProperties.allowlistType;
     bool hasImportantProperties = false;
 
-    for (unsigned i = 0, count = styleProperties.propertyCount(); i < count; ++i) {
-        auto current = styleProperties.propertyAt(i);
-
+    for (auto current : matchedProperties.properties.get()) {
         if (current.isImportant())
             hasImportantProperties = true;
-        if (important != current.isImportant())
+        if ((important == IsImportant::No && current.isImportant()) || (important == IsImportant::Yes && !current.isImportant()))
             continue;
 
-        if (m_includedProperties == IncludedProperties::InheritedOnly && !current.isInherited()) {
-            // Inherited only mode is used after matched properties cache hit.
-            // A match with a value that is explicitly inherited should never have been cached.
-            ASSERT(!current.value()->isInheritValue());
-            continue;
-        }
-        CSSPropertyID propertyID = current.id();
+        auto propertyID = cascadeAliasProperty(current.id());
 
+        auto shouldIncludeProperty = [&] {
 #if ENABLE(VIDEO)
         if (propertyAllowlist == PropertyAllowlist::Cue && !isValidCueStyleProperty(propertyID))
-            continue;
+                return false;
+            if (propertyAllowlist == PropertyAllowlist::CueSelector && !isValidCueSelectorStyleProperty(propertyID))
+                return false;
+            if (propertyAllowlist == PropertyAllowlist::CueBackground && !isValidCueBackgroundStyleProperty(propertyID))
+                return false;
 #endif
         if (propertyAllowlist == PropertyAllowlist::Marker && !isValidMarkerStyleProperty(propertyID))
+                return false;
+
+            if (m_includedProperties.types.containsAll(normalPropertyTypes()))
+                return true;
+
+            if (m_includedProperties.ids.contains(propertyID))
+                return true;
+
+            if (matchedProperties.isCacheable == IsCacheable::Partially && m_includedProperties.types.contains(PropertyType::NonCacheable))
+                return true;
+
+            // If we have applied this property for some reason already we must apply anything that overrides it.
+            if (mayOverrideExistingProperty(propertyID, *current.value()))
+                return true;
+
+            if (m_includedProperties.types.containsAny({ PropertyType::AfterAnimation, PropertyType::AfterTransition })) {
+                if (shouldApplyAfterAnimation(current)) {
+                    m_animationLayer->overriddenProperties.add(propertyID);
+                    return true;
+                }
+                return false;
+            }
+
+            bool currentIsInherited = CSSProperty::isInheritedProperty(current.id());
+            if (m_includedProperties.types.contains(PropertyType::Inherited) && currentIsInherited)
+                return true;
+            if (m_includedProperties.types.contains(PropertyType::ExplicitlyInherited) && isValueID(*current.value(), CSSValueInherit))
+                return true;
+            if (m_includedProperties.types.contains(PropertyType::NonInherited) && !currentIsInherited)
+                return true;
+
+            return false;
+        }();
+
+        if (!shouldIncludeProperty)
             continue;
 
-        if (shouldApplyPropertyInParseOrder(propertyID))
-            setDeferred(propertyID, *current.value(), matchedProperties, cascadeLevel);
-        else
+        if (propertyID < firstLogicalGroupProperty)
             set(propertyID, *current.value(), matchedProperties, cascadeLevel);
+        else
+            setLogicalGroupProperty(propertyID, *current.value(), matchedProperties, cascadeLevel);
     }
 
     return hasImportantProperties;
+}
+
+bool PropertyCascade::shouldApplyAfterAnimation(const StyleProperties::PropertyReference& property)
+{
+    ASSERT(m_animationLayer);
+
+    auto id = property.id();
+    auto* customProperty = dynamicDowncast<CSSCustomPropertyValue>(*property.value());
+
+    auto isAnimatedProperty = [&] {
+        if (customProperty)
+            return m_animationLayer->properties.contains(customProperty->name());
+        return m_animationLayer->properties.contains(id);
+    }();
+
+    if (isAnimatedProperty) {
+        // "Important declarations from all origins take precedence over animations."
+        // https://drafts.csswg.org/css-cascade-5/#importance
+        return m_includedProperties.types.contains(PropertyType::AfterAnimation) && property.isImportant();
+    }
+
+    // If we are animating custom properties they may affect other properties so we need to re-resolve them.
+    if (m_animationLayer->hasCustomProperties) {
+        // We could check if the we are actually animating the referenced variable. Indirect cases would need to be taken into account.
+        if (customProperty && customProperty->isVariableReference())
+            return true;
+        if (property.value()->hasVariableReferences())
+            return true;
+    }
+
+    // Check for 'em' units and similar property dependencies.
+    if (m_animationLayer->hasFontSize || m_animationLayer->hasLineHeight) {
+        auto dependencies = property.value()->computedStyleDependencies();
+        if (m_animationLayer->hasFontSize && dependencies.properties.contains(CSSPropertyFontSize))
+            return true;
+        if (m_animationLayer->hasLineHeight && dependencies.properties.contains(CSSPropertyLineHeight))
+            return true;
+    }
+
+    return false;
+}
+
+void PropertyCascade::addPositionTryFallbackProperties()
+{
+    ASSERT(m_positionTryFallbackProperties);
+
+    // "All of the properties in a @position-try are applied to the box as part of the Position Fallback Origin,
+    // a new cascade origin that lies between the Author Origin and the Animation Origin"
+    // https://drafts.csswg.org/css-anchor-position-1/#fallback-rule
+    // FIXME: Use own cascade origin. This matters for revert-layer.
+    if (m_maximumCascadeLevel < CascadeLevel::Author)
+        return;
+
+    // "It is invalid to use !important on the properties in the <declaration-list>."
+    // FIXME: "Doing so causes the property it is used on to become invalid."
+    addMatch(*m_positionTryFallbackProperties, CascadeLevel::Author, IsImportant::No);
 }
 
 static auto& declarationsForCascadeLevel(const MatchResult& matchResult, CascadeLevel cascadeLevel)
@@ -244,15 +367,15 @@ bool PropertyCascade::addNormalMatches(CascadeLevel cascadeLevel)
 {
     bool hasImportant = false;
     for (auto& matchedDeclarations : declarationsForCascadeLevel(m_matchResult, cascadeLevel))
-        hasImportant |= addMatch(matchedDeclarations, cascadeLevel, false);
+        hasImportant |= addMatch(matchedDeclarations, cascadeLevel, IsImportant::No);
 
     return hasImportant;
 }
 
 static bool hasImportantProperties(const StyleProperties& properties)
 {
-    for (unsigned i = 0, count = properties.propertyCount(); i < count; ++i) {
-        if (properties.propertyAt(i).isImportant())
+    for (auto property : properties) {
+        if (property.isImportant())
             return true;
     }
     return false;
@@ -274,7 +397,7 @@ void PropertyCascade::addImportantMatches(CascadeLevel cascadeLevel)
     for (unsigned i = 0; i < matchedDeclarations.size(); ++i) {
         const MatchedProperties& matchedProperties = matchedDeclarations[i];
 
-        if (!hasImportantProperties(*matchedProperties.properties))
+        if (!hasImportantProperties(matchedProperties.properties))
             continue;
 
         importantMatches.append({ i, matchedProperties.styleScopeOrdinal, matchedProperties.cascadeLayerPriority, matchedProperties.fromStyleAttribute });
@@ -288,7 +411,7 @@ void PropertyCascade::addImportantMatches(CascadeLevel cascadeLevel)
 
     if (hasMatchesFromOtherScopesOrLayers) {
         // Match results are sorted in reverse tree context order so this is not needed for normal properties.
-        std::stable_sort(importantMatches.begin(), importantMatches.end(), [] (auto& a, auto& b) {
+        std::ranges::stable_sort(importantMatches, [](auto& a, auto& b) {
             // For !important properties a later shadow tree wins.
             if (a.ordinal != b.ordinal)
                 return a.ordinal < b.ordinal;
@@ -300,52 +423,29 @@ void PropertyCascade::addImportantMatches(CascadeLevel cascadeLevel)
     }
 
     for (auto& match : importantMatches)
-        addMatch(matchedDeclarations[match.index], cascadeLevel, true);
+        addMatch(matchedDeclarations[match.index], cascadeLevel, IsImportant::Yes);
 }
 
-PropertyCascade::Direction PropertyCascade::resolveDirectionAndWritingMode(Direction inheritedDirection) const
+void PropertyCascade::sortLogicalGroupPropertyIDs()
 {
-    Direction result = inheritedDirection;
-
-    bool hadImportantWritingMode = false;
-    bool hadImportantDirection = false;
-
-    for (auto cascadeLevel : { CascadeLevel::UserAgent, CascadeLevel::User, CascadeLevel::Author }) {
-        for (const auto& matchedProperties : declarationsForCascadeLevel(m_matchResult, cascadeLevel)) {
-            for (unsigned i = 0, count = matchedProperties.properties->propertyCount(); i < count; ++i) {
-                auto property = matchedProperties.properties->propertyAt(i);
-                if (!property.value()->isPrimitiveValue() || property.value()->isCSSWideKeyword())
-                    continue;
-                switch (property.id()) {
-                case CSSPropertyWritingMode:
-                    if (!hadImportantWritingMode || property.isImportant()) {
-                        result.writingMode = downcast<CSSPrimitiveValue>(*property.value());
-                        hadImportantWritingMode = property.isImportant();
-                    }
-                    break;
-                case CSSPropertyDirection:
-                    if (!hadImportantDirection || property.isImportant()) {
-                        result.textDirection = downcast<CSSPrimitiveValue>(*property.value());
-                        hadImportantDirection = property.isImportant();
-                    }
-                    break;
-                default:
-                    break;
-                }
-            }
-        }
+    size_t endIndex = 0;
+    for (uint16_t id = m_lowestSeenLogicalGroupProperty; id <= m_highestSeenLogicalGroupProperty; ++id) {
+        auto propertyID = static_cast<CSSPropertyID>(id);
+        if (hasLogicalGroupProperty(propertyID))
+            m_logicalGroupPropertyIDs[endIndex++] = propertyID;
     }
-
-    return result;
+    m_seenLogicalGroupPropertyCount = endIndex;
+    auto logicalGroupPropertyIDs = std::span { m_logicalGroupPropertyIDs }.first(endIndex);
+    std::ranges::sort(logicalGroupPropertyIDs, [&](auto id1, auto id2) {
+        return logicalGroupPropertyIndex(id1) < logicalGroupPropertyIndex(id2);
+    });
 }
 
-PropertyCascade::Direction PropertyCascade::direction() const
+const HashSet<AnimatableCSSProperty> PropertyCascade::overriddenAnimatedProperties() const
 {
-    if (m_directionIsUnresolved) {
-        m_direction = resolveDirectionAndWritingMode(m_direction);
-        m_directionIsUnresolved = false;
-    }
-    return m_direction;
+    if (m_animationLayer)
+        return m_animationLayer->overriddenProperties;
+    return { };
 }
 
 }

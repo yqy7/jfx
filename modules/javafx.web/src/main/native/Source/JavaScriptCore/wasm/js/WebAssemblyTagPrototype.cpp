@@ -43,7 +43,7 @@ static JSC_DECLARE_HOST_FUNCTION(webAssemblyTagProtoFuncType);
 
 namespace JSC {
 
-const ClassInfo WebAssemblyTagPrototype::s_info = { "WebAssembly.Tag", &Base::s_info, &prototypeTableWebAssemblyTag, nullptr, CREATE_METHOD_TABLE(WebAssemblyTagPrototype) };
+const ClassInfo WebAssemblyTagPrototype::s_info = { "WebAssembly.Tag"_s, &Base::s_info, &prototypeTableWebAssemblyTag, nullptr, CREATE_METHOD_TABLE(WebAssemblyTagPrototype) };
 
 /* Source for WebAssemblyTagPrototype.lut.h
  @begin prototypeTableWebAssemblyTag
@@ -67,7 +67,7 @@ Structure* WebAssemblyTagPrototype::createStructure(VM& vm, JSGlobalObject* glob
 void WebAssemblyTagPrototype::finishCreation(VM& vm)
 {
     Base::finishCreation(vm);
-    ASSERT(inherits(vm, info()));
+    ASSERT(inherits(info()));
     JSC_TO_STRING_TAG_WITHOUT_TRANSITION();
 }
 
@@ -81,12 +81,12 @@ ALWAYS_INLINE static JSWebAssemblyTag* getTag(JSGlobalObject* globalObject, JSVa
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    if (UNLIKELY(!thisValue.isCell())) {
+    if (!thisValue.isCell()) [[unlikely]] {
         throwVMError(globalObject, scope, createNotAnObjectError(globalObject, thisValue));
         return nullptr;
     }
-    auto* tag = jsDynamicCast<JSWebAssemblyTag*>(vm, thisValue.asCell());
-    if (LIKELY(tag))
+    auto* tag = jsDynamicCast<JSWebAssemblyTag*>(thisValue.asCell());
+    if (tag) [[likely]]
         return tag;
     throwTypeError(globalObject, scope, "WebAssembly.Tag operation called on non-Tag object"_s);
     return nullptr;
@@ -103,17 +103,22 @@ JSC_DEFINE_HOST_FUNCTION(webAssemblyTagProtoFuncType, (JSGlobalObject* globalObj
     const Wasm::Tag& tag = jsTag->tag();
 
     MarkedArgumentBuffer argList;
-    for (size_t i = 0; i < tag.parameterCount(); ++i)
-        argList.append(Wasm::typeToString(vm, tag.parameter(i).kind));
+    argList.ensureCapacity(tag.parameterCount());
+    for (size_t i = 0; i < tag.parameterCount(); ++i) {
+        JSString* valueString = typeToJSAPIString(vm, tag.parameter(i));
+        if (!valueString)
+            return throwVMTypeError(globalObject, throwScope, "WebAssembly.Tag.prototype.type unable to produce type descriptor for the given tag"_s);
+        argList.append(valueString);
+    }
 
-    if (UNLIKELY(argList.hasOverflowed())) {
+    if (argList.hasOverflowed()) [[unlikely]] {
         throwOutOfMemoryError(globalObject, throwScope);
         return encodedJSValue();
     }
 
     JSArray* parameters = constructArray(globalObject, static_cast<ArrayAllocationProfile*>(nullptr), argList);
     JSObject* type = constructEmptyObject(globalObject, globalObject->objectPrototype(), 1);
-    type->putDirect(vm, Identifier::fromString(vm, "parameters"), parameters);
+    type->putDirect(vm, Identifier::fromString(vm, "parameters"_s), parameters);
 
     RETURN_IF_EXCEPTION(throwScope, encodedJSValue());
     RELEASE_AND_RETURN(throwScope, JSValue::encode(type));

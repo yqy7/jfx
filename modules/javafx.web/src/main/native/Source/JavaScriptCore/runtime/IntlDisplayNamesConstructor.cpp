@@ -42,7 +42,7 @@ static JSC_DECLARE_HOST_FUNCTION(intlDisplayNamesConstructorSupportedLocalesOf);
 
 namespace JSC {
 
-const ClassInfo IntlDisplayNamesConstructor::s_info = { "Function", &Base::s_info, &displayNamesConstructorTable, nullptr, CREATE_METHOD_TABLE(IntlDisplayNamesConstructor) };
+const ClassInfo IntlDisplayNamesConstructor::s_info = { "Function"_s, &Base::s_info, &displayNamesConstructorTable, nullptr, CREATE_METHOD_TABLE(IntlDisplayNamesConstructor) };
 
 /* Source for IntlDisplayNamesConstructor.lut.h
 @begin displayNamesConstructorTable
@@ -101,7 +101,7 @@ JSC_DEFINE_HOST_FUNCTION(callIntlDisplayNames, (JSGlobalObject* globalObject, Ca
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "DisplayNames"));
+    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "DisplayNames"_s));
 }
 
 JSC_DEFINE_HOST_FUNCTION(intlDisplayNamesConstructorSupportedLocalesOf, (JSGlobalObject* globalObject, CallFrame* callFrame))

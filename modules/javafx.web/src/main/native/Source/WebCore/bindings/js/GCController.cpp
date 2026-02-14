@@ -29,15 +29,17 @@
 #include "CommonVM.h"
 #include "JSHTMLDocument.h"
 #include "Location.h"
+#include "WorkerGlobalScope.h"
 #include <JavaScriptCore/Heap.h>
 #include <JavaScriptCore/HeapSnapshotBuilder.h>
 #include <JavaScriptCore/JSLock.h>
 #include <JavaScriptCore/VM.h>
 #include <pal/Logging.h>
-#include <wtf/FastMalloc.h>
+#include <wtf/FileHandle.h>
 #include <wtf/FileSystem.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 using namespace JSC;
@@ -47,6 +49,8 @@ static void collect()
     JSLockHolder lock(commonVM());
     commonVM().heap.collectNow(Async, CollectionScope::Full);
 }
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(GCController);
 
 GCController& GCController::singleton()
 {
@@ -59,7 +63,7 @@ GCController::GCController()
 {
     static std::once_flag onceFlag;
     std::call_once(onceFlag, [] {
-        PAL::registerNotifyCallback("com.apple.WebKit.dumpGCHeap", [] {
+        PAL::registerNotifyCallback("com.apple.WebKit.dumpGCHeap"_s, [] {
             GCController::singleton().dumpHeap();
         });
     });
@@ -67,15 +71,8 @@ GCController::GCController()
 
 void GCController::garbageCollectSoon()
 {
-    // We only use reportAbandonedObjectGraph for systems for which there's an implementation
-    // of the garbage collector timers in JavaScriptCore. We wouldn't need this if JavaScriptCore
-    // used a timer implementation from WTF like RunLoop::Timer.
-#if USE(CF) || USE(GLIB)
     JSLockHolder lock(commonVM());
     commonVM().heap.reportAbandonedObjectGraph();
-#else
-    garbageCollectOnNextRunLoop();
-#endif
 }
 
 void GCController::garbageCollectOnNextRunLoop()
@@ -100,18 +97,14 @@ void GCController::garbageCollectNow()
 
 void GCController::garbageCollectNowIfNotDoneRecently()
 {
-#if USE(CF) || USE(GLIB)
     JSLockHolder lock(commonVM());
     if (!commonVM().heap.currentThreadIsDoingGCWork())
         commonVM().heap.collectNowFullIfNotDoneRecently(Async);
-#else
-    garbageCollectSoon();
-#endif
 }
 
 void GCController::garbageCollectOnAlternateThreadForDebugging(bool waitUntilDone)
 {
-    auto thread = Thread::create("WebCore: GCController", &collect, ThreadType::GarbageCollection);
+    auto thread = Thread::create("WebCore: GCController"_s, &collect, ThreadType::GarbageCollection);
 
     if (waitUntilDone) {
         thread->waitForCompletion();
@@ -138,18 +131,15 @@ void GCController::deleteAllLinkedCode(DeleteAllCodeEffort effort)
     commonVM().deleteAllLinkedCode(effort);
 }
 
-void GCController::dumpHeap()
+void GCController::dumpHeapForVM(VM& vm)
 {
-    FileSystem::PlatformFileHandle fileHandle;
-    String tempFilePath = FileSystem::openTemporaryFile("GCHeap"_s, fileHandle);
-    if (!FileSystem::isHandleValid(fileHandle)) {
+    auto [tempFilePath, fileHandle] = FileSystem::openTemporaryFile("GCHeap"_s);
+    if (!fileHandle) {
         WTFLogAlways("Dumping GC heap failed to open temporary file");
         return;
     }
 
-    VM& vm = commonVM();
     JSLockHolder lock(vm);
-
     sanitizeStackForVM(vm);
 
     String jsonData;
@@ -164,10 +154,14 @@ void GCController::dumpHeap()
 
     CString utf8String = jsonData.utf8();
 
-    FileSystem::writeToFile(fileHandle, utf8String.data(), utf8String.length());
-    FileSystem::closeFile(fileHandle);
+    fileHandle.write(byteCast<uint8_t>(utf8String.span()));
+    WTFLogAlways("Dumped GC heap to %s%s", tempFilePath.utf8().data(), isMainThread() ? "" : " for Worker");
+}
 
-    WTFLogAlways("Dumped GC heap to %s", tempFilePath.utf8().data());
+void GCController::dumpHeap()
+{
+    dumpHeapForVM(commonVM());
+    WorkerGlobalScope::dumpGCHeapForWorkers();
 }
 
 } // namespace WebCore

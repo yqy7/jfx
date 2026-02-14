@@ -149,7 +149,7 @@ std::optional<CDMKeySystemConfiguration> CDMPrivate::getSupportedConfiguration(c
     // 3. If the initDataTypes member of candidate configuration is non-empty, run the following steps:
     if (!candidateConfiguration.initDataTypes.isEmpty()) {
         // 3.1. Let supported types be an empty sequence of DOMStrings.
-        Vector<String> supportedTypes;
+        Vector<AtomString> supportedTypes;
 
         // 3.2. For each value in candidate configuration's initDataTypes member:
         for (auto initDataType : candidateConfiguration.initDataTypes) {
@@ -386,12 +386,12 @@ std::optional<Vector<CDMMediaCapability>> CDMPrivate::getSupportedCapabilitiesFo
             return std::nullopt;
 
         // 3.4. If content type is an invalid or unrecognized MIME type, continue to the next iteration.
-        std::optional<ParsedContentType> contentType = ParsedContentType::create(requestedCapability.contentType, Mode::Rfc2045);
+        auto contentType = ParsedContentType::create(requestedCapability.contentType);
         if (!contentType)
             continue;
 
         // 3.5. Let container be the container type specified by content type.
-        String container = contentType->mimeType();
+        auto container = contentType->mimeType();
 
         // 3.6. If the user agent does not support container, continue to the next iteration. The case-sensitivity
         //      of string comparisons is determined by the appropriate RFC.
@@ -399,7 +399,7 @@ std::optional<Vector<CDMMediaCapability>> CDMPrivate::getSupportedCapabilitiesFo
         // 3.8. If the user agent does not recognize one or more parameters, continue to the next iteration.
         // 3.9. Let media types be the set of codecs and codec constraints specified by parameters. The case-sensitivity
         //      of string comparisons is determined by the appropriate RFC or other specification.
-        String codecs = contentType->parameterValueForName("codecs");
+        auto codecs = contentType->parameterValueForName("codecs"_s);
         if (contentType->parameterCount() > (codecs.isEmpty() ? 0 : 1))
             continue;
 

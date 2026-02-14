@@ -30,21 +30,24 @@
 #if ENABLE(WEB_AUTHN)
 
 #include "Document.h"
-#include "Frame.h"
+#include "LocalFrame.h"
 #include "Navigator.h"
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(NavigatorCredentials);
 
 NavigatorCredentials::NavigatorCredentials() = default;
 
 NavigatorCredentials::~NavigatorCredentials() = default;
 
-const char* NavigatorCredentials::supplementName()
+ASCIILiteral NavigatorCredentials::supplementName()
 {
-    return "NavigatorCredentials";
+    return "NavigatorCredentials"_s;
 }
 
-CredentialsContainer* NavigatorCredentials::credentials(WeakPtr<Document>&& document)
+CredentialsContainer* NavigatorCredentials::credentials(WeakPtr<Document, WeakPtrImplWithEventTargetData>&& document)
 {
     if (!m_credentialsContainer)
         m_credentialsContainer = CredentialsContainer::create(WTFMove(document));

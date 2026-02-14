@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2022 Metrological Group B.V.
- * Copyright (C) 2022 Igalia S.L.
+ * Copyright (C) 2025 Igalia S.L.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,69 +26,43 @@
 #include "config.h"
 #include "GBMDevice.h"
 
-#if USE(ANGLE) && USE(NICOSIA)
-
+#if USE(GBM)
 #include <fcntl.h>
 #include <gbm.h>
-#include <mutex>
-#include <wtf/ThreadSpecific.h>
-#include <xf86drm.h>
+#include <unistd.h>
+#include <wtf/SafeStrerror.h>
+#include <wtf/StdLibExtras.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
-static ThreadSpecific<GBMDevice>& threadSpecificDevice()
+RefPtr<GBMDevice> GBMDevice::create(const CString& filename)
 {
-    static ThreadSpecific<GBMDevice>* s_gbmDevice;
-    static std::once_flag s_onceFlag;
-    std::call_once(s_onceFlag,
-        [] {
-            s_gbmDevice = new ThreadSpecific<GBMDevice>;
-        });
-    return *s_gbmDevice;
+    RELEASE_ASSERT(isMainThread());
+    auto fd = UnixFileDescriptor { open(filename.data(), O_RDWR | O_CLOEXEC), UnixFileDescriptor::Adopt };
+    if (!fd) {
+        WTFLogAlways("Failed to open DRM node %s: %s", filename.data(), safeStrerror(errno).data());
+        return nullptr;
+    }
+    auto* device = gbm_create_device(fd.value());
+    if (!device) {
+        WTFLogAlways("Failed to create GBM device for DRM node: %s: %s", filename.data(), safeStrerror(errno).data());
+        return nullptr;
+    }
+    return adoptRef(*new GBMDevice(WTFMove(fd), device));
 }
 
-const GBMDevice& GBMDevice::get()
+GBMDevice::GBMDevice(UnixFileDescriptor&& fd, struct gbm_device* device)
+    : m_fd(WTFMove(fd))
+    , m_device(device)
 {
-    return *threadSpecificDevice();
-}
-
-GBMDevice::GBMDevice()
-{
-    static int s_globalFd { -1 };
-    static std::once_flag s_onceFlag;
-    std::call_once(s_onceFlag, [] {
-        drmDevicePtr devices[64];
-        memset(devices, 0, sizeof(devices));
-
-        int numDevices = drmGetDevices2(0, devices, WTF_ARRAY_LENGTH(devices));
-        if (numDevices <= 0)
-            return;
-
-        for (int i = 0; i < numDevices; ++i) {
-            drmDevice* device = devices[i];
-            if (!(device->available_nodes & (1 << DRM_NODE_RENDER)))
-                continue;
-
-            s_globalFd = open(device->nodes[DRM_NODE_RENDER], O_RDWR | O_CLOEXEC);
-            if (s_globalFd >= 0)
-                break;
-        }
-
-        drmFreeDevices(devices, numDevices);
-    });
-
-    if (s_globalFd >= 0)
-        m_device = gbm_create_device(s_globalFd);
 }
 
 GBMDevice::~GBMDevice()
 {
-    if (m_device) {
-        gbm_device_destroy(m_device);
-        m_device = nullptr;
-    }
+    gbm_device_destroy(m_device);
 }
 
 } // namespace WebCore
 
-#endif // USE(ANGLE) && USE(NICOSIA)
+#endif // USE(GBM)

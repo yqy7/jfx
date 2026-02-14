@@ -34,17 +34,19 @@
 #include <wtf/Threading.h>
 #include <wtf/WordLock.h>
 
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
+
 namespace WTF {
 
 class StackShotProfiler {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(StackShotProfiler);
 public:
     StackShotProfiler(unsigned numFrames, unsigned framesToSkip, unsigned stacksToReport)
         : m_numFrames(numFrames)
         , m_framesToSkip(framesToSkip)
         , m_stacksToReport(stacksToReport)
     {
-        Thread::create("StackShotProfiler", [this] () { run(); });
+        Thread::create("StackShotProfiler"_s, [this] () { run(); });
     }
 
     // NEVER_INLINE so that framesToSkip is predictable.
@@ -56,21 +58,23 @@ public:
     }
 
 private:
-    NO_RETURN void run()
+    [[noreturn]] void run()
     {
         for (;;) {
             sleep(1_s);
             Locker locker { m_lock };
-            auto list = m_profile.buildList();
+            {
+                Locker spectrumLocker { m_profile.getLock() };
+                auto list = m_profile.buildList(spectrumLocker);
             dataLog("\nHottest stacks in ", getCurrentProcessID(), ":\n");
             for (size_t i = list.size(), count = 0; i-- && count < m_stacksToReport; count++) {
                 auto& entry = list[i];
                 dataLog("\nTop #", count + 1, " stack: ", entry.count * 100 / m_totalCount, "%\n");
-                StackTrace trace(entry.key.array() + m_framesToSkip, entry.key.size() - m_framesToSkip);
-                dataLog(trace);
+                    dataLog(StackTracePrinter { { entry.key->array() + m_framesToSkip, entry.key->size() - m_framesToSkip } });
             }
             dataLog("\n");
         }
+    }
     }
 
     WordLock m_lock;
@@ -90,3 +94,4 @@ private:
 
 } // namespace WTF
 
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

@@ -33,6 +33,7 @@
 #include "B3HeapRange.h"
 #include "B3InsertionSetInlines.h"
 #include "B3MemoryValue.h"
+#include "B3MemoryValueInlines.h"
 #include "B3PhaseScope.h"
 #include "B3ProcedureInlines.h"
 #include "B3PureCSE.h"
@@ -79,7 +80,7 @@ public:
     void removeIf(const Functor& functor)
     {
         m_map.removeIf(
-            [&] (HashMap<Value*, Matches>::KeyValuePairType& entry) -> bool {
+            [&] (UncheckedKeyHashMap<Value*, Matches>::KeyValuePairType& entry) -> bool {
                 entry.value.removeAllMatching(
                     [&] (Value* value) -> bool {
                         if (MemoryValue* memory = value->as<MemoryValue>())
@@ -120,11 +121,11 @@ public:
 
     void dump(PrintStream& out) const
     {
-        out.print("{");
+        out.print("{"_s);
         CommaPrinter comma;
         for (auto& entry : m_map)
-            out.print(comma, pointerDump(entry.key), "=>", pointerListDump(entry.value));
-        out.print("}");
+            out.print(comma, pointerDump(entry.key), "=>"_s, pointerListDump(entry.value));
+        out.print("}"_s);
     }
 
 private:
@@ -132,7 +133,7 @@ private:
     // - It cannot be a MemoryValue* because the key is imprecise. Many MemoryValues could have the
     //   same key while being unaliased.
     // - It can't be a MemoryMatches array because the MemoryValue*'s could be turned into Identity's.
-    HashMap<Value*, Matches> m_map;
+    UncheckedKeyHashMap<Value*, Matches> m_map;
 };
 
 struct ImpureBlockData {
@@ -152,7 +153,7 @@ struct ImpureBlockData {
     MemoryValueMap memoryValuesAtTail;
 
     // This Maps x->y in "y = WasmAddress(@x)"
-    HashMap<Value*, Value*> m_candidateWasmAddressesAtTail;
+    UncheckedKeyHashMap<Value*, Value*> m_candidateWasmAddressesAtTail;
 };
 
 class CSE {
@@ -249,6 +250,7 @@ private:
         m_value->performSubstitution();
 
         if (m_pureCSE.process(m_value, m_dominators)) {
+            ASSERT(!m_value->effects().readsPinned || !m_data.writesPinned);
             ASSERT(!m_value->effects().writes);
             ASSERT(!m_value->effects().writesPinned);
             m_changed = true;
@@ -276,6 +278,12 @@ private:
 
         if (memory)
             processMemoryAfterClobber(memory);
+
+        // The reads info should be updated even the block is processed
+        // since the dominated store nodes may dependent on the data
+        // read from the processed block. Note that there is no need to
+        // update reads info if the node is deleted.
+        m_data.reads.add(m_value->effects().reads);
     }
 
     // Return true if we got rid of the operation. If you changed IR in this function, you have to
@@ -431,27 +439,53 @@ private:
             handleMemoryValue(
                 ptr, range,
                 [&] (MemoryValue* candidate) -> bool {
-                    if (B3EliminateCommonSubexpressionsInternal::verbose)
-                        dataLog("        Consdering ", pointerDump(candidate), "\n");
+                    dataLogLnIf(B3EliminateCommonSubexpressionsInternal::verbose, "        Consdering ", pointerDump(candidate));
                     if (candidate->offset() != offset)
                         return false;
 
-                    if (B3EliminateCommonSubexpressionsInternal::verbose)
-                        dataLog("            offset ok.\n");
+                    dataLogLnIf(B3EliminateCommonSubexpressionsInternal::verbose, "            offset ok.");
+                    if (candidate->opcode() == Load) {
+                        if (candidate->type() == type)
+                            return true;
+                        if (candidate->type() == Int64 && type == Int32)
+                            return true;
+                    }
 
-                    if (candidate->opcode() == Load && candidate->type() == type)
+                    dataLogLnIf(B3EliminateCommonSubexpressionsInternal::verbose, "            not a load with ok type.");
+                    if (candidate->opcode() == Store) {
+                        if (candidate->child(0)->type() == type)
+                            return true;
+                        if (candidate->child(0)->type() == Int64 && type == Int32)
                         return true;
+                    }
 
-                    if (B3EliminateCommonSubexpressionsInternal::verbose)
-                        dataLog("            not a load with ok type.\n");
-
-                    if (candidate->opcode() == Store && candidate->child(0)->type() == type)
-                        return true;
-
-                    if (B3EliminateCommonSubexpressionsInternal::verbose)
-                        dataLog("            not a store with ok type.\n");
-
+                    dataLogLnIf(B3EliminateCommonSubexpressionsInternal::verbose, "            not a store with ok type.");
                     return false;
+                },
+                [&] (MemoryValue* match, Vector<Value*>& fixups) -> Value* {
+                    if (match->opcode() == Load) {
+                        if (match->type() == type)
+                            return nullptr;
+
+                        if (match->type() == Int64 && type == Int32) {
+                            Value* trunc = m_proc.add<Value>(Trunc, m_value->origin(), match);
+                            fixups.append(trunc);
+                            return trunc;
+                        }
+                    }
+
+                    if (match->opcode() == Store) {
+                        if (match->child(0)->type() == type)
+                            return nullptr;
+
+                        if (match->child(0)->type() == Int64 && type == Int32) {
+                            Value* trunc = m_proc.add<Value>(Trunc, m_value->origin(), match->child(0));
+                            fixups.append(trunc);
+                            return trunc;
+                        }
+                    }
+
+                    return nullptr;
                 });
             break;
         }
@@ -477,11 +511,13 @@ private:
         }
 
         case Store: {
+            auto clobberWidth = memory->accessWidth();
             handleStoreAfterClobber(
                 ptr, range,
                 [&] (MemoryValue* candidate) -> bool {
                     return candidate->opcode() == Store
-                        && candidate->offset() == offset;
+                        && candidate->offset() == offset
+                        && candidate->accessWidth() >= clobberWidth;
                 });
             break;
         }
@@ -725,6 +761,8 @@ private:
         Value* ptr = wasmAddress->child(0);
 
         if (Value* replacement = m_data.m_candidateWasmAddressesAtTail.get(ptr)) {
+            if (B3EliminateCommonSubexpressionsInternal::verbose)
+                dataLog("    Replacing WasmAddress: ", *wasmAddress, " with ", *replacement, "\n");
             wasmAddress->replaceWithIdentity(replacement);
             m_changed = true;
             return;
@@ -759,7 +797,7 @@ private:
         worklist.pushAll(m_block->predecessors());
         while (BasicBlock* block = worklist.pop()) {
             if (block == dominator)
-                break;
+                continue;
             if (m_impureBlockData[block].writesPinned) {
                 candidateReplacement = nullptr;
                 break;
@@ -768,6 +806,8 @@ private:
         }
 
         if (candidateReplacement) {
+            if (B3EliminateCommonSubexpressionsInternal::verbose)
+                dataLog("    Replacing WasmAddress: ", *wasmAddress, " with ", *candidateReplacement, "\n");
             wasmAddress->replaceWithIdentity(candidateReplacement);
             m_changed = true;
         }
@@ -786,7 +826,7 @@ private:
     unsigned m_index;
     Value* m_value;
 
-    HashMap<Value*, Vector<Value*>> m_sets;
+    UncheckedKeyHashMap<Value*, Vector<Value*>> m_sets;
 
     InsertionSet m_insertionSet;
 
@@ -797,7 +837,7 @@ private:
 
 bool eliminateCommonSubexpressions(Procedure& proc)
 {
-    PhaseScope phaseScope(proc, "eliminateCommonSubexpressions");
+    PhaseScope phaseScope(proc, "eliminateCommonSubexpressions"_s);
 
     CSE cse(proc);
     return cse.run();

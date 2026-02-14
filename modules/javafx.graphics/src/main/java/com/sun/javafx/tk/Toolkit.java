@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,7 +28,6 @@ package com.sun.javafx.tk;
 import javafx.application.ConditionalFeature;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.geometry.Dimension2D;
-import javafx.scene.Scene;
 import javafx.scene.effect.BlurType;
 import javafx.scene.image.Image;
 import javafx.scene.image.PixelFormat;
@@ -51,19 +50,14 @@ import javafx.scene.shape.StrokeLineJoin;
 import javafx.scene.shape.StrokeType;
 import javafx.stage.FileChooser.ExtensionFilter;
 import javafx.stage.Modality;
-import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.stage.Window;
 import java.io.File;
-import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -82,7 +76,6 @@ import com.sun.javafx.perf.PerformanceTracker;
 import com.sun.javafx.runtime.VersionInfo;
 import com.sun.javafx.runtime.async.AsyncOperation;
 import com.sun.javafx.runtime.async.AsyncOperationListener;
-import com.sun.javafx.scene.SceneHelper;
 import com.sun.javafx.scene.text.TextLayoutFactory;
 import com.sun.javafx.sg.prism.NGCamera;
 import com.sun.javafx.sg.prism.NGLightBase;
@@ -107,8 +100,7 @@ public abstract class Toolkit {
 
     private static final Map gradientMap = new WeakHashMap();
 
-    @SuppressWarnings("removal")
-    private static final boolean verbose = AccessController.doPrivileged((PrivilegedAction<Boolean>) () -> Boolean.getBoolean("javafx.verbose"));
+    private static final boolean verbose = Boolean.getBoolean("javafx.verbose");
 
     private static final String[] msLibNames = {
         "api-ms-win-core-console-l1-1-0",
@@ -205,13 +197,9 @@ public abstract class Toolkit {
             return TOOLKIT;
         }
 
-        @SuppressWarnings("removal")
-        var dummy = AccessController.doPrivileged((PrivilegedAction<Object>) () -> {
-            // Get the javafx.version and javafx.runtime.version from a preconstructed
-            // java class, VersionInfo, created at build time.
-            VersionInfo.setupSystemProperties();
-            return null;
-        });
+        // Get the javafx.version and javafx.runtime.version from a preconstructed
+        // java class, VersionInfo, created at build time.
+        VersionInfo.setupSystemProperties();
 
         // Load required Microsoft runtime DLLs on Windows platforms
         if (PlatformUtil.isWindows()) {
@@ -221,13 +209,8 @@ public abstract class Toolkit {
         boolean userSpecifiedToolkit = true;
 
         // Check a system property to see if there is a specific toolkit to use.
-        // This is not a doPriviledged check so that applications running
-        // with a security manager cannot use this unless they have permission
-        // to read system properties.
         String forcedToolkit = null;
-        try {
-            forcedToolkit = System.getProperty("javafx.toolkit");
-        } catch (SecurityException ex) {}
+        forcedToolkit = System.getProperty("javafx.toolkit");
 
         if (forcedToolkit == null) {
             forcedToolkit = tk;
@@ -311,11 +294,14 @@ public abstract class Toolkit {
     public abstract boolean init();
 
     /**
-     * Indicates whether or not a nested event loop can be started
-     * from the current thread in the current state. Note that a nested
-     * event loop is not allowed outside of an event handler.
+     * Indicates whether a nested event loop can be started from the current thread in the current state.
+     * A nested event loop can be started from an event handler or from a {@code Runnable} passed to
+     * {@code Platform.runLater(Runnable)}.
+     * This method must be called on the JavaFX Application thread.
      *
-     * @return flag indicating whether a nested event loop can be started.
+     * @return {@code true} if a nested event loop can be started, and {@code false} otherwise.
+     *
+     * @throws IllegalStateException if this method is called on a thread other than the JavaFX Application Thread.
      */
     public abstract boolean canStartNestedEventLoop();
 
@@ -374,73 +360,53 @@ public abstract class Toolkit {
 
     public abstract boolean isNestedLoopRunning();
 
-    public abstract TKStage createTKStage(Window peerWindow, boolean securityDialog, StageStyle stageStyle, boolean primary, Modality modality, TKStage owner, boolean rtl, @SuppressWarnings("removal") AccessControlContext acc);
+    public abstract TKStage createTKStage(Window peerWindow, StageStyle stageStyle, boolean primary,
+                                          Modality modality, TKStage owner, boolean rtl, boolean darkFrame);
 
-    public abstract TKStage createTKPopupStage(Window peerWindow, StageStyle popupStyle, TKStage owner, @SuppressWarnings("removal") AccessControlContext acc);
-    public abstract TKStage createTKEmbeddedStage(HostInterface host, @SuppressWarnings("removal") AccessControlContext acc);
+    public abstract TKStage createTKPopupStage(Window peerWindow, StageStyle popupStyle, TKStage owner);
+    public abstract TKStage createTKEmbeddedStage(HostInterface host);
 
-    @SuppressWarnings("removal")
-    private final Map<TKPulseListener,AccessControlContext> stagePulseListeners =
-            new WeakHashMap<TKPulseListener,AccessControlContext>();
-    @SuppressWarnings("removal")
-    private final Map<TKPulseListener,AccessControlContext> scenePulseListeners =
-            new WeakHashMap<TKPulseListener,AccessControlContext>();
-    @SuppressWarnings("removal")
-    private final Map<TKPulseListener,AccessControlContext> postScenePulseListeners =
-            new WeakHashMap<TKPulseListener,AccessControlContext>();
-    @SuppressWarnings("removal")
-    private final Map<TKListener,AccessControlContext> toolkitListeners =
-            new WeakHashMap<TKListener,AccessControlContext>();
+    // The following collections of listeners is weakly referenced here in order
+    // to allow garbage collection when the listeners are otherwise no longer
+    // referenced.
+    private final Set<TKPulseListener> stagePulseListeners = Collections.newSetFromMap(new WeakHashMap<>());
+    private final Set<TKPulseListener> scenePulseListeners = Collections.newSetFromMap(new WeakHashMap<>());
+    private final Set<TKPulseListener> postScenePulseListeners = Collections.newSetFromMap(new WeakHashMap<>());
+    private final Set<TKListener> toolkitListeners = Collections.newSetFromMap(new WeakHashMap<>());
 
     // The set of shutdown hooks is strongly held to avoid premature GC.
-    private final Set<Runnable> shutdownHooks = new HashSet<Runnable>();
+    private final Set<Runnable> shutdownHooks = new HashSet<>();
 
-    @SuppressWarnings("removal")
-    private void runPulse(final TKPulseListener listener,
-            final AccessControlContext acc) {
-
-        if (acc == null) {
-            throw new IllegalStateException("Invalid AccessControlContext");
-        }
-
-        AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            listener.pulse();
-            return null;
-        }, acc);
+    private void runPulse(final TKPulseListener listener) {
+        listener.pulse();
     }
 
     public void firePulse() {
         // Stages need to be notified of pulses before scenes so the Stage can resized
-        // and those changes propogated to scene before it gets its pulse to update
+        // and those changes propagated to scene before it gets its pulse to update
 
-        // Copy of listener map
-        @SuppressWarnings("removal")
-        final Map<TKPulseListener,AccessControlContext> stagePulseList =
-                new WeakHashMap<TKPulseListener,AccessControlContext>();
-        @SuppressWarnings("removal")
-        final Map<TKPulseListener,AccessControlContext> scenePulseList =
-                new WeakHashMap<TKPulseListener,AccessControlContext>();
-        @SuppressWarnings("removal")
-        final Map<TKPulseListener,AccessControlContext> postScenePulseList =
-                new WeakHashMap<TKPulseListener,AccessControlContext>();
+        // Copy of listener keySet
+        final Set<TKPulseListener> stagePulseList = new HashSet<>();
+        final Set<TKPulseListener> scenePulseList = new HashSet<>();
+        final Set<TKPulseListener> postScenePulseList = new HashSet<>();
 
         synchronized (this) {
-            stagePulseList.putAll(stagePulseListeners);
-            scenePulseList.putAll(scenePulseListeners);
-            postScenePulseList.putAll(postScenePulseListeners);
+            stagePulseList.addAll(stagePulseListeners);
+            scenePulseList.addAll(scenePulseListeners);
+            postScenePulseList.addAll(postScenePulseListeners);
         }
-        for (@SuppressWarnings("removal") Map.Entry<TKPulseListener,AccessControlContext> entry : stagePulseList.entrySet()) {
-            runPulse(entry.getKey(), entry.getValue());
+        for (TKPulseListener listener : stagePulseList) {
+            runPulse(listener);
         }
-        for (@SuppressWarnings("removal") Map.Entry<TKPulseListener,AccessControlContext> entry : scenePulseList.entrySet()) {
-            runPulse(entry.getKey(), entry.getValue());
+        for (TKPulseListener listener : scenePulseList) {
+            runPulse(listener);
         }
-        for (@SuppressWarnings("removal") Map.Entry<TKPulseListener,AccessControlContext> entry : postScenePulseList.entrySet()) {
-            runPulse(entry.getKey(), entry.getValue());
+        for (TKPulseListener listener : postScenePulseList) {
+            runPulse(listener);
         }
 
         if (lastTkPulseListener != null) {
-            runPulse(lastTkPulseListener, lastTkPulseAcc);
+            runPulse(lastTkPulseListener);
         }
     }
     public void addStageTkPulseListener(TKPulseListener listener) {
@@ -448,9 +414,7 @@ public abstract class Toolkit {
             return;
         }
         synchronized (this) {
-            @SuppressWarnings("removal")
-            AccessControlContext acc = AccessController.getContext();
-            stagePulseListeners.put(listener, acc);
+            stagePulseListeners.add(listener);
         }
     }
     public void removeStageTkPulseListener(TKPulseListener listener) {
@@ -463,9 +427,7 @@ public abstract class Toolkit {
             return;
         }
         synchronized (this) {
-            @SuppressWarnings("removal")
-            AccessControlContext acc = AccessController.getContext();
-            scenePulseListeners.put(listener, acc);
+            scenePulseListeners.add(listener);
         }
     }
     public void removeSceneTkPulseListener(TKPulseListener listener) {
@@ -478,9 +440,7 @@ public abstract class Toolkit {
             return;
         }
         synchronized (this) {
-            @SuppressWarnings("removal")
-            AccessControlContext acc = AccessController.getContext();
-            postScenePulseListeners.put(listener, acc);
+            postScenePulseListeners.add(listener);
         }
     }
     public void removePostSceneTkPulseListener(TKPulseListener listener) {
@@ -493,9 +453,7 @@ public abstract class Toolkit {
         if (listener == null) {
             return;
         }
-        @SuppressWarnings("removal")
-        AccessControlContext acc = AccessController.getContext();
-        toolkitListeners.put(listener, acc);
+        toolkitListeners.add(listener);
     }
 
     public void removeTkListener(TKListener listener) {
@@ -503,11 +461,8 @@ public abstract class Toolkit {
     }
 
     private TKPulseListener lastTkPulseListener = null;
-    @SuppressWarnings("removal")
-    private AccessControlContext lastTkPulseAcc = null;
-    @SuppressWarnings("removal")
+
     public void setLastTkPulseListener(TKPulseListener listener) {
-        lastTkPulseAcc = AccessController.getContext();
         lastTkPulseListener = listener;
     }
 
@@ -529,7 +484,7 @@ public abstract class Toolkit {
     protected void notifyShutdownHooks() {
         List<Runnable> hooks;
         synchronized (shutdownHooks) {
-            hooks = new ArrayList<Runnable>(shutdownHooks);
+            hooks = new ArrayList<>(shutdownHooks);
             shutdownHooks.clear();
         }
 
@@ -538,24 +493,14 @@ public abstract class Toolkit {
         }
     }
 
-    @SuppressWarnings("removal")
     public void notifyWindowListeners(final List<TKStage> windows) {
-        for (Map.Entry<TKListener,AccessControlContext> entry : toolkitListeners.entrySet()) {
-            final TKListener listener = entry.getKey();
-            final AccessControlContext acc = entry.getValue();
-            if (acc == null) {
-                throw new IllegalStateException("Invalid AccessControlContext");
-            }
-
-            AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-                listener.changedTopLevelWindows(windows);
-                return null;
-            }, acc);
+        for (TKListener listener : toolkitListeners) {
+            listener.changedTopLevelWindows(windows);
         }
     }
 
     public void notifyLastNestedLoopExited() {
-        for (TKListener listener: toolkitListeners.keySet()) {
+        for (TKListener listener: toolkitListeners) {
             listener.exitedLastNestedLoop();
         }
     }
@@ -575,12 +520,17 @@ public abstract class Toolkit {
                                           boolean preserveRatio,
                                           boolean smooth);
     public abstract AsyncOperation loadImageAsync(
-                                          AsyncOperationListener<? extends ImageLoader> listener,
+                                          AsyncOperationListener<ImageLoader> listener,
                                           String url,
                                           double width, double height,
                                           boolean preserveRatio,
                                           boolean smooth);
-
+    public abstract AsyncOperation loadImageAsync(
+                                          AsyncOperationListener<ImageLoader> listener,
+                                          InputStream stream,
+                                          double width, double height,
+                                          boolean preserveRatio,
+                                          boolean smooth);
     /*
      * The loadPlatformImage method supports the following image types:
      *   - an object returned by the renderToImage method
@@ -650,23 +600,12 @@ public abstract class Toolkit {
     }
 
     public Object getPaint(Paint paint) {
-        if (paint instanceof Color) {
-            return createColorPaint((Color) paint);
-        }
-
-        if (paint instanceof LinearGradient) {
-            return getPaint((LinearGradient) paint);
-        }
-
-        if (paint instanceof RadialGradient) {
-            return getPaint((RadialGradient) paint);
-        }
-
-        if (paint instanceof ImagePattern) {
-            return createImagePatternPaint((ImagePattern) paint);
-        }
-
-        return null;
+        return switch (paint) {
+            case Color color -> createColorPaint(color);
+            case LinearGradient gradient -> getPaint(gradient);
+            case RadialGradient gradient -> getPaint(gradient);
+            case ImagePattern pattern -> createImagePatternPaint(pattern);
+        };
     }
 
     protected static final double clampStopOffset(double offset) {
@@ -708,7 +647,7 @@ public abstract class Toolkit {
                            float[] dashArray,
                            float dashOffset);
 
-    public abstract int getKeyCodeForChar(String character);
+    public abstract int getKeyCodeForChar(String character, int hint);
     public abstract Dimension2D getBestCursorSize(int preferredWidth, int preferredHeight);
     public abstract int getMaximumCursorColors();
     public abstract PathElement[] convertShapeToFXPath(Object shape);

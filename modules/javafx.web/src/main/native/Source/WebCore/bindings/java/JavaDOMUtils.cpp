@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,19 +32,26 @@
 #include "Element.h"
 #include "HTMLDocument.h"
 #include "HTMLElement.h"
+#include "HTMLFrameOwnerElement.h"
 #include "DOMException.h"
+#include "LocalFrame.h"
 
 #include <wtf/java/JavaEnv.h>
 
 #include "JavaDOMUtils.h"
 #include "runtime_root.h"
 
+class LocalFrame;
+
 namespace WebCore {
 
 static void raiseDOMErrorException(JNIEnv* env, WebCore::ExceptionCode ec)
 {
-    ASSERT(ec);
-
+#if ASSERT_ENABLED
+    if (ec != ExceptionCode::TypeError) {
+        WTFLogAlways("Unexpected ExceptionCode: %d", static_cast<int>(ec));
+    }
+#endif
     auto description = DOMException::description(ec);
 
     static JGClass exceptionClass(env->FindClass("org/w3c/dom/DOMException"));
@@ -57,17 +64,17 @@ static void raiseDOMErrorException(JNIEnv* env, WebCore::ExceptionCode ec)
     } else {
         message = "Unknown Exception";
     }
-    env->Throw(JLocalRef<jthrowable>((jthrowable)env->NewObject(exceptionClass, midCtor, jshort(description.legacyCode), (jstring)String(message).toJavaString(env))));
+    env->Throw(JLocalRef<jthrowable>((jthrowable)env->NewObject(exceptionClass, midCtor, jshort(description.legacyCode), (jstring)String::fromLatin1(message).toJavaString(env))));
 }
 
 void raiseTypeErrorException(JNIEnv* env)
 {
-    raiseDOMErrorException(env, WebCore::TypeError);
+    raiseDOMErrorException(env, ExceptionCode::TypeError);
 }
 
 void raiseNotSupportedErrorException(JNIEnv* env)
 {
-    raiseDOMErrorException(env, WebCore::NotSupportedError);
+    raiseDOMErrorException(env, ExceptionCode::NotSupportedError);
 }
 
 void raiseDOMErrorException(JNIEnv* env, Exception&& ec)
@@ -102,7 +109,8 @@ JNIEXPORT jobject JNICALL Java_com_sun_webkit_WebPage_twkGetDocument
     if (!frame)
         return nullptr;
 
-    Document* document = frame->document();
+    auto* localFrame = dynamicDowncast<LocalFrame>(frame);
+    Document* document = localFrame->document();
     if (!document)
         return nullptr;
 

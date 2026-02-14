@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,29 +27,32 @@ package test.javafx.collections;
 
 import com.sun.javafx.collections.NonIterableChange;
 import com.sun.javafx.collections.ObservableListWrapper;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import javafx.collections.ListChangeListener;
 import javafx.collections.WeakListChangeListener;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class WeakListChangeListenerTest {
 
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testConstructWithNull() {
-        new WeakListChangeListener<Object>(null);
+        assertThrows(NullPointerException.class, () -> {
+            new WeakListChangeListener<>(null);
+        });
     }
+
 
     @Test
     public void testHandle() {
-        MockListObserver<Object> listener = new MockListObserver<Object>();
-        final WeakListChangeListener<Object> weakListener = new WeakListChangeListener<Object>(listener);
-        final ObservableListWrapper<Object> list = new ObservableListWrapper<Object>(new ArrayList<Object>());
+        MockListObserver<Object> listener = new MockListObserver<>();
+        final WeakListChangeListener<Object> weakListener = new WeakListChangeListener<>(listener);
+        final ObservableListWrapper<Object> list = new ObservableListWrapper<>(new ArrayList<>());
         final Object removedElement = new Object();
-        final ListChangeListener.Change<Object> change = new NonIterableChange.SimpleRemovedChange<Object>(0, 1, removedElement, list);
+        final ListChangeListener.Change<Object> change = new NonIterableChange.SimpleRemovedChange<>(0, 1, removedElement, list);
 
         // regular call
         weakListener.onChanged(change);

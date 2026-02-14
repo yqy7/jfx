@@ -25,83 +25,101 @@
 #pragma once
 
 #include "FloatRect.h"
+#include "FloatRoundedRect.h"
+#include "InlineIteratorInlineBox.h"
 #include "InlineIteratorTextBox.h"
+#include "PaintInfo.h"
 #include "RenderObject.h"
 #include "TextBoxSelectableRange.h"
+#include "TextDecorationPainter.h"
 #include "TextRun.h"
 
 namespace WebCore {
 
 class Color;
 class Document;
-class LegacyInlineTextBox;
 class RenderCombineText;
 class RenderStyle;
 class RenderText;
-class ShadowData;
-class TextDecorationPainter;
 struct CompositionUnderline;
 struct MarkedText;
-struct PaintInfo;
 struct StyledMarkedText;
 
 class TextBoxPainter {
 public:
-    TextBoxPainter(const LegacyInlineTextBox&, PaintInfo&, const LayoutPoint& paintOffset);
-#if ENABLE(LAYOUT_FORMATTING_CONTEXT)
-    TextBoxPainter(const LayoutIntegration::InlineContent&, const InlineDisplay::Box&, PaintInfo&, const LayoutPoint& paintOffset);
-#endif
-    TextBoxPainter(const InlineIterator::TextBoxIterator&, PaintInfo&, const LayoutPoint& paintOffset);
-
+    TextBoxPainter(const LayoutIntegration::InlineContent&, const InlineDisplay::Box&, const RenderStyle&, PaintInfo&, const LayoutPoint& paintOffset);
     ~TextBoxPainter();
 
     void paint();
 
-    static FloatRect calculateUnionOfAllDocumentMarkerBounds(const LegacyInlineTextBox&);
+    static inline FloatSize rotateShadowOffset(const SpaceSeparatedPoint<Style::Length<>>& offset, WritingMode);
 
-private:
-    auto& textBox() const { return *m_textBox; }
+protected:
+    auto& textBox() const { return m_textBox; }
+    InlineIterator::TextBoxIterator makeIterator() const;
 
     void paintBackground();
     void paintForegroundAndDecorations();
     void paintCompositionBackground();
     void paintCompositionUnderlines();
+    void paintCompositionForeground(const StyledMarkedText&);
     void paintPlatformDocumentMarkers();
 
     enum class BackgroundStyle { Normal, Rounded };
     void paintBackground(unsigned startOffset, unsigned endOffset, const Color&, BackgroundStyle = BackgroundStyle::Normal);
     void paintBackground(const StyledMarkedText&);
     void paintForeground(const StyledMarkedText&);
-    TextDecorationPainter createDecorationPainter(const StyledMarkedText&, const FloatRect&, const FloatRect&);
+    TextDecorationPainter createDecorationPainter(const StyledMarkedText&, const FloatRect&);
     void paintBackgroundDecorations(TextDecorationPainter&, const StyledMarkedText&, const FloatRect&);
-    void paintForegroundDecorations(TextDecorationPainter&, const FloatRect&);
-    void paintCompositionUnderline(const CompositionUnderline&);
+    void paintForegroundDecorations(TextDecorationPainter&, const StyledMarkedText&, const FloatRect&);
+    void paintCompositionUnderline(const CompositionUnderline&, const FloatRoundedRect::Radii&, bool hasLiveConversion);
+    void fillCompositionUnderline(float start, float width, const CompositionUnderline&, const FloatRoundedRect::Radii&, bool hasLiveConversion) const;
     void paintPlatformDocumentMarker(const MarkedText&);
 
-    static FloatRect calculateDocumentMarkerBounds(const InlineIterator::TextBoxIterator&, const MarkedText&);
-
+    float textPosition();
     FloatRect computePaintRect(const LayoutPoint& paintOffset);
     bool computeHaveSelection() const;
+    std::pair<unsigned, unsigned> selectionStartEnd() const;
     MarkedText createMarkedTextFromSelectionInBox();
     const FontCascade& fontCascade() const;
+    WritingMode writingMode() const { return m_style.writingMode(); }
     FloatPoint textOriginFromPaintRect(const FloatRect&) const;
 
-    const ShadowData* debugTextShadow() const;
+    struct DecoratingBox {
+        InlineIterator::InlineBoxIterator inlineBox;
+        const RenderStyle& style;
+        TextDecorationPainter::Styles textDecorationStyles;
+        FloatPoint location;
+    };
+    using DecoratingBoxList = Vector<DecoratingBox>;
+    void collectDecoratingBoxesForBackgroundPainting(DecoratingBoxList&, const InlineIterator::TextBoxIterator&, FloatPoint textBoxLocation, const TextDecorationPainter::Styles&);
 
-    const InlineIterator::TextBoxIterator m_textBox;
+    // FIXME: We could just talk to the display box directly.
+    const InlineIterator::BoxModernPath m_textBox;
     const RenderText& m_renderer;
     const Document& m_document;
     const RenderStyle& m_style;
+    const FloatRect m_logicalRect;
     const TextRun m_paintTextRun;
     PaintInfo& m_paintInfo;
     const TextBoxSelectableRange m_selectableRange;
+    const LayoutPoint m_paintOffset;
     const FloatRect m_paintRect;
     const bool m_isFirstLine;
+    const bool m_isCombinedText;
     const bool m_isPrinting;
     const bool m_haveSelection;
-    const bool m_containsComposition;
-    const bool m_useCustomUnderlines;
+    bool m_containsComposition { false };
+    bool m_useCustomUnderlines { false };
     std::optional<bool> m_emphasisMarkExistsAndIsAbove { };
 };
 
+inline FloatSize TextBoxPainter::rotateShadowOffset(const SpaceSeparatedPoint<Style::Length<>>& offset, WritingMode writingMode)
+{
+    if (writingMode.isHorizontal())
+        return { offset.x().value, offset.y().value };
+    if (writingMode.isLineOverLeft()) // sideways-lr
+        return { -offset.y().value, offset.x().value };
+    return { offset.y().value, -offset.x().value };
+}
 }

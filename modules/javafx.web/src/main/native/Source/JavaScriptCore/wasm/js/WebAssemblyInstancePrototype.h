@@ -35,7 +35,7 @@ namespace JSC {
 class WebAssemblyInstancePrototype final : public JSNonFinalObject {
 public:
     using Base = JSNonFinalObject;
-    static constexpr unsigned StructureFlags = Base::StructureFlags | HasStaticPropertyTable;
+    static constexpr unsigned StructureFlags = Base::StructureFlags;
 
     template<typename CellType, SubspaceAccess>
     static GCClient::IsoSubspace* subspaceFor(VM& vm)
@@ -51,7 +51,7 @@ public:
 
 private:
     WebAssemblyInstancePrototype(VM&, Structure*);
-    void finishCreation(VM&);
+    void finishCreation(VM&, JSGlobalObject*);
 };
 
 } // namespace JSC

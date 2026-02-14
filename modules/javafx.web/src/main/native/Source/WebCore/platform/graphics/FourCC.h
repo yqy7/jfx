@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include <wtf/ASCIICType.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
@@ -32,29 +33,15 @@ namespace WebCore {
 struct FourCC {
     constexpr FourCC() = default;
     constexpr FourCC(uint32_t value) : value { value } { }
-    constexpr FourCC(const char (&nullTerminatedString)[5]);
+    constexpr FourCC(std::span<const char, 5> nullTerminatedString);
     constexpr std::array<char, 5> string() const;
     static std::optional<FourCC> fromString(StringView);
+    friend constexpr bool operator==(FourCC, FourCC) = default;
 
     uint32_t value { 0 };
-
-    template<class Encoder>
-    void encode(Encoder& encoder) const
-    {
-        encoder << value;
-    }
-
-    template <class Decoder>
-    static WARN_UNUSED_RETURN bool decode(Decoder& decoder, FourCC& configuration)
-    {
-        return decoder.decode(configuration.value);
-    }
 };
 
-constexpr bool operator==(FourCC, FourCC);
-constexpr bool operator!=(FourCC, FourCC);
-
-constexpr FourCC::FourCC(const char (&data)[5])
+constexpr FourCC::FourCC(std::span<const char, 5> data)
     : value(data[0] << 24 | data[1] << 16 | data[2] << 8 | data[3])
 {
     ASSERT_UNDER_CONSTEXPR_CONTEXT(isASCII(data[0]));
@@ -75,9 +62,6 @@ constexpr std::array<char, 5> FourCC::string() const
     };
 }
 
-constexpr bool operator==(FourCC a, FourCC b) { return a.value == b.value; }
-constexpr bool operator!=(FourCC a, FourCC b) { return a.value != b.value; }
-
 } // namespace WebCore
 
 namespace WTF {
@@ -85,7 +69,7 @@ namespace WTF {
 template<typename> struct LogArgument;
 
 template<> struct LogArgument<WebCore::FourCC> {
-    static String toString(const WebCore::FourCC& code) { return code.string().data(); }
+    static String toString(const WebCore::FourCC& code) { return String::fromLatin1(code.string().data()); }
 };
 
 } // namespace WTF

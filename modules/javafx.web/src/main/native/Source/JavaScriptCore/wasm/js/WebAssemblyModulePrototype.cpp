@@ -31,16 +31,9 @@
 #include "AuxiliaryBarrierInlines.h"
 #include "JSCInlines.h"
 
-#include "WebAssemblyModulePrototype.lut.h"
-
 namespace JSC {
 
-const ClassInfo WebAssemblyModulePrototype::s_info = { "WebAssembly.Module", &Base::s_info, &prototypeTableWebAssemblyModule, nullptr, CREATE_METHOD_TABLE(WebAssemblyModulePrototype) };
-
-/* Source for WebAssemblyModulePrototype.lut.h
- @begin prototypeTableWebAssemblyModule
- @end
- */
+const ClassInfo WebAssemblyModulePrototype::s_info = { "WebAssembly.Module"_s, &Base::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(WebAssemblyModulePrototype) };
 
 WebAssemblyModulePrototype* WebAssemblyModulePrototype::create(VM& vm, JSGlobalObject*, Structure* structure)
 {
@@ -57,7 +50,7 @@ Structure* WebAssemblyModulePrototype::createStructure(VM& vm, JSGlobalObject* g
 void WebAssemblyModulePrototype::finishCreation(VM& vm)
 {
     Base::finishCreation(vm);
-    ASSERT(inherits(vm, info()));
+    ASSERT(inherits(info()));
     JSC_TO_STRING_TAG_WITHOUT_TRANSITION();
 }
 

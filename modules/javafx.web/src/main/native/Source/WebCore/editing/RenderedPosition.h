@@ -30,10 +30,12 @@
 
 #pragma once
 
+#include "BoundaryPoint.h"
 #include "CaretRectComputation.h"
 #include "InlineIteratorBox.h"
-#include "InlineIteratorLine.h"
+#include "InlineIteratorLineBox.h"
 #include "TextAffinity.h"
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
@@ -50,12 +52,14 @@ public:
     bool isEquivalent(const RenderedPosition&) const;
 
     bool isNull() const { return !m_renderer; }
-    InlineIterator::LineIterator line() const { return m_run ? m_run->line() : InlineIterator::LineIterator(); }
+    InlineIterator::LineBoxIterator lineBox() const { return m_box ? m_box->lineBox() : InlineIterator::LineBoxIterator(); }
+    InlineIterator::LeafBoxIterator box() const { return m_box; }
+    unsigned offset() const { return m_offset; }
 
     unsigned char bidiLevelOnLeft() const;
     unsigned char bidiLevelOnRight() const;
-    RenderedPosition leftBoundaryOfBidiRun(unsigned char bidiLevelOfRun);
-    RenderedPosition rightBoundaryOfBidiRun(unsigned char bidiLevelOfRun);
+    RenderedPosition leftBoundaryOfBidiRun(unsigned char bidiLevelOfRun) const;
+    RenderedPosition rightBoundaryOfBidiRun(unsigned char bidiLevelOfRun) const;
 
     enum ShouldMatchBidiLevel { MatchBidiLevel, IgnoreBidiLevel };
     bool atLeftBoundaryOfBidiRun() const { return atLeftBoundaryOfBidiRun(IgnoreBidiLevel, 0); }
@@ -68,7 +72,12 @@ public:
     Position positionAtLeftBoundaryOfBiDiRun() const;
     Position positionAtRightBoundaryOfBiDiRun() const;
 
+    bool atLeftmostOffsetInBox() const { return m_box && m_offset == m_box->leftmostCaretOffset(); }
+    bool atRightmostOffsetInBox() const { return m_box && m_offset == m_box->rightmostCaretOffset(); }
+
     IntRect absoluteRect(CaretRectMode = CaretRectMode::Normal) const;
+
+    std::optional<BoundaryPoint> boundaryPoint() const;
 
 private:
     bool operator==(const RenderedPosition&) const { return false; }
@@ -76,13 +85,11 @@ private:
 
     InlineIterator::LeafBoxIterator previousLeafOnLine() const;
     InlineIterator::LeafBoxIterator nextLeafOnLine() const;
-    bool atLeftmostOffsetInBox() const { return m_run && m_offset == m_run->leftmostCaretOffset(); }
-    bool atRightmostOffsetInBox() const { return m_run && m_offset == m_run->rightmostCaretOffset(); }
     bool atLeftBoundaryOfBidiRun(ShouldMatchBidiLevel, unsigned char bidiLevelOfRun) const;
     bool atRightBoundaryOfBidiRun(ShouldMatchBidiLevel, unsigned char bidiLevelOfRun) const;
 
-    const RenderObject* m_renderer { nullptr };
-    InlineIterator::LeafBoxIterator m_run;
+    SingleThreadWeakPtr<const RenderObject> m_renderer;
+    InlineIterator::LeafBoxIterator m_box;
     unsigned m_offset { 0 };
 
     mutable std::optional<InlineIterator::LeafBoxIterator> m_previousLeafOnLine;

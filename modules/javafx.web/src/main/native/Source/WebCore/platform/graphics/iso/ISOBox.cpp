@@ -27,10 +27,13 @@
 #include "ISOBox.h"
 
 #include <JavaScriptCore/DataView.h>
+#include <wtf/TZoneMallocInlines.h>
 
 using JSC::DataView;
 
 namespace WebCore {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(ISOBox);
 
 ISOBox::ISOBox() = default;
 ISOBox::~ISOBox() = default;
@@ -38,6 +41,7 @@ ISOBox::ISOBox(const ISOBox&) = default;
 
 ISOBox::PeekResult ISOBox::peekBox(DataView& view, unsigned offset)
 {
+    unsigned maximumPossibleSize = view.byteLength() - offset;
     uint64_t size = 0;
     if (!checkedRead<uint32_t>(size, view, offset, BigEndian))
         return std::nullopt;
@@ -48,8 +52,11 @@ ISOBox::PeekResult ISOBox::peekBox(DataView& view, unsigned offset)
 
     if (size == 1 && !checkedRead<uint64_t>(size, view, offset, BigEndian))
         return std::nullopt;
+
+    if (size > maximumPossibleSize)
+        size = maximumPossibleSize;
     else if (!size)
-        size = view.byteLength();
+        size = maximumPossibleSize;
 
     return std::make_pair(type, size);
 }
@@ -72,6 +79,7 @@ bool ISOBox::read(DataView& view, unsigned& offset)
 
 bool ISOBox::parse(DataView& view, unsigned& offset)
 {
+    unsigned maximumPossibleSize = view.byteLength() - offset;
     if (!checkedRead<uint32_t>(m_size, view, offset, BigEndian))
         return false;
 
@@ -80,21 +88,20 @@ bool ISOBox::parse(DataView& view, unsigned& offset)
 
     if (m_size == 1 && !checkedRead<uint64_t>(m_size, view, offset, BigEndian))
         return false;
-    else if (!m_size)
-        m_size = view.byteLength();
 
-    if (m_boxType == "uuid") {
+    if (m_size > maximumPossibleSize)
+        m_size = maximumPossibleSize;
+    else if (!m_size)
+        m_size = maximumPossibleSize;
+
+    if (m_boxType == std::span { "uuid" }) {
         struct ExtendedType {
             uint8_t value[16];
         } extendedTypeStruct;
         if (!checkedRead<ExtendedType>(extendedTypeStruct, view, offset, BigEndian))
             return false;
 
-        Vector<uint8_t> extendedType;
-        extendedType.reserveInitialCapacity(16);
-        for (auto& character : extendedTypeStruct.value)
-            extendedType.uncheckedAppend(character);
-        m_extendedType = WTFMove(extendedType);
+        m_extendedType = Vector<uint8_t>(std::span { extendedTypeStruct.value });
     }
 
     return true;
@@ -108,6 +115,11 @@ bool ISOFullBox::parse(DataView& view, unsigned& offset)
     if (!ISOBox::parse(view, offset))
         return false;
 
+    return parseVersionAndFlags(view, offset);
+}
+
+bool ISOFullBox::parseVersionAndFlags(DataView& view, unsigned& offset)
+{
     uint32_t versionAndFlags = 0;
     if (!checkedRead<uint32_t>(versionAndFlags, view, offset, BigEndian))
         return false;

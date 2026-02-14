@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -98,8 +98,6 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
      *                                                                         *
      **************************************************************************/
 
-    // package for testing
-    boolean lockItemOnEdit = false;
 
 
 
@@ -173,7 +171,7 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
     };
 
     private final WeakListChangeListener<TreeTablePosition<S,?>> weakSelectedListener =
-            new WeakListChangeListener<TreeTablePosition<S,?>>(selectedListener);
+            new WeakListChangeListener<>(selectedListener);
     private final WeakInvalidationListener weakFocusedListener =
             new WeakInvalidationListener(focusedListener);
     private final WeakInvalidationListener weaktableRowUpdateObserver =
@@ -181,9 +179,9 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
     private final WeakInvalidationListener weakEditingListener =
             new WeakInvalidationListener(editingListener);
     private final WeakListChangeListener<TreeTableColumn<S,?>> weakVisibleLeafColumnsListener =
-            new WeakListChangeListener<TreeTableColumn<S,?>>(visibleLeafColumnsListener);
+            new WeakListChangeListener<>(visibleLeafColumnsListener);
     private final WeakListChangeListener<String> weakColumnStyleClassListener =
-            new WeakListChangeListener<String>(columnStyleClassListener);
+            new WeakListChangeListener<>(columnStyleClassListener);
     private final WeakInvalidationListener weakColumnStyleListener =
             new WeakInvalidationListener(columnStyleListener);
     private final WeakInvalidationListener weakColumnIdListener =
@@ -203,7 +201,7 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
      * The {@code TreeTableColumn} instance that backs this {@code TreeTableCell}.
      */
     private ReadOnlyObjectWrapper<TreeTableColumn<S,T>> tableColumn =
-            new ReadOnlyObjectWrapper<TreeTableColumn<S,T>>(this, "tableColumn") {
+            new ReadOnlyObjectWrapper<>(this, "tableColumn") {
         @Override protected void invalidated() {
             updateColumnIndex();
         }
@@ -230,7 +228,7 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
 
     private ReadOnlyObjectWrapper<TreeTableView<S>> treeTableViewPropertyImpl() {
         if (treeTableView == null) {
-            treeTableView = new ReadOnlyObjectWrapper<TreeTableView<S>>(this, "treeTableView") {
+            treeTableView = new ReadOnlyObjectWrapper<>(this, "treeTableView") {
                 private WeakReference<TreeTableView<S>> weakTableViewRef;
                 @Override protected void invalidated() {
                     TreeTableView.TreeTableViewSelectionModel<S> sm;
@@ -271,7 +269,7 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
                         newTreeTableView.getVisibleLeafColumns().addListener(weakVisibleLeafColumnsListener);
                         newTreeTableView.rootProperty().addListener(weakRootPropertyListener);
 
-                        weakTableViewRef = new WeakReference<TreeTableView<S>>(newTreeTableView);
+                        weakTableViewRef = new WeakReference<>(newTreeTableView);
                     }
 
                     updateColumnIndex();
@@ -287,7 +285,7 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
      * The {@code TreeTableRow} that this {@code TreeTableCell} currently finds itself placed within.
      */
     private ReadOnlyObjectWrapper<TreeTableRow<S>> tableRow =
-            new ReadOnlyObjectWrapper<TreeTableRow<S>>(this, "tableRow");
+            new ReadOnlyObjectWrapper<>(this, "tableRow");
     private void setTableRow(TreeTableRow<S> value) { tableRow.set(value); }
     /**
      * Gets the value of the property {@code tableRow}.
@@ -336,12 +334,7 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
             return;
         }
 
-        // We check the boolean lockItemOnEdit field here, as whilst we want to
-        // updateItem normally, when it comes to unit tests we can't have the
-        // item change in all circumstances.
-        if (! lockItemOnEdit) {
-            updateItem(-1);
-        }
+        updateItem(-1);
 
         // it makes sense to get the cell into its editing state before firing
         // the event to listeners below, so that's what we're doing here
@@ -374,14 +367,24 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
         // out of the editing state.
         // This MUST come before the updateItem call below, otherwise it will
         // call cancelEdit(), resulting in both commit and cancel events being
-        // fired (as identified in RT-29650)
+        // fired (as identified in JDK-8124615)
         super.commitEdit(newValue);
 
         final TreeTableView<S> table = getTreeTableView();
+        boolean tableShouldRequestFocus = false;
+
+        if (table != null) {
+            // The cell is going to be updated, and the current focus owner might be removed from it.
+            // Before that happens, check if it has the table as a parent (otherwise the user might have
+            // clicked out of the table entirely and given focus to something else), so the table can
+            // request the focus back, once the edit commit ends.
+            tableShouldRequestFocus = ControlUtils.controlShouldRequestFocusIfCurrentFocusOwnerIsChild(table);
+        }
+
         // JDK-8187307: fire the commit after updating cell's editing state
         if (getTableColumn() != null) {
             // Inform the TreeTableColumn of the edit being ready to be committed.
-            CellEditEvent<S,T> editEvent = new CellEditEvent<S,T>(
+            CellEditEvent<S,T> editEvent = new CellEditEvent<>(
                     table,
                     editingCellAtStartEdit,
                     TreeTableColumn.<S,T>editCommitEvent(),
@@ -391,18 +394,19 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
             Event.fireEvent(getTableColumn(), editEvent);
         }
 
-        // update the item within this cell, so that it represents the new value
-        updateItem(newValue, false);
+        // Update the item within this cell, so that it represents the new value
+        updateItem(-1);
 
         if (table != null) {
             // reset the editing cell on the TableView
             table.edit(-1, null);
 
             // request focus back onto the table, only if the current focus
-            // owner has the table as a parent (otherwise the user might have
-            // clicked out of the table entirely and given focus to something else.
+            // owner had the table as a parent.
             // It would be rude of us to request it back again.
-            ControlUtils.requestFocusOnControlOnlyIfCurrentFocusOwnerIsChild(table);
+            if (tableShouldRequestFocus) {
+                table.requestFocus();
+            }
         }
     }
 
@@ -418,13 +422,13 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
             if (updateEditingIndex) table.edit(-1, null);
             // request focus back onto the table, only if the current focus
             // owner has the table as a parent (otherwise the user might have
-            // clicked out of the table entirely and given focus to something else.
+            // clicked out of the table entirely and given focus to something else).
             // It would be rude of us to request it back again.
             ControlUtils.requestFocusOnControlOnlyIfCurrentFocusOwnerIsChild(table);
         }
 
         if (getTableColumn() != null) {
-            CellEditEvent<S,T> editEvent = new CellEditEvent<S,T>(
+            CellEditEvent<S,T> editEvent = new CellEditEvent<>(
                     table,
                     editingCellAtStartEdit,
                     TreeTableColumn.<S,T>editCancelEvent(),
@@ -447,7 +451,7 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
     @Override public void updateSelected(boolean selected) {
         // copied from Cell, with the first conditional clause below commented
         // out, as it is valid for an empty TableCell to be selected, as long
-        // as the parent TableRow is not empty (see RT-15529).
+        // as the parent TableRow is not empty (see JDK-8113895).
         /*if (selected && isEmpty()) return;*/
         if (getTableRow() == null || getTableRow().isEmpty()) return;
         setSelected(selected);
@@ -467,7 +471,7 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
 
         if (isEditing() && newIndex == oldIndex) {
             // no-op
-            // Fix for RT-31165 - if we (needlessly) update the index whilst the
+            // Fix for JDK-8123482 - if we (needlessly) update the index whilst the
             // cell is being edited it will no longer be in an editing state.
             // This means that in certain (common) circumstances that it will
             // appear that a cell is uneditable as, despite being clicked, it
@@ -476,7 +480,7 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
         } else {
             // Ideally we would just use the following two lines of code, rather
             // than the updateItem() call beneath, but if we do this we end up with
-            // RT-22428 where all the columns are collapsed.
+            // JDK-8126803 where all the columns are collapsed.
             // itemDirty = true;
             // requestLayout();
             updateItem(oldIndex);
@@ -612,7 +616,7 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
     }
 
     /*
-     * This was brought in to fix the issue in RT-22077, namely that the
+     * This was brought in to fix the issue in JDK-8126798, namely that the
      * ObservableValue was being GC'd, meaning that changes to the value were
      * no longer being delivered. By extracting this value out of the method,
      * it is now referred to from TableCell and will therefore no longer be
@@ -656,15 +660,15 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
                 !tableColumn.isVisible() ||
                 tableView.getRoot() == null) {
 
-            // RT-30484 We need to allow a first run to be special-cased to allow
+            // JDK-8116529 We need to allow a first run to be special-cased to allow
             // for the updateItem method to be called at least once to allow for
-            // the correct visual state to be set up. In particular, in RT-30484
+            // the correct visual state to be set up. In particular, in JDK-8116529
             // refer to Ensemble8PopUpTree.png - in this case the arrows are being
             // shown as the new cells are instantiated with the arrows in the
             // children list, and are only hidden in updateItem.
-            // RT-32621: There are circumstances where we need to updateItem,
+            // JDK-8115233: There are circumstances where we need to updateItem,
             // even when the index is greater than the itemCount. For example,
-            // RT-32621 identifies issues where a TreeTableView collapses a
+            // JDK-8115233 identifies issues where a TreeTableView collapses a
             // TreeItem but the custom cells remain visible. This is now
             // resolved with the check for indexExceedsItemCount.
             if ((!isEmpty && oldValue != null) || isFirstRun || indexExceedsItemCount) {
@@ -677,16 +681,16 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
 
             final T newValue = currentObservableValue == null ? null : currentObservableValue.getValue();
 
-            // RT-35864 - if the index didn't change, then avoid calling updateItem
+            // JDK-8092593 - if the index didn't change, then avoid calling updateItem
             // unless the item has changed.
             if (oldIndex == index) {
                 if (!isItemChanged(oldValue, newValue)) {
-                    // RT-36670: we need to check the row item here to prevent
+                    // JDK-8096643: we need to check the row item here to prevent
                     // the issue where the cell value and index doesn't change,
                     // but the backing row object does.
                     S oldRowItem = oldRowItemRef != null ? oldRowItemRef.get() : null;
                     if (oldRowItem != null && oldRowItem.equals(rowItem)) {
-                        // RT-37054:  we break out of the if/else code here and
+                        // JDK-8096969:  we break out of the if/else code here and
                         // proceed with the code following this, so that we may
                         // still update references, listeners, etc as required.
                         break outer;
@@ -826,7 +830,7 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
 
     /** {@inheritDoc} */
     @Override protected Skin<?> createDefaultSkin() {
-        return new TreeTableCellSkin<S,T>(this);
+        return new TreeTableCellSkin<>(this);
     }
 
     private void possiblySetId(String idCandidate) {
@@ -852,10 +856,22 @@ public class TreeTableCell<S,T> extends IndexedCell<T> {
     @Override
     public Object queryAccessibleAttribute(AccessibleAttribute attribute, Object... parameters) {
         switch (attribute) {
-            case ROW_INDEX: return getIndex();
-            case COLUMN_INDEX: return columnIndex;
-            case SELECTED: return isInCellSelectionMode() ? isSelected() : getTableRow().isSelected();
-            default: return super.queryAccessibleAttribute(attribute, parameters);
+        case ROW_INDEX:
+            return getIndex();
+        case COLUMN_INDEX:
+            return columnIndex;
+        case SELECTED:
+            if (isInCellSelectionMode()) {
+                return isSelected();
+            } else {
+                if (getTableRow() == null) {
+                    return null;
+                } else {
+                    return getTableRow().isSelected();
+                }
+            }
+        default:
+            return super.queryAccessibleAttribute(attribute, parameters);
         }
     }
 

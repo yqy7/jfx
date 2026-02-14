@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2021-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,9 +33,8 @@
 #include "GPUImageCopyTextureTagged.h"
 #include "GPUImageDataLayout.h"
 #include "GPUIntegralTypes.h"
-#include "JSDOMPromiseDeferred.h"
+#include "WebGPUQueue.h"
 #include <optional>
-#include <pal/graphics/WebGPU/WebGPUQueue.h>
 #include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
@@ -46,26 +45,30 @@ namespace WebCore {
 
 class GPUBuffer;
 
+namespace WebGPU {
+class Device;
+}
+
 class GPUQueue : public RefCounted<GPUQueue> {
 public:
-    static Ref<GPUQueue> create(Ref<PAL::WebGPU::Queue>&& backing)
+    static Ref<GPUQueue> create(Ref<WebGPU::Queue>&& backing, WebGPU::Device& device)
     {
-        return adoptRef(*new GPUQueue(WTFMove(backing)));
+        return adoptRef(*new GPUQueue(WTFMove(backing), device));
     }
 
     String label() const;
     void setLabel(String&&);
 
-    void submit(Vector<RefPtr<GPUCommandBuffer>>&&);
+    void submit(Vector<Ref<GPUCommandBuffer>>&&);
 
     using OnSubmittedWorkDonePromise = DOMPromiseDeferred<IDLNull>;
     void onSubmittedWorkDone(OnSubmittedWorkDonePromise&&);
 
-    void writeBuffer(
+    ExceptionOr<void> writeBuffer(
         const GPUBuffer&,
         GPUSize64 bufferOffset,
         BufferSource&& data,
-        GPUSize64 dataOffset,
+        std::optional<GPUSize64> dataOffset,
         std::optional<GPUSize64>);
 
     void writeTexture(
@@ -74,21 +77,20 @@ public:
         const GPUImageDataLayout&,
         const GPUExtent3D& size);
 
-    void copyExternalImageToTexture(
+    ExceptionOr<void> copyExternalImageToTexture(
+        ScriptExecutionContext&,
         const GPUImageCopyExternalImage& source,
         const GPUImageCopyTextureTagged& destination,
         const GPUExtent3D& copySize);
 
-    PAL::WebGPU::Queue& backing() { return m_backing; }
-    const PAL::WebGPU::Queue& backing() const { return m_backing; }
+    WebGPU::Queue& backing() { return m_backing; }
+    const WebGPU::Queue& backing() const { return m_backing; }
 
 private:
-    GPUQueue(Ref<PAL::WebGPU::Queue>&& backing)
-        : m_backing(WTFMove(backing))
-    {
-    }
+    GPUQueue(Ref<WebGPU::Queue>&&, WebGPU::Device&);
 
-    Ref<PAL::WebGPU::Queue> m_backing;
+    const Ref<WebGPU::Queue> m_backing;
+    WeakPtr<WebGPU::Device> m_device;
 };
 
 }

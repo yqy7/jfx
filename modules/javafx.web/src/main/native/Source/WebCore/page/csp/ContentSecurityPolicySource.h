@@ -26,17 +26,21 @@
 
 #pragma once
 
+#include <wtf/CheckedRef.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 class ContentSecurityPolicy;
-struct SecurityOriginData;
+class SecurityOriginData;
+
+enum class IsSelfSource : bool { No, Yes };
 
 class ContentSecurityPolicySource {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(ContentSecurityPolicySource);
 public:
-    ContentSecurityPolicySource(const ContentSecurityPolicy&, const String& scheme, const String& host, std::optional<uint16_t> port, const String& path, bool hostHasWildcard, bool portHasWildcard);
+    ContentSecurityPolicySource(const ContentSecurityPolicy&, const String& scheme, const String& host, std::optional<uint16_t> port, const String& path, bool hostHasWildcard, bool portHasWildcard, IsSelfSource);
 
     bool matches(const URL&, bool didReceiveRedirectResponse = false) const;
 
@@ -49,7 +53,7 @@ private:
     bool portMatches(const URL&) const;
     bool isSchemeOnly() const;
 
-    const ContentSecurityPolicy& m_policy;
+    const CheckedRef<const ContentSecurityPolicy> m_policy;
     String m_scheme;
     String m_host;
     String m_path;
@@ -57,6 +61,7 @@ private:
 
     bool m_hostHasWildcard;
     bool m_portHasWildcard;
+    bool m_isSelfSource;
 };
 
 } // namespace WebCore

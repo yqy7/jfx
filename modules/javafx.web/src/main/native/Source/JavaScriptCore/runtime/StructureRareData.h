@@ -42,10 +42,12 @@ class CachedSpecialPropertyAdaptiveStructureWatchpoint;
 class CachedSpecialPropertyAdaptiveInferredPropertyValueWatchpoint;
 struct SpecialPropertyCache;
 enum class CachedPropertyNamesKind : uint8_t {
-    Keys = 0,
-    GetOwnPropertyNames,
+    EnumerableStrings = 0,
+    Strings,
+    Symbols,
+    StringsAndSymbols,
 };
-static constexpr unsigned numberOfCachedPropertyNames = 2;
+static constexpr unsigned numberOfCachedPropertyNames = 4;
 
 enum class CachedSpecialPropertyKey : uint8_t {
     ToStringTag = 0,
@@ -65,14 +67,11 @@ public:
     static constexpr unsigned StructureFlags = Base::StructureFlags | StructureIsImmortal;
 
     template<typename CellType, SubspaceAccess>
-    static GCClient::IsoSubspace* subspaceFor(VM& vm)
-    {
-        return &vm.structureRareDataSpace();
-    }
+    inline static GCClient::IsoSubspace* subspaceFor(VM&); // Defined in StructureRareDataInlines.h
 
     static StructureRareData* create(VM&, Structure*);
 
-    static constexpr bool needsDestruction = true;
+    static constexpr DestructionMode needsDestruction = NeedsDestruction;
     static void destroy(JSCell*);
 
     DECLARE_VISIT_CHILDREN;
@@ -104,24 +103,44 @@ public:
     void setSharedPolyProtoWatchpoint(Box<InlineWatchpointSet>&& sharedPolyProtoWatchpoint) { m_polyProtoWatchpoint = WTFMove(sharedPolyProtoWatchpoint); }
     bool hasSharedPolyProtoWatchpoint() const { return static_cast<bool>(m_polyProtoWatchpoint); }
 
-    static JSImmutableButterfly* cachedPropertyNamesSentinel() { return bitwise_cast<JSImmutableButterfly*>(static_cast<uintptr_t>(1)); }
+    static JSImmutableButterfly* cachedPropertyNamesSentinel() { return std::bit_cast<JSImmutableButterfly*>(static_cast<uintptr_t>(1)); }
 
-    static ptrdiff_t offsetOfCachedPropertyNames(CachedPropertyNamesKind kind)
+    static constexpr ptrdiff_t offsetOfCachedPropertyNames(CachedPropertyNamesKind kind)
     {
         return OBJECT_OFFSETOF(StructureRareData, m_cachedPropertyNames) + sizeof(WriteBarrier<JSImmutableButterfly>) * static_cast<unsigned>(kind);
     }
 
-    static ptrdiff_t offsetOfCachedPropertyNameEnumeratorAndFlag()
+    static constexpr ptrdiff_t offsetOfCachedPropertyNameEnumeratorAndFlag()
     {
         return OBJECT_OFFSETOF(StructureRareData, m_cachedPropertyNameEnumeratorAndFlag);
     }
 
+    static constexpr ptrdiff_t offsetOfSpecialPropertyCache()
+    {
+        return OBJECT_OFFSETOF(StructureRareData, m_specialPropertyCache);
+    }
+
+    static constexpr ptrdiff_t offsetOfPrevious()
+    {
+        return OBJECT_OFFSETOF(StructureRareData, m_previous);
+    }
+
     DECLARE_EXPORT_INFO;
 
-    void finalizeUnconditionally(VM&);
+    void finalizeUnconditionally(VM&, CollectionScope);
 
     static constexpr uintptr_t cachedPropertyNameEnumeratorIsValidatedViaTraversingFlag = 1;
     static constexpr uintptr_t cachedPropertyNameEnumeratorMask = ~static_cast<uintptr_t>(1);
+
+    unsigned incrementActiveReplacementWatchpointSet()
+    {
+        return ++m_activeReplacementWatchpointSet;
+    }
+
+    unsigned decrementActiveReplacementWatchpointSet()
+    {
+        return --m_activeReplacementWatchpointSet;
+    }
 
 private:
     friend class LLIntOffsetsExtractor;
@@ -147,7 +166,7 @@ private:
     FixedVector<StructureChainInvalidationWatchpoint> m_cachedPropertyNameEnumeratorWatchpoints;
     WriteBarrier<JSImmutableButterfly> m_cachedPropertyNames[numberOfCachedPropertyNames] { };
 
-    typedef HashMap<PropertyOffset, RefPtr<WatchpointSet>, WTF::IntHash<PropertyOffset>, WTF::UnsignedWithZeroKeyHashTraits<PropertyOffset>> PropertyWatchpointMap;
+    typedef UncheckedKeyHashMap<PropertyOffset, RefPtr<WatchpointSet>, WTF::IntHash<PropertyOffset>, WTF::UnsignedWithZeroKeyHashTraits<PropertyOffset>> PropertyWatchpointMap;
 #ifdef NDEBUG
     static_assert(sizeof(PropertyWatchpointMap) == sizeof(void*), "StructureRareData should remain small");
 #endif
@@ -159,6 +178,7 @@ private:
     WriteBarrierStructureID m_previous;
     PropertyOffset m_maxOffset;
     PropertyOffset m_transitionOffset;
+    unsigned m_activeReplacementWatchpointSet { 0 };
 };
 
 } // namespace JSC

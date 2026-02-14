@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011, Google Inc. All rights reserved.
+ * Copyright (C) 2011 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,7 +33,7 @@ namespace WebCore {
 class AudioParam;
 
 class BiquadFilterNode final : public AudioBasicProcessorNode {
-    WTF_MAKE_ISO_ALLOCATED(BiquadFilterNode);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(BiquadFilterNode);
 public:
     static ExceptionOr<Ref<BiquadFilterNode>> create(BaseAudioContext& context, const BiquadFilterOptions& = { });
 
@@ -52,7 +52,7 @@ public:
 private:
     explicit BiquadFilterNode(BaseAudioContext&);
 
-    BiquadProcessor* biquadProcessor() { return static_cast<BiquadProcessor*>(processor()); }
+    BiquadProcessor* biquadProcessor() { return downcast<BiquadProcessor>(processor()); }
 };
 
 } // namespace WebCore

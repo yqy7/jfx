@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2021 Igalia S.L.
  * Author: Caitlin Potter <caitp@igalia.com>
- * Copyright (C) 2022 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,6 +30,7 @@
 #include "AuxiliaryBarrier.h"
 #include "JSFunction.h"
 #include "JSObject.h"
+#include "JSString.h"
 #include <wtf/TaggedArrayStoragePtr.h>
 
 namespace JSC {
@@ -53,12 +54,12 @@ public:
         return vm.remoteFunctionSpace<mode>();
     }
 
-    JS_EXPORT_PRIVATE static JSRemoteFunction* create(VM&, JSGlobalObject*, JSObject* targetCallable);
+    JS_EXPORT_PRIVATE static JSRemoteFunction* tryCreate(JSGlobalObject*, VM&, JSObject* targetCallable);
 
     JSObject* targetFunction() { return m_targetFunction.get(); }
     JSGlobalObject* targetGlobalObject() { return targetFunction()->globalObject(); }
     JSString* nameMayBeNull() const { return m_nameMayBeNull.get(); }
-    const String& nameString()
+    String nameString()
     {
         if (!m_nameMayBeNull)
             return emptyString();
@@ -69,21 +70,20 @@ public:
 
     double length(VM&) const { return m_length; }
 
-    static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
-    {
-        ASSERT(globalObject);
-        return Structure::create(vm, globalObject, prototype, TypeInfo(JSFunctionType, StructureFlags), info());
-    }
+    inline static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
-    static ptrdiff_t offsetOfTargetFunction() { return OBJECT_OFFSETOF(JSRemoteFunction, m_targetFunction); }
+    static constexpr ptrdiff_t offsetOfTargetFunction() { return OBJECT_OFFSETOF(JSRemoteFunction, m_targetFunction); }
 
     DECLARE_EXPORT_INFO;
+
+    DECLARE_VISIT_CHILDREN;
 
 private:
     JSRemoteFunction(VM&, NativeExecutable*, JSGlobalObject*, Structure*, JSObject* targetCallable);
 
-    void finishCreation(VM&);
-    DECLARE_VISIT_CHILDREN;
+    void copyNameAndLength(JSGlobalObject*);
+
+    void finishCreation(JSGlobalObject*, VM&);
 
     WriteBarrier<JSObject> m_targetFunction;
     WriteBarrier<JSString> m_nameMayBeNull;

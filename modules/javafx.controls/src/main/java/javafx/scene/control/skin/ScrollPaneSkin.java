@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,11 +25,8 @@
 
 package javafx.scene.control.skin;
 
-import com.sun.javafx.scene.NodeHelper;
-import com.sun.javafx.scene.ParentHelper;
-import com.sun.javafx.scene.control.Properties;
-import com.sun.javafx.scene.control.behavior.BehaviorBase;
-import com.sun.javafx.scene.traversal.ParentTraversalEngine;
+import static com.sun.javafx.scene.control.skin.Utils.boundedSize;
+
 import javafx.animation.Animation.Status;
 import javafx.animation.KeyFrame;
 import javafx.animation.KeyValue;
@@ -46,11 +43,11 @@ import javafx.event.EventDispatcher;
 import javafx.event.EventHandler;
 import javafx.geometry.BoundingBox;
 import javafx.geometry.Bounds;
+import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.scene.AccessibleAttribute;
 import javafx.scene.Cursor;
 import javafx.scene.Node;
-import javafx.scene.control.Button;
 import javafx.scene.control.Control;
 import javafx.scene.control.ScrollBar;
 import javafx.scene.control.ScrollPane;
@@ -62,12 +59,15 @@ import javafx.scene.input.TouchEvent;
 import javafx.scene.layout.StackPane;
 import javafx.scene.shape.Rectangle;
 import javafx.util.Duration;
-import com.sun.javafx.util.Utils;
-import com.sun.javafx.scene.control.behavior.ScrollPaneBehavior;
-import static com.sun.javafx.scene.control.skin.Utils.*;
-import javafx.geometry.Insets;
 
-import java.util.function.Consumer;
+import com.sun.javafx.scene.NodeHelper;
+import com.sun.javafx.scene.ParentHelper;
+import com.sun.javafx.scene.control.ListenerHelper;
+import com.sun.javafx.scene.control.Properties;
+import com.sun.javafx.scene.control.behavior.BehaviorBase;
+import com.sun.javafx.scene.control.behavior.ScrollPaneBehavior;
+import com.sun.javafx.scene.traversal.ParentTraversalEngine;
+import com.sun.javafx.util.Utils;
 
 /**
  * Default skin implementation for the {@link ScrollPane} control.
@@ -192,7 +192,7 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
     /*
     ** The content of the ScrollPane has just changed bounds, check scrollBar positions.
     */
-    private final ChangeListener<Bounds> boundsChangeListener = new ChangeListener<Bounds>() {
+    private final ChangeListener<Bounds> boundsChangeListener = new ChangeListener<>() {
         @Override public void changed(ObservableValue<? extends Bounds> observable, Bounds oldBounds, Bounds newBounds) {
 
             /*
@@ -265,16 +265,13 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
 
         // install default input map for the ScrollPane control
         behavior = new ScrollPaneBehavior(control);
-//        control.setInputMap(behavior.getInputMap());
 
         initialize();
 
         // Register listeners
-        Consumer<ObservableValue<?>> viewportSizeHintConsumer = e -> {
-            // change affects pref size, so requestLayout on control
-            getSkinnable().requestLayout();
-        };
-        registerChangeListener(control.contentProperty(), e -> {
+        ListenerHelper lh = ListenerHelper.get(this);
+
+        lh.addChangeListener(control.contentProperty(), (ev) -> {
             if (scrollNode != getSkinnable().getContent()) {
                 if (scrollNode != null) {
                     scrollNode.layoutBoundsProperty().removeListener(weakNodeListener);
@@ -292,32 +289,36 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
             }
             getSkinnable().requestLayout();
         });
-        registerChangeListener(control.fitToWidthProperty(), e -> {
-            getSkinnable().requestLayout();
-            viewRect.requestLayout();
-        });
-        registerChangeListener(control.fitToHeightProperty(), e -> {
-            getSkinnable().requestLayout();
-            viewRect.requestLayout();
-        });
-        registerChangeListener(control.hbarPolicyProperty(), e -> {
-            // change might affect pref size, so requestLayout on control
-            getSkinnable().requestLayout();
-        });
-        registerChangeListener(control.vbarPolicyProperty(), e -> {
-            // change might affect pref size, so requestLayout on control
-            getSkinnable().requestLayout();
-        });
-        registerChangeListener(control.hvalueProperty(), e -> hsb.setValue(getSkinnable().getHvalue()));
-        registerChangeListener(control.hmaxProperty(), e -> hsb.setMax(getSkinnable().getHmax()));
-        registerChangeListener(control.hminProperty(), e -> hsb.setMin(getSkinnable().getHmin()));
-        registerChangeListener(control.vvalueProperty(), e -> vsb.setValue(getSkinnable().getVvalue()));
-        registerChangeListener(control.vmaxProperty(), e -> vsb.setMax(getSkinnable().getVmax()));
-        registerChangeListener(control.vminProperty(), e -> vsb.setMin(getSkinnable().getVmin()));
-        registerChangeListener(control.prefViewportWidthProperty(), viewportSizeHintConsumer);
-        registerChangeListener(control.prefViewportHeightProperty(), viewportSizeHintConsumer);
-        registerChangeListener(control.minViewportWidthProperty(), viewportSizeHintConsumer);
-        registerChangeListener(control.minViewportHeightProperty(), viewportSizeHintConsumer);
+
+        lh.addChangeListener(
+            () -> {
+                getSkinnable().requestLayout();
+                viewRect.requestLayout();
+                viewContent.requestLayout();
+            },
+            control.fitToWidthProperty(),
+            control.fitToHeightProperty()
+        );
+
+        lh.addChangeListener(control.hvalueProperty(), e -> hsb.setValue(getSkinnable().getHvalue()));
+        lh.addChangeListener(control.hmaxProperty(), e -> hsb.setMax(getSkinnable().getHmax()));
+        lh.addChangeListener(control.hminProperty(), e -> hsb.setMin(getSkinnable().getHmin()));
+        lh.addChangeListener(control.vvalueProperty(), e -> vsb.setValue(getSkinnable().getVvalue()));
+        lh.addChangeListener(control.vmaxProperty(), e -> vsb.setMax(getSkinnable().getVmax()));
+        lh.addChangeListener(control.vminProperty(), e -> vsb.setMin(getSkinnable().getVmin()));
+
+        lh.addChangeListener(
+            () -> {
+                // change affects pref size, so requestLayout on control
+                getSkinnable().requestLayout();
+            },
+            control.hbarPolicyProperty(),
+            control.vbarPolicyProperty(),
+            control.prefViewportWidthProperty(),
+            control.prefViewportHeightProperty(),
+            control.minViewportWidthProperty(),
+            control.minViewportHeightProperty()
+        );
     }
 
 
@@ -387,12 +388,13 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
      **************************************************************************/
 
     /** {@inheritDoc} */
-    @Override public void dispose() {
-        super.dispose();
-
+    @Override
+    public void dispose() {
         if (behavior != null) {
             behavior.dispose();
         }
+
+        super.dispose();
     }
 
     /**
@@ -421,10 +423,10 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
         double minWidth = vsbWidth + snappedLeftInset() + snappedRightInset();
 
         if (sp.getPrefViewportWidth() > 0) {
-            return (sp.getPrefViewportWidth() + minWidth);
+            return snapSpaceX(sp.getPrefViewportWidth() + minWidth);
         }
         else if (sp.getContent() != null) {
-            return (sp.getContent().prefWidth(height) + minWidth);
+            return snapSpaceX(sp.getContent().prefWidth(height) + minWidth);
         }
         else {
             return Math.max(minWidth, DEFAULT_PREF_SIZE);
@@ -439,10 +441,10 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
         double minHeight = hsbHeight + snappedTopInset() + snappedBottomInset();
 
         if (sp.getPrefViewportHeight() > 0) {
-            return (sp.getPrefViewportHeight() + minHeight);
+            return snapSpaceY(sp.getPrefViewportHeight() + minHeight);
         }
         else if (sp.getContent() != null) {
-            return (sp.getContent().prefHeight(width) + minHeight);
+            return snapSpaceY(sp.getContent().prefHeight(width) + minHeight);
         }
         else {
             return Math.max(minHeight, DEFAULT_PREF_SIZE);
@@ -457,7 +459,7 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
         double minWidth = vsbWidth + snappedLeftInset() + snappedRightInset();
 
         if (sp.getMinViewportWidth() > 0) {
-            return (sp.getMinViewportWidth() + minWidth);
+            return snapSpaceX(sp.getMinViewportWidth() + minWidth);
         } else {
             double w = corner.minWidth(-1);
             return (w > 0) ? (3 * w) : (DEFAULT_MIN_SIZE);
@@ -473,7 +475,7 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
         double minHeight = hsbHeight + snappedTopInset() + snappedBottomInset();
 
         if (sp.getMinViewportHeight() > 0) {
-            return (sp.getMinViewportHeight() + minHeight);
+            return snapSpaceY(sp.getMinViewportHeight() + minHeight);
         } else {
             double h = corner.minHeight(-1);
             return (h > 0) ? (3 * h) : (DEFAULT_MIN_SIZE);
@@ -666,8 +668,10 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
             }
         };
 
-        hsb.addEventFilter(MouseEvent.MOUSE_PRESSED, barHandler);
-        vsb.addEventFilter(MouseEvent.MOUSE_PRESSED, barHandler);
+        ListenerHelper lh = ListenerHelper.get(this);
+
+        lh.addEventFilter(hsb, MouseEvent.MOUSE_PRESSED, barHandler);
+        lh.addEventFilter(vsb, MouseEvent.MOUSE_PRESSED, barHandler);
 
         corner = new StackPane();
         corner.getStyleClass().setAll("corner");
@@ -708,10 +712,9 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
         getChildren().clear();
         getChildren().addAll(viewRect, vsb, hsb, corner);
 
-        /*
-        ** listeners, and assorted housekeeping
-        */
-        InvalidationListener vsbListener = valueModel -> {
+        // listeners, and assorted housekeeping
+
+        lh.addInvalidationListener(vsb.valueProperty(), (valueModel) -> {
             if (!Properties.IS_TOUCH_SUPPORTED) {
                 posY = Utils.clamp(getSkinnable().getVmin(), vsb.getValue(), getSkinnable().getVmax());
             }
@@ -719,10 +722,9 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
                 posY = vsb.getValue();
             }
             updatePosY();
-        };
-        vsb.valueProperty().addListener(vsbListener);
+        });
 
-        InvalidationListener hsbListener = valueModel -> {
+        lh.addInvalidationListener(hsb.valueProperty(), (valueModel) -> {
             if (!Properties.IS_TOUCH_SUPPORTED) {
                 posX = Utils.clamp(getSkinnable().getHmin(), hsb.getValue(), getSkinnable().getHmax());
             }
@@ -730,8 +732,7 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
                 posX = hsb.getValue();
             }
             updatePosX();
-        };
-        hsb.valueProperty().addListener(hsbListener);
+        });
 
         viewRect.setOnMousePressed(e -> {
             mouseDown = true;
@@ -743,7 +744,6 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
             ohvalue = hsb.getValue();
             ovvalue = vsb.getValue();
         });
-
 
         viewRect.setOnDragDetected(e -> {
              if (Properties.IS_TOUCH_SUPPORTED) {
@@ -782,6 +782,7 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
                  startContentsToViewport();
              }
         });
+
         viewRect.setOnMouseDragged(e -> {
              if (Properties.IS_TOUCH_SUPPORTED) {
                  startSBReleasedAnimation();
@@ -843,7 +844,6 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
             e.consume();
         });
 
-
         /*
         ** don't allow the ScrollBar to handle the ScrollEvent,
         ** In a ScrollPane a vertical scroll should scroll on the vertical only,
@@ -880,7 +880,7 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
          * scroll event handling.
          *
          * Note that we use viewRect here, rather than setting the eventHandler
-         * on the ScrollPane itself. This is for RT-31582, and effectively
+         * on the ScrollPane itself. This is for JDK-8096155, and effectively
          * allows for us to prioritise handling (and consuming) the event
          * internally, before it is made available to users listening to events
          * on the control. This is consistent with the VirtualFlow-based controls.
@@ -910,7 +910,7 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
                     ** if there is a repositioning in progress then we only
                     ** set the value for 'real' events
                     */
-                    if (!(((ScrollEvent)event).isInertia()) || (((ScrollEvent)event).isInertia()) && (contentsToViewTimeline == null || contentsToViewTimeline.getStatus() == Status.STOPPED)) {
+                    if (!(event.isInertia()) || (event.isInertia()) && (contentsToViewTimeline == null || contentsToViewTimeline.getStatus() == Status.STOPPED)) {
                         vsb.setValue(newValue);
                         if ((newValue > vsb.getMax() || newValue < vsb.getMin()) && (!mouseDown && !touchDetected)) {
                             startContentsToViewport();
@@ -937,7 +937,7 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
                     ** if there is a repositioning in progress then we only
                     ** set the value for 'real' events
                     */
-                    if (!(((ScrollEvent)event).isInertia()) || (((ScrollEvent)event).isInertia()) && (contentsToViewTimeline == null || contentsToViewTimeline.getStatus() == Status.STOPPED)) {
+                    if (!(event.isInertia()) || (event.isInertia()) && (contentsToViewTimeline == null || contentsToViewTimeline.getStatus() == Status.STOPPED)) {
                         hsb.setValue(newValue);
 
                         if ((newValue > hsb.getMax() || newValue < hsb.getMin()) && (!mouseDown && !touchDetected)) {
@@ -953,13 +953,13 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
         ** there are certain animations that need to know if the touch is
         ** happening.....
         */
-        getSkinnable().addEventHandler(TouchEvent.TOUCH_PRESSED, e -> {
+        lh.addEventHandler(getSkinnable(), TouchEvent.TOUCH_PRESSED, e -> {
             touchDetected = true;
             startSBReleasedAnimation();
             e.consume();
         });
 
-        getSkinnable().addEventHandler(TouchEvent.TOUCH_RELEASED, e -> {
+        lh.addEventHandler(getSkinnable(), TouchEvent.TOUCH_RELEASED, e -> {
             touchDetected = false;
             e.consume();
         });
@@ -967,7 +967,7 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
         // ScrollPanes do not block all MouseEvents by default, unlike most other UI Controls.
         consumeMouseEvents(false);
 
-        // update skin initial state to match control (see RT-35554)
+        // update skin initial state to match control (see JDK-8096249)
         hsb.setValue(control.getHvalue());
         vsb.setValue(control.getVvalue());
     }
@@ -1075,7 +1075,7 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
             return (tempVisibility && (nodeWidth > contentWidth));
         }
         else {
-            // RT-17395: ScrollBarPolicy might be null. If so, treat it as "AS_NEEDED", which is the default
+            // JDK-8093908: ScrollBarPolicy might be null. If so, treat it as "AS_NEEDED", which is the default
             ScrollBarPolicy hbarPolicy = sp.getHbarPolicy();
             return (ScrollBarPolicy.NEVER == hbarPolicy) ? false :
                    ((ScrollBarPolicy.ALWAYS == hbarPolicy) ? true :
@@ -1091,7 +1091,7 @@ public class ScrollPaneSkin extends SkinBase<ScrollPane> {
             return (tempVisibility && (nodeHeight > contentHeight));
         }
         else {
-            // RT-17395: ScrollBarPolicy might be null. If so, treat it as "AS_NEEDED", which is the default
+            // JDK-8093908: ScrollBarPolicy might be null. If so, treat it as "AS_NEEDED", which is the default
             ScrollBarPolicy vbarPolicy = sp.getVbarPolicy();
             return (ScrollBarPolicy.NEVER == vbarPolicy) ? false :
                    ((ScrollBarPolicy.ALWAYS == vbarPolicy) ? true :

@@ -28,15 +28,16 @@
 
 #if ENABLE(WEB_RTC)
 
+#include "ContextDestructionObserverInlines.h"
 #include "RTCDTMFSenderBackend.h"
 #include "RTCDTMFToneChangeEvent.h"
 #include "RTCRtpSender.h"
 #include "ScriptExecutionContext.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(RTCDTMFSender);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(RTCDTMFSender);
 
 static const size_t minToneDurationMs = 40;
 static const size_t maxToneDurationMs = 6000;
@@ -55,7 +56,7 @@ RTCDTMFSender::RTCDTMFSender(ScriptExecutionContext& context, RTCRtpSender& send
     , m_sender(sender)
     , m_backend(WTFMove(backend))
 {
-    m_backend->onTonePlayed([this](const String&) {
+    m_backend->onTonePlayed([this] {
         onTonePlayed();
     });
 }
@@ -81,7 +82,7 @@ String RTCDTMFSender::toneBuffer() const
     return m_tones;
 }
 
-static inline bool isToneCharacterInvalid(UChar character)
+static inline bool isToneCharacterInvalid(char16_t character)
 {
     if (character >= '0' && character <= '9')
         return false;
@@ -93,11 +94,11 @@ static inline bool isToneCharacterInvalid(UChar character)
 ExceptionOr<void> RTCDTMFSender::insertDTMF(const String& tones, size_t duration, size_t interToneGap)
 {
     if (!canInsertDTMF())
-        return Exception { InvalidStateError, "Cannot insert DTMF"_s };
+        return Exception { ExceptionCode::InvalidStateError, "Cannot insert DTMF"_s };
 
     auto normalizedTones = tones.convertToUppercaseWithoutLocale();
     if (normalizedTones.find(isToneCharacterInvalid) != notFound)
-        return Exception { InvalidCharacterError, "Tones are not valid"_s };
+        return Exception { ExceptionCode::InvalidCharacterError, "Tones are not valid"_s };
 
     m_tones = WTFMove(normalizedTones);
     m_duration = clampTo(duration, minToneDurationMs, maxToneDurationMs);
@@ -107,8 +108,8 @@ ExceptionOr<void> RTCDTMFSender::insertDTMF(const String& tones, size_t duration
         return { };
 
     m_isPendingPlayoutTask = true;
-    scriptExecutionContext()->postTask([this, protectedThis = Ref { *this }](auto&) {
-        playNextTone();
+    scriptExecutionContext()->postTask([protectedThis = Ref { *this }](auto&) {
+        protectedThis->playNextTone();
     });
     return { };
 }
@@ -126,10 +127,10 @@ void RTCDTMFSender::playNextTone()
         return;
     }
 
-    auto currentTone = m_tones.substring(0, 1);
-    m_tones.remove(0);
+    auto currentTone = m_tones.left(1);
+    m_tones = m_tones.substring(1);
 
-    m_backend->playTone(currentTone, m_duration, m_interToneGap);
+    m_backend->playTone(currentTone[0], m_duration, m_interToneGap);
     dispatchEvent(RTCDTMFToneChangeEvent::create(currentTone));
 }
 
@@ -145,13 +146,9 @@ void RTCDTMFSender::toneTimerFired()
 
 void RTCDTMFSender::stop()
 {
+    m_isPendingPlayoutTask = false;
     m_backend = nullptr;
     m_toneTimer.stop();
-}
-
-const char* RTCDTMFSender::activeDOMObjectName() const
-{
-    return "RTCDTMFSender";
 }
 
 } // namespace WebCore

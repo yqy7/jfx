@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2006-2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2006-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2013 Google Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,24 +22,27 @@
 #include "config.h"
 #include "HTMLFrameOwnerElement.h"
 
-#include "DOMWindow.h"
-#include "Frame.h"
+#include "ContainerNodeInlines.h"
 #include "FrameLoader.h"
+#include "LocalDOMWindow.h"
+#include "LocalFrame.h"
+#include "RemoteFrame.h"
+#include "RemoteFrameClient.h"
 #include "RenderWidget.h"
 #include "SVGDocument.h"
 #include "SVGElementTypeHelpers.h"
 #include "ScriptController.h"
 #include "ShadowRoot.h"
 #include "StyleTreeResolver.h"
-#include <wtf/IsoMallocInlines.h>
 #include <wtf/Ref.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLFrameOwnerElement);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(HTMLFrameOwnerElement);
 
-HTMLFrameOwnerElement::HTMLFrameOwnerElement(const QualifiedName& tagName, Document& document)
-    : HTMLElement(tagName, document)
+HTMLFrameOwnerElement::HTMLFrameOwnerElement(const QualifiedName& tagName, Document& document, OptionSet<TypeFlag> constructionType)
+    : HTMLElement(tagName, document, constructionType)
 {
 }
 
@@ -46,9 +50,7 @@ RenderWidget* HTMLFrameOwnerElement::renderWidget() const
 {
     // HTMLObjectElement and HTMLEmbedElement may return arbitrary renderers
     // when using fallback content.
-    if (!is<RenderWidget>(renderer()))
-        return nullptr;
-    return downcast<RenderWidget>(renderer());
+    return dynamicDowncast<RenderWidget>(renderer());
 }
 
 void HTMLFrameOwnerElement::setContentFrame(Frame& frame)
@@ -76,21 +78,32 @@ void HTMLFrameOwnerElement::clearContentFrame()
 
 void HTMLFrameOwnerElement::disconnectContentFrame()
 {
-    if (RefPtr<Frame> frame = m_contentFrame.get()) {
-        frame->loader().frameDetached();
+    if (RefPtr frame = m_contentFrame.get()) {
+        if (RefPtr innerDocument = contentDocument())
+            innerDocument->willBeDisconnectedFromFrame(protectedDocument());
+        frame->frameDetached();
+        if (frame == m_contentFrame.get())
         frame->disconnectOwnerElement();
+        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(frame != m_contentFrame.get());
     }
 }
 
 HTMLFrameOwnerElement::~HTMLFrameOwnerElement()
 {
-    if (m_contentFrame)
-        m_contentFrame->disconnectOwnerElement();
+    if (RefPtr contentFrame = m_contentFrame.get())
+        contentFrame->disconnectOwnerElement();
+}
+
+RefPtr<Frame> HTMLFrameOwnerElement::protectedContentFrame() const
+{
+    return m_contentFrame.get();
 }
 
 Document* HTMLFrameOwnerElement::contentDocument() const
 {
-    return m_contentFrame ? m_contentFrame->document() : nullptr;
+    if (auto* localFrame = dynamicDowncast<LocalFrame>(m_contentFrame.get()))
+        return localFrame->document();
+    return nullptr;
 }
 
 WindowProxy* HTMLFrameOwnerElement::contentWindow() const
@@ -101,20 +114,21 @@ WindowProxy* HTMLFrameOwnerElement::contentWindow() const
 void HTMLFrameOwnerElement::setSandboxFlags(SandboxFlags flags)
 {
     m_sandboxFlags = flags;
+    if (RefPtr contentFrame = m_contentFrame.get())
+        contentFrame->updateSandboxFlags(flags, Frame::NotifyUIProcess::Yes);
 }
 
-bool HTMLFrameOwnerElement::isKeyboardFocusable(KeyboardEvent* event) const
+bool HTMLFrameOwnerElement::isKeyboardFocusable(const FocusEventData& focusEventData) const
 {
-    return m_contentFrame && HTMLElement::isKeyboardFocusable(event);
+    return m_contentFrame && HTMLElement::isKeyboardFocusable(focusEventData);
 }
 
-ExceptionOr<Document&> HTMLFrameOwnerElement::getSVGDocument() const
+Document* HTMLFrameOwnerElement::getSVGDocument() const
 {
     auto* document = contentDocument();
     if (is<SVGDocument>(document))
-        return *document;
-    // Spec: http://www.w3.org/TR/SVG/struct.html#InterfaceGetSVGDocument
-    return Exception { NotSupportedError };
+        return document;
+    return nullptr;
 }
 
 void HTMLFrameOwnerElement::scheduleInvalidateStyleAndLayerComposition()
@@ -132,8 +146,12 @@ bool HTMLFrameOwnerElement::isProhibitedSelfReference(const URL& completeURL) co
 {
     // We allow one level of self-reference because some websites depend on that, but we don't allow more than one.
     bool foundOneSelfReference = false;
-    for (auto* frame = document().frame(); frame; frame = frame->tree().parent()) {
-        if (equalIgnoringFragmentIdentifier(frame->document()->url(), completeURL)) {
+    for (RefPtr<Frame> frame = document().frame(); frame; frame = frame->tree().parent()) {
+        RefPtr localFrame = dynamicDowncast<LocalFrame>(frame);
+        if (!localFrame)
+            continue;
+        // Use creationURL() because url() can be changed via History.replaceState() so it's not reliable.
+        if (equalIgnoringFragmentIdentifier(localFrame->document()->creationURL(), completeURL)) {
             if (foundOneSelfReference)
                 return true;
             foundOneSelfReference = true;
@@ -144,7 +162,7 @@ bool HTMLFrameOwnerElement::isProhibitedSelfReference(const URL& completeURL) co
 
 bool SubframeLoadingDisabler::canLoadFrame(HTMLFrameOwnerElement& owner)
 {
-    for (RefPtr<ContainerNode> node = &owner; node; node = node->parentOrShadowHostNode()) {
+    for (RefPtr<ContainerNode> node = owner; node; node = node->parentOrShadowHostNode()) {
         if (disabledSubtreeRoots().contains(node.get()))
             return false;
     }

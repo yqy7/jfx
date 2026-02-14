@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, Google Inc. All rights reserved.
+ * Copyright (C) 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,7 +37,7 @@ class BaseAudioContext;
 class MediaStreamAudioSource;
 
 class MediaStreamAudioDestinationNode final : public AudioBasicInspectorNode {
-    WTF_MAKE_ISO_ALLOCATED(MediaStreamAudioDestinationNode);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(MediaStreamAudioDestinationNode);
 public:
     static ExceptionOr<Ref<MediaStreamAudioDestinationNode>> create(BaseAudioContext&, const AudioNodeOptions& = { });
 
@@ -58,8 +58,8 @@ private:
     // As an audio source, we will never propagate silence.
     bool propagatesSilence() const final { return false; }
 
-    Ref<MediaStreamAudioSource> m_source;
-    Ref<MediaStream> m_stream;
+    const Ref<MediaStreamAudioSource> m_source;
+    const Ref<MediaStream> m_stream;
 };
 
 } // namespace WebCore

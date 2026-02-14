@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,10 +25,6 @@
 
 package test.javafx.scene.layout;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
 import javafx.geometry.HPos;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
@@ -43,14 +39,18 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.RowConstraints;
 import javafx.scene.shape.Rectangle;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 
 public class GridPaneTest {
     GridPane gridpane;
 
-    @Before public void setUp() {
+    @BeforeEach public void setUp() {
         this.gridpane = new GridPane();
     }
 
@@ -70,8 +70,8 @@ public class GridPaneTest {
         gridpane.autosize();
         gridpane.layout();
 
-        assertNull(null, gridpane.getAlignment());
-        assertNull(null, gridpane.alignmentProperty().get());
+        assertNull(gridpane.getAlignment());
+        assertNull(gridpane.alignmentProperty().get());
     }
 
     @Test public void testSimpleGridPane() {
@@ -558,7 +558,7 @@ public class GridPaneTest {
         assertNull(GridPane.getRowIndex(child1));
 
         GridPane.setRowIndex(child1, 2);
-        assertEquals((int)2, (int)GridPane.getRowIndex(child1));
+        assertEquals(2, (int)GridPane.getRowIndex(child1));
 
         GridPane.setRowIndex(child1, null);
         assertNull(GridPane.getRowIndex(child1));
@@ -570,7 +570,7 @@ public class GridPaneTest {
         assertNull(GridPane.getColumnIndex(child1));
 
         GridPane.setColumnIndex(child1, 2);
-        assertEquals((int)2, (int)GridPane.getColumnIndex(child1));
+        assertEquals(2, (int)GridPane.getColumnIndex(child1));
 
         GridPane.setColumnIndex(child1, null);
         assertNull(GridPane.getColumnIndex(child1));
@@ -582,7 +582,7 @@ public class GridPaneTest {
         assertNull(GridPane.getRowSpan(child1));
 
         GridPane.setRowSpan(child1, 2);
-        assertEquals((int)2, (int)GridPane.getRowSpan(child1));
+        assertEquals(2, (int)GridPane.getRowSpan(child1));
 
         GridPane.setRowSpan(child1, null);
         assertNull(GridPane.getRowSpan(child1));
@@ -594,7 +594,7 @@ public class GridPaneTest {
         assertNull(GridPane.getColumnSpan(child1));
 
         GridPane.setColumnSpan(child1, 2);
-        assertEquals((int)2, (int)GridPane.getColumnSpan(child1));
+        assertEquals(2, (int)GridPane.getColumnSpan(child1));
 
         GridPane.setColumnSpan(child1, null);
         assertNull(GridPane.getColumnSpan(child1));
@@ -705,28 +705,28 @@ public class GridPaneTest {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
 
         GridPane.setConstraints(child1, 2,6);
-        assertEquals((int)6, (int)GridPane.getRowIndex(child1));
-        assertEquals((int)2, (int)GridPane.getColumnIndex(child1));
+        assertEquals(6, (int)GridPane.getRowIndex(child1));
+        assertEquals(2, (int)GridPane.getColumnIndex(child1));
     }
 
     @Test public void testGridPaneSetConstraintsWithSpans() {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
 
         GridPane.setConstraints(child1, 2,6, 3,8);
-        assertEquals((int)6, (int)GridPane.getRowIndex(child1));
-        assertEquals((int)2, (int)GridPane.getColumnIndex(child1));
-        assertEquals((int)8, (int)GridPane.getRowSpan(child1));
-        assertEquals((int)3, (int)GridPane.getColumnSpan(child1));
+        assertEquals(6, (int)GridPane.getRowIndex(child1));
+        assertEquals(2, (int)GridPane.getColumnIndex(child1));
+        assertEquals(8, (int)GridPane.getRowSpan(child1));
+        assertEquals(3, (int)GridPane.getColumnSpan(child1));
     }
 
     @Test public void testGridPaneSetConstraintsWithSpansAlignments() {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
 
         GridPane.setConstraints(child1, 2,6, 3,8, HPos.CENTER, VPos.TOP);
-        assertEquals((int)6, (int)GridPane.getRowIndex(child1));
-        assertEquals((int)2, (int)GridPane.getColumnIndex(child1));
-        assertEquals((int)8, (int)GridPane.getRowSpan(child1));
-        assertEquals((int)3, (int)GridPane.getColumnSpan(child1));
+        assertEquals(6, (int)GridPane.getRowIndex(child1));
+        assertEquals(2, (int)GridPane.getColumnIndex(child1));
+        assertEquals(8, (int)GridPane.getRowSpan(child1));
+        assertEquals(3, (int)GridPane.getColumnSpan(child1));
         assertEquals(HPos.CENTER, GridPane.getHalignment(child1));
         assertEquals(VPos.TOP, GridPane.getValignment(child1));
     }
@@ -735,10 +735,10 @@ public class GridPaneTest {
         MockResizable child1 = new MockResizable(100,200, 300,400, 500,600);
 
         GridPane.setConstraints(child1, 2,6, 3,8, HPos.CENTER, VPos.TOP, Priority.SOMETIMES, Priority.ALWAYS);
-        assertEquals((int)6, (int)GridPane.getRowIndex(child1));
-        assertEquals((int)2, (int)GridPane.getColumnIndex(child1));
-        assertEquals((int)8, (int)GridPane.getRowSpan(child1));
-        assertEquals((int)3, (int)GridPane.getColumnSpan(child1));
+        assertEquals(6, (int)GridPane.getRowIndex(child1));
+        assertEquals(2, (int)GridPane.getColumnIndex(child1));
+        assertEquals(8, (int)GridPane.getRowSpan(child1));
+        assertEquals(3, (int)GridPane.getColumnSpan(child1));
         assertEquals(HPos.CENTER, GridPane.getHalignment(child1));
         assertEquals(VPos.TOP, GridPane.getValignment(child1));
         assertEquals(Priority.SOMETIMES, GridPane.getHgrow(child1));
@@ -751,10 +751,10 @@ public class GridPaneTest {
         Insets margin = new Insets(10,20,30,40);
         GridPane.setConstraints(child1, 2,6, 3,8, HPos.CENTER, VPos.TOP,
                 Priority.SOMETIMES, Priority.ALWAYS, margin);
-        assertEquals((int)6, (int)GridPane.getRowIndex(child1));
-        assertEquals((int)2, (int)GridPane.getColumnIndex(child1));
-        assertEquals((int)8, (int)GridPane.getRowSpan(child1));
-        assertEquals((int)3, (int)GridPane.getColumnSpan(child1));
+        assertEquals(6, (int)GridPane.getRowIndex(child1));
+        assertEquals(2, (int)GridPane.getColumnIndex(child1));
+        assertEquals(8, (int)GridPane.getRowSpan(child1));
+        assertEquals(3, (int)GridPane.getColumnSpan(child1));
         assertEquals(HPos.CENTER, GridPane.getHalignment(child1));
         assertEquals(VPos.TOP, GridPane.getValignment(child1));
         assertEquals(Priority.SOMETIMES, GridPane.getHgrow(child1));
@@ -3157,5 +3157,16 @@ public class GridPaneTest {
         gridpane.getRowConstraints().addAll(rc, rc, rc);
 
         assertEquals(160, gridpane.prefHeight(-1), 1e-100);
+    }
+
+    @Test
+    public void testGridPaneHgapVgapConstructor() {
+        assertEquals(0, gridpane.getHgap(), 0);
+        assertEquals(0, gridpane.getVgap(), 0);
+
+        gridpane = new GridPane(3, 8);
+
+        assertEquals(3, gridpane.getHgap(), 0);
+        assertEquals(8, gridpane.getVgap(), 0);
     }
 }

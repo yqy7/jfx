@@ -34,23 +34,22 @@
 #include <type_traits>
 #include <wtf/Assertions.h>
 #include <wtf/MainThread.h>
-#include <wtf/RandomNumber.h>
 
 namespace JSC {
 
 ALWAYS_INLINE VM& Heap::vm() const
 {
-    return *bitwise_cast<VM*>(bitwise_cast<uintptr_t>(this) - OBJECT_OFFSETOF(VM, heap));
+    return *std::bit_cast<VM*>(std::bit_cast<uintptr_t>(this) - OBJECT_OFFSETOF(VM, heap));
 }
 
-ALWAYS_INLINE Heap* Heap::heap(const HeapCell* cell)
+ALWAYS_INLINE JSC::Heap* Heap::heap(const HeapCell* cell)
 {
     if (!cell)
         return nullptr;
     return cell->heap();
 }
 
-inline Heap* Heap::heap(const JSValue v)
+inline JSC::Heap* Heap::heap(const JSValue v)
 {
     if (!v.isCell())
         return nullptr;
@@ -70,7 +69,7 @@ inline bool Heap::worldIsStopped() const
 ALWAYS_INLINE bool Heap::isMarked(const void* rawCell)
 {
     ASSERT(!m_isMarkingForGCVerifier);
-    HeapCell* cell = bitwise_cast<HeapCell*>(rawCell);
+    HeapCell* cell = std::bit_cast<HeapCell*>(rawCell);
     if (cell->isPreciseAllocation())
         return cell->preciseAllocation().isMarked();
     MarkedBlock& block = cell->markedBlock();
@@ -79,17 +78,17 @@ ALWAYS_INLINE bool Heap::isMarked(const void* rawCell)
 
 ALWAYS_INLINE bool Heap::testAndSetMarked(HeapVersion markingVersion, const void* rawCell)
 {
-    HeapCell* cell = bitwise_cast<HeapCell*>(rawCell);
+    HeapCell* cell = std::bit_cast<HeapCell*>(rawCell);
     if (cell->isPreciseAllocation())
         return cell->preciseAllocation().testAndSetMarked();
     MarkedBlock& block = cell->markedBlock();
-    Dependency dependency = block.aboutToMark(markingVersion);
+    Dependency dependency = block.aboutToMark(markingVersion, cell);
     return block.testAndSetMarked(cell, dependency);
 }
 
 ALWAYS_INLINE size_t Heap::cellSize(const void* rawCell)
 {
-    return bitwise_cast<HeapCell*>(rawCell)->cellSize();
+    return std::bit_cast<HeapCell*>(rawCell)->cellSize();
 }
 
 inline void Heap::writeBarrier(const JSCell* from, JSValue to)
@@ -109,7 +108,7 @@ inline void Heap::writeBarrier(const JSCell* from, JSCell* to)
 #endif
     if (!from)
         return;
-    if (LIKELY(!to))
+    if (!to) [[likely]]
         return;
     if (!isWithinThreshold(from->cellState(), barrierThreshold()))
         return;
@@ -121,22 +120,29 @@ inline void Heap::writeBarrier(const JSCell* from)
     ASSERT_GC_OBJECT_LOOKS_VALID(const_cast<JSCell*>(from));
     if (!from)
         return;
-    if (UNLIKELY(isWithinThreshold(from->cellState(), barrierThreshold())))
+    if (isWithinThreshold(from->cellState(), barrierThreshold())) [[unlikely]]
         writeBarrierSlowPath(from);
 }
 
 inline void Heap::mutatorFence()
 {
-    if (isX86() || UNLIKELY(mutatorShouldBeFenced()))
+    // We could push this condition in the lower `if` as on X86 a storeStoreFence is a compilerFence
+    // but this condition makes the logic a bit more explicit.
+    if constexpr (isX86()) {
+        WTF::compilerFence();
+        return;
+    }
+
+    if (mutatorShouldBeFenced()) [[unlikely]]
         WTF::storeStoreFence();
 }
 
-template<typename Functor> inline void Heap::forEachCodeBlock(const Functor& func)
+template<typename Functor> inline void Heap::forEachCodeBlock(NOESCAPE const Functor& func)
 {
     forEachCodeBlockImpl(scopedLambdaRef<void(CodeBlock*)>(func));
 }
 
-template<typename Functor> inline void Heap::forEachCodeBlockIgnoringJITPlans(const AbstractLocker& codeBlockSetLocker, const Functor& func)
+template<typename Functor> inline void Heap::forEachCodeBlockIgnoringJITPlans(const AbstractLocker& codeBlockSetLocker, NOESCAPE const Functor& func)
 {
     forEachCodeBlockIgnoringJITPlansImpl(codeBlockSetLocker, scopedLambdaRef<void(CodeBlock*)>(func));
 }
@@ -180,7 +186,7 @@ inline void Heap::decrementDeferralDepthAndGCIfNeeded()
     ASSERT(!Thread::mayBeGCThread() || m_worldIsStopped);
     m_deferralDepth--;
 
-    if (UNLIKELY(m_didDeferGCWork) || Options::forceDidDeferGCWork()) {
+    if (m_didDeferGCWork || Options::forceDidDeferGCWork()) [[unlikely]] {
         decrementDeferralDepthAndGCIfNeededSlow();
 
         // Here are the possible relationships between m_deferralDepth and m_didDeferGCWork.
@@ -206,17 +212,21 @@ inline void Heap::decrementDeferralDepthAndGCIfNeeded()
     }
 }
 
-inline HashSet<MarkedArgumentBufferBase*>& Heap::markListSet()
+inline UncheckedKeyHashSet<MarkedVectorBase*>& Heap::markListSet()
 {
-    if (!m_markListSet)
-        m_markListSet = makeUnique<HashSet<MarkedArgumentBufferBase*>>();
-    return *m_markListSet;
+    return m_markListSet;
 }
 
-inline void Heap::reportExtraMemoryAllocated(size_t size)
+inline void Heap::reportExtraMemoryAllocated(const JSCell* cell, size_t size)
 {
     if (size > minExtraMemory)
-        reportExtraMemoryAllocatedSlowCase(size);
+        reportExtraMemoryAllocatedSlowCase(nullptr, cell, size);
+}
+
+inline void Heap::reportExtraMemoryAllocated(GCDeferralContext* deferralContext, const JSCell* cell, size_t size)
+{
+    if (size > minExtraMemory)
+        reportExtraMemoryAllocatedSlowCase(deferralContext, cell, size);
 }
 
 inline void Heap::deprecatedReportExtraMemory(size_t size)
@@ -274,7 +284,7 @@ namespace GCClient {
 
 ALWAYS_INLINE VM& Heap::vm() const
 {
-    return *bitwise_cast<VM*>(bitwise_cast<uintptr_t>(this) - OBJECT_OFFSETOF(VM, clientHeap));
+    return *std::bit_cast<VM*>(std::bit_cast<uintptr_t>(this) - OBJECT_OFFSETOF(VM, clientHeap));
 }
 
 } // namespace GCClient

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -50,6 +50,7 @@ import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Control;
 import javafx.scene.control.Label;
 import javafx.scene.control.TableColumnBase;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
@@ -88,7 +89,7 @@ public class TableHeaderRow extends StackPane {
 
     private final VirtualFlow flow;
     final TableViewSkinBase<?,?,?,?,?> tableSkin;
-    private Map<TableColumnBase, CheckMenuItem> columnMenuItems = new HashMap<TableColumnBase, CheckMenuItem>();
+    private Map<TableColumnBase, CheckMenuItem> columnMenuItems;
     private double scrollX;
     private double tableWidth;
     private Rectangle clip;
@@ -140,7 +141,7 @@ public class TableHeaderRow extends StackPane {
 
     private InvalidationListener tablePaddingListener = o -> updateTableWidth();
 
-    // This is necessary for RT-20300 (but was updated for RT-20840)
+    // This is necessary for JDK-8127819 (but was updated for JDK-8127677)
     private ListChangeListener visibleLeafColumnsListener = c -> getRootHeader().setHeadersNeedUpdate();
 
     private final ListChangeListener tableColumnsListener = c -> {
@@ -154,6 +155,14 @@ public class TableHeaderRow extends StackPane {
         CheckMenuItem menuItem = columnMenuItems.get(column);
         if (menuItem != null) {
             menuItem.setText(getText(column.getText(), column));
+        }
+    };
+
+    private InvalidationListener visibleColumnListener = observable -> {
+        TableColumnBase<?, ?> column = (TableColumnBase<?, ?>) ((BooleanProperty) observable).getBean();
+        CheckMenuItem menuItem = columnMenuItems.get(column);
+        if (menuItem != null) {
+            menuItem.setSelected(column.isVisible());
         }
     };
 
@@ -174,10 +183,11 @@ public class TableHeaderRow extends StackPane {
     private final WeakInvalidationListener weakColumnTextListener =
             new WeakInvalidationListener(columnTextListener);
 
+    private final WeakInvalidationListener weakVisibleColumnListener =
+            new WeakInvalidationListener(visibleColumnListener);
+
     private final WeakChangeListener<Boolean> weakCornerPaddingListener =
             new WeakChangeListener<>(cornerPaddingListener);
-
-
 
     /* *************************************************************************
      *                                                                         *
@@ -209,12 +219,6 @@ public class TableHeaderRow extends StackPane {
         tableSkin.getSkinnable().widthProperty().addListener(weakTableWidthListener);
         tableSkin.getSkinnable().paddingProperty().addListener(weakTablePaddingListener);
         TableSkinUtils.getVisibleLeafColumns(skin).addListener(weakVisibleLeafColumnsListener);
-
-        // popup menu for hiding/showing columns
-        columnPopupMenu = new ContextMenu();
-        updateTableColumnListeners(TableSkinUtils.getColumns(tableSkin), Collections.<TableColumnBase<?,?>>emptyList());
-        TableSkinUtils.getVisibleLeafColumns(skin).addListener(weakTableColumnsListener);
-        TableSkinUtils.getColumns(tableSkin).addListener(weakTableColumnsListener);
 
         // drag header region. Used to indicate the current column being reordered
         dragHeader = new StackPane();
@@ -261,13 +265,9 @@ public class TableHeaderRow extends StackPane {
         BooleanProperty tableMenuButtonVisibleProperty = TableSkinUtils.tableMenuButtonVisibleProperty(skin);
         if (tableMenuButtonVisibleProperty != null) {
             cornerRegion.visibleProperty().bind(tableMenuButtonVisibleProperty);
-        };
+        }
 
-        cornerRegion.setOnMousePressed(me -> {
-            // show a popupMenu which lists all columns
-            columnPopupMenu.show(cornerRegion, Side.BOTTOM, 0, 0);
-            me.consume();
-        });
+        cornerRegion.setOnMousePressed(this::showColumnMenu);
         cornerRegion.visibleProperty().addListener(weakCornerPaddingListener);
         flow.getVbar().visibleProperty().addListener(weakCornerPaddingListener);
 
@@ -408,7 +408,7 @@ public class TableHeaderRow extends StackPane {
 
     /** {@inheritDoc} */
     @Override protected double computePrefHeight(double width) {
-        // we hardcode 24.0 here to avoid RT-37616, where the
+        // we hardcode 24.0 here to avoid JDK-8095994, where the
         // entire header row would disappear when all columns were hidden.
         double headerPrefHeight = getRootHeader().prefHeight(width);
         headerPrefHeight = headerPrefHeight == 0.0 ? 24.0 : headerPrefHeight;
@@ -426,10 +426,10 @@ public class TableHeaderRow extends StackPane {
      * @since 12
      */
     protected void updateScrollX() {
-        scrollX = flow.getHbar().isVisible() ? -flow.getHbar().getValue() : 0.0F;
+        scrollX = flow.getHbar().isVisible() ? snapPositionX(-flow.getHbar().getValue()) : 0.0F;
         requestLayout();
 
-        // Fix for RT-36392: without this call even though we call requestLayout()
+        // Fix for JDK-8094852: without this call even though we call requestLayout()
         // we don't seem to ever see the layoutChildren() method above called,
         // which means the layout is not always updated to use the latest scrollX.
         layout();
@@ -450,7 +450,7 @@ public class TableHeaderRow extends StackPane {
      * @since 12
      */
     protected void updateTableWidth() {
-        // snapping added for RT-19428
+        // snapping added for JDK-8127930
         final Control c = tableSkin.getSkinnable();
         if (c == null) {
             this.tableWidth = 0;
@@ -473,7 +473,26 @@ public class TableHeaderRow extends StackPane {
         return new NestedTableColumnHeader(null);
     }
 
+    /**
+     * Shows a menu containing all leaf columns as items.
+     * An item can be selected/deselected to make the corresponding column visible/invisible.
+     *
+     * @implNote This method can be overridden to create and show a custom menu.
+     * @param mouseEvent the {@code MouseEvent} which was generated when the table menu button was pressed
+     * @since 21
+     */
+    protected void showColumnMenu(MouseEvent mouseEvent) {
+        if (columnPopupMenu == null) {
+            columnPopupMenu = new ContextMenu();
+            columnMenuItems = new HashMap<>();
 
+            TableSkinUtils.getVisibleLeafColumns(tableSkin).addListener(weakTableColumnsListener);
+            TableSkinUtils.getColumns(tableSkin).addListener(weakTableColumnsListener);
+            updateTableColumnListeners(TableSkinUtils.getColumns(tableSkin), List.of());
+        }
+        columnPopupMenu.show(cornerRegion, Side.BOTTOM, 0, 0);
+        mouseEvent.consume();
+    }
 
     /* *************************************************************************
      *                                                                         *
@@ -570,9 +589,7 @@ public class TableHeaderRow extends StackPane {
         CheckMenuItem item = columnMenuItems.remove(col);
         if (item != null) {
             col.textProperty().removeListener(weakColumnTextListener);
-            item.selectedProperty().unbindBidirectional(col.visibleProperty());
-
-            columnPopupMenu.getItems().remove(item);
+            col.visibleProperty().removeListener(weakVisibleColumnListener);
         }
 
         if (! col.getColumns().isEmpty()) {
@@ -617,24 +634,28 @@ public class TableHeaderRow extends StackPane {
         if (item == null) {
             item = new CheckMenuItem();
             columnMenuItems.put(col, item);
+
+            item.setSelected(col.isVisible());
+
+            final CheckMenuItem _item = item;
+            // fake bidrectional binding (a real one was used here but resulted in JDK-8136468)
+            item.selectedProperty().addListener(o -> {
+                if (col.visibleProperty().isBound()) return;
+                col.setVisible(_item.isSelected());
+            });
+
+            col.textProperty().addListener(weakColumnTextListener);
+            col.visibleProperty().addListener(weakVisibleColumnListener);
+        } else {
+            item.setSelected(col.isVisible());
         }
 
         // bind column text and isVisible so that the menu item is always correct
         item.setText(getText(col.getText(), col));
-        col.textProperty().addListener(weakColumnTextListener);
 
         // ideally we would have API to observe the binding status of a property,
         // but for now that doesn't exist, so we set this once and then forget
         item.setDisable(col.visibleProperty().isBound());
-
-        // fake bidrectional binding (a real one was used here but resulted in JBS-8136468)
-        item.setSelected(col.isVisible());
-        final CheckMenuItem _item = item;
-        item.selectedProperty().addListener(o -> {
-            if (col.visibleProperty().isBound()) return;
-            col.setVisible(_item.isSelected());
-        });
-        col.visibleProperty().addListener(o -> _item.setSelected(col.isVisible()));
 
         columnPopupMenu.getItems().add(item);
     }
@@ -657,7 +678,7 @@ public class TableHeaderRow extends StackPane {
     // We need to show strings properly. If a column has a parent column which is
     // not inserted into the TableView columns list, it effectively doesn't have
     // a parent column from the users perspective. As such, we shouldn't include
-    // the parent column text in the menu. Fixes RT-14482.
+    // the parent column text in the menu. Fixes JDK-8114496.
     private boolean isColumnVisibleInHeader(TableColumnBase col, List columns) {
         if (col == null) return false;
 
@@ -696,4 +717,12 @@ public class TableHeaderRow extends StackPane {
         cornerPadding.set(padding);
     }
 
+    // testing only
+    Pane getCornerRegion() {
+        return cornerRegion;
+    }
+
+    ContextMenu getColumnPopupMenu() {
+        return columnPopupMenu;
+    }
 }

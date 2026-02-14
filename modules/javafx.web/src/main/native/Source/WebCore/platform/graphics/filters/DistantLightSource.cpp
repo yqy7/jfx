@@ -41,10 +41,17 @@ Ref<DistantLightSource> DistantLightSource::create(float azimuth, float elevatio
 }
 
 DistantLightSource::DistantLightSource(float azimuth, float elevation)
-    : LightSource(LS_DISTANT)
+    : LightSource(LightType::LS_DISTANT)
     , m_azimuth(azimuth)
     , m_elevation(elevation)
 {
+}
+
+bool DistantLightSource::operator==(const DistantLightSource& other) const
+{
+    return LightSource::operator==(other)
+        && m_azimuth == other.m_azimuth
+        && m_elevation == other.m_elevation;
 }
 
 void DistantLightSource::initPaintingData(const Filter&, const FilterImage&, PaintingData& paintingData) const
@@ -82,9 +89,9 @@ bool DistantLightSource::setElevation(float elevation)
 
 TextStream& DistantLightSource::externalRepresentation(TextStream& ts) const
 {
-    ts << "[type=DISTANT-LIGHT] ";
-    ts << "[azimuth=\"" << azimuth() << "\"]";
-    ts << "[elevation=\"" << elevation() << "\"]";
+    ts << "[type=DISTANT-LIGHT] "_s;
+    ts << "[azimuth=\"" << azimuth() << "\"]"_s;
+    ts << "[elevation=\"" << elevation() << "\"]"_s;
     return ts;
 }
 

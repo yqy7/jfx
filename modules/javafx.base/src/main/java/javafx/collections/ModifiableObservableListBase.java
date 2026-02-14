@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,6 +29,7 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
+import java.util.Objects;
 
 /**
  * Abstract class that serves as a base class for {@link ObservableList} implementations that are modifiable.
@@ -88,7 +89,11 @@ public abstract class ModifiableObservableListBase<E> extends ObservableListBase
 
     @Override
     public boolean setAll(Collection<? extends E> col) {
-        if (isEmpty() && col.isEmpty()) return false;
+        // implicit check to ensure col != null
+        if (col.isEmpty() && isEmpty()) {
+            return false;
+        }
+
         beginChange();
         try {
             clear();
@@ -100,11 +105,34 @@ public abstract class ModifiableObservableListBase<E> extends ObservableListBase
     }
 
     @Override
-    public boolean addAll(Collection<? extends E> c) {
+    public boolean replaceRange(int from, int to, Collection<? extends E> col) {
+        Objects.checkFromToIndex(from, to, size());
+
+        // implicit check to ensure col != null
+        if (col.isEmpty() && from == to) {
+            return false;
+        }
+
         beginChange();
         try {
-            boolean res = super.addAll(c);
-            return res;
+            remove(from, to);
+            addAll(from, col);
+            return true;
+        } finally {
+            endChange();
+        }
+    }
+
+    @Override
+    public boolean addAll(Collection<? extends E> c) {
+        // implicit check to ensure c != null
+        if (c.isEmpty()) {
+            return false;
+        }
+
+        beginChange();
+        try {
+            return super.addAll(c);
         } finally {
             endChange();
         }
@@ -112,10 +140,18 @@ public abstract class ModifiableObservableListBase<E> extends ObservableListBase
 
     @Override
     public boolean addAll(int index, Collection<? extends E> c) {
+        if (index < 0 || index > size()) {
+            throw new IndexOutOfBoundsException("Index: " + index);
+        }
+
+        // implicit check to ensure c != null
+        if (c.isEmpty()) {
+            return false;
+        }
+
         beginChange();
         try {
-            boolean res = super.addAll(index, c);
-            return res;
+            return super.addAll(index, c);
         } finally {
             endChange();
         }
@@ -123,6 +159,15 @@ public abstract class ModifiableObservableListBase<E> extends ObservableListBase
 
     @Override
     protected void removeRange(int fromIndex, int toIndex) {
+        if (fromIndex < 0 || fromIndex > size()) {
+            throw new IndexOutOfBoundsException("Index: " + fromIndex);
+        }
+
+        // return early if the range is empty
+        if (fromIndex == toIndex) {
+            return;
+        }
+
         beginChange();
         try {
             super.removeRange(fromIndex, toIndex);
@@ -133,10 +178,14 @@ public abstract class ModifiableObservableListBase<E> extends ObservableListBase
 
     @Override
     public boolean removeAll(Collection<?> c) {
+        // implicit check to ensure c != null
+        if (c.isEmpty() || isEmpty()) {
+            return false;
+        }
+
         beginChange();
         try {
-            boolean res = super.removeAll(c);
-            return res;
+            return super.removeAll(c);
         } finally {
             endChange();
         }
@@ -144,10 +193,19 @@ public abstract class ModifiableObservableListBase<E> extends ObservableListBase
 
     @Override
     public boolean retainAll(Collection<?> c) {
+        // implicit check to ensure c != null
+        if (c.isEmpty() && !isEmpty()) {
+            clear();
+            return true;
+        }
+
+        if (isEmpty()) {
+            return false;
+        }
+
         beginChange();
         try {
-            boolean res = super.retainAll(c);
-            return res;
+            return super.retainAll(c);
         } finally {
             endChange();
         }
@@ -254,7 +312,8 @@ public abstract class ModifiableObservableListBase<E> extends ObservableListBase
      */
     protected abstract E doRemove(int index);
 
-    private class SubObservableList implements List<E> {
+    // package-private for testing
+    class SubObservableList implements List<E> {
 
         public SubObservableList(List<E> sublist) {
             this.sublist = sublist;
@@ -308,10 +367,14 @@ public abstract class ModifiableObservableListBase<E> extends ObservableListBase
 
         @Override
         public boolean addAll(Collection<? extends E> c) {
+            // implicit check to ensure c != null
+            if (c.isEmpty()) {
+                return false;
+            }
+
             beginChange();
             try {
-                boolean res = sublist.addAll(c);
-                return res;
+                return sublist.addAll(c);
             } finally {
                 endChange();
             }
@@ -319,10 +382,18 @@ public abstract class ModifiableObservableListBase<E> extends ObservableListBase
 
         @Override
         public boolean addAll(int index, Collection<? extends E> c) {
+            if (index < 0 || index > sublist.size()) {
+                throw new IndexOutOfBoundsException("Index: " + index);
+            }
+
+            // implicit check to ensure c != null
+            if (c.isEmpty()) {
+                return false;
+            }
+
             beginChange();
             try {
-                boolean res = sublist.addAll(index, c);
-                return res;
+                return sublist.addAll(index, c);
             } finally {
                 endChange();
             }
@@ -330,10 +401,14 @@ public abstract class ModifiableObservableListBase<E> extends ObservableListBase
 
         @Override
         public boolean removeAll(Collection<?> c) {
+            // implicit check to ensure c != null
+            if (c.isEmpty() || sublist.isEmpty()) {
+                return false;
+            }
+
             beginChange();
             try {
-                boolean res = sublist.removeAll(c);
-                return res;
+                return sublist.removeAll(c);
             } finally {
                 endChange();
             }
@@ -341,10 +416,19 @@ public abstract class ModifiableObservableListBase<E> extends ObservableListBase
 
         @Override
         public boolean retainAll(Collection<?> c) {
+            // implicit check to ensure c != null
+            if (c.isEmpty() && !sublist.isEmpty()) {
+                sublist.clear();
+                return true;
+            }
+
+            if (sublist.isEmpty()) {
+                return false;
+            }
+
             beginChange();
             try {
-                boolean res = sublist.retainAll(c);
-                return res;
+                return sublist.retainAll(c);
             } finally {
                 endChange();
             }

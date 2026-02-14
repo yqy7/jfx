@@ -26,7 +26,7 @@
 #include "HTMLOptGroupElement.h"
 
 #include "Document.h"
-#include "ElementAncestorIterator.h"
+#include "ElementAncestorIteratorInlines.h"
 #include "ElementIterator.h"
 #include "HTMLNames.h"
 #include "HTMLOptionElement.h"
@@ -35,12 +35,13 @@
 #include "RenderMenuList.h"
 #include "NodeRenderStyle.h"
 #include "StyleResolver.h"
-#include <wtf/IsoMallocInlines.h>
+#include "TypedElementDescendantIteratorInlines.h"
 #include <wtf/StdLibExtras.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(HTMLOptGroupElement);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(HTMLOptGroupElement);
 
 using namespace HTMLNames;
 
@@ -62,22 +63,21 @@ bool HTMLOptGroupElement::isDisabledFormControl() const
 
 bool HTMLOptGroupElement::isFocusable() const
 {
-    if (!supportsFocus())
+    RefPtr select = ownerSelectElement();
+    if (select && select->usesMenuList())
         return false;
-    // Optgroup elements do not have a renderer.
-    auto* style = const_cast<HTMLOptGroupElement&>(*this).computedStyle();
-    return style && style->display() != DisplayType::None;
+    return HTMLElement::isFocusable();
 }
 
 const AtomString& HTMLOptGroupElement::formControlType() const
 {
-    static MainThreadNeverDestroyed<const AtomString> optgroup("optgroup", AtomString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> optgroup("optgroup"_s);
     return optgroup;
 }
 
 void HTMLOptGroupElement::childrenChanged(const ChildChange& change)
 {
-    bool isRelevant = change.affectsElements();
+    bool isRelevant = change.affectsElements == ChildChange::AffectsElements::Yes;
     RefPtr select = isRelevant ? ownerSelectElement() : nullptr;
     if (!isRelevant || !select) {
         HTMLElement::childrenChanged(change);
@@ -90,19 +90,19 @@ void HTMLOptGroupElement::childrenChanged(const ChildChange& change)
     HTMLElement::childrenChanged(change);
 }
 
-void HTMLOptGroupElement::parseAttribute(const QualifiedName& name, const AtomString& value)
+void HTMLOptGroupElement::attributeChanged(const QualifiedName& name, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason attributeModificationReason)
 {
-    HTMLElement::parseAttribute(name, value);
+    HTMLElement::attributeChanged(name, oldValue, newValue, attributeModificationReason);
     recalcSelectOptions();
 
     if (name == disabledAttr) {
-        bool newDisabled = !value.isNull();
+        bool newDisabled = !newValue.isNull();
         if (m_isDisabled != newDisabled) {
-            Style::PseudoClassChangeInvalidation disabledInvalidation(*this, { { CSSSelector::PseudoClassDisabled, newDisabled }, { CSSSelector::PseudoClassEnabled, !newDisabled } });
+            Style::PseudoClassChangeInvalidation disabledInvalidation(*this, { { CSSSelector::PseudoClass::Disabled, newDisabled }, { CSSSelector::PseudoClass::Enabled, !newDisabled } });
 
             Vector<Style::PseudoClassChangeInvalidation> optionInvalidation;
-            for (auto& descendant : descendantsOfType<HTMLOptionElement>(*this))
-                optionInvalidation.append({ descendant, { { CSSSelector::PseudoClassDisabled, newDisabled }, { CSSSelector::PseudoClassEnabled, !newDisabled } } });
+            for (Ref descendant : descendantsOfType<HTMLOptionElement>(*this))
+                optionInvalidation.append({ descendant, { { CSSSelector::PseudoClass::Disabled, newDisabled }, { CSSSelector::PseudoClass::Enabled, !newDisabled } } });
 
             m_isDisabled = newDisabled;
         }
@@ -119,12 +119,12 @@ void HTMLOptGroupElement::recalcSelectOptions()
 
 String HTMLOptGroupElement::groupLabelText() const
 {
-    String itemText = document().displayStringModifiedByEncoding(attributeWithoutSynchronization(labelAttr));
+    String itemText = protectedDocument()->displayStringModifiedByEncoding(attributeWithoutSynchronization(labelAttr));
 
     // In WinIE, leading and trailing whitespace is ignored in options and optgroups. We match this behavior.
-    itemText = itemText.stripWhiteSpace();
+    itemText = itemText.trim(deprecatedIsSpaceOrNewline);
     // We want to collapse our whitespace too.  This will match other browsers.
-    itemText = itemText.simplifyWhiteSpace();
+    itemText = itemText.simplifyWhiteSpace(deprecatedIsSpaceOrNewline);
 
     return itemText;
 }

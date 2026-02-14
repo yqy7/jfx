@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,19 +40,22 @@ class JSDOMGlobalObject;
 class WebGLBuffer;
 class WebGLFramebuffer;
 class WebGLProgram;
+class WebGLQuery;
 class WebGLRenderbuffer;
 class WebGLSampler;
 class WebGLTexture;
+class WebGLTimerQueryEXT;
 class WebGLTransformFeedback;
 class WebGLVertexArrayObject;
 class WebGLVertexArrayObjectOES;
 
-using WebGLAny = std::variant<
+using WebGLAny = Variant<
     std::nullptr_t,
     bool,
     int,
     unsigned,
     long long,
+    unsigned long long,
     float,
     String,
     Vector<bool>,
@@ -65,14 +68,14 @@ using WebGLAny = std::variant<
     RefPtr<WebGLBuffer>,
     RefPtr<WebGLFramebuffer>,
     RefPtr<WebGLProgram>,
+    RefPtr<WebGLQuery>,
     RefPtr<WebGLRenderbuffer>,
+    RefPtr<WebGLSampler>,
     RefPtr<WebGLTexture>,
+    RefPtr<WebGLTimerQueryEXT>,
+    RefPtr<WebGLTransformFeedback>,
+    RefPtr<WebGLVertexArrayObject>,
     RefPtr<WebGLVertexArrayObjectOES>
-#if ENABLE(WEBGL2)
-    , RefPtr<WebGLSampler>
-    , RefPtr<WebGLTransformFeedback>
-    , RefPtr<WebGLVertexArrayObject>
-#endif
 >;
 
 } // namespace WebCore

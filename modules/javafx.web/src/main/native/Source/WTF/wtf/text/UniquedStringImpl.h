@@ -35,10 +35,22 @@ class UniquedStringImpl : public StringImpl {
 private:
     UniquedStringImpl() = delete;
 protected:
-    UniquedStringImpl(CreateSymbolTag, const LChar* characters, unsigned length) : StringImpl(CreateSymbol, characters, length) { }
-    UniquedStringImpl(CreateSymbolTag, const UChar* characters, unsigned length) : StringImpl(CreateSymbol, characters, length) { }
-    UniquedStringImpl(CreateSymbolTag) : StringImpl(CreateSymbol) { }
+    inline UniquedStringImpl(CreateSymbolTag, std::span<const LChar>);
+    inline UniquedStringImpl(CreateSymbolTag, std::span<const char16_t>);
+    inline UniquedStringImpl(CreateSymbolTag);
 };
+
+inline UniquedStringImpl::UniquedStringImpl(CreateSymbolTag, std::span<const LChar> characters)
+    : StringImpl(CreateSymbol, characters)
+{ }
+
+inline UniquedStringImpl::UniquedStringImpl(CreateSymbolTag, std::span<const char16_t> characters)
+    : StringImpl(CreateSymbol, characters)
+{ }
+
+inline UniquedStringImpl::UniquedStringImpl(CreateSymbolTag)
+    : StringImpl(CreateSymbol)
+{ }
 
 #if ASSERT_ENABLED
 // UniquedStringImpls created from StaticStringImpl will ASSERT

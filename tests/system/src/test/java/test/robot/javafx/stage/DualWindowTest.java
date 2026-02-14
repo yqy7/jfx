@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,13 +36,14 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.robot.Robot;
 import javafx.stage.Stage;
 import javafx.stage.WindowEvent;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.PlatformUtil;
 import test.util.Util;
-
-import static org.junit.Assert.*;
 
 public class DualWindowTest {
 
@@ -107,24 +108,18 @@ public class DualWindowTest {
         }
     }
 
-    @BeforeClass
+    @BeforeAll
     public static void setupOnce() throws Exception {
         startupLatch = new CountDownLatch(2);
-        new Thread(() -> Application.launch(TestApp.class, (String[]) null)).start();
-        assertTrue("Timeout waiting for FX runtime to start",
-                startupLatch.await(15, TimeUnit.SECONDS));
+        Util.launch(startupLatch, TestApp.class);
     }
 
-    @AfterClass
+    @AfterAll
     public static void teardown() {
-        Platform.runLater(() -> {
-            if (stage1 != null) stage1.hide();
-            if (stage2 != null) stage2.hide();
-            Platform.exit();
-        });
+        Util.shutdown();
     }
 
-    @Before
+    @BeforeEach
     public void setup() {
         Util.runAndWait(() -> robot = new Robot());
     }
@@ -147,21 +142,23 @@ public class DualWindowTest {
         mouseClick(button.getScene(),
                    button.getLayoutX() + button.getWidth() / 2,
                    button.getLayoutY() + button.getHeight() / 2);
-        assertTrue(button.getText() + " action not fired",
-                   button.latch.await(5, TimeUnit.SECONDS));
+        Assertions.assertTrue(button.latch.await(5, TimeUnit.SECONDS), button.getText() + " action not fired");
     }
 
     @Test
     public void testTwoStages() throws Exception {
+        if (PlatformUtil.isLinux()) {
+            Assumptions.assumeTrue(Boolean.getBoolean("unstable.test")); // JDK-8321624
+        }
+
         Util.sleep(1000);
         Util.runAndWait(() -> {
-            assertEquals(STAGE1_X, stage1.getX(), 1.0);
-            assertEquals(STAGE1_Y, stage1.getY(), 1.0);
-            assertEquals(STAGE2_X, stage2.getX(), 1.0);
-            assertEquals(STAGE2_Y, stage2.getY(), 1.0);
+            Assertions.assertEquals(STAGE1_X, stage1.getX(), 1.0);
+            Assertions.assertEquals(STAGE1_Y, stage1.getY(), 1.0);
+            Assertions.assertEquals(STAGE2_X, stage2.getX(), 1.0);
+            Assertions.assertEquals(STAGE2_Y, stage2.getY(), 1.0);
         });
         clickButton(button1);
         clickButton(button2);
     }
-
 }

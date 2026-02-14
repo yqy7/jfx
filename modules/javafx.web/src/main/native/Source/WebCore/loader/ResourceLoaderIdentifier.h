@@ -29,8 +29,7 @@
 
 namespace WebCore {
 
-class ResourceLoader;
-
-using ResourceLoaderIdentifier = ObjectIdentifier<ResourceLoader>;
+struct ResourceLoaderIdentifierType;
+using ResourceLoaderIdentifier = AtomicObjectIdentifier<ResourceLoaderIdentifierType>;
 
 } // namespace WebCore

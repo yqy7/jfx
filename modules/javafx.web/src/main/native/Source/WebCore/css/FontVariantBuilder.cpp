@@ -26,9 +26,11 @@
 #include "config.h"
 #include "FontVariantBuilder.h"
 
+#include "CSSFunctionValue.h"
 #include "CSSPrimitiveValue.h"
 #include "CSSValueList.h"
 #include "CSSValuePool.h"
+#include "StyleBuilderState.h"
 #include "TextFlags.h"
 
 namespace WebCore {
@@ -40,9 +42,9 @@ FontVariantLigaturesValues extractFontVariantLigatures(const CSSValue& value)
     FontVariantLigatures historical = FontVariantLigatures::Normal;
     FontVariantLigatures contextualAlternates = FontVariantLigatures::Normal;
 
-    if (is<CSSValueList>(value)) {
-        for (auto& item : downcast<CSSValueList>(value)) {
-            switch (downcast<CSSPrimitiveValue>(item.get()).valueID()) {
+    if (auto* valueList = dynamicDowncast<CSSValueList>(value)) {
+        for (auto& item : *valueList) {
+            switch (item.valueID()) {
             case CSSValueNoCommonLigatures:
                 common = FontVariantLigatures::No;
                 break;
@@ -73,7 +75,7 @@ FontVariantLigaturesValues extractFontVariantLigatures(const CSSValue& value)
             }
         }
     } else if (is<CSSPrimitiveValue>(value)) {
-        switch (downcast<CSSPrimitiveValue>(value).valueID()) {
+        switch (value.valueID()) {
         case CSSValueNormal:
             break;
         case CSSValueNone:
@@ -99,9 +101,9 @@ FontVariantNumericValues extractFontVariantNumeric(const CSSValue& value)
     FontVariantNumericOrdinal ordinal = FontVariantNumericOrdinal::Normal;
     FontVariantNumericSlashedZero slashedZero = FontVariantNumericSlashedZero::Normal;
 
-    if (is<CSSValueList>(value)) {
-        for (auto& item : downcast<CSSValueList>(value)) {
-            switch (downcast<CSSPrimitiveValue>(item.get()).valueID()) {
+    if (auto* valueList = dynamicDowncast<CSSValueList>(value)) {
+        for (auto& item : *valueList) {
+            switch (item.valueID()) {
             case CSSValueLiningNums:
                 figure = FontVariantNumericFigure::LiningNumbers;
                 break;
@@ -132,7 +134,7 @@ FontVariantNumericValues extractFontVariantNumeric(const CSSValue& value)
             }
         }
     } else if (is<CSSPrimitiveValue>(value))
-        ASSERT(downcast<CSSPrimitiveValue>(value).valueID() == CSSValueNormal);
+        ASSERT(value.valueID() == CSSValueNormal);
 
     return FontVariantNumericValues(figure, spacing, fraction, ordinal, slashedZero);
 }
@@ -143,9 +145,9 @@ FontVariantEastAsianValues extractFontVariantEastAsian(const CSSValue& value)
     FontVariantEastAsianWidth width = FontVariantEastAsianWidth::Normal;
     FontVariantEastAsianRuby ruby = FontVariantEastAsianRuby::Normal;
 
-    if (is<CSSValueList>(value)) {
-        for (auto& item : downcast<CSSValueList>(value)) {
-            switch (downcast<CSSPrimitiveValue>(item.get()).valueID()) {
+    if (auto* valueList = dynamicDowncast<CSSValueList>(value)) {
+        for (auto& item : *valueList) {
+            switch (item.valueID()) {
             case CSSValueJis78:
                 variant = FontVariantEastAsianVariant::Jis78;
                 break;
@@ -179,197 +181,105 @@ FontVariantEastAsianValues extractFontVariantEastAsian(const CSSValue& value)
             }
         }
     } else if (is<CSSPrimitiveValue>(value))
-        ASSERT(downcast<CSSPrimitiveValue>(value).valueID() == CSSValueNormal);
+        ASSERT(value.valueID() == CSSValueNormal);
 
     return FontVariantEastAsianValues(variant, width, ruby);
 }
 
-Ref<CSSValue> computeFontVariant(const FontVariantSettings& variantSettings)
+FontVariantAlternates extractFontVariantAlternates(const CSSValue& value, Style::BuilderState& builderState)
 {
-    if (variantSettings.isAllNormal())
-        return CSSValuePool::singleton().createIdentifierValue(CSSValueNormal);
+    auto processSingleItemFunction = [&](const CSSFunctionValue& function, String& parameterToSet) -> bool {
+        if (function.size() != 1) {
+            builderState.setCurrentPropertyInvalidAtComputedValueTime();
+            return false;
+        }
+        RefPtr primitiveArgument = dynamicDowncast<CSSPrimitiveValue>(function[0]);
+        if (!primitiveArgument || !primitiveArgument->isCustomIdent()) {
+            builderState.setCurrentPropertyInvalidAtComputedValueTime();
+            return false;
+        }
+        parameterToSet = primitiveArgument->customIdent();
+        return true;
+    };
 
-    auto list = CSSValueList::createSpaceSeparated();
+    auto processListFunction = [&](const CSSFunctionValue& function, Vector<String>& parameterToSet) -> bool {
+        if (!function.size()) {
+            builderState.setCurrentPropertyInvalidAtComputedValueTime();
+            return false;
+        }
+        for (Ref argument : function) {
+            RefPtr primitiveArgument = dynamicDowncast<CSSPrimitiveValue>(argument);
+            if (!primitiveArgument || !primitiveArgument->isCustomIdent()) {
+                builderState.setCurrentPropertyInvalidAtComputedValueTime();
+                return false;
+            }
+            parameterToSet.append(primitiveArgument->customIdent());
+        }
+        return true;
+    };
 
-    switch (variantSettings.commonLigatures) {
-    case FontVariantLigatures::Normal:
-        break;
-    case FontVariantLigatures::Yes:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueCommonLigatures));
-        break;
-    case FontVariantLigatures::No:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueNoCommonLigatures));
-        break;
+    auto result = FontVariantAlternates::Normal();
+
+    if (RefPtr valueList = dynamicDowncast<CSSValueList>(value)) {
+        for (Ref item : *valueList) {
+            if (RefPtr primitive = dynamicDowncast<CSSPrimitiveValue>(item.get())) {
+                switch (primitive->valueID()) {
+                case CSSValueHistoricalForms:
+                    result.valuesRef().historicalForms = true;
+                    break;
+                default:
+                    builderState.setCurrentPropertyInvalidAtComputedValueTime();
+                    return FontVariantAlternates::Normal();
+                }
+            } else if (RefPtr function = dynamicDowncast<CSSFunctionValue>(item.get())) {
+                switch (function->name()) {
+                case CSSValueSwash:
+                    if (!processSingleItemFunction(*function, result.valuesRef().swash))
+                        return FontVariantAlternates::Normal();
+                    break;
+                case CSSValueStylistic:
+                    if (!processSingleItemFunction(*function, result.valuesRef().stylistic))
+                        return FontVariantAlternates::Normal();
+                    break;
+                case CSSValueStyleset:
+                    if (!processListFunction(*function, result.valuesRef().styleset))
+                        return FontVariantAlternates::Normal();
+                    break;
+                case CSSValueCharacterVariant:
+                    if (!processListFunction(*function, result.valuesRef().characterVariant))
+                        return FontVariantAlternates::Normal();
+                    break;
+                case CSSValueOrnaments:
+                    if (!processSingleItemFunction(*function, result.valuesRef().ornaments))
+                        return FontVariantAlternates::Normal();
+                    break;
+                case CSSValueAnnotation:
+                    if (!processSingleItemFunction(*function, result.valuesRef().annotation))
+                        return FontVariantAlternates::Normal();
+                    break;
+                default:
+                    builderState.setCurrentPropertyInvalidAtComputedValueTime();
+                    return FontVariantAlternates::Normal();
+                }
+            } else {
+                builderState.setCurrentPropertyInvalidAtComputedValueTime();
+                return FontVariantAlternates::Normal();
+            }
+        }
+    } else if (is<CSSPrimitiveValue>(value)) {
+        switch (value.valueID()) {
+        case CSSValueNormal:
+            break;
+        case CSSValueHistoricalForms:
+            result.valuesRef().historicalForms = true;
+            break;
+        default:
+            builderState.setCurrentPropertyInvalidAtComputedValueTime();
+            return FontVariantAlternates::Normal();
+        }
     }
 
-    switch (variantSettings.discretionaryLigatures) {
-    case FontVariantLigatures::Normal:
-        break;
-    case FontVariantLigatures::Yes:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueDiscretionaryLigatures));
-        break;
-    case FontVariantLigatures::No:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueNoDiscretionaryLigatures));
-        break;
-    }
-
-    switch (variantSettings.historicalLigatures) {
-    case FontVariantLigatures::Normal:
-        break;
-    case FontVariantLigatures::Yes:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueHistoricalLigatures));
-        break;
-    case FontVariantLigatures::No:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueNoHistoricalLigatures));
-        break;
-    }
-
-    switch (variantSettings.contextualAlternates) {
-    case FontVariantLigatures::Normal:
-        break;
-    case FontVariantLigatures::Yes:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueContextual));
-        break;
-    case FontVariantLigatures::No:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueNoContextual));
-        break;
-    }
-
-    switch (variantSettings.position) {
-    case FontVariantPosition::Normal:
-        break;
-    case FontVariantPosition::Subscript:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueSub));
-        break;
-    case FontVariantPosition::Superscript:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueSuper));
-        break;
-    }
-
-    switch (variantSettings.caps) {
-    case FontVariantCaps::Normal:
-        break;
-    case FontVariantCaps::Small:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueSmallCaps));
-        break;
-    case FontVariantCaps::AllSmall:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueAllSmallCaps));
-        break;
-    case FontVariantCaps::Petite:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValuePetiteCaps));
-        break;
-    case FontVariantCaps::AllPetite:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueAllPetiteCaps));
-        break;
-    case FontVariantCaps::Unicase:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueUnicase));
-        break;
-    case FontVariantCaps::Titling:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueTitlingCaps));
-        break;
-    }
-
-    switch (variantSettings.numericFigure) {
-    case FontVariantNumericFigure::Normal:
-        break;
-    case FontVariantNumericFigure::LiningNumbers:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueLiningNums));
-        break;
-    case FontVariantNumericFigure::OldStyleNumbers:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueOldstyleNums));
-        break;
-    }
-
-    switch (variantSettings.numericSpacing) {
-    case FontVariantNumericSpacing::Normal:
-        break;
-    case FontVariantNumericSpacing::ProportionalNumbers:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueProportionalNums));
-        break;
-    case FontVariantNumericSpacing::TabularNumbers:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueTabularNums));
-        break;
-    }
-
-    switch (variantSettings.numericFraction) {
-    case FontVariantNumericFraction::Normal:
-        break;
-    case FontVariantNumericFraction::DiagonalFractions:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueDiagonalFractions));
-        break;
-    case FontVariantNumericFraction::StackedFractions:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueStackedFractions));
-        break;
-    }
-
-    switch (variantSettings.numericOrdinal) {
-    case FontVariantNumericOrdinal::Normal:
-        break;
-    case FontVariantNumericOrdinal::Yes:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueOrdinal));
-        break;
-    }
-
-    switch (variantSettings.numericSlashedZero) {
-    case FontVariantNumericSlashedZero::Normal:
-        break;
-    case FontVariantNumericSlashedZero::Yes:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueSlashedZero));
-        break;
-    }
-
-    switch (variantSettings.alternates) {
-    case FontVariantAlternates::Normal:
-        break;
-    case FontVariantAlternates::HistoricalForms:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueHistoricalForms));
-        break;
-    }
-
-    switch (variantSettings.eastAsianVariant) {
-    case FontVariantEastAsianVariant::Normal:
-        break;
-    case FontVariantEastAsianVariant::Jis78:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueJis78));
-        break;
-    case FontVariantEastAsianVariant::Jis83:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueJis83));
-        break;
-    case FontVariantEastAsianVariant::Jis90:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueJis90));
-        break;
-    case FontVariantEastAsianVariant::Jis04:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueJis04));
-        break;
-    case FontVariantEastAsianVariant::Simplified:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueSimplified));
-        break;
-    case FontVariantEastAsianVariant::Traditional:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueTraditional));
-        break;
-    }
-
-    switch (variantSettings.eastAsianWidth) {
-    case FontVariantEastAsianWidth::Normal:
-        break;
-    case FontVariantEastAsianWidth::Full:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueFullWidth));
-        break;
-    case FontVariantEastAsianWidth::Proportional:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueProportionalWidth));
-        break;
-    }
-
-    switch (variantSettings.eastAsianRuby) {
-    case FontVariantEastAsianRuby::Normal:
-        break;
-    case FontVariantEastAsianRuby::Yes:
-        list.get().append(CSSValuePool::singleton().createIdentifierValue(CSSValueRuby));
-        break;
-    }
-
-    return list;
+    return result;
 }
 
-}
-
+} // WebCore namespace

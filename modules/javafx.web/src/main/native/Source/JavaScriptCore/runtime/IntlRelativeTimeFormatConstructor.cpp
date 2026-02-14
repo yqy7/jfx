@@ -44,7 +44,7 @@ static JSC_DECLARE_HOST_FUNCTION(intlRelativeTimeFormatConstructorFuncSupportedL
 
 namespace JSC {
 
-const ClassInfo IntlRelativeTimeFormatConstructor::s_info = { "Function", &InternalFunction::s_info, &relativeTimeFormatConstructorTable, nullptr, CREATE_METHOD_TABLE(IntlRelativeTimeFormatConstructor) };
+const ClassInfo IntlRelativeTimeFormatConstructor::s_info = { "Function"_s, &InternalFunction::s_info, &relativeTimeFormatConstructorTable, nullptr, CREATE_METHOD_TABLE(IntlRelativeTimeFormatConstructor) };
 
 /* Source for IntlRelativeTimeFormatConstructor.lut.h
 @begin relativeTimeFormatConstructorTable
@@ -103,7 +103,7 @@ JSC_DEFINE_HOST_FUNCTION(callIntlRelativeTimeFormat, (JSGlobalObject* globalObje
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "RelativeTimeFormat"));
+    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "RelativeTimeFormat"_s));
 }
 
 // https://tc39.es/ecma402/#sec-Intl.RelativeTimeFormat.supportedLocalesOf

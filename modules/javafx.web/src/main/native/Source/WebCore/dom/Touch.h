@@ -36,20 +36,22 @@
 
 namespace WebCore {
 
-class Frame;
+class LocalFrame;
 
 class Touch : public RefCounted<Touch> {
 public:
-    static Ref<Touch> create(Frame* frame, EventTarget* target,
-            unsigned identifier, int screenX, int screenY, int pageX, int pageY,
+    static Ref<Touch> create(LocalFrame* frame, EventTarget* target,
+            int identifier, int screenX, int screenY, int pageX, int pageY,
             int radiusX, int radiusY, float rotationAngle, float force)
     {
         return adoptRef(*new Touch(frame, target, identifier, screenX,
                 screenY, pageX, pageY, radiusX, radiusY, rotationAngle, force));
     }
 
+    ~Touch();
+
     EventTarget* target() const { return m_target.get(); }
-    unsigned identifier() const { return m_identifier; }
+    int identifier() const { return m_identifier; }
     int clientX() const { return m_clientX; }
     int clientY() const { return m_clientY; }
     int screenX() const { return m_screenX; }
@@ -64,16 +66,16 @@ public:
     Ref<Touch> cloneWithNewTarget(EventTarget*) const;
 
 private:
-    Touch(Frame* frame, EventTarget* target, unsigned identifier,
+    Touch(LocalFrame*, EventTarget*, int identifier,
             int screenX, int screenY, int pageX, int pageY,
             int radiusX, int radiusY, float rotationAngle, float force);
 
-    Touch(EventTarget*, unsigned identifier, int clientX, int clientY,
+    Touch(EventTarget*, int identifier, int clientX, int clientY,
         int screenX, int screenY, int pageX, int pageY,
         int radiusX, int radiusY, float rotationAngle, float force, LayoutPoint absoluteLocation);
 
     RefPtr<EventTarget> m_target;
-    unsigned m_identifier;
+    int m_identifier;
     int m_clientX;
     int m_clientY;
     int m_screenX;

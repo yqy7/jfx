@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,29 +25,24 @@
 
 package test.javafx.stage;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import javafx.application.Platform;
 import javafx.collections.ListChangeListener.Change;
 import javafx.collections.ObservableList;
 import javafx.stage.Screen;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import test.util.Util;
-
-import static org.junit.Assert.*;
-import static org.junit.Assume.assumeTrue;
 
 public class ScreenTest {
     static CountDownLatch startupLatch = new CountDownLatch(1);
     static ObservableList<Screen> screens;
     static volatile boolean screensListenerCalled = false;
     static volatile boolean screensSizeIsZero = false;
-
-    private static void waitForLatch(CountDownLatch latch, int seconds, String msg) throws Exception {
-        assertTrue("Timeout: " + msg, latch.await(seconds, TimeUnit.SECONDS));
-    }
 
     /* This test for JDK-8252446 adds a listener on the ObservableList of
      * screens as the first thing in the platform startup runnable. Even
@@ -56,10 +51,10 @@ public class ScreenTest {
      * do get one on Mac, but this isn't guaranteed behavior, so this
      * test might or might not be effective.
      */
-    @BeforeClass
+    @BeforeAll
     public static void initFX() throws Exception {
         Platform.setImplicitExit(false);
-        Platform.startup(() -> {
+        Util.startup(startupLatch, () -> {
             screens = Screen.getScreens();
             screens.addListener((Change<?> change) -> {
                 final int size = screens.size();
@@ -71,18 +66,17 @@ public class ScreenTest {
             });
             Platform.runLater(startupLatch::countDown);
         });
-        waitForLatch(startupLatch, 10, "FX runtime failed to start");
     }
 
-    @AfterClass
+    @AfterAll
     public static void exitFX() {
-        Platform.exit();
+        Util.shutdown();
     }
 
     @Test
     public void testScreensNotEmpty() {
         assertNotNull(screens);
-        assertFalse("Screens list is empty", screens.size() == 0);
+        assertFalse(screens.size() == 0, "Screens list is empty");
     }
 
     @Test
@@ -97,7 +91,6 @@ public class ScreenTest {
             System.err.println("Skipping test: Screens listener not called");
         }
         assumeTrue(screensListenerCalled);
-        assertFalse("Screens list is empty in listener", screensSizeIsZero);
+        assertFalse(screensSizeIsZero, "Screens list is empty in listener");
     }
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,7 @@
 package test.javafx.collections;
 
 import javafx.beans.InvalidationListener;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.*;
 import java.util.function.BiConsumer;
@@ -38,7 +38,7 @@ import javafx.collections.ObservableList;
 import javafx.collections.ObservableMap;
 import javafx.collections.ObservableSet;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class FXCollectionsTest {
 
@@ -88,7 +88,7 @@ public class FXCollectionsTest {
     public void concatTest() {
         ObservableList<String> seq =
                 FXCollections.concat(FXCollections.observableArrayList("foo", "bar"),
-                FXCollections.observableArrayList("foobar"));
+                        FXCollections.observableArrayList("foobar"));
         assertArrayEquals(new String[] {"foo", "bar", "foobar"}, seq.toArray(new String[0]));
         seq = FXCollections.concat();
         assertTrue(seq.isEmpty());
@@ -113,7 +113,7 @@ public class FXCollectionsTest {
     public void copyTest() {
         ObservableList<String> dest = FXCollections.observableArrayList("a", "b", "c", "d");
         ObservableList<String> src = FXCollections.observableArrayList("foo", "bar");
-        final MockListObserver<String> observer = new MockListObserver<String>();
+        final MockListObserver<String> observer = new MockListObserver<>();
 
         dest.addListener(observer);
 
@@ -126,7 +126,7 @@ public class FXCollectionsTest {
     @Test
     public void fillTest() {
         ObservableList<String> seq = FXCollections.observableArrayList("foo", "bar");
-        final MockListObserver<String> observer = new MockListObserver<String>();
+        final MockListObserver<String> observer = new MockListObserver<>();
 
         seq.addListener(observer);
         FXCollections.fill(seq, "ham");
@@ -137,7 +137,7 @@ public class FXCollectionsTest {
     @Test
     public void replaceAllTest() {
         ObservableList<String> seq = FXCollections.observableArrayList("eggs", "ham", "spam", "spam", "eggs", "spam");
-        final MockListObserver<String> observer = new MockListObserver<String>();
+        final MockListObserver<String> observer = new MockListObserver<>();
 
         seq.addListener(observer);
         FXCollections.replaceAll(seq, "spam", "viking");
@@ -149,11 +149,11 @@ public class FXCollectionsTest {
     public void reverseTest() {
 
         ObservableList<String> seq1 = FXCollections.observableArrayList("one", "two", "three", "four");
-        final MockListObserver<String> observer1 = new MockListObserver<String>();
+        final MockListObserver<String> observer1 = new MockListObserver<>();
         seq1.addListener(observer1);
 
         ObservableList<String> seq2 = FXCollections.observableArrayList("one", "two", "three", "four", "five");
-        final MockListObserver<String> observer2 = new MockListObserver<String>();
+        final MockListObserver<String> observer2 = new MockListObserver<>();
         seq2.addListener(observer2);
 
         FXCollections.reverse(seq1);
@@ -169,7 +169,7 @@ public class FXCollectionsTest {
     @Test
     public void rotateTest() {
         ObservableList<String> seq = FXCollections.observableArrayList("one", "two", "three", "four", "five");
-        final MockListObserver<String> observer = new MockListObserver<String>();
+        final MockListObserver<String> observer = new MockListObserver<>();
         seq.addListener(observer);
 
         FXCollections.rotate(seq, 2);
@@ -206,10 +206,10 @@ public class FXCollectionsTest {
 
     @Test
     public void sortTest2() {
-    //test sort on bigger elements, so that it is sorted with mergesort and not insert sort
+        //test sort on bigger elements, so that it is sorted with mergesort and not insert sort
         String[] content = new String[] { "q", "w", "e", "r", "t", "y", "u", "i", "o", "p" };
         ObservableList<String> seq = FXCollections.observableArrayList(content);
-        final MockListObserver<String> observer = new MockListObserver<String>();
+        final MockListObserver<String> observer = new MockListObserver<>();
         seq.addListener(observer);
         FXCollections.sort(seq);
         observer.check1Permutation(seq, new int[] {4, 8, 0, 5, 6, 9, 7, 1, 2, 3});
@@ -222,14 +222,14 @@ public class FXCollectionsTest {
     @Test
     public void sortTest_empty() {
         ObservableList<String> seq = FXCollections.observableArrayList();
-        final MockListObserver<String> observer = new MockListObserver<String>();
+        final MockListObserver<String> observer = new MockListObserver<>();
         seq.addListener(observer);
         FXCollections.sort(seq);
         observer.check0();
     }
 
     private void doSort(ObservableList<String> seq, boolean permutation) {
-        final MockListObserver<String> observer = new MockListObserver<String>();
+        final MockListObserver<String> observer = new MockListObserver<>();
         seq.addListener(observer);
         FXCollections.sort(seq);
         assertArrayEquals(new String[]{"five", "four", "one", "three", "two"}, seq.toArray(new String[0]));
@@ -248,12 +248,13 @@ public class FXCollectionsTest {
         }
     }
 
-    @Test(expected=ClassCastException.class)
+    @Test
     @SuppressWarnings("unchecked")
     public void sortNotComparableTest() {
         ObservableList seq = FXCollections.observableArrayList(new Object(), new Object(), new Object());
-        FXCollections.sort(seq);
+        assertThrows(ClassCastException.class, () -> FXCollections.sort(seq));
     }
+
 
     @Test
     public void emptyObservableListTest() {
@@ -377,7 +378,7 @@ public class FXCollectionsTest {
     @Test
     public void checkedListenerObservableSetTest() {
         ObservableSet<String> set = FXCollections.checkedObservableSet(FXCollections.observableSet("foo", "foo2"), String.class);
-        final MockSetObserver<String> observer = new MockSetObserver<String>();
+        final MockSetObserver<String> observer = new MockSetObserver<>();
         set.addListener(observer);
         try {
             set.add("foo3");
@@ -417,7 +418,7 @@ public class FXCollectionsTest {
         } catch (UnsupportedOperationException e) {
         }
         try {
-            Map<String, String> putMap = new HashMap<String, String>();
+            Map<String, String> putMap = new HashMap<>();
             putMap.put("bar", "bar");
             map.putAll(putMap);
             fail("Expected UnsupportedOperationException");

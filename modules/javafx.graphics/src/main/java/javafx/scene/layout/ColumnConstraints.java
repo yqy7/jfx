@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -109,13 +109,13 @@ public class ColumnConstraints extends ConstraintsBase {
 
     /**
      * Creates a column constraint object with a fixed size range, horizontal
-     * grow priority, horizonal alignment, and horizontal fill behavior.
+     * grow priority, horizontal alignment, and horizontal fill behavior.
      *
      * @param minWidth the minimum width
      * @param prefWidth the preferred width
      * @param maxWidth the maximum width
      * @param hgrow the horizontal grow priority
-     * @param halignment the horizonal alignment
+     * @param halignment the horizontal alignment
      * @param fillWidth the horizontal fill behavior
      */
     public ColumnConstraints(double minWidth, double prefWidth, double maxWidth, Priority hgrow, HPos halignment, boolean fillWidth) {
@@ -308,7 +308,7 @@ public class ColumnConstraints extends ConstraintsBase {
 
     public final ObjectProperty<Priority> hgrowProperty() {
         if (hgrow == null) {
-            hgrow = new ObjectPropertyBase<Priority>() {
+            hgrow = new ObjectPropertyBase<>() {
 
                 @Override
                 protected void invalidated() {
@@ -348,7 +348,7 @@ public class ColumnConstraints extends ConstraintsBase {
 
     public final ObjectProperty<HPos> halignmentProperty() {
         if (halignment == null) {
-            halignment = new ObjectPropertyBase<HPos>() {
+            halignment = new ObjectPropertyBase<>() {
 
                 @Override
                 protected void invalidated() {

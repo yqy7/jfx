@@ -33,21 +33,22 @@
 
 namespace WebCore {
 
-Ref<WebGLVertexArrayObjectOES> WebGLVertexArrayObjectOES::create(WebGLRenderingContextBase& context, Type type)
+Ref<WebGLVertexArrayObjectOES> WebGLVertexArrayObjectOES::createDefault(WebGLRenderingContextBase& context)
 {
-    return adoptRef(*new WebGLVertexArrayObjectOES(context, type));
+    return adoptRef(*new WebGLVertexArrayObjectOES(context, 0, Type::Default));
 }
 
-WebGLVertexArrayObjectOES::WebGLVertexArrayObjectOES(WebGLRenderingContextBase& context, Type type)
-    : WebGLVertexArrayObjectBase(context, type)
+RefPtr<WebGLVertexArrayObjectOES> WebGLVertexArrayObjectOES::createUser(WebGLRenderingContextBase& context)
 {
-    switch (type) {
-    case Type::Default:
-        break;
-    case Type::User:
-        setObject(this->context()->graphicsContextGL()->createVertexArray());
-        break;
-    }
+    auto object = context.protectedGraphicsContextGL()->createVertexArray();
+    if (!object)
+        return nullptr;
+    return adoptRef(*new WebGLVertexArrayObjectOES { context, object, Type::User });
+}
+
+WebGLVertexArrayObjectOES::WebGLVertexArrayObjectOES(WebGLRenderingContextBase& context, PlatformGLObject object, Type type)
+    : WebGLVertexArrayObjectBase(context, object, type)
+{
 }
 
 WebGLVertexArrayObjectOES::~WebGLVertexArrayObjectOES()
@@ -68,12 +69,12 @@ void WebGLVertexArrayObjectOES::deleteObjectImpl(const AbstractLocker& locker, G
         break;
     }
 
-    if (m_boundElementArrayBuffer)
-        m_boundElementArrayBuffer->onDetached(locker, context3d);
+    if (RefPtr boundElementArrayBuffer = m_boundElementArrayBuffer.get())
+        boundElementArrayBuffer->onDetached(locker, context3d);
 
     for (auto& state : m_vertexAttribState) {
-        if (state.bufferBinding)
-            state.bufferBinding->onDetached(locker, context3d);
+        if (RefPtr bufferBinding = state.bufferBinding.get())
+            bufferBinding->onDetached(locker, context3d);
     }
 }
 }

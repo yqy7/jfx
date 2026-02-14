@@ -28,22 +28,24 @@
 #include "FilterEffectApplier.h"
 #include "FloatPoint.h"
 #include "IntRect.h"
+#include "PixelBuffer.h"
 #include <JavaScriptCore/Forward.h>
+#include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
 
 class FETurbulence;
-enum class TurbulenceType;
+enum class TurbulenceType : uint8_t;
 
 class FETurbulenceSoftwareApplier final : public FilterEffectConcreteApplier<FETurbulence> {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(FETurbulenceSoftwareApplier);
     using Base = FilterEffectConcreteApplier<FETurbulence>;
 
 public:
     using Base::Base;
 
 private:
-    bool apply(const Filter&, const FilterImageVector& inputs, FilterImage& result) const final;
+    bool apply(const Filter&, std::span<const Ref<FilterImage>> inputs, FilterImage& result) const final;
 
     // Produces results in the range [1, 2**31 - 2]. Algorithm is:
     // r = (a * r) mod m where a = s_randAmplitude = 16807 and
@@ -79,8 +81,8 @@ private:
         bool stitchTiles;
         IntSize paintingSize;
 
-        int latticeSelector[2 * s_blockSize + 2];
-        float gradient[4][2 * s_blockSize + 2][2];
+        std::array<int, 2 * s_blockSize + 2> latticeSelector;
+        std::array<std::array<std::array<float, 2>, 2 * s_blockSize + 2>, 4> gradient;
     };
 
     struct StitchData {
@@ -93,7 +95,7 @@ private:
     struct ApplyParameters {
         IntRect filterRegion;
         FloatSize filterScale;
-        Uint8ClampedArray* pixelArray;
+        PixelBuffer* pixelBuffer;
         PaintingData* paintingData;
         StitchData stitchData;
         int startY;
@@ -110,9 +112,9 @@ private:
     static ColorComponents<uint8_t, 4> toIntBasedColorComponents(const ColorComponents<float, 4>& floatComponents);
     static ColorComponents<uint8_t, 4> calculateTurbulenceValueForPoint(const PaintingData&, StitchData, const FloatPoint&);
 
-    static void applyPlatformGeneric(const IntRect& filterRegion, const FloatSize& filterScale, Uint8ClampedArray& pixelArray, const PaintingData&, StitchData, int startY, int endY);
+    static void applyPlatformGeneric(const IntRect& filterRegion, const FloatSize& filterScale, PixelBuffer&, const PaintingData&, StitchData, int startY, int endY);
     static void applyPlatformWorker(ApplyParameters*);
-    static void applyPlatform(const IntRect& filterRegion, const FloatSize& filterScale, Uint8ClampedArray& pixelArray, PaintingData&, StitchData&);
+    static void applyPlatform(const IntRect& filterRegion, const FloatSize& filterScale, PixelBuffer&, PaintingData&, StitchData&);
 };
 
 } // namespace WebCore

@@ -1,6 +1,8 @@
 /* GObject - GLib Type, Object, Parameter and Signal Library
  * Copyright (C) 2001 Red Hat, Inc.
  *
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -49,7 +51,7 @@ static void                                                                 \
 value_transform_##func_name (const GValue *src_value,                       \
                              GValue       *dest_value)                      \
 {                                                                           \
-  ctype c_value = src_value->data[0].from_member;                           \
+  ctype c_value = (ctype) src_value->data[0].from_member;                   \
   dest_value->data[0].to_member = c_value;                                  \
 } extern void glib_dummy_decl (void)
 DEFINE_CAST (int_s8,            v_int,    gint8,   v_int);

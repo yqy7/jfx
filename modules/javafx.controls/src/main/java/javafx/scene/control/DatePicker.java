@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,7 +44,6 @@ import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.property.SimpleObjectProperty;
-import javafx.beans.value.WritableValue;
 import javafx.css.CssMetaData;
 import javafx.css.Styleable;
 import javafx.css.StyleableBooleanProperty;
@@ -122,8 +121,8 @@ public class DatePicker extends ComboBoxBase<LocalDate> {
             if (validateDate(chrono, date)) {
                 lastValidDate = date;
             } else {
-                System.err.println("Restoring value to " +
-                        ((lastValidDate == null) ? "null" : getConverter().toString(lastValidDate)));
+                //System.err.println("Restoring value to " +
+                //        ((lastValidDate == null) ? "null" : getConverter().toString(lastValidDate)));
                 setValue(lastValidDate);
             }
         });
@@ -136,7 +135,7 @@ public class DatePicker extends ComboBoxBase<LocalDate> {
                 lastValidChronology = chrono;
                 defaultConverter = new LocalDateStringConverter(FormatStyle.SHORT, null, chrono);
             } else {
-                System.err.println("Restoring value to " + lastValidChronology);
+                //System.err.println("Restoring value to " + lastValidChronology);
                 setChronology(lastValidChronology);
             }
         });
@@ -148,7 +147,11 @@ public class DatePicker extends ComboBoxBase<LocalDate> {
 
         focusedProperty().addListener(o -> {
             if (!isFocused()) {
-                commitValue();
+                try {
+                    commitValue();
+                } catch (Exception e) {
+                    cancelEdit();
+                }
             }
         });
     }
@@ -160,7 +163,7 @@ public class DatePicker extends ComboBoxBase<LocalDate> {
             }
             return true;
         } catch (DateTimeException ex) {
-            System.err.println(ex);
+            //System.err.println(ex);
             return false;
         }
     }
@@ -212,7 +215,7 @@ public class DatePicker extends ComboBoxBase<LocalDate> {
     }
     public final ObjectProperty<Callback<DatePicker, DateCell>> dayCellFactoryProperty() {
         if (dayCellFactory == null) {
-            dayCellFactory = new SimpleObjectProperty<Callback<DatePicker, DateCell>>(this, "dayCellFactory");
+            dayCellFactory = new SimpleObjectProperty<>(this, "dayCellFactory");
         }
         return dayCellFactory;
     }
@@ -237,14 +240,14 @@ public class DatePicker extends ComboBoxBase<LocalDate> {
         return chronology;
     }
     private ObjectProperty<Chronology> chronology =
-        new SimpleObjectProperty<Chronology>(this, "chronology", null);
+        new SimpleObjectProperty<>(this, "chronology", null);
     public final Chronology getChronology() {
         Chronology chrono = chronology.get();
         if (chrono == null) {
             try {
                 chrono = Chronology.ofLocale(Locale.getDefault(Locale.Category.FORMAT));
             } catch (Exception ex) {
-                System.err.println(ex);
+                //System.err.println(ex);
             }
             if (chrono == null) {
                 chrono = IsoChronology.INSTANCE;
@@ -392,7 +395,7 @@ public class DatePicker extends ComboBoxBase<LocalDate> {
      */
     public final ObjectProperty<StringConverter<LocalDate>> converterProperty() { return converter; }
     private ObjectProperty<StringConverter<LocalDate>> converter =
-            new SimpleObjectProperty<StringConverter<LocalDate>>(this, "converter", null);
+            new SimpleObjectProperty<>(this, "converter", null);
     public final void setConverter(StringConverter<LocalDate> value) { converterProperty().set(value); }
     public final StringConverter<LocalDate> getConverter() {
         StringConverter<LocalDate> converter = converterProperty().get();
@@ -479,7 +482,7 @@ public class DatePicker extends ComboBoxBase<LocalDate> {
         private static final String country =
             Locale.getDefault(Locale.Category.FORMAT).getCountry();
         private static final CssMetaData<DatePicker, Boolean> SHOW_WEEK_NUMBERS =
-              new CssMetaData<DatePicker, Boolean>("-fx-show-week-numbers",
+              new CssMetaData<>("-fx-show-week-numbers",
                    BooleanConverter.getInstance(),
                    (!country.isEmpty() &&
                     ControlResources.getNonTranslatableString("DatePicker.showWeekNumbers").contains(country))) {
@@ -488,7 +491,7 @@ public class DatePicker extends ComboBoxBase<LocalDate> {
             }
 
             @Override public StyleableProperty<Boolean> getStyleableProperty(DatePicker n) {
-                return (StyleableProperty<Boolean>)(WritableValue<Boolean>)n.showWeekNumbersProperty();
+                return (StyleableProperty<Boolean>)n.showWeekNumbersProperty();
             }
         };
 
@@ -496,7 +499,7 @@ public class DatePicker extends ComboBoxBase<LocalDate> {
 
         static {
             final List<CssMetaData<? extends Styleable, ?>> styleables =
-                new ArrayList<CssMetaData<? extends Styleable, ?>>(Control.getClassCssMetaData());
+                new ArrayList<>(Control.getClassCssMetaData());
             Collections.addAll(styleables,
                 SHOW_WEEK_NUMBERS
             );

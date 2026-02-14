@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,6 @@
 #include "BitmapTexturePool.h"
 #include "GraphicsLayer.h"
 #include "NotImplemented.h"
-#include <wtf/RandomNumber.h>
 
 #include "com_sun_webkit_graphics_GraphicsDecoder.h"
 
@@ -39,14 +38,8 @@ namespace WebCore {
 
 static const int s_maximumAllowedImageBufferDimension = 256;
 
-std::unique_ptr<TextureMapper> TextureMapper::platformCreateAccelerated()
-{
-    return std::make_unique<TextureMapperJava>();
-}
-
 TextureMapperJava::TextureMapperJava()
 {
-    m_texturePool = std::make_unique<BitmapTexturePool>();
 }
 
 IntSize TextureMapperJava::maxTextureSize() const
@@ -66,16 +59,15 @@ void TextureMapperJava::beginClip(const TransformationMatrix& matrix, const Floa
     context->setCTM(previousTransform);
 }
 
-void TextureMapperJava::drawTexture(const BitmapTexture& texture, const FloatRect& targetRect, const TransformationMatrix& transform, float opacity, unsigned /* exposedEdges */)
+void TextureMapperJava::drawTexture(const BitmapTextureJava& texture, const FloatRect& targetRect, const TransformationMatrix& transform, float opacity, unsigned /* exposedEdges */)
 {
     GraphicsContext* context = currentContext();
     if (!context)
         return;
 
-    const BitmapTextureJava& textureImageBuffer = static_cast<const BitmapTextureJava&>(texture);
+    const BitmapTextureJava& textureImageBuffer = texture;
     ImageBuffer* image = textureImageBuffer.image();
     context->save();
-    context->setCompositeOperation(isInMaskMode() ? CompositeOperator::DestinationIn : CompositeOperator::SourceOver);
     context->setAlpha(opacity);
     context->platformContext()->rq().freeSpace(68)
         << (jint)com_sun_webkit_graphics_GraphicsDecoder_SET_PERSPECTIVE_TRANSFORM
@@ -94,7 +86,6 @@ void TextureMapperJava::drawSolidColor(const FloatRect& rect, const Transformati
         return;
 
     context->save();
-    context->setCompositeOperation(isInMaskMode() ? CompositeOperator::DestinationIn : CompositeOperator::SourceOver);
     context->platformContext()->rq().freeSpace(68)
         << (jint)com_sun_webkit_graphics_GraphicsDecoder_SET_PERSPECTIVE_TRANSFORM
         << (float)transform.m11() << (float)transform.m12() << (float)transform.m13() << (float)transform.m14()
@@ -121,5 +112,11 @@ void TextureMapperJava::clearColor(const Color&)
     notImplemented();
 }
 
+void TextureMapperJava::setDepthRange(double, double)
+{
+    notImplemented();
 }
+
+}
+
 #endif

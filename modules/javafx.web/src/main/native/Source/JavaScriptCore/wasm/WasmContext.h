@@ -27,32 +27,23 @@
 
 #if ENABLE(WEBASSEMBLY)
 
+#include "MacroAssembler.h"
+
 #include <wtf/Lock.h>
 #include <wtf/UniqueArray.h>
 #include <wtf/Vector.h>
 
 namespace JSC { namespace Wasm {
 
-class Instance;
-
 struct Context {
-    Instance* load() const;
-    void store(Instance*, void* softStackLimit);
-
-    static bool useFastTLS();
-
-    Instance** pointerToInstance()
-    {
-        ASSERT(!useFastTLS());
-        return &instance;
-    }
-
-    static Instance* tryLoadInstanceFromTLS();
-
     uint64_t* scratchBufferForSize(size_t numberOfSlots);
 
+    ALWAYS_INLINE static constexpr size_t scratchBufferSlotsPerValue(SavedFPWidth savedFPWidth)
+    {
+        return savedFPWidth == SavedFPWidth::SaveVectors ? 2 : 1;
+    }
+
 private:
-    Instance* instance { nullptr };
     Vector<UniqueArray<uint64_t>> m_scratchBuffers;
     size_t m_sizeOfLastScratchBuffer { 0 };
     Lock m_scratchBufferLock;

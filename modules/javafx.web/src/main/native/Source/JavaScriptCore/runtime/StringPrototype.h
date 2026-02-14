@@ -32,14 +32,15 @@ class RegExpObject;
 class StringPrototype final : public StringObject {
 public:
     using Base = StringObject;
-    static constexpr unsigned StructureFlags = Base::StructureFlags | HasStaticPropertyTable;
+    // We explicitly exclude InterceptsGetOwnPropertySlotByIndexEvenWhenLengthIsNotZero because StringPrototype's wrapped JSString is always empty, thus, we do not need to
+    // trap via getOwnPropertySlotByIndex.
+    static constexpr unsigned StructureFlags = (Base::StructureFlags | HasStaticPropertyTable) & ~InterceptsGetOwnPropertySlotByIndexEvenWhenLengthIsNotZero;
 
     static StringPrototype* create(VM&, JSGlobalObject*, Structure*);
 
-    static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype)
-    {
-        return Structure::create(vm, globalObject, prototype, TypeInfo(DerivedStringObjectType, StructureFlags), info());
-    }
+    inline static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
+
+    using JSObject::getOwnPropertySlotByIndex;
 
     DECLARE_INFO;
 
@@ -49,16 +50,13 @@ private:
 };
 STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(StringPrototype, StringObject);
 
-JSC_DECLARE_JIT_OPERATION(operationStringProtoFuncReplaceGeneric, JSCell*, (JSGlobalObject*, EncodedJSValue thisValue, EncodedJSValue searchValue, EncodedJSValue replaceValue));
-JSC_DECLARE_JIT_OPERATION(operationStringProtoFuncReplaceRegExpEmptyStr, JSCell*, (JSGlobalObject*, JSString* thisValue, RegExpObject* searchValue));
-JSC_DECLARE_JIT_OPERATION(operationStringProtoFuncReplaceRegExpString, JSCell*, (JSGlobalObject*, JSString* thisValue, RegExpObject* searchValue, JSString* replaceValue));
-
 void substituteBackreferences(StringBuilder& result, const String& replacement, StringView source, const int* ovector, RegExp*);
+void substituteBackreferencesSlow(StringBuilder& result, StringView replacement, StringView source, const int* ovector, RegExp*, size_t firstDollarSignPosition);
 
 JSC_DECLARE_HOST_FUNCTION(stringProtoFuncRepeatCharacter);
 JSC_DECLARE_HOST_FUNCTION(stringProtoFuncSplitFast);
+JSC_DECLARE_HOST_FUNCTION(stringProtoFuncSubstring);
 
-JSC_DECLARE_HOST_FUNCTION(builtinStringSubstringInternal);
 JSC_DECLARE_HOST_FUNCTION(builtinStringIncludesInternal);
 JSC_DECLARE_HOST_FUNCTION(builtinStringIndexOfInternal);
 

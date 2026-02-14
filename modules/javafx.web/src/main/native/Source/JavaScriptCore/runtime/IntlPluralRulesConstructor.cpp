@@ -44,7 +44,7 @@ static JSC_DECLARE_HOST_FUNCTION(intlPluralRulesConstructorFuncSupportedLocalesO
 
 namespace JSC {
 
-const ClassInfo IntlPluralRulesConstructor::s_info = { "Function", &InternalFunction::s_info, &pluralRulesConstructorTable, nullptr, CREATE_METHOD_TABLE(IntlPluralRulesConstructor) };
+const ClassInfo IntlPluralRulesConstructor::s_info = { "Function"_s, &InternalFunction::s_info, &pluralRulesConstructorTable, nullptr, CREATE_METHOD_TABLE(IntlPluralRulesConstructor) };
 
 /* Source for IntlPluralRulesConstructor.lut.h
 @begin pluralRulesConstructorTable
@@ -105,7 +105,7 @@ JSC_DEFINE_HOST_FUNCTION(callIntlPluralRules, (JSGlobalObject* globalObject, Cal
 
     // 13.2.1 Intl.PluralRules ([ locales [ , options ] ])
     // https://tc39.github.io/ecma402/#sec-intl.pluralrules
-    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "PluralRules"));
+    return JSValue::encode(throwConstructorCannotBeCalledAsFunctionTypeError(globalObject, scope, "PluralRules"_s));
 }
 
 JSC_DEFINE_HOST_FUNCTION(intlPluralRulesConstructorFuncSupportedLocalesOf, (JSGlobalObject* globalObject, CallFrame* callFrame))

@@ -28,17 +28,19 @@
 
 #include <mutex>
 #include <wtf/HexNumber.h>
+#include <wtf/NeverDestroyed.h>
 #include <wtf/text/WTFString.h>
 
 namespace WTF {
 
 Lock loggerObserverLock;
+Lock messageHandlerLoggerObserverLock;
 
 String Logger::LogSiteIdentifier::toString() const
 {
     if (className)
-        return makeString(className, "::", methodName, '(', hex(objectPtr), ") ");
-    return makeString(methodName, '(', hex(objectPtr), ") ");
+        return makeString(className, "::"_s, unsafeSpan(methodName), '(', hex(objectIdentifier), ") "_s);
+    return makeString(unsafeSpan(methodName), '(', hex(objectIdentifier), ") "_s);
 }
 
 String LogArgument<const void*>::toString(const void* argument)
@@ -54,6 +56,28 @@ Vector<std::reference_wrapper<Logger::Observer>>& Logger::observers()
         observers.construct();
     });
     return observers;
+}
+
+Vector<std::reference_wrapper<Logger::MessageHandlerObserver>>& Logger::messageHandlerObservers()
+{
+    static LazyNeverDestroyed<Vector<std::reference_wrapper<MessageHandlerObserver>>> observers;
+    static std::once_flag onceKey;
+    std::call_once(onceKey, [&] {
+        observers.construct();
+    });
+    return observers;
+}
+
+const Logger& emptyLogger()
+{
+    static NeverDestroyed<Ref<Logger>> emptyLogger = [&] {
+        // Passing the wrapper as the "owner" of the logger ensures
+        // no caller will every be able to enable this logger.
+        auto logger = Logger::create(&emptyLogger);
+        logger->setEnabled(&emptyLogger, false);
+        return logger;
+    }();
+    return emptyLogger->get();
 }
 
 } // namespace WTF

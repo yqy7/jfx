@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,7 +31,6 @@ import javafx.beans.NamedArg;
 import javafx.event.EventTarget;
 import javafx.event.EventType;
 import javafx.geometry.Point3D;
-import javafx.scene.Node;
 
 // PENDING_DOC_REVIEW
 /**
@@ -55,7 +54,7 @@ public class ContextMenuEvent extends InputEvent {
      * This event occurs when a context menu is requested.
      */
     public static final EventType<ContextMenuEvent> CONTEXT_MENU_REQUESTED =
-            new EventType<ContextMenuEvent>(InputEvent.ANY, "CONTEXTMENUREQUESTED");
+            new EventType<>(InputEvent.ANY, "CONTEXTMENUREQUESTED");
 
     /**
      * Common supertype for all context menu event types.
@@ -329,6 +328,7 @@ public class ContextMenuEvent extends InputEvent {
         return sb.append("]").toString();
     }
 
+    @SuppressWarnings("doclint:missing")
     private void readObject(java.io.ObjectInputStream in)
             throws IOException, ClassNotFoundException {
         in.defaultReadObject();

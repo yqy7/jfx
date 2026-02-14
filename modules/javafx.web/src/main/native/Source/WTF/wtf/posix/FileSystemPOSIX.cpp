@@ -35,33 +35,43 @@
 #include <fnmatch.h>
 #include <libgen.h>
 #include <stdio.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <wtf/EnumTraits.h>
+#include <wtf/FileHandle.h>
+#include <wtf/MallocSpan.h>
+#include <wtf/MappedFileData.h>
 #include <wtf/SafeStrerror.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/MakeString.h>
+#include <wtf/text/ParsingUtilities.h>
 #include <wtf/text/StringBuilder.h>
 #include <wtf/text/WTFString.h>
+
+#if USE(GLIB)
+#include <glib.h>
+#endif
 
 namespace WTF {
 
 namespace FileSystemImpl {
 
-PlatformFileHandle openFile(const String& path, FileOpenMode mode, FileAccessPermission permission, bool failIfFileExists)
+FileHandle openFile(const String& path, FileOpenMode mode, FileAccessPermission permission, OptionSet<FileLockMode> lockMode, bool failIfFileExists)
 {
     CString fsRep = fileSystemRepresentation(path);
 
     if (fsRep.isNull())
-        return invalidPlatformFileHandle;
+        return { };
 
-    int platformFlag = 0;
+    int platformFlag = O_CLOEXEC;
     switch (mode) {
     case FileOpenMode::Read:
         platformFlag |= O_RDONLY;
         break;
-    case FileOpenMode::Write:
+    case FileOpenMode::Truncate:
         platformFlag |= (O_WRONLY | O_CREAT | O_TRUNC);
         break;
     case FileOpenMode::ReadWrite:
@@ -83,111 +93,40 @@ PlatformFileHandle openFile(const String& path, FileOpenMode mode, FileAccessPer
     else if (permission == FileAccessPermission::All)
         permissionFlag |= (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
 
-    return open(fsRep.data(), platformFlag, permissionFlag);
-}
-
-void closeFile(PlatformFileHandle& handle)
-{
-    if (isHandleValid(handle)) {
-        close(handle);
-        handle = invalidPlatformFileHandle;
-    }
-}
-
-long long seekFile(PlatformFileHandle handle, long long offset, FileSeekOrigin origin)
-{
-    int whence = SEEK_SET;
-    switch (origin) {
-    case FileSeekOrigin::Beginning:
-        whence = SEEK_SET;
-        break;
-    case FileSeekOrigin::Current:
-        whence = SEEK_CUR;
-        break;
-    case FileSeekOrigin::End:
-        whence = SEEK_END;
-        break;
-    default:
-        ASSERT_NOT_REACHED();
-    }
-    return static_cast<long long>(lseek(handle, offset, whence));
-}
-
-bool truncateFile(PlatformFileHandle handle, long long offset)
-{
-    // ftruncate returns 0 to indicate the success.
-    return !ftruncate(handle, offset);
-}
-
-bool flushFile(PlatformFileHandle handle)
-{
-    return !fsync(handle);
-}
-
-int writeToFile(PlatformFileHandle handle, const void* data, int length)
-{
-    do {
-        int bytesWritten = write(handle, data, static_cast<size_t>(length));
-        if (bytesWritten >= 0)
-            return bytesWritten;
-    } while (errno == EINTR);
-    return -1;
-}
-
-int readFromFile(PlatformFileHandle handle, void* data, int length)
-{
-    do {
-        int bytesRead = read(handle, data, static_cast<size_t>(length));
-        if (bytesRead >= 0)
-            return bytesRead;
-    } while (errno == EINTR);
-    return -1;
-}
-
-#if USE(FILE_LOCK)
-bool lockFile(PlatformFileHandle handle, OptionSet<FileLockMode> lockMode)
-{
-    COMPILE_ASSERT(LOCK_SH == WTF::enumToUnderlyingType(FileLockMode::Shared), LockSharedEncodingIsAsExpected);
-    COMPILE_ASSERT(LOCK_EX == WTF::enumToUnderlyingType(FileLockMode::Exclusive), LockExclusiveEncodingIsAsExpected);
-    COMPILE_ASSERT(LOCK_NB == WTF::enumToUnderlyingType(FileLockMode::Nonblocking), LockNonblockingEncodingIsAsExpected);
-    int result = flock(handle, lockMode.toRaw());
-    return (result != -1);
-}
-
-bool unlockFile(PlatformFileHandle handle)
-{
-    int result = flock(handle, LOCK_UN);
-    return (result != -1);
-}
-#endif
-
-std::optional<uint64_t> fileSize(PlatformFileHandle handle)
-{
-    struct stat fileInfo;
-    if (fstat(handle, &fileInfo))
-        return std::nullopt;
-
-    return fileInfo.st_size;
+    return FileHandle::adopt(open(fsRep.data(), platformFlag, permissionFlag), lockMode);
 }
 
 std::optional<WallTime> fileCreationTime(const String& path)
 {
-#if OS(DARWIN) || OS(OPENBSD) || OS(NETBSD) || OS(FREEBSD)
+#if (OS(LINUX) && HAVE(STATX)) || OS(DARWIN) || OS(OPENBSD) || OS(NETBSD) || OS(FREEBSD)
     CString fsRep = fileSystemRepresentation(path);
-
     if (!fsRep.data() || fsRep.data()[0] == '\0')
         return std::nullopt;
 
+#if OS(LINUX) && HAVE(STATX)
+    struct statx fileInfo;
+
+    if (statx(-1, fsRep.data(), 0, STATX_BTIME, &fileInfo) == -1)
+        return std::nullopt;
+
+    return WallTime::fromRawSeconds(fileInfo.stx_btime.tv_sec);
+#elif OS(DARWIN) || OS(OPENBSD) || OS(NETBSD) || OS(FREEBSD)
     struct stat fileInfo;
 
-    if (stat(fsRep.data(), &fileInfo))
+    if (stat(fsRep.data(), &fileInfo) == -1)
         return std::nullopt;
 
     return WallTime::fromRawSeconds(fileInfo.st_birthtime);
-#else
+#endif
+#endif
+
     UNUSED_PARAM(path);
     return std::nullopt;
-#endif
+}
+
+bool fileIDsAreEqual(std::optional<PlatformFileID> a, std::optional<PlatformFileID> b)
+{
+    return a == b;
 }
 
 std::optional<uint32_t> volumeFileBlockSize(const String& path)
@@ -215,34 +154,44 @@ CString fileSystemRepresentation(const String& path)
 #endif
 
 #if !PLATFORM(COCOA)
-String openTemporaryFile(const String& prefix, PlatformFileHandle& handle, const String& suffix)
+static const char* temporaryFileDirectory()
 {
-    // FIXME: Suffix is not supported, but OK for now since the code using it is macOS-port-only.
+#if USE(GLIB)
+    return g_get_tmp_dir();
+#else
+    if (auto* tmpDir = getenv("TMPDIR"))
+        return tmpDir;
+
+    return "/tmp";
+#endif
+}
+
+std::pair<String, FileHandle> openTemporaryFile(StringView prefix, StringView suffix)
+{
+    // Suffix is not supported because that's incompatible with mkostemp, mkostemps would be needed for that.
+    // This is OK for now since the code using it is built on macOS only.
     ASSERT_UNUSED(suffix, suffix.isEmpty());
 
-    char buffer[PATH_MAX];
-    const char* tmpDir = getenv("TMPDIR");
+    const char* directory = temporaryFileDirectory();
+    CString prefixUTF8 = prefix.utf8();
+    size_t length = strlen(directory) + 1 + prefixUTF8.length() + 1 + 6 + 1;
+    auto buffer = MallocSpan<char>::malloc(length);
+    snprintf(buffer.mutableSpan().data(), length, "%s/%s-XXXXXX", directory, prefixUTF8.data());
 
-    if (!tmpDir)
-        tmpDir = "/tmp";
+    auto handle = FileHandle::adopt(mkostemp(buffer.mutableSpan().data(), O_CLOEXEC));
+    if (!handle)
+        return { String(), FileHandle() };
 
-    if (snprintf(buffer, PATH_MAX, "%s/%sXXXXXX", tmpDir, prefix.utf8().data()) >= PATH_MAX)
-        goto end;
-
-    handle = mkstemp(buffer);
-    if (handle < 0)
-        goto end;
-
-    return String::fromUTF8(buffer);
-
-end:
-    handle = invalidPlatformFileHandle;
-    return String();
+    return { String::fromUTF8(buffer.span().data()), WTFMove(handle) };
 }
 #endif // !PLATFORM(COCOA)
 
-std::optional<int32_t> getFileDeviceId(const CString& fsFile)
+std::optional<int32_t> getFileDeviceId(const String& path)
 {
+    auto fsFile = fileSystemRepresentation(path);
+    if (fsFile.isNull())
+        return std::nullopt;
+
     struct stat fileStat;
     if (stat(fsFile.data(), &fileStat) == -1)
         return std::nullopt;
@@ -250,6 +199,8 @@ std::optional<int32_t> getFileDeviceId(const CString& fsFile)
     return fileStat.st_dev;
 }
 
+// On macOS, stat() used by std::filesystem is much slower than access() when sandboxed.
+// This fast path exists to avoid calls to stat(). It's not needed on other platforms.
 #if ENABLE(FILESYSTEM_POSIX_FAST_PATH)
 
 bool fileExists(const String& path)
@@ -270,21 +221,24 @@ bool deleteFile(const String& path)
 bool makeAllDirectories(const String& path)
 {
     auto fullPath = fileSystemRepresentation(path);
+    int length = fullPath.length();
+    if (!length)
+        return false;
+
     if (!access(fullPath.data(), F_OK))
         return true;
 
-    char* p = fullPath.mutableData() + 1;
-    int length = fullPath.length();
+    auto p = fullPath.mutableSpanIncludingNullTerminator().subspan(1);
     if (p[length - 1] == '/')
         p[length - 1] = '\0';
-    for (; *p; ++p) {
-        if (*p == '/') {
-            *p = '\0';
+    for (; p[0]; skip(p, 1)) {
+        if (p[0] == '/') {
+            p[0] = '\0';
             if (access(fullPath.data(), F_OK)) {
                 if (mkdir(fullPath.data(), S_IRWXU))
                     return false;
             }
-            *p = '/';
+            p[0] = '/';
         }
     }
     if (access(fullPath.data(), F_OK)) {
@@ -295,14 +249,14 @@ bool makeAllDirectories(const String& path)
     return true;
 }
 
-String pathByAppendingComponent(const String& path, const String& component)
+String pathByAppendingComponent(StringView path, StringView component)
 {
     if (path.endsWith('/'))
-        return path + component;
-    return path + "/" + component;
+        return makeString(path, component);
+    return makeString(path, '/', component);
 }
 
-String pathByAppendingComponents(StringView path, const Vector<StringView>& components)
+String pathByAppendingComponents(StringView path, std::span<const StringView> components)
 {
     StringBuilder builder;
     builder.append(path);

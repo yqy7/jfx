@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,15 +26,15 @@
 package test.javafx.beans.property;
 
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
 import javafx.beans.InvalidationListener;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class ObjectPropertyTest {
 
@@ -47,8 +47,8 @@ public class ObjectPropertyTest {
 
     @Test
     public void testBindBidirectional() {
-        final ObjectProperty<Object> p1 = new SimpleObjectProperty<Object>(VALUE_2);
-        final ObjectProperty<Object> p2 = new SimpleObjectProperty<Object>(VALUE_1);
+        final ObjectProperty<Object> p1 = new SimpleObjectProperty<>(VALUE_2);
+        final ObjectProperty<Object> p2 = new SimpleObjectProperty<>(VALUE_1);
 
         p1.bindBidirectional(p2);
         assertEquals(VALUE_1, p1.get());

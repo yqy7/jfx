@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,6 +29,7 @@
 #include <WebCore/DOMException.h>
 #include <WebCore/HTMLCollection.h>
 #include <WebCore/HTMLElement.h>
+#include <WebCore/ElementInlines.h>
 #include <WebCore/HTMLFormElement.h>
 #include <WebCore/HTMLNames.h>
 #include <WebCore/HTMLOptGroupElement.h>
@@ -104,7 +105,7 @@ JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_HTMLSelectElementImpl_getNameI
 JNIEXPORT void JNICALL Java_com_sun_webkit_dom_HTMLSelectElementImpl_setNameImpl(JNIEnv* env, jclass, jlong peer, jstring value)
 {
     WebCore::JSMainThreadNullState state;
-    IMPL->setAttributeWithoutSynchronization(WebCore::HTMLNames::nameAttr, String(env, value));
+    IMPL->setAttributeWithoutSynchronization(WebCore::HTMLNames::nameAttr, AtomString {String(env, value)});
 }
 
 JNIEXPORT jboolean JNICALL Java_com_sun_webkit_dom_HTMLSelectElementImpl_getRequiredImpl(JNIEnv*, jclass, jlong peer)
@@ -176,7 +177,7 @@ JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_HTMLSelectElementImpl_getValue
 JNIEXPORT void JNICALL Java_com_sun_webkit_dom_HTMLSelectElementImpl_setValueImpl(JNIEnv* env, jclass, jlong peer, jstring value)
 {
     WebCore::JSMainThreadNullState state;
-    IMPL->setValue(String(env, value));
+    IMPL->setValue(AtomString {String(env, value)});
 }
 
 JNIEXPORT jboolean JNICALL Java_com_sun_webkit_dom_HTMLSelectElementImpl_getWillValidateImpl(JNIEnv*, jclass, jlong peer)
@@ -203,13 +204,6 @@ JNIEXPORT jstring JNICALL Java_com_sun_webkit_dom_HTMLSelectElementImpl_getAutoc
     return JavaReturn<String>(env, IMPL->autocomplete());
 }
 
-JNIEXPORT void JNICALL Java_com_sun_webkit_dom_HTMLSelectElementImpl_setAutocompleteImpl(JNIEnv* env, jclass, jlong peer, jstring value)
-{
-    WebCore::JSMainThreadNullState state;
-    IMPL->setAutocomplete(String(env, value));
-}
-
-
 // Functions
 JNIEXPORT jlong JNICALL Java_com_sun_webkit_dom_HTMLSelectElementImpl_itemImpl(JNIEnv* env, jclass, jlong peer
     , jint index)
@@ -223,7 +217,7 @@ JNIEXPORT jlong JNICALL Java_com_sun_webkit_dom_HTMLSelectElementImpl_namedItemI
     , jstring name)
 {
     WebCore::JSMainThreadNullState state;
-    return JavaReturn<Node>(env, WTF::getPtr(IMPL->namedItem(String(env, name))));
+    return JavaReturn<Node>(env, WTF::getPtr(IMPL->namedItem(AtomString {String(env, name)})));
 }
 
 
@@ -270,7 +264,7 @@ JNIEXPORT void JNICALL Java_com_sun_webkit_dom_HTMLSelectElementImpl_setCustomVa
     , jstring error)
 {
     WebCore::JSMainThreadNullState state;
-    IMPL->setCustomValidity(String(env, error));
+    IMPL->setCustomValidity(AtomString{String(env, error)});
 }
 
 

@@ -26,51 +26,145 @@
 #include "StyleCursorImage.h"
 
 #include "CSSCursorImageValue.h"
-#include "CSSImageSetValue.h"
+#include "CSSImageValue.h"
+#include "CSSValuePair.h"
 #include "CachedImage.h"
 #include "FloatSize.h"
 #include "RenderElement.h"
+#include "SVGCursorElement.h"
+#include "SVGElementTypeHelpers.h"
+#include "SVGLengthContext.h"
+#include "SVGURIReference.h"
+#include "StyleBuilderState.h"
+#include "StyleCachedImage.h"
+#include "StyleImageSet.h"
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-Ref<StyleCursorImage> StyleCursorImage::create(CSSCursorImageValue& cssValue)
+WTF_MAKE_TZONE_ALLOCATED_IMPL(StyleCursorImage);
+
+Ref<StyleCursorImage> StyleCursorImage::create(const Ref<StyleImage>& image, std::optional<IntPoint> hotSpot, const Style::URL& originalURL)
 {
-    return adoptRef(*new StyleCursorImage(cssValue));
+    return adoptRef(*new StyleCursorImage(image, hotSpot, originalURL));
+}
+
+Ref<StyleCursorImage> StyleCursorImage::create(Ref<StyleImage>&& image, std::optional<IntPoint> hotSpot, Style::URL&& originalURL)
+{
+    return adoptRef(*new StyleCursorImage(WTFMove(image), hotSpot, WTFMove(originalURL)));
+}
+
+StyleCursorImage::StyleCursorImage(const Ref<StyleImage>& image, std::optional<IntPoint> hotSpot, const Style::URL& originalURL)
+    : StyleMultiImage { Type::CursorImage }
+    , m_image { image }
+    , m_hotSpot { hotSpot }
+    , m_originalURL { originalURL }
+{
+}
+
+StyleCursorImage::StyleCursorImage(Ref<StyleImage>&& image, std::optional<IntPoint> hotSpot, Style::URL&& originalURL)
+    : StyleMultiImage { Type::CursorImage }
+    , m_image { WTFMove(image) }
+    , m_hotSpot { hotSpot }
+    , m_originalURL { WTFMove(originalURL) }
+{
+}
+
+StyleCursorImage::~StyleCursorImage()
+{
+    for (auto& element : m_cursorElements)
+        element.removeClient(*this);
 }
 
 bool StyleCursorImage::operator==(const StyleImage& other) const
 {
-    return is<StyleCursorImage>(other) && equals(downcast<StyleCursorImage>(other));
+    auto* otherCursorImage = dynamicDowncast<StyleCursorImage>(other);
+    return otherCursorImage && equals(*otherCursorImage);
 }
 
-Ref<CSSValue> StyleCursorImage::cssValue() const
+bool StyleCursorImage::equals(const StyleCursorImage& other) const
 {
-    return m_cssValue.copyRef();
+    return equalInputImages(other) && StyleMultiImage::equals(other);
 }
 
-StyleCursorImage::StyleCursorImage(CSSCursorImageValue& cssValue)
-    : m_cssValue(cssValue)
+bool StyleCursorImage::equalInputImages(const StyleCursorImage& other) const
 {
-    m_isCursorImage = true;
+    return arePointingToEqualData(m_image, other.m_image);
 }
 
-StyleCursorImage::~StyleCursorImage() = default;
-
-ImageWithScale StyleCursorImage::selectBestFitImage(const Document& document) const
+Ref<CSSValue> StyleCursorImage::computedStyleValue(const RenderStyle& style) const
 {
-    return m_cssValue->selectBestFitImage(document);
+    RefPtr<CSSValuePair> hotSpot;
+    if (m_hotSpot)
+        hotSpot = CSSValuePair::createNoncoalescing(CSSPrimitiveValue::create(m_hotSpot->x()), CSSPrimitiveValue::create(m_hotSpot->y()));
+
+    return CSSCursorImageValue::create(m_image->computedStyleValue(style), WTFMove(hotSpot), Style::toCSS(m_originalURL, style));
+}
+
+ImageWithScale StyleCursorImage::selectBestFitImage(const Document& document)
+{
+    if (RefPtr imageSet = dynamicDowncast<StyleImageSet>(m_image.get()))
+        return imageSet->selectBestFitImage(document);
+
+    if (RefPtr cachedImage = dynamicDowncast<StyleCachedImage>(m_image.get())) {
+        if (RefPtr cursorElement = updateCursorElement(document)) {
+            auto existingImageURL = cachedImage->url().resolved;
+            auto updatedImageURL = document.completeURL(cursorElement->href());
+
+            if (existingImageURL != updatedImageURL) {
+                auto styleURL = Style::URL { .resolved = updatedImageURL, .modifiers = { } };
+                m_image = StyleCachedImage::create(styleURL, CSSImageValue::create(WTFMove(updatedImageURL)));
+        }
+    }
+    }
+
+    return { m_image.ptr(), 1, String() };
+}
+
+RefPtr<SVGCursorElement> StyleCursorImage::updateCursorElement(const Document& document)
+{
+    RefPtr cursorElement = dynamicDowncast<SVGCursorElement>(SVGURIReference::targetElementFromIRIString(m_originalURL.resolved.string(), document).element);
+    if (!cursorElement)
+        return nullptr;
+
+    // FIXME: Not right to keep old cursor elements as clients. The new one should replace the old, not join it in a set.
+    if (m_cursorElements.add(*cursorElement).isNewEntry) {
+        cursorElementChanged(*cursorElement);
+        cursorElement->addClient(*this);
+    }
+    return cursorElement;
+}
+
+void StyleCursorImage::cursorElementRemoved(SVGCursorElement& cursorElement)
+{
+    // FIXME: Not right to stay a client of a cursor element until the element is destroyed. We'd want to stop being a client once it's no longer a valid target, like when it's disconnected.
+    m_cursorElements.remove(cursorElement);
+}
+
+void StyleCursorImage::cursorElementChanged(SVGCursorElement& cursorElement)
+{
+    // FIXME: Seems wrong that changing an old cursor element, one that that is no longer the target, changes the hot spot.
+    // FIXME: This will override a hot spot that was specified in CSS, which is probably incorrect.
+    // FIXME: Should we clamp from float to int instead of just casting here?
+    SVGLengthContext lengthContext(nullptr);
+    m_hotSpot = IntPoint {
+        static_cast<int>(std::round(cursorElement.x().value(lengthContext))),
+        static_cast<int>(std::round(cursorElement.y().value(lengthContext)))
+    };
+
+    // FIXME: Why doesn't this funtion check for a change to the href of the cursor element? Why would we dynamically track changes to x/y but not href?
 }
 
 void StyleCursorImage::setContainerContextForRenderer(const RenderElement& renderer, const FloatSize& containerSize, float containerZoom)
 {
     if (!hasCachedImage())
         return;
-    cachedImage()->setContainerContextForClient(renderer, LayoutSize(containerSize), containerZoom, m_cssValue->imageURL());
+    cachedImage()->setContainerContextForClient(renderer, LayoutSize(containerSize), containerZoom, m_originalURL.resolved);
 }
 
 bool StyleCursorImage::usesDataProtocol() const
 {
-    return m_cssValue->imageURL().protocolIsData();
+    return m_originalURL.resolved.protocolIsData();
 }
 
-}
+} // namespace WebCore

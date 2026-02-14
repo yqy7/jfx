@@ -143,7 +143,7 @@ RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportRaw(CryptoAlgorithmIdentifier ide
     auto group = EC_KEY_get0_group(key.get());
     auto point = ECPointPtr(EC_POINT_new(group));
     // Load an EC point from the keyData. This point is used as a public key.
-    if (EC_POINT_oct2point(group, point.get(), keyData.data(), keyData.size(), nullptr) <= 0)
+    if (EC_POINT_oct2point(group, point.get(), keyData.span().data(), keyData.size(), nullptr) <= 0)
         return nullptr;
 
     if (EC_KEY_set_public_key(key.get(), point.get()) <= 0)
@@ -163,14 +163,13 @@ RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportJWKPublic(CryptoAlgorithmIdentifi
 {
     auto key = createECKey(curve);
     if (!key)
-    UNUSED_PARAM(extractable);
         return nullptr;
 
     auto group = EC_KEY_get0_group(key.get());
     auto point = ECPointPtr(EC_POINT_new(group));
 
     // Currently we only support elliptic curves over GF(p).
-    if (EC_POINT_set_affine_coordinates_GFp(group, point.get(), BIGNUMPtr(convertToBigNumber(nullptr, x)).get(), BIGNUMPtr(convertToBigNumber(nullptr, y)).get(), nullptr) <= 0)
+    if (EC_POINT_set_affine_coordinates_GFp(group, point.get(), convertToBigNumber(x).get(), convertToBigNumber(y).get(), nullptr) <= 0)
         return nullptr;
 
     if (EC_KEY_set_public_key(key.get(), point.get()) <= 0)
@@ -196,13 +195,13 @@ RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportJWKPrivate(CryptoAlgorithmIdentif
     auto point = ECPointPtr(EC_POINT_new(group));
 
     // Currently we only support elliptic curves over GF(p).
-    if (EC_POINT_set_affine_coordinates_GFp(group, point.get(), BIGNUMPtr(convertToBigNumber(nullptr, x)).get(), BIGNUMPtr(convertToBigNumber(nullptr, y)).get(), nullptr) <= 0)
+    if (EC_POINT_set_affine_coordinates_GFp(group, point.get(), convertToBigNumber(x).get(), convertToBigNumber(y).get(), nullptr) <= 0)
         return nullptr;
 
     if (EC_KEY_set_public_key(key.get(), point.get()) <= 0)
         return nullptr;
 
-    if (EC_KEY_set_private_key(key.get(), BIGNUMPtr(convertToBigNumber(nullptr, d)).get()) <= 0)
+    if (EC_KEY_set_private_key(key.get(), convertToBigNumber(d).get()) <= 0)
         return nullptr;
 
     if (EC_KEY_check_key(key.get()) <= 0)
@@ -258,11 +257,11 @@ RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportSpki(CryptoAlgorithmIdentifier id
     //   subjectPublicKey  BIT STRING
     // }
 
-    const uint8_t* ptr = keyData.data();
+    const uint8_t* ptr = keyData.span().data();
     auto subjectPublicKeyInfo = ASN1SequencePtr(d2i_ASN1_SEQUENCE_ANY(nullptr, &ptr, keyData.size()));
     if (!subjectPublicKeyInfo)
         return nullptr;
-    if (ptr - keyData.data() != (ptrdiff_t)keyData.size())
+    if (ptr - keyData.span().data() != (ptrdiff_t)keyData.span().size())
         return nullptr;
 
     if (sk_ASN1_TYPE_num(subjectPublicKeyInfo.get()) != 2)
@@ -348,17 +347,17 @@ RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportSpki(CryptoAlgorithmIdentifier id
 RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportPkcs8(CryptoAlgorithmIdentifier identifier, NamedCurve curve, Vector<uint8_t>&& keyData, bool extractable, CryptoKeyUsageBitmap usages)
 {
     // We need a local pointer variable to pass to d2i (DER to internal) functions().
-    const uint8_t* ptr = keyData.data();
+    const uint8_t* ptr = keyData.span().data();
 
     // We use d2i_PKCS8_PRIV_KEY_INFO() to import a private key.
     auto p8inf = PKCS8PrivKeyInfoPtr(d2i_PKCS8_PRIV_KEY_INFO(nullptr, &ptr, keyData.size()));
     if (!p8inf)
         return nullptr;
-    if (ptr - keyData.data() != (ptrdiff_t)keyData.size())
+    if (ptr - keyData.span().data() != (ptrdiff_t)keyData.size())
         return nullptr;
 
     auto pkey = EvpPKeyPtr(EVP_PKCS82PKEY(p8inf.get()));
-    if (!pkey || EVP_PKEY_type(pkey->type) != EVP_PKEY_EC)
+    if (!pkey || EVP_PKEY_base_id(pkey.get()) != EVP_PKEY_EC)
         return nullptr;
 
     auto ecKey = EVP_PKEY_get0_EC_KEY(pkey.get());
@@ -378,7 +377,7 @@ RefPtr<CryptoKeyEC> CryptoKeyEC::platformImportPkcs8(CryptoAlgorithmIdentifier i
 
 Vector<uint8_t> CryptoKeyEC::platformExportRaw() const
 {
-    EC_KEY* key = EVP_PKEY_get0_EC_KEY(platformKey());
+    EC_KEY* key = EVP_PKEY_get0_EC_KEY(platformKey().get());
     if (!key)
         return { };
 
@@ -389,7 +388,7 @@ Vector<uint8_t> CryptoKeyEC::platformExportRaw() const
         return { };
 
     Vector<uint8_t> keyData(keyDataSize);
-    if (EC_POINT_point2oct(group, point, POINT_CONVERSION_UNCOMPRESSED, keyData.data(), keyData.size(), nullptr) != keyDataSize)
+    if (EC_POINT_point2oct(group, point, POINT_CONVERSION_UNCOMPRESSED, keyData.mutableSpan().data(), keyData.size(), nullptr) != keyDataSize)
         return { };
 
     return keyData;
@@ -399,7 +398,7 @@ bool CryptoKeyEC::platformAddFieldElements(JsonWebKey& jwk) const
 {
     size_t keySizeInBytes = (keySizeInBits() + 7) / 8;
 
-    EC_KEY* key = EVP_PKEY_get0_EC_KEY(platformKey());
+    EC_KEY* key = EVP_PKEY_get0_EC_KEY(platformKey().get());
     if (!key)
         return false;
 
@@ -427,13 +426,13 @@ Vector<uint8_t> CryptoKeyEC::platformExportSpki() const
     if (type() != CryptoKeyType::Public)
         return { };
 
-    int len = i2d_PUBKEY(platformKey(), nullptr);
+    int len = i2d_PUBKEY(platformKey().get(), nullptr);
     if (len < 0)
         return { };
 
     Vector<uint8_t> keyData(len);
-    auto ptr = keyData.data();
-    if (i2d_PUBKEY(platformKey(), &ptr) < 0)
+    auto ptr = keyData.mutableSpan().data();
+    if (i2d_PUBKEY(platformKey().get(), &ptr) < 0)
         return { };
 
     return keyData;
@@ -444,7 +443,7 @@ Vector<uint8_t> CryptoKeyEC::platformExportPkcs8() const
     if (type() != CryptoKeyType::Private)
         return { };
 
-    auto p8inf = PKCS8PrivKeyInfoPtr(EVP_PKEY2PKCS8(platformKey()));
+    auto p8inf = PKCS8PrivKeyInfoPtr(EVP_PKEY2PKCS8(platformKey().get()));
     if (!p8inf)
         return { };
 
@@ -453,7 +452,7 @@ Vector<uint8_t> CryptoKeyEC::platformExportPkcs8() const
         return { };
 
     Vector<uint8_t> keyData(len);
-    auto ptr = keyData.data();
+    auto ptr = keyData.mutableSpan().data();
     if (i2d_PKCS8_PRIV_KEY_INFO(p8inf.get(), &ptr) < 0)
         return { };
 

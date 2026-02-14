@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,12 +35,7 @@
 
 #include "wrapped.h"
 
-#if GTK_CHECK_VERSION(3, 0, 0)
-#if ! GTK_CHECK_VERSION(3, 8, 0)
-#error GTK development version is not the minimum 3.8
-#endif
 #define GLASS_GTK3
-#endif
 
 #ifndef GDK_TOUCH_MASK
 #define GDK_TOUCH_MASK (1 << 22)
@@ -92,6 +87,12 @@ private:
     const char *message;
     jstring jmessage;
 };
+
+#define SAFE_FREE(PTR)  \
+    if ((PTR) != NULL) {  \
+        free(PTR);     \
+        (PTR) = NULL;     \
+    }
 
 #define EXCEPTION_OCCURED(env) (check_and_clear_exception(env))
 
@@ -164,10 +165,9 @@ private:
     extern jmethodID jViewNotifyDragDrop; //com.sun.glass.ui.View#notifyDragDrop (IIIII)I
     extern jmethodID jViewNotifyDragLeave; //com.sun.glass.ui.View#notifyDragLeave ()V
     extern jmethodID jViewNotifyScroll; //com.sun.glass.ui.View#notifyScroll (IIIIDDIIIIIDD)V
-    extern jmethodID jViewNotifyInputMethod; //com.sun.glass.ui.View#notifyInputMethod (Ljava/lang/String;[I[I[BIII)V
-    extern jmethodID jViewNotifyInputMethodDraw; //com.sun.glass.ui.gtk.GtkView#notifyInputMethodDraw (Ljava/lang/String;III[B)V
-    extern jmethodID jViewNotifyInputMethodCaret; //com.sun.glass.ui.gtk.GtkView#notifyInputMethodCaret (III)V
-    extern jmethodID jViewNotifyPreeditMode; //com.sun.glass.ui.gtk.GtkView#notifyPreeditMode (Z)V
+    extern jmethodID jViewNotifyInputMethodLinux; //com.sun.glass.ui.View#notifyInputMethodLinux (Ljava/lang/String;IIB)V
+    extern jmethodID jViewNotifyInputMethodCandidateRelativePosRequest; //com.sun.glass.ui.gtk.GtkView#notifyInputMethodCandidateRelativePosRequest (I)[D
+
     extern jmethodID jViewNotifyMenu; //com.sun.glass.ui.View#notifyMenu (IIIIZ)V
     extern jfieldID  jViewPtr; //com.sun.glass.ui.View.ptr
 
@@ -186,15 +186,21 @@ private:
     extern jfieldID jWindowPtr; // com.sun.glass.ui.Window#ptr
     extern jfieldID jCursorPtr; // com.sun.glass.ui.Cursor#ptr
 
-    extern jmethodID jGtkWindowNotifyStateChanged; // com.sun.glass.ui.GtkWindow#notifyStateChanged (I)V
+    extern jmethodID jGtkWindowNotifyStateChanged; // com.sun.glass.ui.gtk.GtkWindow#notifyStateChanged (I)V
+    extern jmethodID jGtkWindowNonClientHitTest; //com.sun.glass.ui.gtk.GtkWindow#nonClientHitTest (II)I
 
     extern jmethodID jClipboardContentChanged; // com.sun.glass.ui.Clipboard#contentChanged ()V
 
     extern jmethodID jSizeInit; // com.sun.class.ui.Size#<init> ()V
 
+    extern jclass jMapCls; // java.util.Map
     extern jmethodID jMapGet; // java.util.Map#get(Ljava/lang/Object;)Ljava/lang/Object;
+    extern jmethodID jMapPut; // java.util.Map#put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
     extern jmethodID jMapKeySet; // java.util.Map#keySet()Ljava/util/Set;
     extern jmethodID jMapContainsKey; // java.util.Map#containsKey(Ljava/lang/Object;)Z
+
+    extern jclass jHashMapCls; // java.util.HashMap
+    extern jmethodID jHashMapInit; // java.util.HashMap#<init> ()V
 
     extern jclass jHashSetCls; // java.util.HashSet
     extern jmethodID jHashSetInit; // java.util.HashSet#<init> ()V
@@ -214,6 +220,20 @@ private:
     extern jmethodID jApplicationReportException; // reportException(Ljava/lang/Throwable;)V
     extern jmethodID jApplicationGetApplication; // GetApplication()()Lcom/sun/glass/ui/Application;
     extern jmethodID jApplicationGetName; // getName()Ljava/lang/String;
+    extern jmethodID jApplicationNotifyPreferencesChanged; // notifyPreferencesChanged(Ljava/util/Map;)V
+
+    extern jclass jObjectCls; // java.lang.Object
+    extern jmethodID jObjectEquals; // java.lang.Object#equals(Ljava/lang/Object;)Z
+
+    extern jclass jBooleanCls; // java.lang.Boolean
+    extern jfieldID jBooleanTRUE; // java.lang.Boolean#TRUE
+    extern jfieldID jBooleanFALSE; // java.lang.Boolean#FALSE
+
+    extern jclass jCollectionsCls; // java.util.Collections;
+    extern jmethodID jCollectionsUnmodifiableMap; // java.util.Collections#unmodifiableMap(Ljava/util/Map;)Ljava/util/Map;
+
+    extern jclass jColorCls; // javafx.scene.paint.Color
+    extern jmethodID jColorRgb; // javafx.scene.paint.Color#rgb(IIID)Ljavafx/scene/paint/Color;
 
 #ifdef VERBOSE
 #define LOG0(msg) {printf(msg);fflush(stdout);}

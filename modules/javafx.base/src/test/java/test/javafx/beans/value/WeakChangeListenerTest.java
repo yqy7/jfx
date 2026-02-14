@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,21 +29,24 @@ import javafx.beans.InvalidationListener;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.beans.value.WeakChangeListener;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class WeakChangeListenerTest {
 
-    @Test(expected=NullPointerException.class)
+    @Test
     public void testConstructWithNull() {
-        new WeakChangeListener<Object>(null);
+        assertThrows(NullPointerException.class, () -> {
+            new WeakChangeListener<>(null);
+        });
     }
+
 
     @Test
     public void testHandle() {
-        ChangeListenerMock<Object> listener = new ChangeListenerMock<Object>(new Object());
-        final WeakChangeListener<Object> weakListener = new WeakChangeListener<Object>(listener);
+        ChangeListenerMock<Object> listener = new ChangeListenerMock<>(new Object());
+        final WeakChangeListener<Object> weakListener = new WeakChangeListener<>(listener);
         final ObservableMock o = new ObservableMock();
         final Object obj1 = new Object();
         final Object obj2 = new Object();

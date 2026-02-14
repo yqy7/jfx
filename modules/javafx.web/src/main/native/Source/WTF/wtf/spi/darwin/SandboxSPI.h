@@ -25,6 +25,8 @@
 
 #pragma once
 
+DECLARE_SYSTEM_HEADER
+
 #if OS(DARWIN)
 
 #import <sandbox.h>
@@ -34,9 +36,12 @@
 #else
 enum sandbox_filter_type {
     SANDBOX_FILTER_NONE,
+    SANDBOX_FILTER_PATH,
     SANDBOX_FILTER_GLOBAL_NAME = 2,
+    SANDBOX_FILTER_PREFERENCE_DOMAIN = 6,
     SANDBOX_FILTER_XPC_SERVICE_NAME = 12,
     SANDBOX_FILTER_IOKIT_CONNECTION,
+    SANDBOX_FILTER_SYSCALL_NUMBER,
 };
 
 #define SANDBOX_NAMED_EXTERNAL 0x0003
@@ -85,6 +90,8 @@ int sandbox_apply(sandbox_profile_t);
 
 char *sandbox_extension_issue_iokit_registry_entry_class_to_process(const char *extension_class, const char *registry_entry_class, uint32_t flags, audit_token_t);
 char *sandbox_extension_issue_iokit_registry_entry_class(const char *extension_class, const char *registry_entry_class, uint32_t flags);
+
+bool sandbox_enable_state_flag(const char *varname, audit_token_t);
 
 WTF_EXTERN_C_END
 

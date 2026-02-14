@@ -19,11 +19,13 @@
 
 #pragma once
 
-#include "DOMWindow.h"
 #include "DOMWrapperWorld.h"
 #include "EventListener.h"
 #include "EventNames.h"
 #include "HTMLElement.h"
+#include "LocalDOMWindow.h"
+#include "NodeInlines.h"
+#include "WebCoreJSClientData.h"
 #include <JavaScriptCore/StrongInlines.h>
 #include <JavaScriptCore/Weak.h>
 #include <JavaScriptCore/WeakInlines.h>
@@ -34,7 +36,7 @@
 
 namespace WebCore {
 
-class JSEventListener : public EventListener {
+class JSEventListener : public EventListener, public JSVMClientDataClient {
 public:
     WEBCORE_EXPORT static Ref<JSEventListener> create(JSC::JSObject& listener, JSC::JSObject& wrapper, bool isAttribute, DOMWrapperWorld&);
 
@@ -48,8 +50,7 @@ public:
     bool wasCreatedFromMarkup() const { return m_wasCreatedFromMarkup; }
 
     JSC::JSObject* ensureJSFunction(ScriptExecutionContext&) const;
-    DOMWrapperWorld& isolatedWorld() const { return m_isolatedWorld; }
-
+    DOMWrapperWorld* isolatedWorld() const { return m_isolatedWorld.get(); }
 
     JSC::JSObject* jsFunction() const final { return m_jsFunction.get(); }
     JSC::JSObject* wrapper() const final { return m_wrapper.get(); }
@@ -62,7 +63,8 @@ public:
     void replaceJSFunctionForAttributeListener(JSC::JSObject* function, JSC::JSObject* wrapper);
     static bool wasCreatedFromMarkup(const EventListener& listener)
     {
-        return is<JSEventListener>(listener) && downcast<JSEventListener>(listener).wasCreatedFromMarkup();
+        auto* jsEventListener = dynamicDowncast<JSEventListener>(listener);
+        return jsEventListener && jsEventListener->wasCreatedFromMarkup();
     }
 
 private:
@@ -72,6 +74,9 @@ private:
     void visitJSFunction(JSC::AbstractSlotVisitor&) final;
     void visitJSFunction(JSC::SlotVisitor&) final;
     virtual String code() const { return String(); }
+
+    // JSVMClientDataClient
+    void willDestroyVM() final;
 
 protected:
     enum class CreatedFromMarkup : bool { No, Yes };
@@ -88,7 +93,7 @@ private:
     mutable JSC::Weak<JSC::JSObject> m_jsFunction;
     mutable JSC::Weak<JSC::JSObject> m_wrapper;
 
-    Ref<DOMWrapperWorld> m_isolatedWorld;
+    RefPtr<DOMWrapperWorld> m_isolatedWorld;
 };
 
 // For "onxxx" attributes that automatically set up JavaScript event listeners.
@@ -108,8 +113,8 @@ inline JSC::JSValue windowEventHandlerAttribute(DOMWindow& window, const AtomStr
 
 inline JSC::JSValue windowEventHandlerAttribute(HTMLElement& element, const AtomString& eventType, DOMWrapperWorld& isolatedWorld)
 {
-    if (auto* domWindow = element.document().domWindow())
-        return eventHandlerAttribute(*domWindow, eventType, isolatedWorld);
+    if (RefPtr window = element.document().window())
+        return eventHandlerAttribute(*window, eventType, isolatedWorld);
     return JSC::jsNull();
 }
 
@@ -122,14 +127,17 @@ inline void setWindowEventHandlerAttribute(DOMWindow& window, const AtomString& 
 template<typename JSMaybeErrorEventListener>
 inline void setWindowEventHandlerAttribute(HTMLElement& element, const AtomString& eventType, JSC::JSValue listener, JSC::JSObject& jsEventTarget)
 {
-    if (auto* domWindow = element.document().domWindow())
-        domWindow->setAttributeEventListener<JSMaybeErrorEventListener>(eventType, listener, *jsEventTarget.globalObject());
+    if (RefPtr window = element.document().window())
+        window->setAttributeEventListener<JSMaybeErrorEventListener>(eventType, listener, *jsEventTarget.globalObject());
 }
 
 inline JSC::JSObject* JSEventListener::ensureJSFunction(ScriptExecutionContext& scriptExecutionContext) const
 {
     // initializeJSFunction can trigger code that deletes this event listener
     // before we're done. It should always return null in this case.
+    if (!m_isolatedWorld) [[unlikely]]
+        return nullptr;
+
     JSC::VM& vm = m_isolatedWorld->vm();
     Ref protect = const_cast<JSEventListener&>(*this);
     JSC::EnsureStillAliveScope protectedWrapper(m_wrapper.get());

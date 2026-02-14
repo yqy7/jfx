@@ -31,13 +31,14 @@
 #include "VideoColorSpaceInit.h"
 #include "VideoMatrixCoefficients.h"
 #include "VideoTransferCharacteristics.h"
-#include <wtf/FastMalloc.h>
+#include <wtf/Ref.h>
 #include <wtf/RefCounted.h>
+#include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
 
 class VideoColorSpace : public RefCounted<VideoColorSpace> {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(VideoColorSpace);
 public:
     static Ref<VideoColorSpace> create() { return adoptRef(*new VideoColorSpace()); };
     static Ref<VideoColorSpace> create(const VideoColorSpaceInit& init) { return adoptRef(*new VideoColorSpace(init)); }
@@ -56,6 +57,10 @@ public:
 
     const std::optional<bool>& fullRange() const { return m_state.fullRange; }
     void setfFullRange(std::optional<bool>&& fullRange) { m_state.fullRange = WTFMove(fullRange); }
+
+    VideoColorSpaceInit state() const { return m_state; }
+
+    Ref<JSON::Object> toJSON() const;
 
 private:
     VideoColorSpace() = default;

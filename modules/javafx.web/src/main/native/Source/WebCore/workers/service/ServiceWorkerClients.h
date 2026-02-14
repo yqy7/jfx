@@ -25,8 +25,6 @@
 
 #pragma once
 
-#if ENABLE(SERVICE_WORKER)
-
 #include "ServiceWorkerClientQueryOptions.h"
 #include "ServiceWorkerClientType.h"
 #include "ServiceWorkerIdentifier.h"
@@ -38,6 +36,7 @@ namespace WebCore {
 
 class DeferredPromise;
 class ScriptExecutionContext;
+class WebCoreOpaqueRoot;
 struct ServiceWorkerClientData;
 
 class ServiceWorkerClients : public RefCounted<ServiceWorkerClients> {
@@ -54,12 +53,18 @@ public:
     void openWindow(ScriptExecutionContext&, const String& url, Ref<DeferredPromise>&&);
     void claim(ScriptExecutionContext&, Ref<DeferredPromise>&&);
 
+    enum PromiseIdentifierType { };
+    using PromiseIdentifier = AtomicObjectIdentifier<PromiseIdentifierType>;
+
+    PromiseIdentifier addPendingPromise(Ref<DeferredPromise>&&);
+    RefPtr<DeferredPromise> takePendingPromise(PromiseIdentifier);
+
 private:
     ServiceWorkerClients() = default;
 
-    HashMap<DeferredPromise*, Ref<DeferredPromise>> m_pendingPromises;
+    HashMap<PromiseIdentifier, Ref<DeferredPromise>> m_pendingPromises;
 };
 
-} // namespace WebCore
+WebCoreOpaqueRoot root(ServiceWorkerClients*);
 
-#endif // ENABLE(SERVICE_WORKER)
+} // namespace WebCore

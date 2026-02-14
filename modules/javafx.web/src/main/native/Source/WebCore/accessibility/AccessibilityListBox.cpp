@@ -36,45 +36,41 @@
 #include "HitTestResult.h"
 #include "RenderListBox.h"
 #include "RenderObject.h"
+#include <wtf/Scope.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-AccessibilityListBox::AccessibilityListBox(RenderObject* renderer)
-    : AccessibilityRenderObject(renderer)
+AccessibilityListBox::AccessibilityListBox(AXID axID, RenderObject& renderer, AXObjectCache& cache)
+    : AccessibilityRenderObject(axID, renderer, cache)
 {
 }
 
 AccessibilityListBox::~AccessibilityListBox() = default;
 
-Ref<AccessibilityListBox> AccessibilityListBox::create(RenderObject* renderer)
+Ref<AccessibilityListBox> AccessibilityListBox::create(AXID axID, RenderObject& renderer, AXObjectCache& cache)
 {
-    return adoptRef(*new AccessibilityListBox(renderer));
-}
-
-bool AccessibilityListBox::canSetSelectedChildren() const
-{
-    Node* selectNode = m_renderer->node();
-    if (!selectNode)
-        return false;
-
-    return !downcast<HTMLSelectElement>(*selectNode).isDisabledFormControl();
+    return adoptRef(*new AccessibilityListBox(axID, renderer, cache));
 }
 
 void AccessibilityListBox::addChildren()
 {
-    if (!m_renderer)
-        return;
-
-    Node* selectNode = m_renderer->node();
-    if (!selectNode)
-        return;
-
     m_childrenInitialized = true;
+    auto clearDirtySubtree = makeScopeExit([&] {
+        m_subtreeDirty = false;
+    });
 
-    for (const auto& listItem : downcast<HTMLSelectElement>(*selectNode).listItems())
-        addChild(listBoxOptionAccessibilityObject(listItem), DescendIfIgnored::No);
+    RefPtr selectElement = dynamicDowncast<HTMLSelectElement>(node());
+    if (!selectElement)
+        return;
+
+    for (const auto& listItem : selectElement->listItems())
+        addChild(listBoxOptionAccessibilityObject(listItem.get()), DescendIfIgnored::No);
+
+#ifndef NDEBUG
+    verifyChildrenIndexInParent();
+#endif
 }
 
 void AccessibilityListBox::setSelectedChildren(const AccessibilityChildrenVector& children)
@@ -82,85 +78,74 @@ void AccessibilityListBox::setSelectedChildren(const AccessibilityChildrenVector
     if (!canSetSelectedChildren())
         return;
 
-    Node* selectNode = m_renderer->node();
-    if (!selectNode)
-        return;
-
-    // disable any selected options
-    for (const auto& child : m_children) {
-        auto& listBoxOption = downcast<AccessibilityListBoxOption>(*child);
-        if (listBoxOption.isSelected())
-            listBoxOption.setSelected(false);
+    // Unselect any selected option.
+    for (const auto& child : unignoredChildren()) {
+        if (child->isSelected())
+            child->setSelected(false);
     }
 
-    for (const auto& obj : children) {
-        if (obj->roleValue() != AccessibilityRole::ListBoxOption)
-            continue;
-
-        downcast<AccessibilityListBoxOption>(*obj).setSelected(true);
+    for (const auto& object : children) {
+        if (object->isListBoxOption())
+            object->setSelected(true);
     }
 }
 
-void AccessibilityListBox::selectedChildren(AccessibilityChildrenVector& result)
+AXCoreObject::AccessibilityChildrenVector AccessibilityListBox::visibleChildren()
 {
-    ASSERT(result.isEmpty());
+    ASSERT(!m_renderer || is<RenderListBox>(m_renderer.get()));
+    auto* listBox = dynamicDowncast<RenderListBox>(m_renderer.get());
+    if (!listBox)
+        return { };
 
     if (!childrenInitialized())
         addChildren();
 
-    for (const auto& child : m_children) {
-        if (downcast<AccessibilityListBoxOption>(*child).isSelected())
-            result.append(child.get());
+    const auto& children = const_cast<AccessibilityListBox*>(this)->unignoredChildren();
+    AccessibilityChildrenVector result;
+    size_t size = children.size();
+    for (size_t i = 0; i < size; i++) {
+        if (listBox->listIndexIsVisible(i))
+            result.append(children[i]);
     }
-}
-
-void AccessibilityListBox::visibleChildren(AccessibilityChildrenVector& result)
-{
-    ASSERT(result.isEmpty());
-
-    if (!childrenInitialized())
-        addChildren();
-
-    unsigned length = m_children.size();
-    for (unsigned i = 0; i < length; i++) {
-        if (downcast<RenderListBox>(*m_renderer).listIndexIsVisible(i))
-            result.append(m_children[i]);
-    }
+    return result;
 }
 
 AccessibilityObject* AccessibilityListBox::listBoxOptionAccessibilityObject(HTMLElement* element) const
 {
     // FIXME: Why does AccessibilityMenuListPopup::menuListOptionAccessibilityObject check inRenderedDocument, but this does not?
-    return m_renderer->document().axObjectCache()->getOrCreate(element);
+    RefPtr document = this->document();
+    if (CheckedPtr cache = document ? document->axObjectCache() : nullptr)
+        return cache->getOrCreate(element);
+    return nullptr;
 }
 
-AXCoreObject* AccessibilityListBox::elementAccessibilityHitTest(const IntPoint& point) const
+AccessibilityObject* AccessibilityListBox::elementAccessibilityHitTest(const IntPoint& point) const
 {
     // the internal HTMLSelectElement methods for returning a listbox option at a point
     // ignore optgroup elements.
     if (!m_renderer)
         return nullptr;
 
-    Node* node = m_renderer->node();
-    if (!node)
+    if (!m_renderer->node())
         return nullptr;
 
     LayoutRect parentRect = boundingBoxRect();
 
-    AXCoreObject* listBoxOption = nullptr;
-    unsigned length = m_children.size();
+    RefPtr<AccessibilityObject> listBoxOption;
+    const auto& children = const_cast<AccessibilityListBox*>(this)->unignoredChildren();
+    unsigned length = children.size();
     for (unsigned i = 0; i < length; ++i) {
         LayoutRect rect = downcast<RenderListBox>(*m_renderer).itemBoundingBoxRect(parentRect.location(), i);
         // The cast to HTMLElement below is safe because the only other possible listItem type
         // would be a WMLElement, but WML builds don't use accessibility features at all.
         if (rect.contains(point)) {
-            listBoxOption = m_children[i].get();
+            listBoxOption = downcast<AccessibilityObject>(children[i].get());
             break;
         }
     }
 
-    if (listBoxOption && !listBoxOption->accessibilityIsIgnored())
-        return listBoxOption;
+    if (listBoxOption && !listBoxOption->isIgnored())
+        return listBoxOption.get();
 
     return axObjectCache()->getOrCreate(renderer());
 }

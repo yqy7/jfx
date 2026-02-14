@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -126,9 +126,11 @@ final class WCImageDecoderImpl extends WCImageDecoder {
 
     private void startLoader() {
         if (this.loader == null) {
-            this.loader = new Service<ImageFrame[]>() {
+            this.loader = new Service<>() {
+                @Override
                 protected Task<ImageFrame[]> createTask() {
-                    return new Task<ImageFrame[]>() {
+                    return new Task<>() {
+                        @Override
                         protected ImageFrame[] call() throws Exception {
                             return loadFrames();
                         }
@@ -202,7 +204,7 @@ final class WCImageDecoderImpl extends WCImageDecoder {
                 log.fine(String.format("%X Image size %dx%d",
                         hashCode(), metadata.imageWidth, metadata.imageHeight));
             }
-            // The following lines is a workaround for RT-13475,
+            // The following lines is a workaround for JDK-8093650,
             // because image decoder does not report valid image size
             if (imageWidth < metadata.imageWidth) {
                 imageWidth = metadata.imageWidth;
@@ -293,14 +295,14 @@ final class WCImageDecoderImpl extends WCImageDecoder {
         final ImageMetadata meta = getFrameMetadata(idx);
         int dur = (meta == null || meta.delayTime == null) ? 0 : meta.delayTime;
         // Many annoying ads try to animate too fast.
-        // See RT-13535 or <http://webkit.org/b/36082>.
+        // See JDK-8113587 or <http://webkit.org/b/36082>.
         if (dur < 11) dur = 100;
         return dur;
     }
 
     // Per thread array cache to avoid repeated creation of int[]
     private static final ThreadLocal<int[]> THREAD_LOCAL_SIZE_ARRAY =
-        new ThreadLocal<int[]> () {
+        new ThreadLocal<> () {
             @Override protected int[] initialValue() {
                 return new int[2];
             }

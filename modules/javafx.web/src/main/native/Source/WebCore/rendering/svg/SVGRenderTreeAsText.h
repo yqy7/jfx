@@ -30,41 +30,28 @@
 
 namespace WebCore {
 
-class AffineTransform;
-class Color;
-class FloatRect;
-class FloatSize;
 class LegacyRenderSVGContainer;
+class LegacyRenderSVGImage;
+class LegacyRenderSVGResourceContainer;
 class LegacyRenderSVGRoot;
 class LegacyRenderSVGShape;
-class Node;
-class RenderImage;
+class RenderElement;
 class RenderObject;
-class RenderSVGContainer;
 class RenderSVGGradientStop;
-class RenderSVGImage;
 class RenderSVGInlineText;
-class RenderSVGResourceContainer;
-class RenderSVGRoot;
-class RenderSVGShape;
 class RenderSVGText;
-class SVGUnitTypes;
+class SVGGraphicsElement;
 
 // functions used by the main RenderTreeAsText code
 void write(WTF::TextStream&, const LegacyRenderSVGRoot&, OptionSet<RenderAsTextFlag>);
 void write(WTF::TextStream&, const LegacyRenderSVGShape&, OptionSet<RenderAsTextFlag>);
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
-void write(WTF::TextStream&, const RenderSVGRoot&, OptionSet<RenderAsTextFlag>);
-void write(WTF::TextStream&, const RenderSVGShape&, OptionSet<RenderAsTextFlag>);
-#endif
 void writeSVGGradientStop(WTF::TextStream&, const RenderSVGGradientStop&, OptionSet<RenderAsTextFlag>);
-void writeSVGResourceContainer(WTF::TextStream&, const RenderSVGResourceContainer&, OptionSet<RenderAsTextFlag>);
+void writeSVGResourceContainer(WTF::TextStream&, const LegacyRenderSVGResourceContainer&, OptionSet<RenderAsTextFlag>);
 void writeSVGContainer(WTF::TextStream&, const LegacyRenderSVGContainer&, OptionSet<RenderAsTextFlag>);
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
-void writeSVGContainer(WTF::TextStream&, const RenderSVGContainer&, OptionSet<RenderAsTextFlag>);
-#endif
-void writeSVGImage(WTF::TextStream&, const RenderSVGImage&, OptionSet<RenderAsTextFlag>);
+void writeSVGGraphicsElement(WTF::TextStream&, const SVGGraphicsElement&);
+void writeSVGImage(WTF::TextStream&, const LegacyRenderSVGImage&, OptionSet<RenderAsTextFlag>);
 void writeSVGInlineText(WTF::TextStream&, const RenderSVGInlineText&, OptionSet<RenderAsTextFlag>);
+void writeSVGPaintingFeatures(TextStream&, const RenderElement&, OptionSet<RenderAsTextFlag>);
 void writeSVGText(WTF::TextStream&, const RenderSVGText&, OptionSet<RenderAsTextFlag>);
 void writeResources(WTF::TextStream&, const RenderObject&, OptionSet<RenderAsTextFlag>);
 
@@ -74,15 +61,15 @@ void writeResources(WTF::TextStream&, const RenderObject&, OptionSet<RenderAsTex
 template<typename Item>
 WTF::TextStream& operator<<(WTF::TextStream& ts, const Vector<Item*>& v)
 {
-    ts << "[";
+    ts << '[';
 
     for (unsigned i = 0; i < v.size(); i++) {
         ts << *v[i];
         if (i < v.size() - 1)
-            ts << ", ";
+            ts << ", "_s;
     }
 
-    ts << "]";
+    ts << ']';
     return ts;
 }
 

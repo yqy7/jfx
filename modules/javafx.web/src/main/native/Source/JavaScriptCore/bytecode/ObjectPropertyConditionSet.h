@@ -31,6 +31,8 @@
 #include <wtf/RefCountedFixedVector.h>
 #include <wtf/Vector.h>
 
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
+
 namespace JSC {
 
 // An object property condition set is used to represent the set of additional conditions
@@ -55,13 +57,14 @@ public:
         return result;
     }
 
-    static ObjectPropertyConditionSet create(Vector<ObjectPropertyCondition>&& vector)
+    template<typename Vector>
+    static ObjectPropertyConditionSet create(Vector&& vector)
     {
         if (vector.isEmpty())
             return ObjectPropertyConditionSet();
 
         ObjectPropertyConditionSet result;
-        result.m_data = Conditions::createFromVector(WTFMove(vector));
+        result.m_data = Conditions::createFromVector(std::forward<Vector>(vector));
         ASSERT(result.isValid());
         return result;
     }
@@ -71,8 +74,6 @@ public:
         return !m_data || !m_data->isEmpty();
     }
 
-    bool isValidAndWatchable() const;
-
     size_t size() const { return m_data ? m_data->size() : 0; }
     bool isEmpty() const
     {
@@ -81,13 +82,13 @@ public:
 
     using const_iterator = Conditions::const_iterator;
 
-    const_iterator begin() const
+    const_iterator begin() const LIFETIME_BOUND
     {
         if (!m_data)
             return nullptr;
         return m_data->cbegin();
     }
-    const_iterator end() const
+    const_iterator end() const LIFETIME_BOUND
     {
         if (!m_data)
             return nullptr;
@@ -115,11 +116,6 @@ public:
         return true;
     }
 
-    friend bool operator!=(const ObjectPropertyConditionSet& lhs, const ObjectPropertyConditionSet& rhs)
-    {
-        return !(lhs == rhs);
-    }
-
     ObjectPropertyCondition forObject(JSObject*) const;
     ObjectPropertyCondition forConditionKind(PropertyCondition::Kind) const;
 
@@ -138,8 +134,8 @@ public:
     // invalid().
     ObjectPropertyConditionSet mergedWith(const ObjectPropertyConditionSet& other) const;
 
+    bool isStillValid() const;
     bool structuresEnsureValidity() const;
-    bool structuresEnsureValidityAssumingImpurePropertyWatchpoint() const;
 
     bool needImpurePropertyWatchpoint() const;
 
@@ -172,9 +168,8 @@ ObjectPropertyConditionSet generateConditionsForPropertyMiss(
     VM&, JSCell* owner, JSGlobalObject*, Structure* headStructure, UniquedStringImpl* uid);
 ObjectPropertyConditionSet generateConditionsForPropertySetterMiss(
     VM&, JSCell* owner, JSGlobalObject*, Structure* headStructure, UniquedStringImpl* uid);
-ObjectPropertyConditionSet generateConditionsForPrototypePropertyHit(
-    VM&, JSCell* owner, JSGlobalObject*, Structure* headStructure, JSObject* prototype,
-    UniquedStringImpl* uid);
+ObjectPropertyConditionSet generateConditionsForIndexedMiss(VM&, JSCell* owner, JSGlobalObject*, Structure* headStructure);
+ObjectPropertyConditionSet generateConditionsForPrototypePropertyHit(VM&, JSCell* owner, JSGlobalObject*, Structure* headStructure, JSObject* prototype, UniquedStringImpl* uid);
 ObjectPropertyConditionSet generateConditionsForPrototypePropertyHitCustom(
     VM&, JSCell* owner, JSGlobalObject*, Structure* headStructure, JSObject* prototype,
     UniquedStringImpl* uid, unsigned attributes);
@@ -182,21 +177,20 @@ ObjectPropertyConditionSet generateConditionsForPrototypePropertyHitCustom(
 ObjectPropertyConditionSet generateConditionsForInstanceOf(
     VM&, JSCell* owner, JSGlobalObject*, Structure* headStructure, JSObject* prototype, bool shouldHit);
 
-ObjectPropertyConditionSet generateConditionsForPrototypeEquivalenceConcurrently(
-    VM&, JSGlobalObject*, Structure* headStructure, JSObject* prototype,
-    UniquedStringImpl* uid);
-ObjectPropertyConditionSet generateConditionsForPropertyMissConcurrently(
-    VM&, JSGlobalObject*, Structure* headStructure, UniquedStringImpl* uid);
-ObjectPropertyConditionSet generateConditionsForPropertySetterMissConcurrently(
-    VM&, JSGlobalObject*, Structure* headStructure, UniquedStringImpl* uid);
+ObjectPropertyConditionSet generateConditionsForPrototypeEquivalenceConcurrently(VM&, JSGlobalObject*, Structure* headStructure, JSObject* prototype, UniquedStringImpl* uid);
+ObjectPropertyConditionSet generateConditionsForPrototypePropertyHitConcurrently(VM&, JSGlobalObject*, Structure* headStructure, JSObject* prototype, UniquedStringImpl* uid);
+ObjectPropertyConditionSet generateConditionsForPropertyMissConcurrently(VM&, JSGlobalObject*, Structure* headStructure, UniquedStringImpl* uid);
+ObjectPropertyConditionSet generateConditionsForPropertySetterMissConcurrently(VM&, JSGlobalObject*, Structure* headStructure, UniquedStringImpl* uid);
 
 struct PrototypeChainCachingStatus {
     bool usesPolyProto;
     bool flattenedDictionary;
 };
 
-std::optional<PrototypeChainCachingStatus> prepareChainForCaching(JSGlobalObject*, JSCell* base, const PropertySlot&);
-std::optional<PrototypeChainCachingStatus> prepareChainForCaching(JSGlobalObject*, JSCell* base, JSObject* target);
-std::optional<PrototypeChainCachingStatus> prepareChainForCaching(JSGlobalObject*, Structure* base, JSObject* target);
+std::optional<PrototypeChainCachingStatus> prepareChainForCaching(JSGlobalObject*, JSCell* base, UniquedStringImpl*, const PropertySlot&);
+std::optional<PrototypeChainCachingStatus> prepareChainForCaching(JSGlobalObject*, JSCell* base, UniquedStringImpl*, JSObject* target);
+std::optional<PrototypeChainCachingStatus> prepareChainForCaching(JSGlobalObject*, Structure* base, UniquedStringImpl*, JSObject* target);
 
 } // namespace JSC
+
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END

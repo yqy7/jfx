@@ -105,7 +105,7 @@ class DoubleToStringConverter {
   //   ToPrecision(230.0, 2) -> "230"
   //   ToPrecision(230.0, 2) -> "230."  with EMIT_TRAILING_DECIMAL_POINT.
   //   ToPrecision(230.0, 2) -> "2.3e2" with EMIT_TRAILING_ZERO_AFTER_POINT.
-  DoubleToStringConverter(int flags,
+  constexpr DoubleToStringConverter(int flags,
                           const char* infinity_symbol,
                           const char* nan_symbol,
                           char exponent_character,
@@ -125,12 +125,13 @@ class DoubleToStringConverter {
             max_trailing_padding_zeroes_in_precision_mode) {
     // When 'trailing zero after the point' is set, then 'trailing point'
     // must be set too.
-    ASSERT(((flags & EMIT_TRAILING_DECIMAL_POINT) != 0) ||
+    ASSERT_UNDER_CONSTEXPR_CONTEXT(((flags & EMIT_TRAILING_DECIMAL_POINT) != 0) ||
         !((flags & EMIT_TRAILING_ZERO_AFTER_POINT) != 0));
   }
 
   // Returns a converter following the EcmaScript specification.
   WTF_EXPORT_PRIVATE static const DoubleToStringConverter& EcmaScriptConverter();
+  WTF_EXPORT_PRIVATE static const DoubleToStringConverter& EcmaScriptConverterWithTrailingPoint();
 
   WTF_EXPORT_PRIVATE static const DoubleToStringConverter& CSSConverter();
 
@@ -348,17 +349,16 @@ class DoubleToStringConverter {
   static void DoubleToAscii(double v,
                             DtoaMode mode,
                             int requested_digits,
-                            char* buffer,
-                            int buffer_length,
-                            bool* sign,
-                            int* length,
-                            int* point);
+                            std::span<char> buffer,
+                            bool& sign,
+                            int& length,
+                            int& point);
 
  private:
   // Implementation for ToShortest and ToShortestSingle.
-  bool ToShortestIeeeNumber(double value,
-                            StringBuilder* result_builder,
-                            DtoaMode mode) const;
+  WTF_EXPORT_PRIVATE bool ToShortestIeeeNumber(double value,
+                                               StringBuilder* result_builder,
+                                               DtoaMode mode) const;
 
   // If the value is a special value (NaN or Infinity) constructs the
   // corresponding string using the configured infinity/nan-symbol.
@@ -367,20 +367,17 @@ class DoubleToStringConverter {
   bool HandleSpecialValues(double value, StringBuilder* result_builder) const;
   // Constructs an exponential representation (i.e. 1.234e56).
   // The given exponent assumes a decimal point after the first decimal digit.
-  void CreateExponentialRepresentation(const char* decimal_digits,
-                                       int length,
+  void CreateExponentialRepresentation(std::span<const char> decimal_digits,
                                        int exponent,
                                        StringBuilder* result_builder) const;
   // Creates a decimal representation (i.e 1234.5678).
-  void CreateDecimalRepresentation(const char* decimal_digits,
-                                   int length,
+  void CreateDecimalRepresentation(std::span<const char> decimal_digits,
                                    int decimal_point,
                                    int digits_after_point,
                                    StringBuilder* result_builder) const;
   bool ToFixedInternal(double value,
                        int requested_digits,
-                       char* buffer,
-                       int buffer_length,
+                       std::span<char> buffer,
                        StringBuilder* result_builder) const;
 
   const int flags_;

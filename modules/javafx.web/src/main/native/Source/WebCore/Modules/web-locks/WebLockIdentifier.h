@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021, Apple Inc. All rights reserved.
+ * Copyright (C) 2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,14 +24,13 @@
 
 #pragma once
 
-#include <wtf/Forward.h>
+#include "ProcessQualified.h"
+#include <wtf/ObjectIdentifier.h>
 
 namespace WebCore {
 
-template<typename> class ProcessQualified;
-
-enum WebLockIdentifierType { };
-using WebLockIdentifier = ProcessQualified<ObjectIdentifier<WebLockIdentifierType>>;
+enum class WebLockIdentifierType { };
+using WebLockIdentifier = ProcessQualified<AtomicObjectIdentifier<WebLockIdentifierType>>;
 
 } // namespace
 

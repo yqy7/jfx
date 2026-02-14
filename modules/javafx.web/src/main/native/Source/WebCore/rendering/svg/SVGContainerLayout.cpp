@@ -7,7 +7,7 @@
  * Copyright (C) Research In Motion Limited 2009-2010. All rights reserved.
  * Copyright (C) 2018 Adobe Systems Incorporated. All rights reserved.
  * Copyright (C) 2020 Apple Inc. All rights reserved.
- * Copyright (C) 2021 Igalia S.L.
+ * Copyright (C) 2021, 2023, 2024 Igalia S.L.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -28,23 +28,19 @@
 #include "config.h"
 #include "SVGContainerLayout.h"
 
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
 #include "Logging.h"
 #include "RenderAncestorIterator.h"
 #include "RenderChildIterator.h"
-#include "RenderSVGForeignObject.h"
-#include "RenderSVGHiddenContainer.h"
+#include "RenderObjectInlines.h"
 #include "RenderSVGInline.h"
 #include "RenderSVGModelObject.h"
+#include "RenderSVGResourceGradient.h"
 #include "RenderSVGRoot.h"
 #include "RenderSVGShape.h"
 #include "RenderSVGText.h"
 #include "RenderSVGTransformableContainer.h"
 #include "RenderSVGViewportContainer.h"
 #include "SVGRenderSupport.h"
-#include "SVGRenderingContext.h"
-#include "SVGResources.h"
-#include "SVGResourcesCache.h"
 
 namespace WebCore {
 
@@ -56,103 +52,59 @@ SVGContainerLayout::SVGContainerLayout(RenderLayerModelObject& container)
 void SVGContainerLayout::layoutChildren(bool containerNeedsLayout)
 {
     bool layoutSizeChanged = layoutSizeOfNearestViewportChanged();
-    bool transformChanged = transformToRootChanged(&m_container);
-    HashSet<RenderElement*> elementsThatDidNotReceiveLayout;
+    bool transformChanged = transformToRootChanged(m_container.ptr());
 
     m_positionedChildren.clear();
     for (auto& child : childrenOfType<RenderObject>(m_container)) {
-        if (child.isSVGLayerAwareRenderer()) {
-            ASSERT(child.hasLayer());
+        if (child.isSVGLayerAwareRenderer())
             m_positionedChildren.append(downcast<RenderLayerModelObject>(child));
-        }
 
         bool needsLayout = containerNeedsLayout;
         bool childEverHadLayout = child.everHadLayout();
 
         if (transformChanged) {
             // If the transform changed we need to update the text metrics (note: this also happens for layoutSizeChanged=true).
-            if (is<RenderSVGText>(child))
-                downcast<RenderSVGText>(child).setNeedsTextMetricsUpdate();
+            if (CheckedPtr text = dynamicDowncast<RenderSVGText>(child))
+                text->setNeedsTextMetricsUpdate();
             needsLayout = true;
         }
 
-        if (layoutSizeChanged && child.node() && is<SVGElement>(*child.node())) {
-            // When containerNeedsLayout is false and the layout size changed, we have to check whether this child uses relative lengths
-            auto& element = downcast<SVGElement>(*child.node());
-            if (element.hasRelativeLengths() && 1) {
-                // When the layout size changed and when using relative values tell the RenderSVGShape to update its shape object
-                if (is<RenderSVGShape>(child))
-                    downcast<RenderSVGShape>(child).setNeedsShapeUpdate();
-                else if (is<RenderSVGText>(child)) {
-                    auto& svgText = downcast<RenderSVGText>(child);
-                    svgText.setNeedsTextMetricsUpdate();
-                    svgText.setNeedsPositioningValuesUpdate();
-                }
-
+        if (layoutSizeChanged) {
+            if (child.isAnonymous()) {
+                ASSERT(is<RenderSVGViewportContainer>(child));
                 needsLayout = true;
+            } else if (RefPtr element = dynamicDowncast<SVGElement>(child.node())) {
+                if (element->hasRelativeLengths()) {
+                // When containerNeedsLayout is false and the layout size changed, we have to check whether this child uses relative lengths
+
+                // When the layout size changed and when using relative values tell the RenderSVGShape to update its shape object
+                if (CheckedPtr shape = dynamicDowncast<RenderSVGShape>(child)) {
+                    shape->setNeedsShapeUpdate();
+                    needsLayout = true;
+                } else if (CheckedPtr svgText = dynamicDowncast<RenderSVGText>(child)) {
+                    svgText->setNeedsTextMetricsUpdate();
+                    svgText->setNeedsPositioningValuesUpdate();
+                    needsLayout = true;
+                } else if (CheckedPtr resource = dynamicDowncast<RenderSVGResourceGradient>(child))
+                    resource->invalidateGradient();
+                // FIXME: [LBSE] Add pattern support.
+                }
             }
         }
 
         if (needsLayout)
             child.setNeedsLayout(MarkOnlyThis);
 
-        bool childNeededLayout = child.needsLayout();
-        if (is<RenderElement>(child)) {
-            auto& element = downcast<RenderElement>(child);
-            if (childNeededLayout) {
-                layoutDifferentRootIfNeeded(element);
-                element.layout();
-            } else if (layoutSizeChanged)
-                elementsThatDidNotReceiveLayout.add(&element);
+        if (CheckedPtr element = dynamicDowncast<RenderElement>(child)) {
+            if (element->needsLayout())
+                element->layout();
 
-            if (!childEverHadLayout && element.checkForRepaintDuringLayout())
-                child.repaint();
+            if (!childEverHadLayout && element->checkForRepaintDuringLayout())
+                element->repaint();
         }
 
         ASSERT(!child.needsLayout());
     }
-
-    if (layoutSizeChanged) {
-        // If the layout size changed, invalidate all resources of all children that didn't go through the layout() code path.
-        for (auto* element : elementsThatDidNotReceiveLayout)
-            invalidateResourcesOfChildren(*element);
-    } else
-        ASSERT(elementsThatDidNotReceiveLayout.isEmpty());
-}
-
-static inline LayoutPoint layoutLocationFromRenderer(const RenderObject& renderer)
-{
-    if (is<RenderSVGModelObject>(renderer))
-        return downcast<RenderSVGModelObject>(renderer).layoutLocation();
-
-    if (is<RenderSVGBlock>(renderer)) // <foreignObject> / <text>
-        return downcast<RenderSVGBlock>(renderer).location();
-
-    if (is<RenderSVGInline>(renderer)) // <tspan> / <textPath>
-        return { };
-
-    ASSERT_NOT_REACHED();
-    return { };
-}
-
-static inline void setLayoutLocationForRenderer(RenderObject& renderer, const LayoutPoint& newLocation)
-{
-    if (is<RenderSVGModelObject>(renderer)) {
-        downcast<RenderSVGModelObject>(renderer).setLayoutLocation(newLocation);
-        return;
-    }
-
-    // <foreignObject> / <text>
-    if (is<RenderSVGBlock>(renderer)) {
-        downcast<RenderSVGBlock>(renderer).setLocation(newLocation);
-        return;
-    }
-
-    // <tspan> / <textPath>
-    if (is<RenderSVGInline>(renderer))
-        return;
-
-    ASSERT_NOT_REACHED();
 }
 
 void SVGContainerLayout::positionChildrenRelativeToContainer()
@@ -160,11 +112,11 @@ void SVGContainerLayout::positionChildrenRelativeToContainer()
     if (m_positionedChildren.isEmpty())
         return;
 
-    auto verifyPositionedChildRendererExpectation = [](RenderObject& renderer) {
+    auto verifyPositionedChildRendererExpectation = [](auto& renderer) {
 #if !defined(NDEBUG)
         ASSERT(renderer.isSVGLayerAwareRenderer()); // Pre-condition to enter m_positionedChildren
-        ASSERT(!renderer.isSVGRoot()); // There is only one outermost RenderSVGRoot object
-        ASSERT(!renderer.isSVGInline()); // Inlines are only allowed within a RenderSVGText tree
+        ASSERT(!renderer.isRenderSVGRoot()); // There is only one outermost RenderSVGRoot object
+        ASSERT(!renderer.isRenderSVGInline()); // Inlines are only allowed within a RenderSVGText tree
 
         if (is<RenderSVGModelObject>(renderer) || is<RenderSVGBlock>(renderer))
             return;
@@ -176,41 +128,55 @@ void SVGContainerLayout::positionChildrenRelativeToContainer()
 #endif
     };
 
+    auto computeContainerLayoutLocation = [&]() -> LayoutPoint {
+        // The nominal SVG layout location (== flooredLayoutPoint(objectBoundingBoxWithoutTransformsTopLeft), where
+        // objectBoundingBoxWithoutTransforms = union of child boxes, not mapped through their tranforms) is
+        // only meaningful for the children of the RenderSVGRoot. RenderSVGRoot itself is positioned according to
+        // the CSS box model object, where we need to respect border & padding, encoded in the contentBoxLocation().
+        // -> Position all RenderSVGRoot children relative to the contentBoxLocation() to avoid intruding border/padding area.
+        if (CheckedPtr svgRoot = dynamicDowncast<RenderSVGRoot>(m_container.get()))
+            return -svgRoot->contentBoxLocation();
+
+        // For (inner) RenderSVGViewportContainer nominalSVGLayoutLocation() returns the viewport boundaries,
+        // including the effect of the 'x'/'y' attribute values. Do not subtract the location, otherwise the
+        // effect of the x/y translation is removed.
+        if (is<RenderSVGViewportContainer>(m_container) && !m_container->isAnonymous())
+            return { };
+
+        return m_container->nominalSVGLayoutLocation();
+    };
+
     // Arrange layout location for all child renderers relative to the container layout location.
-    auto parentLayoutLocation = flooredLayoutPoint(m_container.objectBoundingBox().minXMinYCorner());
-    for (RenderObject& child : m_positionedChildren) {
+    auto parentLayoutLocation = computeContainerLayoutLocation();
+    for (RenderLayerModelObject& child : m_positionedChildren) {
         verifyPositionedChildRendererExpectation(child);
 
-        auto objectBoundingBoxChild = child.objectBoundingBox();
-        auto layoutLocation = flooredLayoutPoint(objectBoundingBoxChild.minXMinYCorner());
-        auto desiredLayoutLocation = toLayoutPoint(layoutLocation - parentLayoutLocation);
-        auto currentLayoutLocation = layoutLocationFromRenderer(child);
-        if (currentLayoutLocation == desiredLayoutLocation)
-            continue;
-        setLayoutLocationForRenderer(child, desiredLayoutLocation);
+        auto desiredLayoutLocation = toLayoutPoint(child.nominalSVGLayoutLocation() - parentLayoutLocation);
+        if (child.currentSVGLayoutLocation() != desiredLayoutLocation)
+            child.setCurrentSVGLayoutLocation(desiredLayoutLocation);
     }
 }
 
-void SVGContainerLayout::verifyLayoutLocationConsistency(const RenderElement& renderer)
+void SVGContainerLayout::verifyLayoutLocationConsistency(const RenderLayerModelObject& renderer)
 {
-    if (renderer.isSVGLayerAwareRenderer() && !renderer.isSVGRoot()) {
-        auto currentLayoutLocation = layoutLocationFromRenderer(renderer);
+    if (renderer.isSVGLayerAwareRenderer() && !renderer.isRenderSVGRoot()) {
+        auto currentLayoutLocation = renderer.currentSVGLayoutLocation();
 
         auto expectedLayoutLocation = currentLayoutLocation;
-        for (auto& ancestor : ancestorsOfType<RenderElement>(renderer)) {
+        for (auto& ancestor : ancestorsOfType<RenderLayerModelObject>(renderer)) {
             ASSERT(ancestor.isSVGLayerAwareRenderer());
-            if (ancestor.isSVGRoot())
+            if (ancestor.isRenderSVGRoot())
                 break;
-            expectedLayoutLocation.moveBy(layoutLocationFromRenderer(ancestor));
+            expectedLayoutLocation.moveBy(ancestor.currentSVGLayoutLocation());
         }
 
-        auto initialLayoutLocation = flooredLayoutPoint(renderer.objectBoundingBox().minXMinYCorner());
+        auto initialLayoutLocation = renderer.nominalSVGLayoutLocation();
         if (expectedLayoutLocation == initialLayoutLocation) {
-            LOG_WITH_STREAM(SVG, stream << "--> SVGContainerLayout renderer " << &renderer << " (" << renderer.renderName() << ")"
-                << " - verifyLayoutLocationConsistency() objectBoundingBox / layoutLocation are in sync.");
+            LOG_WITH_STREAM(SVG, stream << "--> SVGContainerLayout renderer " << &renderer << " (" << renderer.renderName().characters() << ")"
+                << " - verifyLayoutLocationConsistency() currentSVGLayoutLocation / nominalSVGLayoutLocation are in sync.");
         } else {
-            LOG_WITH_STREAM(SVG, stream << "--> SVGContainerLayout renderer " << &renderer << " (" << renderer.renderName() << ")"
-                << " - verifyLayoutLocationConsistency() objectBoundingBox / layoutLocation invariant violated -- out of sync due to partial layout?"
+            LOG_WITH_STREAM(SVG, stream << "--> SVGContainerLayout renderer " << &renderer << " (" << renderer.renderName().characters() << ")"
+                << " - verifyLayoutLocationConsistency() currentSVGLayoutLocation / nominalSVGLayoutLocation invariant violated -- out of sync due to partial layout?"
                 << " currentLayoutLocation=" << currentLayoutLocation
                 << "  (expectedLayoutLocation=" << expectedLayoutLocation
                 << " != initialLayoutLocation=" << initialLayoutLocation << ")"
@@ -224,64 +190,46 @@ void SVGContainerLayout::verifyLayoutLocationConsistency(const RenderElement& re
         }
     }
 
-    for (auto& child : childrenOfType<RenderElement>(renderer)) {
+    for (auto& child : childrenOfType<RenderLayerModelObject>(renderer)) {
         if (child.isSVGLayerAwareRenderer())
             verifyLayoutLocationConsistency(child);
     }
 
 #if !defined(NDEBUG)
-    if (renderer.isSVGRoot()) {
-        LOG_WITH_STREAM(SVG, stream << "--> SVGContainerLayout renderer " << &renderer << " (" << renderer.renderName() << ")"
+    if (renderer.isRenderSVGRoot()) {
+        LOG_WITH_STREAM(SVG, stream << "--> SVGContainerLayout renderer " << &renderer << " (" << renderer.renderName().characters() << ")"
             << " - verifyLayoutLocationConsistency() end");
     }
 #endif
 }
 
-void SVGContainerLayout::layoutDifferentRootIfNeeded(const RenderElement& renderer)
-{
-    if (auto* resources = SVGResourcesCache::cachedResourcesForRenderer(renderer)) {
-        auto* svgRoot = SVGRenderSupport::findTreeRootObject(renderer);
-        ASSERT(svgRoot);
-        resources->layoutDifferentRootIfNeeded(svgRoot);
-    }
-}
-
-void SVGContainerLayout::invalidateResourcesOfChildren(RenderElement& renderer)
-{
-    ASSERT(!renderer.needsLayout());
-    if (auto* resources = SVGResourcesCache::cachedResourcesForRenderer(renderer))
-        resources->removeClientFromCache(renderer, false);
-
-    for (auto& child : childrenOfType<RenderElement>(renderer))
-        invalidateResourcesOfChildren(child);
-}
-
 bool SVGContainerLayout::layoutSizeOfNearestViewportChanged() const
 {
-    RenderElement* ancestor = &m_container;
-    while (ancestor && !is<RenderSVGRoot>(*ancestor) && !is<RenderSVGViewportContainer>(*ancestor))
+    RenderElement* ancestor = m_container.ptr();
+    while (ancestor && !is<RenderSVGRoot>(ancestor) && !is<RenderSVGViewportContainer>(ancestor))
         ancestor = ancestor->parent();
 
     ASSERT(ancestor);
-    if (is<RenderSVGViewportContainer>(*ancestor))
-        return downcast<RenderSVGViewportContainer>(*ancestor).isLayoutSizeChanged();
+    if (auto* viewportContainer = dynamicDowncast<RenderSVGViewportContainer>(ancestor))
+        return viewportContainer->isLayoutSizeChanged();
 
-    return downcast<RenderSVGRoot>(*ancestor).isLayoutSizeChanged();
+    if (auto* svgRoot = dynamicDowncast<RenderSVGRoot>(ancestor))
+        return svgRoot->isLayoutSizeChanged();
+
+    return false;
 }
 
 bool SVGContainerLayout::transformToRootChanged(const RenderObject* ancestor)
 {
     while (ancestor) {
-        // FIXME: [LBSE] Upstream RenderSVGTransformableContainer changes
-        // if (is<RenderSVGTransformableContainer>(*ancestor))
-        //     return downcast<const RenderSVGTransformableContainer>(*ancestor).didTransformToRootUpdate();
+        if (CheckedPtr container = dynamicDowncast<RenderSVGTransformableContainer>(*ancestor))
+            return container->didTransformToRootUpdate();
 
-        // FIXME: [LBSE] Upstream RenderSVGTransformableContainer changes
-        // if (is<RenderSVGViewportContainer>(*ancestor))
-        //     return downcast<const RenderSVGViewportContainer>(*ancestor).didTransformToRootUpdate();
+        if (CheckedPtr container = dynamicDowncast<RenderSVGViewportContainer>(*ancestor))
+            return container->didTransformToRootUpdate();
 
-        if (is<RenderSVGRoot>(*ancestor))
-            return downcast<const RenderSVGRoot>(*ancestor).didTransformToRootUpdate();
+        if (CheckedPtr svgRoot = dynamicDowncast<RenderSVGRoot>(*ancestor))
+            return svgRoot->didTransformToRootUpdate();
         ancestor = ancestor->parent();
     }
 
@@ -290,4 +238,3 @@ bool SVGContainerLayout::transformToRootChanged(const RenderObject* ancestor)
 
 }
 
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)

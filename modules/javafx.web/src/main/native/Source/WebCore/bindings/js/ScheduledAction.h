@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reseved.
+ *  Copyright (C) 2003-2025 Apple Inc. All rights reseved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -22,6 +22,7 @@
 #include <JavaScriptCore/Strong.h>
 #include <JavaScriptCore/StrongInlines.h>
 #include <memory>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/text/WTFString.h>
 
 namespace JSC {
@@ -36,9 +37,9 @@ class ScriptExecutionContext;
 class WorkerGlobalScope;
 
 class ScheduledAction {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(ScheduledAction);
 public:
-    static std::unique_ptr<ScheduledAction> create(DOMWrapperWorld&, JSC::Strong<JSC::Unknown>&&);
+    static std::unique_ptr<ScheduledAction> create(DOMWrapperWorld&, JSC::Strong<JSC::JSObject>&&);
     static std::unique_ptr<ScheduledAction> create(DOMWrapperWorld&, String&&);
     ~ScheduledAction();
 
@@ -52,17 +53,18 @@ public:
     void execute(ScriptExecutionContext&);
 
 private:
-    ScheduledAction(DOMWrapperWorld&, JSC::Strong<JSC::Unknown>&&);
+    ScheduledAction(DOMWrapperWorld&, JSC::Strong<JSC::JSObject>&&);
     ScheduledAction(DOMWrapperWorld&, String&&);
 
     void executeFunctionInContext(JSC::JSGlobalObject*, JSC::JSValue thisValue, ScriptExecutionContext&);
     void execute(Document&);
     void execute(WorkerGlobalScope&);
 
-    Ref<DOMWrapperWorld> m_isolatedWorld;
-    JSC::Strong<JSC::Unknown> m_function;
+    const Ref<DOMWrapperWorld> m_isolatedWorld;
+    JSC::Strong<JSC::JSObject> m_function;
     FixedVector<JSC::Strong<JSC::Unknown>> m_arguments;
     String m_code;
+    JSC::SourceTaintedOrigin m_sourceTaintedOrigin;
 };
 
 } // namespace WebCore

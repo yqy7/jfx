@@ -26,6 +26,7 @@
 [
     Conditional=NOTIFICATIONS
 ] dictionary NotificationOptions {
+    [Conditional=DECLARATIVE_WEB_PUSH, EnabledBySetting=DeclarativeWebPush] USVString navigate;
     NotificationDirection dir = "auto";
     DOMString lang = "";
     DOMString body = "";
@@ -37,8 +38,8 @@
     // VibratePattern vibrate;
     // EpochTimeStamp timestamp;
     // boolean renotify = false;
-    // boolean silent = false;
+    boolean? silent = null;
     // boolean requireInteraction = false;
-    // any data = null;
+    any data = null;
     // sequence<NotificationAction> actions = [];
 };

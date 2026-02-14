@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, Google Inc. All rights reserved.
+ * Copyright (C) 2010 Google Inc. All rights reserved.
  * Copyright (C) 2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,10 +34,14 @@
 #include "AudioNodeOptions.h"
 #include "AudioNodeOutput.h"
 #include "AudioParam.h"
+#include "ContextDestructionObserverInlines.h"
+#include "EventTargetInterfaces.h"
+#include "ExceptionOr.h"
 #include "Logging.h"
 #include <wtf/Atomics.h>
-#include <wtf/IsoMallocInlines.h>
 #include <wtf/MainThread.h>
+#include <wtf/NeverDestroyed.h>
+#include <wtf/TZoneMallocInlines.h>
 
 #if DEBUG_AUDIONODE_REFERENCES
 #include <stdio.h>
@@ -45,11 +49,11 @@
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(AudioNode);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(AudioNode);
 
 String convertEnumerationToString(AudioNode::NodeType enumerationValue)
 {
-    static const NeverDestroyed<String> values[] = {
+    static const std::array<NeverDestroyed<String>, 21> values {
         MAKE_STATIC_STRING_IMPL("NodeTypeDestination"),
         MAKE_STATIC_STRING_IMPL("NodeTypeOscillator"),
         MAKE_STATIC_STRING_IMPL("NodeTypeAudioBufferSource"),
@@ -94,7 +98,7 @@ String convertEnumerationToString(AudioNode::NodeType enumerationValue)
     static_assert(static_cast<size_t>(AudioNode::NodeTypeIIRFilter) == 19, "AudioNode::NodeTypeIIRFilter is not 19 as expected");
     static_assert(static_cast<size_t>(AudioNode::NodeTypeWorklet) == 20, "AudioNode::NodeTypeWorklet is not 20 as expected");
 
-    ASSERT(static_cast<size_t>(enumerationValue) < WTF_ARRAY_LENGTH(values));
+    ASSERT(static_cast<size_t>(enumerationValue) < std::size(values));
 
     return values[static_cast<size_t>(enumerationValue)];
 }
@@ -137,7 +141,7 @@ AudioNode::~AudioNode()
     ASSERT(isMainThread());
 #if DEBUG_AUDIONODE_REFERENCES
     --s_nodeCount[nodeType()];
-    fprintf(stderr, "%p: %d: AudioNode::~AudioNode() %d %d\n", this, nodeType(), m_normalRefCount.load(), m_connectionRefCount);
+    fprintf(stderr, "%p: %d: AudioNode::~AudioNode() %d %d\n", this, nodeType(), m_normalRefCount.load(), m_connectionRefCount.load());
 #endif
 }
 
@@ -188,19 +192,24 @@ ExceptionOr<void> AudioNode::connect(AudioNode& destination, unsigned outputInde
 
     // Sanity check input and output indices.
     if (outputIndex >= numberOfOutputs())
-        return Exception { IndexSizeError, "Output index exceeds number of outputs"_s };
+        return Exception { ExceptionCode::IndexSizeError, "Output index exceeds number of outputs"_s };
 
     if (inputIndex >= destination.numberOfInputs())
-        return Exception { IndexSizeError, "Input index exceeds number of inputs"_s };
+        return Exception { ExceptionCode::IndexSizeError, "Input index exceeds number of inputs"_s };
 
-    if (&context() != &destination.context())
-        return Exception { InvalidAccessError, "Source and destination nodes belong to different audio contexts"_s };
+    auto& context = this->context();
+    if (&context != &destination.context())
+        return Exception { ExceptionCode::InvalidAccessError, "Source and destination nodes belong to different audio contexts"_s };
 
     auto* input = destination.input(inputIndex);
     auto* output = this->output(outputIndex);
 
     if (!output->numberOfChannels())
-        return Exception { InvalidAccessError, "Node has zero output channels"_s };
+        return Exception { ExceptionCode::InvalidAccessError, "Node has zero output channels"_s };
+
+    RefPtr audioContext = dynamicDowncast<AudioContext>(context);
+    if (audioContext && &destination == &context.destination() && !audioContext->destination().isConnected())
+        audioContext->defaultDestinationWillBecomeConnected();
 
     input->connect(output);
 
@@ -218,10 +227,10 @@ ExceptionOr<void> AudioNode::connect(AudioParam& param, unsigned outputIndex)
     INFO_LOG(LOGIDENTIFIER, param.name(), ", output = ", outputIndex);
 
     if (outputIndex >= numberOfOutputs())
-        return Exception { IndexSizeError, "Output index exceeds number of outputs"_s };
+        return Exception { ExceptionCode::IndexSizeError, "Output index exceeds number of outputs"_s };
 
     if (&context() != param.context())
-        return Exception { InvalidAccessError, "Node and AudioParam belong to different audio contexts"_s };
+        return Exception { ExceptionCode::InvalidAccessError, "Node and AudioParam belong to different audio contexts"_s };
 
     auto* output = this->output(outputIndex);
     param.connect(output);
@@ -249,7 +258,7 @@ ExceptionOr<void> AudioNode::disconnect(unsigned outputIndex)
     Locker locker { context().graphLock() };
 
     if (outputIndex >= numberOfOutputs())
-        return Exception { IndexSizeError, "output index is out of bounds"_s };
+        return Exception { ExceptionCode::IndexSizeError, "output index is out of bounds"_s };
 
     auto* output = this->output(outputIndex);
     INFO_LOG(LOGIDENTIFIER, output->node()->nodeType());
@@ -278,7 +287,7 @@ ExceptionOr<void> AudioNode::disconnect(AudioNode& destinationNode)
     }
 
     if (!didDisconnection)
-        return Exception { InvalidAccessError, "The given destination is not connected"_s };
+        return Exception { ExceptionCode::InvalidAccessError, "The given destination is not connected"_s };
 
     updatePullStatus();
     return { };
@@ -290,7 +299,7 @@ ExceptionOr<void> AudioNode::disconnect(AudioNode& destinationNode, unsigned out
     Locker locker { context().graphLock() };
 
     if (outputIndex >= numberOfOutputs())
-        return Exception { IndexSizeError, "output index is out of bounds"_s };
+        return Exception { ExceptionCode::IndexSizeError, "output index is out of bounds"_s };
 
     bool didDisconnection = false;
     auto* output = this->output(outputIndex);
@@ -303,7 +312,7 @@ ExceptionOr<void> AudioNode::disconnect(AudioNode& destinationNode, unsigned out
     }
 
     if (!didDisconnection)
-        return Exception { InvalidAccessError, "The given destination is not connected"_s };
+        return Exception { ExceptionCode::InvalidAccessError, "The given destination is not connected"_s };
 
     updatePullStatus();
     return { };
@@ -315,15 +324,15 @@ ExceptionOr<void> AudioNode::disconnect(AudioNode& destinationNode, unsigned out
     Locker locker { context().graphLock() };
 
     if (outputIndex >= numberOfOutputs())
-        return Exception { IndexSizeError, "output index is out of bounds"_s };
+        return Exception { ExceptionCode::IndexSizeError, "output index is out of bounds"_s };
 
     if (inputIndex >= destinationNode.numberOfInputs())
-        return Exception { IndexSizeError, "input index is out of bounds"_s };
+        return Exception { ExceptionCode::IndexSizeError, "input index is out of bounds"_s };
 
     auto* output = this->output(outputIndex);
     auto* input = destinationNode.input(inputIndex);
     if (!output->isConnectedTo(*input))
-        return Exception { InvalidAccessError, "The given destination is not connected"_s };
+        return Exception { ExceptionCode::InvalidAccessError, "The given destination is not connected"_s };
 
     input->disconnect(output);
 
@@ -346,7 +355,7 @@ ExceptionOr<void> AudioNode::disconnect(AudioParam& destinationParam)
     }
 
     if (!didDisconnection)
-        return Exception { InvalidAccessError, "The given destination is not connected"_s };
+        return Exception { ExceptionCode::InvalidAccessError, "The given destination is not connected"_s };
 
     updatePullStatus();
     return { };
@@ -358,11 +367,11 @@ ExceptionOr<void> AudioNode::disconnect(AudioParam& destinationParam, unsigned o
     Locker locker { context().graphLock() };
 
     if (outputIndex >= numberOfOutputs())
-        return Exception { IndexSizeError, "output index is out of bounds"_s };
+        return Exception { ExceptionCode::IndexSizeError, "output index is out of bounds"_s };
 
     auto* output = this->output(outputIndex);
     if (!output->isConnectedTo(destinationParam))
-        return Exception { InvalidAccessError, "The given destination is not connected"_s };
+        return Exception { ExceptionCode::InvalidAccessError, "The given destination is not connected"_s };
 
     destinationParam.disconnect(output);
 
@@ -383,10 +392,10 @@ ExceptionOr<void> AudioNode::setChannelCount(unsigned channelCount)
     ALWAYS_LOG(LOGIDENTIFIER, channelCount);
 
     if (!channelCount)
-        return Exception { NotSupportedError, "Channel count cannot be 0"_s };
+        return Exception { ExceptionCode::NotSupportedError, "Channel count cannot be 0"_s };
 
     if (channelCount > AudioContext::maxNumberOfChannels)
-        return Exception { NotSupportedError, "Channel count exceeds maximum limit"_s };
+        return Exception { ExceptionCode::NotSupportedError, "Channel count exceeds maximum limit"_s };
 
     if (m_channelCount == channelCount)
         return { };
@@ -438,9 +447,9 @@ void AudioNode::initializeDefaultNodeOptions(unsigned count, ChannelCountMode mo
     m_channelInterpretation = interpretation;
 }
 
-EventTargetInterface AudioNode::eventTargetInterface() const
+enum EventTargetInterfaceType AudioNode::eventTargetInterface() const
 {
-    return AudioNodeEventTargetInterfaceType;
+    return EventTargetInterfaceType::AudioNode;
 }
 
 ScriptExecutionContext* AudioNode::scriptExecutionContext() const
@@ -505,7 +514,7 @@ void AudioNode::pullInputs(size_t framesToProcess)
 bool AudioNode::inputsAreSilent()
 {
     for (auto& input : m_inputs) {
-        if (!input->bus()->isSilent())
+        if (!input->bus().isSilent())
             return false;
     }
     return true;
@@ -514,7 +523,7 @@ bool AudioNode::inputsAreSilent()
 void AudioNode::silenceOutputs()
 {
     for (auto& output : m_outputs)
-        output->bus()->zero();
+        output->bus().zero();
 }
 
 void AudioNode::enableOutputsIfNecessary()
@@ -571,8 +580,13 @@ void AudioNode::incrementConnectionCount()
     // In this case, we need to re-enable.
     enableOutputsIfNecessary();
 
+    {
+        Locker locker { context().graphLock() };
+        unmarkNodeForDeletionIfNecessary();
+    }
+
 #if DEBUG_AUDIONODE_REFERENCES
-    fprintf(stderr, "%p: %d: AudioNode::incrementConnectionCount() %d %d\n", this, nodeType(), m_normalRefCount, m_connectionRefCount);
+    fprintf(stderr, "%p: %d: AudioNode::incrementConnectionCount() %d %d\n", this, nodeType(), m_normalRefCount.load(), m_connectionRefCount.load());
 #endif
 }
 
@@ -604,7 +618,7 @@ void AudioNode::decrementConnectionCountWithLock()
     --m_connectionRefCount;
 
 #if DEBUG_AUDIONODE_REFERENCES
-    fprintf(stderr, "%p: %d: AudioNode::decrementConnectionCountWithLock() %d %d\n", this, nodeType(), m_normalRefCount, m_connectionRefCount);
+    fprintf(stderr, "%p: %d: AudioNode::decrementConnectionCountWithLock() %d %d\n", this, nodeType(), m_normalRefCount.load(), m_connectionRefCount.load());
 #endif
 
     if (!m_connectionRefCount && m_normalRefCount)
@@ -633,16 +647,33 @@ void AudioNode::markNodeForDeletionIfNecessary()
     m_isMarkedForDeletion = true;
 }
 
-void AudioNode::ref()
+void AudioNode::unmarkNodeForDeletionIfNecessary()
+{
+    ASSERT(context().isGraphOwner());
+    if (!m_isMarkedForDeletion)
+        return;
+    if (!m_connectionRefCount && !m_normalRefCount)
+        return;
+
+    m_isMarkedForDeletion = false;
+    context().unmarkForDeletion(*this);
+}
+
+void AudioNode::ref() const
 {
     ++m_normalRefCount;
 
+    {
+        Locker locker { context().graphLock() };
+        const_cast<AudioNode*>(this)->unmarkNodeForDeletionIfNecessary();
+    }
+
 #if DEBUG_AUDIONODE_REFERENCES
-    fprintf(stderr, "%p: %d: AudioNode::ref() %d %d\n", this, nodeType(), m_normalRefCount, m_connectionRefCount);
+    fprintf(stderr, "%p: %d: AudioNode::ref() %d %d\n", this, nodeType(), m_normalRefCount.load(), m_connectionRefCount.load());
 #endif
 }
 
-void AudioNode::deref()
+void AudioNode::deref() const
 {
     ASSERT(!context().isAudioThread());
 
@@ -656,10 +687,10 @@ void AudioNode::deref()
     // We can't call in AudioContext::~AudioContext() since it will never be called as long as any AudioNode is alive
     // because AudioNodes keep a reference to the context.
     if (context().isAudioThreadFinished())
-        context().deleteMarkedNodes();
+        const_cast<BaseAudioContext&>(context()).deleteMarkedNodes();
 }
 
-void AudioNode::derefWithLock()
+void AudioNode::derefWithLock() const
 {
     ASSERT(context().isGraphOwner());
 
@@ -667,10 +698,10 @@ void AudioNode::derefWithLock()
     --m_normalRefCount;
 
 #if DEBUG_AUDIONODE_REFERENCES
-    fprintf(stderr, "%p: %d: AudioNode::deref() %d %d\n", this, nodeType(), m_normalRefCount, m_connectionRefCount);
+    fprintf(stderr, "%p: %d: AudioNode::deref() %d %d\n", this, nodeType(), m_normalRefCount.load(), m_connectionRefCount.load());
 #endif
 
-    markNodeForDeletionIfNecessary();
+    const_cast<AudioNode*>(this)->markNodeForDeletionIfNecessary();
 }
 
 ExceptionOr<void> AudioNode::handleAudioNodeOptions(const AudioNodeOptions& options, const DefaultAudioNodeOptions& defaults)
@@ -694,7 +725,7 @@ BaseAudioContext& AudioNode::context()
 {
     return WTF::switchOn(m_context, [](Ref<BaseAudioContext>& context) -> BaseAudioContext& {
         return context.get();
-    }, [](WeakPtr<BaseAudioContext>& context) -> BaseAudioContext& {
+    }, [](WeakPtr<BaseAudioContext, WeakPtrImplWithEventTargetData>& context) -> BaseAudioContext& {
         return *context;
     });
 }
@@ -703,9 +734,14 @@ const BaseAudioContext& AudioNode::context() const
 {
     return WTF::switchOn(m_context, [](const Ref<BaseAudioContext>& context) -> const BaseAudioContext& {
         return context.get();
-    }, [](const WeakPtr<BaseAudioContext>& context) -> const BaseAudioContext& {
+    }, [](const WeakPtr<BaseAudioContext, WeakPtrImplWithEventTargetData>& context) -> const BaseAudioContext& {
         return *context;
     });
+}
+
+OptionSet<NoiseInjectionPolicy> AudioNode::noiseInjectionPolicies() const
+{
+    return context().noiseInjectionPolicies();
 }
 
 #if DEBUG_AUDIONODE_REFERENCES

@@ -67,31 +67,31 @@ State::State(Graph& graph)
     graph.m_plan.setFinalizer(makeUnique<JITFinalizer>(graph.m_plan));
     finalizer = static_cast<JITFinalizer*>(graph.m_plan.finalizer());
 
-    proc = makeUnique<Procedure>();
+    proc = makeUniqueWithoutFastMallocCheck<Procedure>(/* usesSIMD = */ false);
 
     if (graph.m_vm.shouldBuilderPCToCodeOriginMapping())
         proc->setNeedsPCToOriginMap();
 
     proc->setOriginPrinter(
         [] (PrintStream& out, B3::Origin origin) {
-            out.print(bitwise_cast<Node*>(origin.data()));
+            out.print(origin.dfgOrigin());
         });
 
     proc->setFrontendData(&graph);
 }
 
-void State::dumpDisassembly(PrintStream& out, const ScopedLambda<void(DFG::Node*)>& perDFGNodeCallback)
+void State::dumpDisassembly(PrintStream& out, LinkBuffer& linkBuffer, const ScopedLambda<void(DFG::Node*)>& perDFGNodeCallback)
 {
     B3::Air::Disassembler* disassembler = proc->code().disassembler();
 
+    out.atomically([&](auto&) {
     out.print("Generated ", graph.m_plan.mode(), " code for ", CodeBlockWithJITType(graph.m_codeBlock, JITType::FTLJIT), ", instructions size = ", graph.m_codeBlock->instructionsSize(), ":\n");
 
-    LinkBuffer& linkBuffer = *finalizer->b3CodeLinkBuffer;
     B3::Value* currentB3Value = nullptr;
     Node* currentDFGNode = nullptr;
 
-    HashSet<B3::Value*> printedValues;
-    HashSet<Node*> printedNodes;
+        UncheckedKeyHashSet<B3::Value*> printedValues;
+        UncheckedKeyHashSet<Node*> printedNodes;
     const char* dfgPrefix = "DFG " "    ";
     const char* b3Prefix  = "b3  " "          ";
     const char* airPrefix = "Air " "              ";
@@ -107,7 +107,7 @@ void State::dumpDisassembly(PrintStream& out, const ScopedLambda<void(DFG::Node*
 
         perDFGNodeCallback(node);
 
-        HashSet<Node*> localPrintedNodes;
+            UncheckedKeyHashSet<Node*> localPrintedNodes;
         WTF::Function<void(Node*)> printNodeRecursive = [&] (Node* node) {
             if (printedNodes.contains(node) || localPrintedNodes.contains(node))
                 return;
@@ -130,9 +130,9 @@ void State::dumpDisassembly(PrintStream& out, const ScopedLambda<void(DFG::Node*
         if (!currentB3Value)
             return;
 
-        printDFGNode(bitwise_cast<Node*>(value->origin().data()));
+            printDFGNode(value->origin().dfgOrigin());
 
-        HashSet<B3::Value*> localPrintedValues;
+            UncheckedKeyHashSet<B3::Value*> localPrintedValues;
         auto printValueRecursive = recursableLambda([&] (auto self, B3::Value* value) -> void {
             if (printedValues.contains(value) || localPrintedValues.contains(value))
                 return;
@@ -149,16 +149,32 @@ void State::dumpDisassembly(PrintStream& out, const ScopedLambda<void(DFG::Node*
         printedValues.add(value);
     };
 
+    B3::Value* prevOrigin = nullptr;
     auto forEachInst = scopedLambda<void(B3::Air::Inst&)>([&] (B3::Air::Inst& inst) {
+        if (inst.origin != prevOrigin) {
         printB3Value(inst.origin);
+            prevOrigin = inst.origin;
+        }
     });
 
     disassembler->dump(proc->code(), out, linkBuffer, airPrefix, asmPrefix, forEachInst);
+    });
     linkBuffer.didAlreadyDisassemble();
 }
 
-State::~State()
+State::~State() = default;
+
+StructureStubInfo* State::addStructureStubInfo()
 {
+    ASSERT(!graph.m_plan.isUnlinked());
+    auto* stubInfo = jitCode->common.m_stubInfos.add();
+    stubInfo->useDataIC = Options::useDataICInFTL();
+    return stubInfo;
+}
+
+OptimizingCallLinkInfo* State::addCallLinkInfo(CodeOrigin codeOrigin)
+{
+    return jitCode->common.m_callLinkInfos.add(codeOrigin, graph.m_codeBlock);
 }
 
 } } // namespace JSC::FTL

@@ -34,14 +34,17 @@
 #if ENABLE(MEDIA_STREAM)
 
 #include "Document.h"
-#include "Frame.h"
+#include "LocalFrameInlines.h"
 #include "MediaDevices.h"
 #include "Navigator.h"
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-NavigatorMediaDevices::NavigatorMediaDevices(DOMWindow* window)
-    : DOMWindowProperty(window)
+WTF_MAKE_TZONE_ALLOCATED_IMPL(NavigatorMediaDevices);
+
+NavigatorMediaDevices::NavigatorMediaDevices(LocalDOMWindow* window)
+    : LocalDOMWindowProperty(window)
 {
 }
 
@@ -49,7 +52,7 @@ NavigatorMediaDevices::~NavigatorMediaDevices() = default;
 
 NavigatorMediaDevices* NavigatorMediaDevices::from(Navigator* navigator)
 {
-    NavigatorMediaDevices* supplement = static_cast<NavigatorMediaDevices*>(Supplement<Navigator>::from(navigator, supplementName()));
+    NavigatorMediaDevices* supplement = reinterpret_cast<NavigatorMediaDevices*>(Supplement<Navigator>::from(navigator, supplementName()));
     if (!supplement) {
         auto newSupplement = makeUnique<NavigatorMediaDevices>(navigator->window());
         supplement = newSupplement.get();
@@ -66,13 +69,13 @@ MediaDevices* NavigatorMediaDevices::mediaDevices(Navigator& navigator)
 MediaDevices* NavigatorMediaDevices::mediaDevices() const
 {
     if (!m_mediaDevices && frame())
-        m_mediaDevices = MediaDevices::create(*frame()->document());
+        m_mediaDevices = MediaDevices::create(*frame()->protectedDocument());
     return m_mediaDevices.get();
 }
 
-const char* NavigatorMediaDevices::supplementName()
+ASCIILiteral NavigatorMediaDevices::supplementName()
 {
-    return "NavigatorMediaDevices";
+    return "NavigatorMediaDevices"_s;
 }
 
 } // namespace WebCore

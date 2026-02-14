@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -66,7 +66,7 @@ class ParallelHelperClient;
 
 class ParallelHelperPool : public ThreadSafeRefCounted<ParallelHelperPool> {
 public:
-    WTF_EXPORT_PRIVATE ParallelHelperPool(CString&& threadName);
+    WTF_EXPORT_PRIVATE ParallelHelperPool(ASCIILiteral threadName);
     WTF_EXPORT_PRIVATE ~ParallelHelperPool();
 
     WTF_EXPORT_PRIVATE void ensureThreads(unsigned numThreads);
@@ -86,14 +86,14 @@ private:
     ParallelHelperClient* getClientWithTask() WTF_REQUIRES_LOCK(m_lock);
 
     Box<Lock> m_lock; // AutomaticThread wants this in a box for safety.
-    Ref<AutomaticThreadCondition> m_workAvailableCondition;
+    const Ref<AutomaticThreadCondition> m_workAvailableCondition;
     Condition m_workCompleteCondition;
 
     WeakRandom m_random;
 
     Vector<ParallelHelperClient*> m_clients WTF_GUARDED_BY_LOCK(*m_lock);
     Vector<RefPtr<AutomaticThread>> m_threads;
-    CString m_threadName;
+    ASCIILiteral m_threadName;
     unsigned m_numThreads { 0 }; // This can be larger than m_threads.size() because we start threads only once there is work.
     bool m_isDying { false };
 };
@@ -163,7 +163,7 @@ private:
 // will lead to RELEASE_ASSERT's or worse.
 class ParallelHelperClient {
     WTF_MAKE_NONCOPYABLE(ParallelHelperClient);
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(ParallelHelperClient);
 public:
     WTF_EXPORT_PRIVATE ParallelHelperClient(RefPtr<ParallelHelperPool>&&);
     WTF_EXPORT_PRIVATE ~ParallelHelperClient();

@@ -34,11 +34,14 @@
 
 #if ENABLE(VIDEO)
 
+#include "CommonAtomStrings.h"
+#include "ScriptExecutionContext.h"
 #include "VideoTrackClient.h"
 #include "VideoTrackConfiguration.h"
 #include "VideoTrackList.h"
 #include "VideoTrackPrivate.h"
 #include <wtf/NeverDestroyed.h>
+#include <wtf/TZoneMallocInlines.h>
 
 #if ENABLE(MEDIA_SOURCE)
 #include "SourceBuffer.h"
@@ -46,56 +49,28 @@
 
 namespace WebCore {
 
-const AtomString& VideoTrack::alternativeKeyword()
-{
-    static MainThreadNeverDestroyed<const AtomString> alternative("alternative", AtomString::ConstructFromLiteral);
-    return alternative;
-}
-
-const AtomString& VideoTrack::captionsKeyword()
-{
-    static MainThreadNeverDestroyed<const AtomString> captions("captions", AtomString::ConstructFromLiteral);
-    return captions;
-}
-
-const AtomString& VideoTrack::mainKeyword()
-{
-    static MainThreadNeverDestroyed<const AtomString> captions("main", AtomString::ConstructFromLiteral);
-    return captions;
-}
+WTF_MAKE_TZONE_ALLOCATED_IMPL(VideoTrack);
 
 const AtomString& VideoTrack::signKeyword()
 {
-    static MainThreadNeverDestroyed<const AtomString> sign("sign", AtomString::ConstructFromLiteral);
+    static MainThreadNeverDestroyed<const AtomString> sign("sign"_s);
     return sign;
 }
 
-const AtomString& VideoTrack::subtitlesKeyword()
-{
-    static MainThreadNeverDestroyed<const AtomString> subtitles("subtitles", AtomString::ConstructFromLiteral);
-    return subtitles;
-}
-
-const AtomString& VideoTrack::commentaryKeyword()
-{
-    static MainThreadNeverDestroyed<const AtomString> commentary("commentary", AtomString::ConstructFromLiteral);
-    return commentary;
-}
-
 VideoTrack::VideoTrack(ScriptExecutionContext* context, VideoTrackPrivate& trackPrivate)
-    : MediaTrackBase(context, MediaTrackBase::VideoTrack, trackPrivate.id(), trackPrivate.label(), trackPrivate.language())
+    : MediaTrackBase(context, MediaTrackBase::VideoTrack, trackPrivate.trackUID(), trackPrivate.id(), trackPrivate.label(), trackPrivate.language())
     , m_private(trackPrivate)
     , m_configuration(VideoTrackConfiguration::create())
     , m_selected(trackPrivate.selected())
 {
-    m_private->setClient(*this);
+    addClientToTrackPrivateBase(*this, trackPrivate);
     updateKindFromPrivate();
     updateConfigurationFromPrivate();
 }
 
 VideoTrack::~VideoTrack()
 {
-    m_private->clearClient();
+    removeClientFromTrackPrivateBase(Ref { m_private });
 }
 
 void VideoTrack::setPrivate(VideoTrackPrivate& trackPrivate)
@@ -103,9 +78,9 @@ void VideoTrack::setPrivate(VideoTrackPrivate& trackPrivate)
     if (m_private.ptr() == &trackPrivate)
         return;
 
-    m_private->clearClient();
+    removeClientFromTrackPrivateBase(Ref { m_private });
     m_private = trackPrivate;
-    m_private->setClient(*this);
+    addClientToTrackPrivateBase(*this, trackPrivate);
 #if !RELEASE_LOG_DISABLED
     m_private->setLogger(logger(), logIdentifier());
 #endif
@@ -118,12 +93,12 @@ void VideoTrack::setPrivate(VideoTrackPrivate& trackPrivate)
 
 bool VideoTrack::isValidKind(const AtomString& value) const
 {
-    return value == alternativeKeyword()
-        || value == commentaryKeyword()
-        || value == captionsKeyword()
-        || value == mainKeyword()
-        || value == signKeyword()
-        || value == subtitlesKeyword();
+    return value == "alternative"_s
+        || value == "commentary"_s
+        || value == "captions"_s
+        || value == "main"_s
+        || value == "sign"_s
+        || value == "subtitles"_s;
 }
 
 void VideoTrack::setSelected(const bool selected)
@@ -167,9 +142,12 @@ void VideoTrack::selectedChanged(bool selected)
 void VideoTrack::configurationChanged(const PlatformVideoTrackConfiguration& configuration)
 {
     m_configuration->setState(configuration);
+    m_clients.forEach([this] (auto& client) {
+        client.videoTrackConfigurationChanged(*this);
+    });
 }
 
-void VideoTrack::idChanged(const AtomString& id)
+void VideoTrack::idChanged(TrackID id)
 {
     setId(id);
     m_clients.forEach([this] (auto& client) {
@@ -240,26 +218,26 @@ void VideoTrack::setLanguage(const AtomString& language)
 void VideoTrack::updateKindFromPrivate()
 {
     switch (m_private->kind()) {
-    case VideoTrackPrivate::Alternative:
-        setKind(VideoTrack::alternativeKeyword());
+    case VideoTrackPrivate::Kind::Alternative:
+        setKind("alternative"_s);
         return;
-    case VideoTrackPrivate::Captions:
-        setKind(VideoTrack::captionsKeyword());
+    case VideoTrackPrivate::Kind::Captions:
+        setKind("captions"_s);
         return;
-    case VideoTrackPrivate::Main:
-        setKind(VideoTrack::mainKeyword());
+    case VideoTrackPrivate::Kind::Main:
+        setKind("main"_s);
         return;
-    case VideoTrackPrivate::Sign:
-        setKind(VideoTrack::signKeyword());
+    case VideoTrackPrivate::Kind::Sign:
+        setKind("sign"_s);
         return;
-    case VideoTrackPrivate::Subtitles:
-        setKind(VideoTrack::subtitlesKeyword());
+    case VideoTrackPrivate::Kind::Subtitles:
+        setKind("subtitles"_s);
         return;
-    case VideoTrackPrivate::Commentary:
-        setKind(VideoTrack::commentaryKeyword());
+    case VideoTrackPrivate::Kind::Commentary:
+        setKind("commentary"_s);
         return;
-    case VideoTrackPrivate::None:
-        setKind(emptyString());
+    case VideoTrackPrivate::Kind::None:
+        setKind(emptyAtom());
         return;
     }
     ASSERT_NOT_REACHED();
@@ -271,7 +249,7 @@ void VideoTrack::updateConfigurationFromPrivate()
 }
 
 #if !RELEASE_LOG_DISABLED
-void VideoTrack::setLogger(const Logger& logger, const void* logIdentifier)
+void VideoTrack::setLogger(const Logger& logger, uint64_t logIdentifier)
 {
     TrackBase::setLogger(logger, logIdentifier);
     m_private->setLogger(logger, this->logIdentifier());

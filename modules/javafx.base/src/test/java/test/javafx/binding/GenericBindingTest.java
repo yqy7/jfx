@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,57 +32,54 @@ import test.javafx.beans.value.ChangeListenerMock;
 import javafx.beans.value.ObservableValueBase;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
+import java.lang.reflect.Constructor;
 import java.util.Arrays;
 import java.util.Collection;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
-@RunWith(Parameterized.class)
 public class GenericBindingTest<T> {
 
     private static final Object UNDEFINED = null;
 
-    private final ObservableStub dependency1;
-    private final ObservableStub dependency2;
-    private final BindingMock<T> binding0;
-    private final BindingMock<T> binding1;
-    private final BindingMock<T> binding2;
-    private final T value1;
-    private final T value2;
+    private  ObservableStub dependency1 = new ObservableStub();
+    private  ObservableStub dependency2 = new ObservableStub();
+    private  T value1;
+    private  T value2;
+    private  Constructor<BindingMock<T>> bindingMockClassConstructor;
+
+    private BindingMock<T> binding0;
+    private BindingMock<T> binding1;
+    private BindingMock<T> binding2;
     private InvalidationListenerMock invalidationListener;
     private ChangeListenerMock<Object> changeListener;
 
-    public GenericBindingTest(
-            T value1, T value2,
-            ObservableStub dependency1,
-            ObservableStub dependency2,
-            BindingMock<T> binding0, BindingMock<T> binding1, BindingMock<T> binding2) {
+    private void setUp(T value1, T value2, Class<BindingMock<T>> bindingMockClass) throws Exception {
         this.value1 = value1;
         this.value2 = value2;
-        this.dependency1 = dependency1;
-        this.dependency2 = dependency2;
-        this.binding0 = binding0;
-        this.binding1 = binding1;
-        this.binding2 = binding2;
-    }
+        this.bindingMockClassConstructor = bindingMockClass.getConstructor(Observable[].class);
+        // Recreate bindings as they may have been altered by one of the tests
+        binding0 = bindingMockClassConstructor.newInstance((Object)new Observable[] {});
+        binding1 = bindingMockClassConstructor.newInstance((Object)new Observable[] {dependency1});
+        binding2 = bindingMockClassConstructor.newInstance((Object)new Observable[] {dependency1, dependency2});
 
-    @Before
-    public void setUp() {
         invalidationListener = new InvalidationListenerMock();
-        changeListener = new ChangeListenerMock<Object>(UNDEFINED);
+        changeListener = new ChangeListenerMock<>(UNDEFINED);
         binding0.setValue(value2);
         binding1.setValue(value2);
         binding2.setValue(value2);
     }
 
-    @After
+    @AfterEach
     public void tearDown() {
         binding0.removeListener(invalidationListener);
         binding0.removeListener(changeListener);
@@ -92,8 +89,10 @@ public class GenericBindingTest<T> {
         binding2.removeListener(changeListener);
     }
 
-    @Test
-    public void testNoDependencyLazy() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testNoDependencyLazy(T value1, T value2, Class<BindingMock<T>> bindingMockClass) throws Exception  {
+        setUp(value1, value2, bindingMockClass);
         binding0.getValue();
         binding0.addListener(invalidationListener);
         System.gc(); // making sure we did not not overdo weak references
@@ -107,8 +106,10 @@ public class GenericBindingTest<T> {
         assertEquals(true, binding0.isValid());
     }
 
-    @Test
-    public void testNoDependencyEager() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testNoDependencyEager(T value1, T value2, Class<BindingMock<T>> bindingMockClass) throws Exception  {
+        setUp(value1, value2, bindingMockClass);
         binding0.getValue();
         binding0.addListener(changeListener);
         System.gc(); // making sure we did not not overdo weak references
@@ -122,8 +123,10 @@ public class GenericBindingTest<T> {
         assertEquals(true, binding0.isValid());
     }
 
-    @Test
-    public void testSingleDependencyLazy() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testSingleDependencyLazy(T value1, T value2, Class<BindingMock<T>> bindingMockClass) throws Exception  {
+        setUp(value1, value2, bindingMockClass);
         binding1.getValue();
         binding1.addListener(invalidationListener);
         System.gc(); // making sure we did not not overdo weak references
@@ -184,8 +187,10 @@ public class GenericBindingTest<T> {
         assertEquals(true, binding1.isValid());
     }
 
-    @Test
-    public void testSingleDependencyEager() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testSingleDependencyEager(T value1, T value2, Class<BindingMock<T>> bindingMockClass) throws Exception  {
+        setUp(value1, value2, bindingMockClass);
         binding1.getValue();
         binding1.addListener(changeListener);
         System.gc(); // making sure we did not not overdo weak references
@@ -246,8 +251,10 @@ public class GenericBindingTest<T> {
         assertEquals(true, binding1.isValid());
     }
 
-    @Test
-    public void testTwoDependencies() {
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testTwoDependencies(T value1, T value2, Class<BindingMock<T>> bindingMockClass) throws Exception  {
+        setUp(value1, value2, bindingMockClass);
         binding2.getValue();
         binding2.addListener(invalidationListener);
         System.gc(); // making sure we did not not overdo weak references
@@ -292,67 +299,87 @@ public class GenericBindingTest<T> {
         assertEquals(true, binding2.isValid());
     }
 
-    @Parameterized.Parameters
+    @ParameterizedTest
+    @MethodSource("parameters")
+    public void testUnbindDependencies(T value1, T value2, Class<BindingMock<T>> bindingMockClass) throws Exception  {
+        setUp(value1, value2, bindingMockClass);
+        // Start by making binding valid:
+        binding2.getValue();
+        assertTrue(binding2.isValid());
+
+        // Changing dependency1 should cause binding to become invalid:
+        dependency1.fireValueChangedEvent();
+        assertFalse(binding2.isValid());
+
+        // Make valid again:
+        binding2.getValue();
+        assertTrue(binding2.isValid());
+
+        // Changing dependency2 should cause binding to become invalid:
+        dependency2.fireValueChangedEvent();
+        assertFalse(binding2.isValid());
+
+        // Make valid again:
+        binding2.getValue();
+        assertTrue(binding2.isValid());
+
+        // Remove dependency1:
+        binding2.publicUnbind(dependency1);
+
+        // Check that binding2 is no longer affected by changes in dependency1:
+        dependency1.fireValueChangedEvent();
+        assertTrue(binding2.isValid());
+
+        // But still affected by changes in dependency2:
+        dependency2.fireValueChangedEvent();
+        assertFalse(binding2.isValid());
+
+        // Make valid again:
+        binding2.getValue();
+        assertTrue(binding2.isValid());
+
+        // Remove dependency2:
+        binding2.publicUnbind(dependency2);
+
+        // Check that binding2 is no longer affected by changes in dependency2:
+        dependency2.fireValueChangedEvent();
+        assertTrue(binding2.isValid());   // Fixed by 8243115
+    }
+
     public static Collection<Object[]> parameters() {
-        final ObservableStub dependency1 = new ObservableStub();
-        final ObservableStub dependency2 = new ObservableStub();
         return Arrays.asList(new Object[][] {
             {
                 Float.MIN_VALUE, Float.MAX_VALUE,
-                dependency1, dependency2,
-                new FloatBindingImpl(),
-                new FloatBindingImpl(dependency1),
-                new FloatBindingImpl(dependency1, dependency2),
+                FloatBindingImpl.class
             },
             {
                 Double.MIN_VALUE, Double.MAX_VALUE,
-                dependency1, dependency2,
-                new DoubleBindingImpl(),
-                new DoubleBindingImpl(dependency1),
-                new DoubleBindingImpl(dependency1, dependency2),
+                DoubleBindingImpl.class
             },
             {
                 Long.MIN_VALUE, Long.MAX_VALUE,
-                dependency1, dependency2,
-                new LongBindingImpl(),
-                new LongBindingImpl(dependency1),
-                new LongBindingImpl(dependency1, dependency2),
+                LongBindingImpl.class
             },
             {
                 Integer.MIN_VALUE, Integer.MAX_VALUE,
-                dependency1, dependency2,
-                new IntegerBindingImpl(),
-                new IntegerBindingImpl(dependency1),
-                new IntegerBindingImpl(dependency1, dependency2),
+                IntegerBindingImpl.class
             },
             {
                 true, false,
-                dependency1, dependency2,
-                new BooleanBindingImpl(),
-                new BooleanBindingImpl(dependency1),
-                new BooleanBindingImpl(dependency1, dependency2),
+                BooleanBindingImpl.class
             },
             {
                 "Hello World", "Goodbye",
-                dependency1, dependency2,
-                new StringBindingImpl(),
-                new StringBindingImpl(dependency1),
-                new StringBindingImpl(dependency1, dependency2),
+                StringBindingImpl.class
             },
             {
-                    new Object(), new Object(),
-                    dependency1, dependency2,
-                    new ObjectBindingImpl(),
-                    new ObjectBindingImpl(dependency1),
-                    new ObjectBindingImpl(dependency1, dependency2),
+                new Object(), new Object(),
+                ObjectBindingImpl.class
             },
             {
-                    FXCollections.observableArrayList(), FXCollections.observableArrayList(),
-                    dependency1, dependency2,
-                    new ListBindingImpl(),
-                    new ListBindingImpl(dependency1),
-                    new ListBindingImpl(dependency1, dependency2),
-            },
+                FXCollections.observableArrayList(), FXCollections.observableArrayList(),
+                ListBindingImpl.class
+            }
         });
     }
 
@@ -369,6 +396,7 @@ public class GenericBindingTest<T> {
         int getComputeValueCounter();
         void reset();
         void setValue(T value);
+        void publicUnbind(Observable... observables);
     }
 
     private static class DoubleBindingImpl extends DoubleBinding implements BindingMock<Number> {
@@ -397,9 +425,15 @@ public class GenericBindingTest<T> {
             return value;
         }
 
+        @Override
         public ObservableList<?> getDependencies() {
             fail("Should not reach here");
             return null;
+        }
+
+        @Override
+        public void publicUnbind(Observable... observables) {
+            super.unbind(observables);
         }
     }
 
@@ -429,9 +463,15 @@ public class GenericBindingTest<T> {
             return value;
         }
 
+        @Override
         public ObservableList<?> getDependencies() {
             fail("Should not reach here");
             return null;
+        }
+
+        @Override
+        public void publicUnbind(Observable... observables) {
+            super.unbind(observables);
         }
     }
 
@@ -461,9 +501,15 @@ public class GenericBindingTest<T> {
             return value;
         }
 
+        @Override
         public ObservableList<?> getDependencies() {
             fail("Should not reach here");
             return null;
+        }
+
+        @Override
+        public void publicUnbind(Observable... observables) {
+            super.unbind(observables);
         }
     }
 
@@ -493,9 +539,15 @@ public class GenericBindingTest<T> {
             return value;
         }
 
+        @Override
         public ObservableList<?> getDependencies() {
             fail("Should not reach here");
             return null;
+        }
+
+        @Override
+        public void publicUnbind(Observable... observables) {
+            super.unbind(observables);
         }
     }
 
@@ -525,9 +577,15 @@ public class GenericBindingTest<T> {
             return value;
         }
 
+        @Override
         public ObservableList<?> getDependencies() {
             fail("Should not reach here");
             return null;
+        }
+
+        @Override
+        public void publicUnbind(Observable... observables) {
+            super.unbind(observables);
         }
     }
 
@@ -557,9 +615,15 @@ public class GenericBindingTest<T> {
             return value;
         }
 
+        @Override
         public ObservableList<?> getDependencies() {
             fail("Should not reach here");
             return null;
+        }
+
+        @Override
+        public void publicUnbind(Observable... observables) {
+            super.unbind(observables);
         }
     }
 
@@ -589,9 +653,15 @@ public class GenericBindingTest<T> {
             return value;
         }
 
+        @Override
         public ObservableList<?> getDependencies() {
             fail("Should not reach here");
             return null;
+        }
+
+        @Override
+        public void publicUnbind(Observable... observables) {
+            super.unbind(observables);
         }
     }
 
@@ -621,11 +691,15 @@ public class GenericBindingTest<T> {
             return value;
         }
 
+        @Override
         public ObservableList<?> getDependencies() {
             fail("Should not reach here");
             return null;
         }
+
+        @Override
+        public void publicUnbind(Observable... observables) {
+            super.unbind(observables);
+        }
     }
-
-
 }

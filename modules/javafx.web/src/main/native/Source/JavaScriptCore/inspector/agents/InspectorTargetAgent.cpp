@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2018-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,20 +27,23 @@
 #include "InspectorTargetAgent.h"
 
 #include "InspectorTarget.h"
+#include <wtf/TZoneMallocInlines.h>
 
 namespace Inspector {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(InspectorTargetAgent);
 
 InspectorTargetAgent::InspectorTargetAgent(FrontendRouter& frontendRouter, BackendDispatcher& backendDispatcher)
     : InspectorAgentBase("Target"_s)
     , m_router(frontendRouter)
-    , m_frontendDispatcher(makeUnique<TargetFrontendDispatcher>(frontendRouter))
+    , m_frontendDispatcher(makeUniqueRef<TargetFrontendDispatcher>(frontendRouter))
     , m_backendDispatcher(TargetBackendDispatcher::create(backendDispatcher, this))
 {
 }
 
 InspectorTargetAgent::~InspectorTargetAgent() = default;
 
-void InspectorTargetAgent::didCreateFrontendAndBackend(FrontendRouter*, BackendDispatcher*)
+void InspectorTargetAgent::didCreateFrontendAndBackend()
 {
     m_isConnected = true;
 

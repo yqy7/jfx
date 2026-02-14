@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006-2020 Apple Inc.  All rights reserved.
+ * Copyright (C) 2006-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,8 +30,8 @@
 #include "NetscapePlugInStreamLoader.h"
 
 #include "DocumentLoader.h"
-#include "FrameLoader.h"
-#include "FrameLoaderClient.h"
+#include "LoaderStrategy.h"
+#include "PlatformStrategies.h"
 #include <wtf/CompletionHandler.h>
 #include <wtf/Ref.h>
 
@@ -43,7 +43,7 @@ namespace WebCore {
 
 // FIXME: Skip Content Security Policy check when associated plugin element is in a user agent shadow tree.
 // See <https://bugs.webkit.org/show_bug.cgi?id=146663>.
-NetscapePlugInStreamLoader::NetscapePlugInStreamLoader(Frame& frame, NetscapePlugInStreamLoaderClient& client)
+NetscapePlugInStreamLoader::NetscapePlugInStreamLoader(LocalFrame& frame, NetscapePlugInStreamLoaderClient& client)
     : ResourceLoader(frame, ResourceLoaderOptions(
         SendCallbackPolicy::SendCallbacks,
         ContentSniffingPolicy::SniffContent,
@@ -66,9 +66,12 @@ NetscapePlugInStreamLoader::NetscapePlugInStreamLoader(Frame& frame, NetscapePlu
 
 NetscapePlugInStreamLoader::~NetscapePlugInStreamLoader() = default;
 
-void NetscapePlugInStreamLoader::create(Frame& frame, NetscapePlugInStreamLoaderClient& client, ResourceRequest&& request, CompletionHandler<void(RefPtr<NetscapePlugInStreamLoader>&&)>&& completionHandler)
+void NetscapePlugInStreamLoader::create(LocalFrame& frame, NetscapePlugInStreamLoaderClient& client, ResourceRequest&& request, CompletionHandler<void(RefPtr<NetscapePlugInStreamLoader>&&)>&& completionHandler)
 {
-    auto loader(adoptRef(*new NetscapePlugInStreamLoader(frame, client)));
+    if (request.isNull())
+        return completionHandler(nullptr);
+
+    Ref loader = adoptRef(*new NetscapePlugInStreamLoader(frame, client));
     loader->init(WTFMove(request), [loader, completionHandler = WTFMove(completionHandler)] (bool initialized) mutable {
         if (!initialized)
             return completionHandler(nullptr);
@@ -93,7 +96,7 @@ void NetscapePlugInStreamLoader::init(ResourceRequest&& request, CompletionHandl
         if (!success)
             return completionHandler(false);
         ASSERT(!reachedTerminalState());
-        m_documentLoader->addPlugInStreamLoader(*this);
+        protectedDocumentLoader()->addPlugInStreamLoader(*this);
         m_isInitialized = true;
         completionHandler(true);
     });
@@ -112,7 +115,7 @@ void NetscapePlugInStreamLoader::willSendRequest(ResourceRequest&& request, cons
     });
 }
 
-void NetscapePlugInStreamLoader::didReceiveResponse(const ResourceResponse& response, CompletionHandler<void()>&& policyCompletionHandler)
+void NetscapePlugInStreamLoader::didReceiveResponse(ResourceResponse&& response, CompletionHandler<void()>&& policyCompletionHandler)
 {
     Ref<NetscapePlugInStreamLoader> protectedThis(*this);
     CompletionHandlerCallingScope completionHandlerCaller(WTFMove(policyCompletionHandler));
@@ -124,7 +127,8 @@ void NetscapePlugInStreamLoader::didReceiveResponse(const ResourceResponse& resp
     if (!m_client)
         return;
 
-    ResourceLoader::didReceiveResponse(response, [this, protectedThis = WTFMove(protectedThis), response, completionHandlerCaller = WTFMove(completionHandlerCaller)]() mutable {
+    ResourceResponse responseForClosure = response;
+    ResourceLoader::didReceiveResponse(WTFMove(response), [this, protectedThis = WTFMove(protectedThis), response = WTFMove(responseForClosure), completionHandlerCaller = WTFMove(completionHandlerCaller)]() mutable {
         // Don't continue if the stream is cancelled
         if (!m_client)
             return;
@@ -137,13 +141,13 @@ void NetscapePlugInStreamLoader::didReceiveResponse(const ResourceResponse& resp
 
         // Status code can be null when serving from a Web archive.
         if (response.httpStatusCode() && (response.httpStatusCode() < 100 || response.httpStatusCode() >= 400))
-            cancel(frameLoader()->client().fileDoesNotExistError(response));
+            cancel(platformStrategies()->loaderStrategy()->fileDoesNotExistError(response));
     });
 }
 
 void NetscapePlugInStreamLoader::didReceiveData(const SharedBuffer& buffer, long long encodedDataLength, DataPayloadType dataPayloadType)
 {
-    Ref<NetscapePlugInStreamLoader> protectedThis(*this);
+    Ref protectedThis { *this };
 
     if (m_client)
         m_client->didReceiveData(this, buffer);
@@ -153,7 +157,7 @@ void NetscapePlugInStreamLoader::didReceiveData(const SharedBuffer& buffer, long
 
 void NetscapePlugInStreamLoader::didFinishLoading(const NetworkLoadMetrics& networkLoadMetrics)
 {
-    Ref<NetscapePlugInStreamLoader> protectedThis(*this);
+    Ref protectedThis { *this };
 
     notifyDone();
 
@@ -164,7 +168,7 @@ void NetscapePlugInStreamLoader::didFinishLoading(const NetworkLoadMetrics& netw
 
 void NetscapePlugInStreamLoader::didFail(const ResourceError& error)
 {
-    Ref<NetscapePlugInStreamLoader> protectedThis(*this);
+    Ref protectedThis { *this };
 
     notifyDone();
 
@@ -179,7 +183,7 @@ void NetscapePlugInStreamLoader::willCancel(const ResourceError& error)
         m_client->didFail(this, error);
 }
 
-void NetscapePlugInStreamLoader::didCancel(const ResourceError&)
+void NetscapePlugInStreamLoader::didCancel(LoadWillContinueInAnotherProcess)
 {
     notifyDone();
 }
@@ -189,7 +193,8 @@ void NetscapePlugInStreamLoader::notifyDone()
     if (!m_isInitialized)
         return;
 
-    m_documentLoader->removePlugInStreamLoader(*this);
+    if (RefPtr documentLoader = this->documentLoader())
+        documentLoader->removePlugInStreamLoader(*this);
 }
 
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Google, Inc. All Rights Reserved.
+ * Copyright (C) 2010 Google, Inc. All rights reserved.
  * Copyright (C) 2015-2021 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,11 +27,12 @@
 #include "config.h"
 #include "HTMLDocumentParser.h"
 
+#include "ContextDestructionObserverInlines.h"
 #include "CustomElementReactionQueue.h"
 #include "DocumentFragment.h"
 #include "DocumentLoader.h"
 #include "EventLoop.h"
-#include "Frame.h"
+#include "FrameDestructionObserverInlines.h"
 #include "HTMLDocument.h"
 #include "HTMLParserScheduler.h"
 #include "HTMLPreloadScanner.h"
@@ -40,6 +41,7 @@
 #include "HTMLUnknownElement.h"
 #include "JSCustomElementInterface.h"
 #include "LinkLoader.h"
+#include "LocalFrame.h"
 #include "NavigationScheduler.h"
 #include "ScriptElement.h"
 #include "ThrowOnDynamicMarkupInsertionCountIncrementer.h"
@@ -57,28 +59,28 @@ static bool isMainDocumentLoadingFromHTTP(const Document& document)
     return !document.ownerElement() && document.url().protocolIsInHTTPFamily();
 }
 
-HTMLDocumentParser::HTMLDocumentParser(HTMLDocument& document)
-    : ScriptableDocumentParser(document)
+HTMLDocumentParser::HTMLDocumentParser(HTMLDocument& document, OptionSet<ParserContentPolicy> policy)
+    : ScriptableDocumentParser(document, policy)
     , m_options(document)
     , m_tokenizer(m_options)
     , m_scriptRunner(makeUnique<HTMLScriptRunner>(document, static_cast<HTMLScriptRunnerHost&>(*this)))
-    , m_treeBuilder(makeUnique<HTMLTreeBuilder>(*this, document, parserContentPolicy(), m_options))
-    , m_parserScheduler(makeUnique<HTMLParserScheduler>(*this))
+    , m_treeBuilder(makeUniqueRef<HTMLTreeBuilder>(*this, document, parserContentPolicy(), m_options))
+    , m_parserScheduler(HTMLParserScheduler::create(*this))
     , m_preloader(makeUnique<HTMLResourcePreloader>(document))
     , m_shouldEmitTracePoints(isMainDocumentLoadingFromHTTP(document))
 {
 }
 
-Ref<HTMLDocumentParser> HTMLDocumentParser::create(HTMLDocument& document)
+Ref<HTMLDocumentParser> HTMLDocumentParser::create(HTMLDocument& document, OptionSet<ParserContentPolicy> policy)
 {
-    return adoptRef(*new HTMLDocumentParser(document));
+    return adoptRef(*new HTMLDocumentParser(document, policy));
 }
 
-inline HTMLDocumentParser::HTMLDocumentParser(DocumentFragment& fragment, Element& contextElement, ParserContentPolicy rawPolicy)
+inline HTMLDocumentParser::HTMLDocumentParser(DocumentFragment& fragment, Element& contextElement, OptionSet<ParserContentPolicy> rawPolicy, CustomElementRegistry* registry)
     : ScriptableDocumentParser(fragment.document(), rawPolicy)
     , m_options(fragment.document())
     , m_tokenizer(m_options)
-    , m_treeBuilder(makeUnique<HTMLTreeBuilder>(*this, fragment, contextElement, parserContentPolicy(), m_options))
+    , m_treeBuilder(makeUniqueRef<HTMLTreeBuilder>(*this, fragment, contextElement, parserContentPolicy(), m_options, registry))
     , m_shouldEmitTracePoints(false) // Avoid emitting trace points when parsing fragments like outerHTML.
 {
     // https://html.spec.whatwg.org/multipage/syntax.html#parsing-html-fragments
@@ -86,9 +88,9 @@ inline HTMLDocumentParser::HTMLDocumentParser(DocumentFragment& fragment, Elemen
         m_tokenizer.updateStateFor(contextElement.tagQName().localName());
 }
 
-inline Ref<HTMLDocumentParser> HTMLDocumentParser::create(DocumentFragment& fragment, Element& contextElement, ParserContentPolicy parserContentPolicy)
+inline Ref<HTMLDocumentParser> HTMLDocumentParser::create(DocumentFragment& fragment, Element& contextElement, OptionSet<ParserContentPolicy> parserContentPolicy, CustomElementRegistry* registry)
 {
-    return adoptRef(*new HTMLDocumentParser(fragment, contextElement, parserContentPolicy));
+    return adoptRef(*new HTMLDocumentParser(fragment, contextElement, parserContentPolicy, registry));
 }
 
 HTMLDocumentParser::~HTMLDocumentParser()
@@ -109,13 +111,15 @@ void HTMLDocumentParser::detach()
     // Yet during fast/dom/HTMLScriptElement/script-load-events.html we do.
     m_preloadScanner = nullptr;
     m_insertionPreloadScanner = nullptr;
-    m_parserScheduler = nullptr; // Deleting the scheduler will clear any timers.
+    if (RefPtr parserScheduler = std::exchange(m_parserScheduler, nullptr))
+        parserScheduler->detach(); // Will clear any timers.
 }
 
 void HTMLDocumentParser::stopParsing()
 {
     DocumentParser::stopParsing();
-    m_parserScheduler = nullptr; // Deleting the scheduler will clear any timers.
+    if (RefPtr parserScheduler = std::exchange(m_parserScheduler, nullptr))
+        parserScheduler->detach(); // Will clear any timers.
 }
 
 // This kicks off "Once the user agent stops parsing" as described by:
@@ -130,7 +134,7 @@ void HTMLDocumentParser::prepareToStopParsing()
 
     // NOTE: This pump should only ever emit buffered character tokens,
     // so ForceSynchronous vs. AllowYield should be meaningless.
-    pumpTokenizerIfPossible(ForceSynchronous);
+    pumpTokenizerIfPossible(SynchronousMode::ForceSynchronous);
 
     if (isStopped())
         return;
@@ -138,8 +142,13 @@ void HTMLDocumentParser::prepareToStopParsing()
     DocumentParser::prepareToStopParsing();
 
     // We will not have a scriptRunner when parsing a DocumentFragment.
-    if (m_scriptRunner)
-        document()->setReadyState(Document::Interactive);
+    if (m_scriptRunner) {
+        RefPtr document = this->document();
+        document->setReadyState(Document::ReadyState::Interactive);
+
+        if (!isDetached())
+            document->processInternalResourceLinks();
+    }
 
     // Setting the ready state above can fire mutation event and detach us
     // from underneath. In that case, just bail out.
@@ -161,12 +170,14 @@ inline bool HTMLDocumentParser::shouldDelayEnd() const
 
 void HTMLDocumentParser::didBeginYieldingParser()
 {
-    m_parserScheduler->didBeginYieldingParser();
+    if (RefPtr parserScheduler = m_parserScheduler)
+        parserScheduler->didBeginYieldingParser();
 }
 
 void HTMLDocumentParser::didEndYieldingParser()
 {
-    m_parserScheduler->didEndYieldingParser();
+    if (RefPtr parserScheduler = m_parserScheduler)
+        parserScheduler->didEndYieldingParser();
 }
 
 bool HTMLDocumentParser::isParsingFragment() const
@@ -186,7 +197,7 @@ void HTMLDocumentParser::pumpTokenizerIfPossible(SynchronousMode mode)
 
     // Once a resume is scheduled, HTMLParserScheduler controls when we next pump.
     if (isScheduledForResume()) {
-        ASSERT(mode == AllowYield);
+        ASSERT(mode == SynchronousMode::AllowYield);
         return;
     }
 
@@ -195,7 +206,8 @@ void HTMLDocumentParser::pumpTokenizerIfPossible(SynchronousMode mode)
 
 bool HTMLDocumentParser::isScheduledForResume() const
 {
-    return m_parserScheduler && m_parserScheduler->isScheduledForResume();
+    RefPtr scheduler = m_parserScheduler;
+    return scheduler && scheduler->isScheduledForResume();
 }
 
 // Used by HTMLParserScheduler
@@ -207,7 +219,7 @@ void HTMLDocumentParser::resumeParsingAfterYield()
 
     // We should never be here unless we can pump immediately.
     // Call pumpTokenizer() directly so that ASSERTS will fire if we're wrong.
-    pumpTokenizer(AllowYield);
+    pumpTokenizer(SynchronousMode::AllowYield);
     endIfDelayed();
 }
 
@@ -221,13 +233,15 @@ void HTMLDocumentParser::runScriptsForPausedTreeBuilder()
         // https://html.spec.whatwg.org/#create-an-element-for-the-token
         {
             // Prevent document.open/write during reactions by allocating the incrementer before the reactions stack.
-            ThrowOnDynamicMarkupInsertionCountIncrementer incrementer(*document());
+            RefPtr document = this->document();
+            ThrowOnDynamicMarkupInsertionCountIncrementer incrementer(*document);
 
-            document()->eventLoop().performMicrotaskCheckpoint();
+            document->eventLoop().performMicrotaskCheckpoint();
 
-            CustomElementReactionStack reactionStack(document()->globalObject());
-            auto& elementInterface = constructionData->elementInterface.get();
-            auto newElement = elementInterface.constructElementWithFallback(*document(), constructionData->name);
+            CustomElementReactionStack reactionStack(document->globalObject());
+            Ref elementInterface = constructionData->elementInterface.get();
+            auto newElement = elementInterface->constructElementWithFallback(*document, constructionData->registry, constructionData->name,
+                m_scriptRunner && !m_scriptRunner->isExecutingScript() ? ParserConstructElementWithEmptyStack::Yes : ParserConstructElementWithEmptyStack::No);
             m_treeBuilder->didCreateCustomOrFallbackElement(WTFMove(newElement), *constructionData);
         }
         return;
@@ -253,9 +267,10 @@ Document* HTMLDocumentParser::contextForParsingSession()
 
 bool HTMLDocumentParser::pumpTokenizerLoop(SynchronousMode mode, bool parsingFragment, PumpSession& session)
 {
+    RefPtr parserScheduler = m_parserScheduler;
     do {
-        if (UNLIKELY(isWaitingForScripts())) {
-            if (mode == AllowYield && m_parserScheduler->shouldYieldBeforeExecutingScript(m_treeBuilder->scriptToProcess(), session))
+        if (isWaitingForScripts()) [[unlikely]] {
+            if (mode == SynchronousMode::AllowYield && parserScheduler->shouldYieldBeforeExecutingScript(m_treeBuilder->protectedScriptToProcess().get(), session))
                 return true;
 
             runScriptsForPausedTreeBuilder();
@@ -268,10 +283,10 @@ bool HTMLDocumentParser::pumpTokenizerLoop(SynchronousMode mode, bool parsingFra
         // how the parser has always handled stopping when the page assigns window.location. What should
         // happen instead is that assigning window.location causes the parser to stop parsing cleanly.
         // The problem is we're not prepared to do that at every point where we run JavaScript.
-        if (UNLIKELY(!parsingFragment && document()->frame() && document()->frame()->navigationScheduler().locationChangePending()))
+        if (!parsingFragment && document()->frame() && document()->protectedFrame()->protectedNavigationScheduler()->locationChangePending()) [[unlikely]]
             return false;
 
-        if (UNLIKELY(mode == AllowYield && m_parserScheduler->shouldYieldBeforeToken(session)))
+        if (mode == SynchronousMode::AllowYield && parserScheduler->shouldYieldBeforeToken(session)) [[unlikely]]
             return true;
 
         auto token = m_tokenizer.nextToken(m_input.current());
@@ -314,19 +329,20 @@ void HTMLDocumentParser::pumpTokenizer(SynchronousMode mode)
         return;
 
     if (shouldResume)
-        m_parserScheduler->scheduleForResume();
+        Ref { *m_parserScheduler }->scheduleForResume();
 
+    RefPtr document = this->document();
     if (isWaitingForScripts() && !isDetached()) {
         ASSERT(m_tokenizer.isInDataState());
         if (!m_preloadScanner) {
-            m_preloadScanner = makeUnique<HTMLPreloadScanner>(m_options, document()->url(), document()->deviceScaleFactor());
+            m_preloadScanner = makeUnique<HTMLPreloadScanner>(m_options, document->url(), document->deviceScaleFactor());
             m_preloadScanner->appendToEnd(m_input.current());
         }
-        m_preloadScanner->scan(*m_preloader, *document());
+        m_preloadScanner->scan(*m_preloader, *document);
     }
     // The viewport definition is known here, so we can load link preloads with media attributes.
-    if (document()->loader())
-        LinkLoader::loadLinksFromHeader(document()->loader()->response().httpHeaderField(HTTPHeaderName::Link), document()->url(), *document(), LinkLoader::MediaAttributeCheck::MediaAttributeNotEmpty);
+    if (document->loader())
+        LinkLoader::loadLinksFromHeader(document->loader()->response().httpHeaderField(HTTPHeaderName::Link), document->url(), *document, LinkLoader::MediaAttributeCheck::MediaAttributeNotEmpty);
 }
 
 void HTMLDocumentParser::constructTreeFromHTMLToken(HTMLTokenizer::TokenPtr& rawToken)
@@ -343,7 +359,7 @@ void HTMLDocumentParser::constructTreeFromHTMLToken(HTMLTokenizer::TokenPtr& raw
     // FIXME: Stop clearing the rawToken once we start running the parser off
     // the main thread or once we stop allowing synchronous JavaScript
     // execution from parseAttribute.
-    if (rawToken->type() != HTMLToken::Character) {
+    if (rawToken->type() != HTMLToken::Type::Character) {
         // Clearing the TokenPtr makes sure we don't clear the HTMLToken a second time
         // later when the TokenPtr is destroyed.
         rawToken.clear();
@@ -372,15 +388,16 @@ void HTMLDocumentParser::insert(SegmentedString&& source)
 
     source.setExcludeLineNumbers();
     m_input.insertAtCurrentInsertionPoint(WTFMove(source));
-    pumpTokenizerIfPossible(ForceSynchronous);
+    pumpTokenizerIfPossible(SynchronousMode::ForceSynchronous);
 
     if (isWaitingForScripts() && !isDetached()) {
+        RefPtr document = this->document();
         // Check the document.write() output with a separate preload scanner as
         // the main scanner can't deal with insertions.
         if (!m_insertionPreloadScanner)
-            m_insertionPreloadScanner = makeUnique<HTMLPreloadScanner>(m_options, document()->url(), document()->deviceScaleFactor());
+            m_insertionPreloadScanner = makeUnique<HTMLPreloadScanner>(m_options, document->url(), document->deviceScaleFactor());
         m_insertionPreloadScanner->appendToEnd(source);
-        m_insertionPreloadScanner->scan(*m_preloader, *document());
+        m_insertionPreloadScanner->scan(*m_preloader, *document);
     }
 
     endIfDelayed();
@@ -388,12 +405,12 @@ void HTMLDocumentParser::insert(SegmentedString&& source)
 
 void HTMLDocumentParser::append(RefPtr<StringImpl>&& inputSource)
 {
-    append(WTFMove(inputSource), AllowYield);
+    append(WTFMove(inputSource), SynchronousMode::AllowYield);
 }
 
 void HTMLDocumentParser::appendSynchronously(RefPtr<StringImpl>&& inputSource)
 {
-    append(WTFMove(inputSource), ForceSynchronous);
+    append(WTFMove(inputSource), SynchronousMode::ForceSynchronous);
 }
 
 void HTMLDocumentParser::append(RefPtr<StringImpl>&& inputSource, SynchronousMode synchronousMode)
@@ -415,7 +432,7 @@ void HTMLDocumentParser::append(RefPtr<StringImpl>&& inputSource, SynchronousMod
         } else {
             m_preloadScanner->appendToEnd(source);
             if (isWaitingForScripts())
-                m_preloadScanner->scan(*m_preloader, *document());
+                m_preloadScanner->scan(*m_preloader, *protectedDocument());
         }
     }
 
@@ -538,7 +555,7 @@ void HTMLDocumentParser::resumeParsingAfterScriptExecution()
     Ref<HTMLDocumentParser> protectedThis(*this);
 
     m_insertionPreloadScanner = nullptr;
-    pumpTokenizerIfPossible(AllowYield);
+    pumpTokenizerIfPossible(SynchronousMode::AllowYield);
     endIfDelayed();
 }
 
@@ -560,7 +577,7 @@ void HTMLDocumentParser::appendCurrentInputStreamToPreloadScannerAndScan()
 {
     ASSERT(m_preloadScanner);
     m_preloadScanner->appendToEnd(m_input.current());
-    m_preloadScanner->scan(*m_preloader, *document());
+    m_preloadScanner->scan(*m_preloader, *protectedDocument());
 }
 
 void HTMLDocumentParser::notifyFinished(PendingScript& pendingScript)
@@ -609,9 +626,9 @@ void HTMLDocumentParser::executeScriptsWaitingForStylesheets()
         resumeParsingAfterScriptExecution();
 }
 
-void HTMLDocumentParser::parseDocumentFragment(const String& source, DocumentFragment& fragment, Element& contextElement, ParserContentPolicy parserContentPolicy)
+void HTMLDocumentParser::parseDocumentFragment(const String& source, DocumentFragment& fragment, Element& contextElement, OptionSet<ParserContentPolicy> parserContentPolicy, CustomElementRegistry* registry)
 {
-    auto parser = create(fragment, contextElement, parserContentPolicy);
+    auto parser = create(fragment, contextElement, parserContentPolicy, registry);
     parser->insert(source); // Use insert() so that the parser will not yield.
     parser->finish();
     ASSERT(!parser->processingData());
@@ -620,14 +637,19 @@ void HTMLDocumentParser::parseDocumentFragment(const String& source, DocumentFra
 
 void HTMLDocumentParser::suspendScheduledTasks()
 {
-    if (m_parserScheduler)
-        m_parserScheduler->suspend();
+    if (RefPtr parserScheduler = m_parserScheduler)
+        parserScheduler->suspend();
 }
 
 void HTMLDocumentParser::resumeScheduledTasks()
 {
-    if (m_parserScheduler)
-        m_parserScheduler->resume();
+    if (RefPtr parserScheduler = m_parserScheduler)
+        parserScheduler->resume();
+}
+
+bool HTMLDocumentParser::isOnStackOfOpenElements(Element& element) const
+{
+    return m_treeBuilder->isOnStackOfOpenElements(element);
 }
 
 }

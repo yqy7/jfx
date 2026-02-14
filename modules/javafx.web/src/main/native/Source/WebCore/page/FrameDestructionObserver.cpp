@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Google, Inc. All Rights Reserved.
+ * Copyright (C) 2011 Google, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,11 +26,11 @@
 #include "config.h"
 #include "FrameDestructionObserver.h"
 
-#include "Frame.h"
+#include "LocalFrame.h"
 
 namespace WebCore {
 
-FrameDestructionObserver::FrameDestructionObserver(Frame* frame)
+FrameDestructionObserver::FrameDestructionObserver(LocalFrame* frame)
     : m_frame(nullptr)
 {
     observeFrame(frame);
@@ -39,15 +39,9 @@ FrameDestructionObserver::FrameDestructionObserver(Frame* frame)
 FrameDestructionObserver::~FrameDestructionObserver()
 {
     observeFrame(nullptr);
-
 }
 
-Frame* FrameDestructionObserver::frame() const
-{
-    return m_frame.get();
-}
-
-void FrameDestructionObserver::observeFrame(Frame* frame)
+void FrameDestructionObserver::observeFrame(LocalFrame* frame)
 {
     if (m_frame)
         m_frame->removeDestructionObserver(*this);

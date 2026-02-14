@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,33 +25,43 @@
 
 package javafx.scene.chart;
 
-
-import java.util.*;
-
-import javafx.animation.*;
-import javafx.application.Platform;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.NavigableMap;
+import java.util.TreeMap;
+import javafx.animation.FadeTransition;
+import javafx.animation.Interpolator;
+import javafx.animation.KeyFrame;
+import javafx.animation.KeyValue;
+import javafx.animation.Timeline;
 import javafx.beans.NamedArg;
+import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.DoubleProperty;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
-import javafx.scene.AccessibleRole;
-import javafx.scene.Group;
-import javafx.scene.Node;
-import javafx.scene.layout.StackPane;
-import javafx.scene.shape.*;
-import javafx.util.Duration;
-
-import com.sun.javafx.charts.Legend.LegendItem;
-import javafx.css.converter.BooleanConverter;
-
-import javafx.beans.property.BooleanProperty;
-import javafx.beans.value.WritableValue;
 import javafx.css.CssMetaData;
 import javafx.css.Styleable;
 import javafx.css.StyleableBooleanProperty;
 import javafx.css.StyleableProperty;
+import javafx.css.converter.BooleanConverter;
+import javafx.scene.AccessibleRole;
+import javafx.scene.Group;
+import javafx.scene.Node;
+import javafx.scene.layout.StackPane;
+import javafx.scene.shape.ClosePath;
+import javafx.scene.shape.LineTo;
+import javafx.scene.shape.MoveTo;
+import javafx.scene.shape.Path;
+import javafx.scene.shape.StrokeLineJoin;
+import javafx.util.Duration;
+import com.sun.javafx.charts.Legend.LegendItem;
 
 /**
  * StackedAreaChart is a variation of {@link AreaChart} that displays trends of the
@@ -65,6 +75,8 @@ import javafx.css.StyleableProperty;
  * Since data points across multiple series may not be common, StackedAreaChart
  * interpolates values along the line joining the data points whenever necessary.
  *
+ * @param <X> the X axis value type
+ * @param <Y> the Y axis value type
  * @since JavaFX 2.1
  */
 public class StackedAreaChart<X,Y> extends XYChart<X,Y> {
@@ -73,6 +85,7 @@ public class StackedAreaChart<X,Y> extends XYChart<X,Y> {
 
     /** A multiplier for teh Y values that we store for each series, it is used to animate in a new series */
     private Map<Series<X,Y>, DoubleProperty> seriesYMultiplierMap = new HashMap<>();
+    private Timeline timeline;
 
     // -------------- PUBLIC PROPERTIES ----------------------------------------
     /**
@@ -103,14 +116,17 @@ public class StackedAreaChart<X,Y> extends XYChart<X,Y> {
             requestChartLayout();
         }
 
+        @Override
         public Object getBean() {
-            return this;
+            return StackedAreaChart.this;
         }
 
+        @Override
         public String getName() {
             return "createSymbols";
         }
 
+        @Override
         public CssMetaData<StackedAreaChart<?, ?>,Boolean> getCssMetaData() {
             return StyleableProperties.CREATE_SYMBOLS;
         }
@@ -243,7 +259,7 @@ public class StackedAreaChart<X,Y> extends XYChart<X,Y> {
             boolean animate = false;
             // dataSize represents size of currently visible data. After this operation, the number will decrement by 1
             final int dataSize = series.getDataSize();
-            // This is the size of current data list in Series. Note that it might be totaly different from dataSize as
+            // This is the size of current data list in Series. Note that it might be totally different from dataSize as
             // some big operation might have happened on the list.
             final int dataListSize = series.getData().size();
             if (itemIndex > 0 && itemIndex < dataSize - 1) {
@@ -352,7 +368,7 @@ public class StackedAreaChart<X,Y> extends XYChart<X,Y> {
             seriesYAnimMultiplier.setValue(1d);
         }
         getPlotChildren().add(areaGroup);
-        List<KeyFrame> keyFrames = new ArrayList<KeyFrame>();
+        List<KeyFrame> keyFrames = new ArrayList<>();
         if (shouldAnimate()) {
             // animate in new series
             keyFrames.add(new KeyFrame(Duration.ZERO,
@@ -387,8 +403,8 @@ public class StackedAreaChart<X,Y> extends XYChart<X,Y> {
         seriesYMultiplierMap.remove(series);
         // remove all symbol nodes
         if (shouldAnimate()) {
-            Timeline tl = new Timeline(createSeriesRemoveTimeLine(series, 400));
-            tl.play();
+            timeline = new Timeline(createSeriesRemoveTimeLine(series, 400));
+            timeline.play();
         } else {
             getPlotChildren().remove(series.getNode());
             for (Data<X,Y> d:series.getData()) getPlotChildren().remove(d.getNode());
@@ -720,6 +736,18 @@ public class StackedAreaChart<X,Y> extends XYChart<X,Y> {
         currentSeriesData.add(currentDataPoint);
     }
 
+    /** {@inheritDoc} */
+    @Override void seriesBeingRemovedIsAdded(Series<X,Y> series) {
+        if (timeline != null) {
+            timeline.setOnFinished(null);
+            timeline.stop();
+            timeline = null;
+            getPlotChildren().remove(series.getNode());
+            for (Data<X,Y> d:series.getData()) getPlotChildren().remove(d.getNode());
+            removeSeriesFromDisplay(series);
+        }
+    }
+
     //-------------------- helper methods to retrieve data points from the previous
      // or current data series.
      private int findNextCurrent(ArrayList<DataPointInfo<X, Y>> points, int index) {
@@ -781,7 +809,7 @@ public class StackedAreaChart<X,Y> extends XYChart<X,Y> {
             symbol = new StackPane();
             symbol.setAccessibleRole(AccessibleRole.TEXT);
             symbol.setAccessibleRoleDescription("Point");
-            symbol.focusTraversableProperty().bind(Platform.accessibilityActiveProperty());
+            symbol.setFocusTraversable(isAccessibilityActive());
             item.setNode(symbol);
         }
         // set symbol styles
@@ -861,7 +889,7 @@ public class StackedAreaChart<X,Y> extends XYChart<X,Y> {
     private static class StyleableProperties {
 
         private static final CssMetaData<StackedAreaChart<?, ?>, Boolean> CREATE_SYMBOLS =
-                new CssMetaData<StackedAreaChart<?, ?>, Boolean>("-fx-create-symbols",
+                new CssMetaData<>("-fx-create-symbols",
                 BooleanConverter.getInstance(), Boolean.TRUE) {
             @Override
             public boolean isSettable(StackedAreaChart<?,?> node) {
@@ -870,7 +898,7 @@ public class StackedAreaChart<X,Y> extends XYChart<X,Y> {
 
             @Override
             public StyleableProperty<Boolean> getStyleableProperty(StackedAreaChart<?,?> node) {
-                return (StyleableProperty<Boolean>)(WritableValue<Boolean>)node.createSymbolsProperty();
+                return (StyleableProperty<Boolean>)node.createSymbolsProperty();
             }
         };
 
@@ -878,7 +906,7 @@ public class StackedAreaChart<X,Y> extends XYChart<X,Y> {
 
         static {
             final List<CssMetaData<? extends Styleable, ?>> styleables =
-                new ArrayList<CssMetaData<? extends Styleable, ?>>(XYChart.getClassCssMetaData());
+                new ArrayList<>(XYChart.getClassCssMetaData());
             styleables.add(CREATE_SYMBOLS);
             STYLEABLES = Collections.unmodifiableList(styleables);
 

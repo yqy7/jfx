@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2003-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include "AdvancedPrivacyProtections.h"
 #include "FrameLoaderTypes.h"
 #include "ReferrerPolicy.h"
 #include "ResourceRequest.h"
@@ -35,13 +36,14 @@
 namespace WebCore {
 
 class Document;
-class Frame;
+class Element;
+class LocalFrame;
 class SecurityOrigin;
 
 class FrameLoadRequest {
 public:
-    WEBCORE_EXPORT FrameLoadRequest(Document&, SecurityOrigin&, ResourceRequest&&, const String& frameName, InitiatedByMainFrame, const AtomString& downloadAttribute = { }, const SystemPreviewInfo& = { });
-    WEBCORE_EXPORT FrameLoadRequest(Frame&, const ResourceRequest&, const SubstituteData& = SubstituteData());
+    WEBCORE_EXPORT FrameLoadRequest(Ref<Document>&&, SecurityOrigin&, ResourceRequest&&, const AtomString& frameName, InitiatedByMainFrame, const AtomString& downloadAttribute = { });
+    WEBCORE_EXPORT FrameLoadRequest(LocalFrame&, ResourceRequest&&, SubstituteData&& = SubstituteData());
 
     WEBCORE_EXPORT ~FrameLoadRequest();
 
@@ -50,14 +52,17 @@ public:
 
     bool isEmpty() const { return m_resourceRequest.isEmpty(); }
 
-    Document& requester();
+    WEBCORE_EXPORT Document& requester();
+    Ref<Document> protectedRequester() const;
     const SecurityOrigin& requesterSecurityOrigin() const;
+    Ref<SecurityOrigin> protectedRequesterSecurityOrigin() const;
 
     ResourceRequest& resourceRequest() { return m_resourceRequest; }
     const ResourceRequest& resourceRequest() const { return m_resourceRequest; }
+    ResourceRequest takeResourceRequest() { return std::exchange(m_resourceRequest, { }); }
 
-    const String& frameName() const { return m_frameName; }
-    void setFrameName(const String& frameName) { m_frameName = frameName; }
+    const AtomString& frameName() const { return m_frameName; }
+    void setFrameName(const AtomString& frameName) { m_frameName = frameName; }
 
     void setShouldCheckNewWindowPolicy(bool checkPolicy) { m_shouldCheckNewWindowPolicy = checkPolicy; }
     bool shouldCheckNewWindowPolicy() const { return m_shouldCheckNewWindowPolicy; }
@@ -66,8 +71,9 @@ public:
     ShouldTreatAsContinuingLoad shouldTreatAsContinuingLoad() const { return m_shouldTreatAsContinuingLoad; }
 
     const SubstituteData& substituteData() const { return m_substituteData; }
-    void setSubstituteData(const SubstituteData& data) { m_substituteData = data; }
+    void setSubstituteData(SubstituteData&& data) { m_substituteData = WTFMove(data); }
     bool hasSubstituteData() { return m_substituteData.isValid(); }
+    SubstituteData takeSubstituteData() { return std::exchange(m_substituteData, { }); }
 
     LockHistory lockHistory() const { return m_lockHistory; }
     void setLockHistory(LockHistory value) { m_lockHistory = value; }
@@ -75,8 +81,14 @@ public:
     LockBackForwardList lockBackForwardList() const { return m_lockBackForwardList; }
     void setLockBackForwardList(LockBackForwardList value) { m_lockBackForwardList = value; }
 
+    bool isInitialFrameSrcLoad() const { return m_isInitialFrameSrcLoad; }
+    void setIsInitialFrameSrcLoad(bool isInitialFrameSrcLoad) { m_isInitialFrameSrcLoad = isInitialFrameSrcLoad; }
+
+    bool isContentRuleListRedirect() const { return m_isContentRuleListRedirect; }
+    void setIsContentRuleListRedirect(bool isContentRuleListRedirect) { m_isContentRuleListRedirect = isContentRuleListRedirect; }
+
     const String& clientRedirectSourceForHistory() const { return m_clientRedirectSourceForHistory; }
-    void setClientRedirectSourceForHistory(const String& clientRedirectSourceForHistory) { m_clientRedirectSourceForHistory = clientRedirectSourceForHistory; }
+    void setClientRedirectSourceForHistory(String&& clientRedirectSourceForHistory) { m_clientRedirectSourceForHistory = WTFMove(clientRedirectSourceForHistory); }
 
     ReferrerPolicy referrerPolicy() const { return m_referrerPolicy; }
     void setReferrerPolicy(const ReferrerPolicy& referrerPolicy) { m_referrerPolicy = referrerPolicy; }
@@ -97,19 +109,31 @@ public:
 
     const AtomString& downloadAttribute() const { return m_downloadAttribute; }
 
-    InitiatedByMainFrame initiatedByMainFrame() const { return m_initiatedByMainFrame; }
+    Element* sourceElement() const { return m_sourceElement.get(); }
+    void setSourceElement(Element* sourceElement) { m_sourceElement = sourceElement; }
 
-    bool isSystemPreview() const { return m_systemPreviewInfo.isPreview; }
-    const SystemPreviewInfo& systemPreviewInfo() const { return m_systemPreviewInfo; }
+    InitiatedByMainFrame initiatedByMainFrame() const { return m_initiatedByMainFrame; }
 
     void setIsRequestFromClientOrUserInput() { m_isRequestFromClientOrUserInput = true; }
     bool isRequestFromClientOrUserInput() const { return m_isRequestFromClientOrUserInput; }
+
+    void setAdvancedPrivacyProtections(OptionSet<AdvancedPrivacyProtections> policy) { m_advancedPrivacyProtections = policy; }
+    std::optional<OptionSet<AdvancedPrivacyProtections>> advancedPrivacyProtections() const { return m_advancedPrivacyProtections; }
+
+    NavigationHistoryBehavior navigationHistoryBehavior() const { return m_navigationHistoryBehavior; }
+    void setNavigationHistoryBehavior(NavigationHistoryBehavior historyHandling) { m_navigationHistoryBehavior = historyHandling; }
+
+    bool isFromNavigationAPI() const { return m_isFromNavigationAPI; }
+    void setIsFromNavigationAPI(bool isFromNavigationAPI) { m_isFromNavigationAPI = isFromNavigationAPI; }
+
+    bool isHandledByAboutSchemeHandler() const { return m_isHandledByAboutSchemeHandler; }
+    void setIsHandledByAboutSchemeHandler(bool isHandledByAboutSchemeHandler) { m_isHandledByAboutSchemeHandler = isHandledByAboutSchemeHandler; }
 
 private:
     Ref<Document> m_requester;
     Ref<SecurityOrigin> m_requesterSecurityOrigin;
     ResourceRequest m_resourceRequest;
-    String m_frameName;
+    AtomString m_frameName;
     SubstituteData m_substituteData;
     String m_clientRedirectSourceForHistory;
 
@@ -123,9 +147,15 @@ private:
     ShouldReplaceDocumentIfJavaScriptURL m_shouldReplaceDocumentIfJavaScriptURL { ReplaceDocumentIfJavaScriptURL };
     ShouldOpenExternalURLsPolicy m_shouldOpenExternalURLsPolicy { ShouldOpenExternalURLsPolicy::ShouldNotAllow };
     AtomString m_downloadAttribute;
+    RefPtr<Element> m_sourceElement;
     InitiatedByMainFrame m_initiatedByMainFrame { InitiatedByMainFrame::Unknown };
-    SystemPreviewInfo m_systemPreviewInfo;
     bool m_isRequestFromClientOrUserInput { false };
+    bool m_isInitialFrameSrcLoad { false };
+    bool m_isContentRuleListRedirect { false };
+    std::optional<OptionSet<AdvancedPrivacyProtections>> m_advancedPrivacyProtections;
+    NavigationHistoryBehavior m_navigationHistoryBehavior { NavigationHistoryBehavior::Auto };
+    bool m_isFromNavigationAPI { false };
+    bool m_isHandledByAboutSchemeHandler { false };
 };
 
 } // namespace WebCore

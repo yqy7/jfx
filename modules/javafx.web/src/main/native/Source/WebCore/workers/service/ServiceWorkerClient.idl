@@ -24,9 +24,8 @@
  */
 
 [
-    Conditional=SERVICE_WORKER,
     CustomToJSObject,
-    EnabledAtRuntime=ServiceWorkerEnabled,
+    EnabledBySetting=ServiceWorkersEnabled,
     ExportMacro=WEBCORE_EXPORT,
     Exposed=ServiceWorker,
     InterfaceName=Client,

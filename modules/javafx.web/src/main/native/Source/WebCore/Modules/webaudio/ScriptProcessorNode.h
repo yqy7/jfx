@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, Google Inc. All rights reserved.
+ * Copyright (C) 2010 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,7 +46,7 @@ class AudioProcessingEvent;
 // AudioBuffers for each input and output.
 
 class ScriptProcessorNode final : public AudioNode, public ActiveDOMObject {
-    WTF_MAKE_ISO_ALLOCATED(ScriptProcessorNode);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(ScriptProcessorNode);
 public:
     // bufferSize must be one of the following values: 256, 512, 1024, 2048, 4096, 8192, 16384.
     // This value controls how frequently the onaudioprocess event handler is called and how many sample-frames need to be processed each call.
@@ -56,7 +56,9 @@ public:
 
     virtual ~ScriptProcessorNode();
 
-    const char* activeDOMObjectName() const override { return "ScriptProcessorNode"; }
+    // ActiveDOMObject.
+    void ref() const final { AudioNode::ref(); }
+    void deref() const final { AudioNode::deref(); }
 
     // AudioNode
     void process(size_t framesToProcess) override;
@@ -75,7 +77,9 @@ private:
 
     ScriptProcessorNode(BaseAudioContext&, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels);
 
+    // ActiveDOMObject.
     bool virtualHasPendingActivity() const final;
+
     void eventListenersDidChange() final;
     void fireProcessEvent(unsigned bufferIndex);
 
@@ -100,7 +104,7 @@ private:
     unsigned m_numberOfInputChannels;
     unsigned m_numberOfOutputChannels;
 
-    RefPtr<AudioBus> m_internalInputBus;
+    const Ref<AudioBus> m_internalInputBus;
     bool m_hasAudioProcessEventListener { false };
 };
 

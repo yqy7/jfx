@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Apple Inc.
+ * Copyright (C) 2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,16 +37,19 @@
 #include "RTCRtpSender.h"
 #include "RTCRtpTransformBackend.h"
 #include "ScriptExecutionContext.h"
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-LibWebRTCRtpSenderBackend::LibWebRTCRtpSenderBackend(LibWebRTCPeerConnectionBackend& backend, rtc::scoped_refptr<webrtc::RtpSenderInterface>&& rtcSender)
+WTF_MAKE_TZONE_ALLOCATED_IMPL(LibWebRTCRtpSenderBackend);
+
+LibWebRTCRtpSenderBackend::LibWebRTCRtpSenderBackend(LibWebRTCPeerConnectionBackend& backend, RefPtr<webrtc::RtpSenderInterface>&& rtcSender)
     : m_peerConnectionBackend(backend)
     , m_rtcSender(WTFMove(rtcSender))
 {
 }
 
-LibWebRTCRtpSenderBackend::LibWebRTCRtpSenderBackend(LibWebRTCPeerConnectionBackend& backend, rtc::scoped_refptr<webrtc::RtpSenderInterface>&& rtcSender, Source&& source)
+LibWebRTCRtpSenderBackend::LibWebRTCRtpSenderBackend(LibWebRTCPeerConnectionBackend& backend, RefPtr<webrtc::RtpSenderInterface>&& rtcSender, Source&& source)
     : m_peerConnectionBackend(backend)
     , m_rtcSender(WTFMove(rtcSender))
     , m_source(WTFMove(source))
@@ -62,13 +65,15 @@ LibWebRTCRtpSenderBackend::~LibWebRTCRtpSenderBackend()
 void LibWebRTCRtpSenderBackend::startSource()
 {
     // We asynchronously start the sources to guarantee media goes through the transform if a transform is set when creating the track.
-    callOnMainThread([weakThis = WeakPtr { *this }, source = m_source]() mutable {
-        if (!weakThis || weakThis->m_source != source)
+    callOnMainThread([this, weakThis = WeakPtr { *this }, source = m_source]() mutable {
+        if (!weakThis)
             return;
-        switchOn(source, [](Ref<RealtimeOutgoingAudioSource>& source) {
-            source->start();
-        }, [](Ref<RealtimeOutgoingVideoSource>& source) {
-            source->start();
+        switchOn(source, [this](Ref<RealtimeOutgoingAudioSource>& source) {
+            if (auto* currentSource = std::get_if<Ref<RealtimeOutgoingAudioSource>>(&m_source); currentSource && currentSource->ptr() == source.ptr())
+                source->start();
+        }, [this](Ref<RealtimeOutgoingVideoSource>& source) {
+            if (auto* currentSource = std::get_if<Ref<RealtimeOutgoingVideoSource>>(&m_source); currentSource && currentSource->ptr() == source.ptr())
+                source->start();
         }, [](std::nullptr_t&) {
         });
     });
@@ -108,8 +113,13 @@ bool LibWebRTCRtpSenderBackend::replaceTrack(RTCRtpSender& sender, MediaStreamTr
         });
     }
 
-    m_peerConnectionBackend->setSenderSourceFromTrack(*this, *track);
+    protectedPeerConnectionBackend()->setSenderSourceFromTrack(*this, *track);
     return true;
+}
+
+RefPtr<LibWebRTCPeerConnectionBackend> LibWebRTCRtpSenderBackend::protectedPeerConnectionBackend() const
+{
+    return m_peerConnectionBackend.get();
 }
 
 RTCRtpSendParameters LibWebRTCRtpSenderBackend::getParameters() const
@@ -121,21 +131,74 @@ RTCRtpSendParameters LibWebRTCRtpSenderBackend::getParameters() const
     return toRTCRtpSendParameters(*m_currentParameters);
 }
 
+static bool validateModifiedParameters(const RTCRtpSendParameters& newParameters, const RTCRtpSendParameters& oldParameters)
+{
+    if (oldParameters.transactionId != newParameters.transactionId)
+        return false;
+
+    if (oldParameters.encodings.size() != newParameters.encodings.size())
+        return false;
+
+    for (size_t i = 0; i < oldParameters.encodings.size(); ++i) {
+        if (oldParameters.encodings[i].rid != newParameters.encodings[i].rid)
+            return false;
+    }
+
+    if (oldParameters.headerExtensions.size() != newParameters.headerExtensions.size())
+        return false;
+
+    for (size_t i = 0; i < oldParameters.headerExtensions.size(); ++i) {
+        const auto& oldExtension = oldParameters.headerExtensions[i];
+        const auto& newExtension = newParameters.headerExtensions[i];
+        if (oldExtension.uri != newExtension.uri || oldExtension.id != newExtension.id)
+            return false;
+    }
+
+    if (oldParameters.rtcp.cname != newParameters.rtcp.cname)
+        return false;
+
+    if (!!oldParameters.rtcp.reducedSize != !!newParameters.rtcp.reducedSize)
+        return false;
+
+    if (oldParameters.rtcp.reducedSize && *oldParameters.rtcp.reducedSize != *newParameters.rtcp.reducedSize)
+        return false;
+
+    if (oldParameters.codecs.size() != newParameters.codecs.size())
+        return false;
+
+    for (size_t i = 0; i < oldParameters.codecs.size(); ++i) {
+        const auto& oldCodec = oldParameters.codecs[i];
+        const auto& newCodec = newParameters.codecs[i];
+        if (oldCodec.payloadType != newCodec.payloadType
+            || oldCodec.mimeType != newCodec.mimeType
+            || oldCodec.clockRate != newCodec.clockRate
+            || oldCodec.channels != newCodec.channels
+            || oldCodec.sdpFmtpLine != newCodec.sdpFmtpLine)
+            return false;
+    }
+
+    return true;
+}
+
 void LibWebRTCRtpSenderBackend::setParameters(const RTCRtpSendParameters& parameters, DOMPromiseDeferred<void>&& promise)
 {
     if (!m_rtcSender) {
-        promise.reject(NotSupportedError);
+        promise.reject(ExceptionCode::NotSupportedError);
         return;
     }
 
     if (!m_currentParameters) {
-        promise.reject(Exception { InvalidStateError, "getParameters must be called before setParameters"_s });
+        promise.reject(Exception { ExceptionCode::InvalidStateError, "getParameters must be called before setParameters"_s });
         return;
     }
 
-    auto rtcParameters = WTFMove(*m_currentParameters);
+    if (!validateModifiedParameters(parameters, toRTCRtpSendParameters(*m_currentParameters))) {
+        promise.reject(ExceptionCode::InvalidModificationError, "parameters are not valid"_s);
+        return;
+    }
+
+    auto rtcParameters = *std::exchange(m_currentParameters, std::nullopt);
     updateRTCRtpSendParameters(parameters, rtcParameters);
-    m_currentParameters = std::nullopt;
 
     auto error = m_rtcSender->SetParameters(rtcParameters);
     if (!error.ok()) {
@@ -147,20 +210,20 @@ void LibWebRTCRtpSenderBackend::setParameters(const RTCRtpSendParameters& parame
 
 std::unique_ptr<RTCDTMFSenderBackend> LibWebRTCRtpSenderBackend::createDTMFBackend()
 {
-    return makeUnique<LibWebRTCDTMFSenderBackend>(m_rtcSender->GetDtmfSender());
+    return makeUnique<LibWebRTCDTMFSenderBackend>(toRef(m_rtcSender->GetDtmfSender()));
 }
 
 Ref<RTCRtpTransformBackend> LibWebRTCRtpSenderBackend::rtcRtpTransformBackend()
 {
     if (!m_transformBackend)
-        m_transformBackend = LibWebRTCRtpSenderTransformBackend::create(m_rtcSender);
+        lazyInitialize(m_transformBackend, LibWebRTCRtpSenderTransformBackend::create(*m_rtcSender));
     return *m_transformBackend;
 }
 
 std::unique_ptr<RTCDtlsTransportBackend> LibWebRTCRtpSenderBackend::dtlsTransportBackend()
 {
-    auto backend = m_rtcSender->dtls_transport();
-    return backend ? makeUnique<LibWebRTCDtlsTransportBackend>(WTFMove(backend)) : nullptr;
+    RefPtr backend = toRefPtr(m_rtcSender->dtls_transport());
+    return backend ? makeUnique<LibWebRTCDtlsTransportBackend>(backend.releaseNonNull()) : nullptr;
 }
 
 void LibWebRTCRtpSenderBackend::setMediaStreamIds(const FixedVector<String>& streamIds)

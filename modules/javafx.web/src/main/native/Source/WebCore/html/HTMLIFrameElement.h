@@ -23,42 +23,54 @@
 
 #pragma once
 
-#include "FeaturePolicy.h"
 #include "HTMLFrameElementBase.h"
+#include "PermissionsPolicy.h"
+#include "SubstituteData.h"
 
 namespace WebCore {
 
 class DOMTokenList;
 class LazyLoadFrameObserver;
 class RenderIFrame;
+class TrustedHTML;
 
 class HTMLIFrameElement final : public HTMLFrameElementBase {
-    WTF_MAKE_ISO_ALLOCATED(HTMLIFrameElement);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(HTMLIFrameElement);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(HTMLIFrameElement);
 public:
     static Ref<HTMLIFrameElement> create(const QualifiedName&, Document&);
+    ~HTMLIFrameElement();
 
     DOMTokenList& sandbox();
 
-    RenderIFrame* renderer() const;
-
-    void setReferrerPolicyForBindings(const AtomString&);
     String referrerPolicyForBindings() const;
     ReferrerPolicy referrerPolicy() const final;
 
-    const FeaturePolicy& featurePolicy() const;
-
-    const AtomString& loadingForBindings() const;
-    void setLoadingForBindings(const AtomString&);
+    String srcdoc() const;
+    ExceptionOr<void> setSrcdoc(Variant<RefPtr<TrustedHTML>, String>&&, SubstituteData::SessionHistoryVisibility = SubstituteData::SessionHistoryVisibility::Visible);
+    SubstituteData::SessionHistoryVisibility srcdocSessionHistoryVisibility() const { return m_srcdocSessionHistoryVisibility; };
 
     LazyLoadFrameObserver& lazyLoadFrameObserver();
 
     void loadDeferredFrame();
 
+    enum LoadingValues { Lazy, Eager };
+
+#if ENABLE(FULLSCREEN_API)
+    bool hasIFrameFullscreenFlag() const { return m_IFrameFullscreenFlag; }
+    void setIFrameFullscreenFlag(bool value) { m_IFrameFullscreenFlag = value; }
+#endif
+
+#if ENABLE(CONTENT_EXTENSIONS)
+    const URL& initiatorSourceURL() const { return m_initiatorSourceURL; }
+    void setInitiatorSourceURL(URL&& url) { m_initiatorSourceURL = WTFMove(url); }
+#endif
+
 private:
     HTMLIFrameElement(const QualifiedName&, Document&);
 
     int defaultTabIndex() const final;
-    void parseAttribute(const QualifiedName&, const AtomString&) final;
+    void attributeChanged(const QualifiedName&, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason) final;
     bool hasPresentationalHintsForAttribute(const QualifiedName&) const final;
     void collectPresentationalHintsForAttribute(const QualifiedName&, const AtomString&, MutableStyleProperties&) final;
 
@@ -66,13 +78,21 @@ private:
 
     bool rendererIsNeeded(const RenderStyle&) final;
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) final;
+    bool isReplaced(const RenderStyle* = nullptr) const final { return true; }
 
+    ReferrerPolicy referrerPolicyFromAttribute() const;
     bool shouldLoadFrameLazily() final;
     bool isLazyLoadObserverActive() const final;
 
-    std::unique_ptr<DOMTokenList> m_sandbox;
-    mutable std::optional<FeaturePolicy> m_featurePolicy;
+    const std::unique_ptr<DOMTokenList> m_sandbox;
     std::unique_ptr<LazyLoadFrameObserver> m_lazyLoadFrameObserver;
+#if ENABLE(CONTENT_EXTENSIONS)
+    URL m_initiatorSourceURL;
+#endif
+    SubstituteData::SessionHistoryVisibility m_srcdocSessionHistoryVisibility { SubstituteData::SessionHistoryVisibility::Visible };
+#if ENABLE(FULLSCREEN_API)
+    bool m_IFrameFullscreenFlag { false };
+#endif
 };
 
 } // namespace WebCore

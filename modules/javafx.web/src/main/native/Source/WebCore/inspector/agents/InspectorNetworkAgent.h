@@ -34,14 +34,19 @@
 #include "InspectorInstrumentation.h"
 #include "InspectorPageAgent.h"
 #include "InspectorWebAgentBase.h"
+#include "NetworkResourcesData.h"
 #include "WebSocket.h"
+#include <JavaScriptCore/ContentSearchUtilities.h>
 #include <JavaScriptCore/InspectorBackendDispatchers.h>
 #include <JavaScriptCore/InspectorFrontendDispatchers.h>
 #include <JavaScriptCore/RegularExpression.h>
 #include <wtf/Forward.h>
 #include <wtf/JSONValues.h>
+#include <wtf/RobinHoodHashMap.h>
+#include <wtf/TZoneMalloc.h>
 
 namespace Inspector {
+class ConsoleMessage;
 class InjectedScriptManager;
 }
 
@@ -63,10 +68,12 @@ class WebSocket;
 struct WebSocketFrame;
 
 class InspectorNetworkAgent : public InspectorAgentBase, public Inspector::NetworkBackendDispatcherHandler {
+    WTF_MAKE_TZONE_ALLOCATED(InspectorNetworkAgent);
     WTF_MAKE_NONCOPYABLE(InspectorNetworkAgent);
-    WTF_MAKE_FAST_ALLOCATED;
 public:
     ~InspectorNetworkAgent() override;
+
+    static constexpr ASCIILiteral errorDomain() { return "InspectorNetworkAgent"_s; }
 
     static bool shouldTreatAsText(const String& mimeType);
     static Ref<TextResourceDecoder> createTextDecoder(const String& mimeType, const String& textEncodingName);
@@ -74,7 +81,7 @@ public:
     static bool cachedResourceContent(CachedResource&, String* result, bool* base64Encoded);
 
     // InspectorAgentBase
-    void didCreateFrontendAndBackend(Inspector::FrontendRouter*, Inspector::BackendDispatcher*) final;
+    void didCreateFrontendAndBackend() final;
     void willDestroyFrontendAndBackend(Inspector::DisconnectReason) final;
 
     // NetworkBackendDispatcherHandler
@@ -94,11 +101,14 @@ public:
     Inspector::Protocol::ErrorStringOr<void> interceptWithResponse(const Inspector::Protocol::Network::RequestId&, const String& content, bool base64Encoded, const String& mimeType, std::optional<int>&& status, const String& statusText, RefPtr<JSON::Object>&& headers) final;
     Inspector::Protocol::ErrorStringOr<void> interceptRequestWithResponse(const Inspector::Protocol::Network::RequestId&, const String& content, bool base64Encoded, const String& mimeType, int status, const String& statusText, Ref<JSON::Object>&& headers) final;
     Inspector::Protocol::ErrorStringOr<void> interceptRequestWithError(const Inspector::Protocol::Network::RequestId&, Inspector::Protocol::Network::ResourceErrorType) final;
+#if ENABLE(INSPECTOR_NETWORK_THROTTLING)
+    Inspector::Protocol::ErrorStringOr<void> setEmulatedConditions(std::optional<int>&& bytesPerSecondLimit) final;
+#endif
 
     // InspectorInstrumentation
     void willRecalculateStyle();
     void didRecalculateStyle();
-    void willSendRequest(ResourceLoaderIdentifier, DocumentLoader*, ResourceRequest&, const ResourceResponse& redirectResponse, const CachedResource*);
+    void willSendRequest(ResourceLoaderIdentifier, DocumentLoader*, ResourceRequest&, const ResourceResponse& redirectResponse, const CachedResource*, ResourceLoader*);
     void willSendRequestOfType(ResourceLoaderIdentifier, DocumentLoader*, ResourceRequest&, InspectorInstrumentation::LoadType);
     void didReceiveResponse(ResourceLoaderIdentifier, DocumentLoader*, const ResourceResponse&, ResourceLoader*);
     void didReceiveData(ResourceLoaderIdentifier, const SharedBuffer*, int expectedDataLength, int encodedDataLength);
@@ -121,7 +131,7 @@ public:
     void setInitialScriptContent(ResourceLoaderIdentifier, const String& sourceString);
     void didScheduleStyleRecalculation(Document&);
     bool willIntercept(const ResourceRequest&);
-    bool shouldInterceptRequest(const ResourceRequest&);
+    bool shouldInterceptRequest(const ResourceLoader&);
     bool shouldInterceptResponse(const ResourceResponse&);
     void interceptResponse(const ResourceResponse&, ResourceLoaderIdentifier, CompletionHandler<void(const ResourceResponse&, RefPtr<FragmentedSharedBuffer>)>&&);
     void interceptRequest(ResourceLoader&, Function<void(const ResourceRequest&)>&&);
@@ -130,17 +140,21 @@ public:
     void searchInRequest(Inspector::Protocol::ErrorString&, const Inspector::Protocol::Network::RequestId&, const String& query, bool caseSensitive, bool isRegex, RefPtr<JSON::ArrayOf<Inspector::Protocol::GenericTypes::SearchMatch>>&);
 
 protected:
-    InspectorNetworkAgent(WebAgentContext&);
+    InspectorNetworkAgent(WebAgentContext&, const NetworkResourcesData::Settings&);
 
     virtual Inspector::Protocol::Network::LoaderId loaderIdentifier(DocumentLoader*) = 0;
     virtual Inspector::Protocol::Network::FrameId frameIdentifier(DocumentLoader*) = 0;
     virtual Vector<WebSocket*> activeWebSockets() WTF_REQUIRES_LOCK(WebSocket::allActiveWebSocketsLock()) = 0;
     virtual void setResourceCachingDisabledInternal(bool) = 0;
+#if ENABLE(INSPECTOR_NETWORK_THROTTLING)
+    virtual bool setEmulatedConditionsInternal(std::optional<int>&& bytesPerSecondLimit) = 0;
+#endif
     virtual ScriptExecutionContext* scriptExecutionContext(Inspector::Protocol::ErrorString&, const Inspector::Protocol::Network::FrameId&) = 0;
+    virtual void addConsoleMessage(std::unique_ptr<Inspector::ConsoleMessage>&&) = 0;
     virtual bool shouldForceBufferingNetworkResourceData() const = 0;
 
 private:
-    void willSendRequest(ResourceLoaderIdentifier, DocumentLoader*, ResourceRequest&, const ResourceResponse& redirectResponse, InspectorPageAgent::ResourceType);
+    void willSendRequest(ResourceLoaderIdentifier, DocumentLoader*, ResourceRequest&, const ResourceResponse& redirectResponse, InspectorPageAgent::ResourceType, ResourceLoader*);
 
     bool shouldIntercept(URL, Inspector::Protocol::Network::NetworkStage);
     void continuePendingRequests();
@@ -157,8 +171,8 @@ private:
     double timestamp();
 
     class PendingInterceptRequest {
+        WTF_MAKE_TZONE_ALLOCATED(PendingInterceptRequest);
         WTF_MAKE_NONCOPYABLE(PendingInterceptRequest);
-        WTF_MAKE_FAST_ALLOCATED;
     public:
         PendingInterceptRequest(RefPtr<ResourceLoader> loader, Function<void(const ResourceRequest&)>&& callback)
             : m_loader(loader)
@@ -182,8 +196,8 @@ private:
     };
 
     class PendingInterceptResponse {
+        WTF_MAKE_TZONE_ALLOCATED(PendingInterceptResponse);
         WTF_MAKE_NONCOPYABLE(PendingInterceptResponse);
-        WTF_MAKE_FAST_ALLOCATED;
     public:
         PendingInterceptResponse(const ResourceResponse& originalResponse, CompletionHandler<void(const ResourceResponse&, RefPtr<FragmentedSharedBuffer>)>&& completionHandler)
             : m_originalResponse(originalResponse)
@@ -219,13 +233,13 @@ private:
         bool m_responded { false };
     };
 
-    std::unique_ptr<Inspector::NetworkFrontendDispatcher> m_frontendDispatcher;
-    RefPtr<Inspector::NetworkBackendDispatcher> m_backendDispatcher;
+    const UniqueRef<Inspector::NetworkFrontendDispatcher> m_frontendDispatcher;
+    const Ref<Inspector::NetworkBackendDispatcher> m_backendDispatcher;
     Inspector::InjectedScriptManager& m_injectedScriptManager;
 
-    std::unique_ptr<NetworkResourcesData> m_resourcesData;
+    const UniqueRef<NetworkResourcesData> m_resourcesData;
 
-    HashMap<String, String> m_extraRequestHeaders;
+    MemoryCompactRobinHoodHashMap<String, String> m_extraRequestHeaders;
     HashSet<ResourceLoaderIdentifier> m_hiddenRequestIdentifiers;
 
     struct Intercept {
@@ -241,10 +255,18 @@ private:
                 && isRegex == other.isRegex
                 && networkStage == other.networkStage;
         }
+
+        bool matches(const String& url, Inspector::Protocol::Network::NetworkStage);
+
+    private:
+        std::optional<Inspector::ContentSearchUtilities::Searcher> m_urlSearcher;
+
+        // Avoid having to (re)match the searcher each time a URL is requested.
+        HashSet<String> m_knownMatchingURLs;
     };
     Vector<Intercept> m_intercepts;
-    HashMap<String, std::unique_ptr<PendingInterceptRequest>> m_pendingInterceptRequests;
-    HashMap<String, std::unique_ptr<PendingInterceptResponse>> m_pendingInterceptResponses;
+    MemoryCompactRobinHoodHashMap<String, std::unique_ptr<PendingInterceptRequest>> m_pendingInterceptRequests;
+    MemoryCompactRobinHoodHashMap<String, std::unique_ptr<PendingInterceptResponse>> m_pendingInterceptResponses;
 
     // FIXME: InspectorNetworkAgent should not be aware of style recalculation.
     RefPtr<Inspector::Protocol::Network::Initiator> m_styleRecalculationInitiator;

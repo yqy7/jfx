@@ -26,6 +26,7 @@
 #pragma once
 
 #include "HTMLModelElementCamera.h"
+#include "LayerHostingContextIdentifier.h"
 #include "LayoutPoint.h"
 #include "LayoutSize.h"
 #include "PlatformLayer.h"
@@ -33,22 +34,51 @@
 #include <wtf/Forward.h>
 #include <wtf/MonotonicTime.h>
 #include <wtf/Seconds.h>
+#include <wtf/TZoneMalloc.h>
+
+#if ENABLE(MODEL_PROCESS)
+#include "ModelPlayerIdentifier.h"
+#include <WebCore/StageModeOperations.h>
+#endif
 
 namespace WebCore {
 
+class Color;
+class FloatPoint3D;
 class Model;
+class ModelPlayerAnimationState;
+class ModelPlayerTransformState;
+class SharedBuffer;
+class TransformationMatrix;
 
 class WEBCORE_EXPORT ModelPlayer : public RefCounted<ModelPlayer> {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED_EXPORT(ModelPlayer, WEBCORE_EXPORT);
 public:
     virtual ~ModelPlayer();
 
+#if ENABLE(MODEL_PROCESS)
+    virtual ModelPlayerIdentifier identifier() const = 0;
+#endif
+
+    virtual bool isPlaceholder() const;
+    virtual std::optional<ModelPlayerAnimationState> currentAnimationState() const;
+    virtual std::optional<std::unique_ptr<ModelPlayerTransformState>> currentTransformState() const;
+
     virtual void load(Model&, LayoutSize) = 0;
+    virtual void reload(Model&, LayoutSize, ModelPlayerAnimationState&, std::unique_ptr<ModelPlayerTransformState>&&);
+    virtual void visibilityStateDidChange();
+
     virtual void sizeDidChange(LayoutSize) = 0;
     virtual PlatformLayer* layer() = 0;
+    virtual std::optional<LayerHostingContextIdentifier> layerHostingContextIdentifier() = 0;
+    virtual std::optional<FloatPoint3D> boundingBoxCenter() const;
+    virtual std::optional<FloatPoint3D> boundingBoxExtents() const;
+    virtual std::optional<TransformationMatrix> entityTransform() const;
+    virtual void setEntityTransform(TransformationMatrix);
     virtual void enterFullscreen() = 0;
     virtual bool supportsMouseInteraction();
     virtual bool supportsDragging();
+    virtual bool supportsTransform(TransformationMatrix);
     virtual void setInteractionEnabled(bool);
     virtual void handleMouseDown(const LayoutPoint&, MonotonicTime) = 0;
     virtual void handleMouseMove(const LayoutPoint&, MonotonicTime) = 0;
@@ -65,8 +95,27 @@ public:
     virtual void hasAudio(CompletionHandler<void(std::optional<bool>&&)>&&) = 0;
     virtual void isMuted(CompletionHandler<void(std::optional<bool>&&)>&&) = 0;
     virtual void setIsMuted(bool, CompletionHandler<void(bool success)>&&) = 0;
+    virtual String inlinePreviewUUIDForTesting() const;
 #if PLATFORM(COCOA)
     virtual Vector<RetainPtr<id>> accessibilityChildren() = 0;
+#endif
+#if ENABLE(MODEL_PROCESS)
+    virtual void setAutoplay(bool);
+    virtual void setLoop(bool);
+    virtual void setPlaybackRate(double, CompletionHandler<void(double effectivePlaybackRate)>&&);
+    virtual double duration() const;
+    virtual bool paused() const;
+    virtual void setPaused(bool, CompletionHandler<void(bool succeeded)>&&);
+    virtual Seconds currentTime() const;
+    virtual void setCurrentTime(Seconds, CompletionHandler<void()>&&);
+    virtual void setEnvironmentMap(Ref<SharedBuffer>&& data);
+    virtual void setHasPortal(bool);
+    virtual void setStageMode(StageModeOperation);
+    virtual void beginStageModeTransform(const TransformationMatrix&);
+    virtual void updateStageModeTransform(const TransformationMatrix&);
+    virtual void endStageModeInteraction();
+    virtual void animateModelToFitPortal(CompletionHandler<void(bool)>&&);
+    virtual void resetModelTransformAfterDrag();
 #endif
 };
 

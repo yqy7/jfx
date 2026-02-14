@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -96,7 +96,13 @@ public final class PNGImageLoader2 extends ImageLoaderImpl {
         width = stream.readInt();
         height = stream.readInt();
 
-        if (width == 0 || height == 0) {
+        if (width <= 0) {
+            throw new IOException("Bad PNG image width, must be > 0!");
+        }
+        if (height <= 0) {
+            throw new IOException("Bad PNG image height, must be > 0!");
+        }
+        if (width >= (Integer.MAX_VALUE / height)) {
             throw new IOException("Bad PNG image size!");
         }
 
@@ -292,6 +298,7 @@ public final class PNGImageLoader2 extends ImageLoaderImpl {
         }
     }
 
+    @Override
     public void dispose() {
     }
 
@@ -305,8 +312,6 @@ public final class PNGImageLoader2 extends ImageLoaderImpl {
                 return tRNS_present
                         ? ImageStorage.ImageType.RGBA
                         : ImageStorage.ImageType.RGB;
-            case PNG_COLOR_PALETTE:
-                return ImageStorage.ImageType.PALETTE;
             case PNG_COLOR_GRAY_ALPHA:
                 return ImageStorage.ImageType.GRAY_ALPHA;
             case PNG_COLOR_RGB_ALPHA:
@@ -583,8 +588,11 @@ public final class PNGImageLoader2 extends ImageLoaderImpl {
         }
     }
 
-    private ImageFrame decodePalette(byte srcImage[], ImageMetadata metadata) {
+    private ImageFrame decodePalette(byte srcImage[], ImageMetadata metadata) throws IOException {
         int bpp = tRNS_present ? 4 : 3;
+        if (width >= (Integer.MAX_VALUE / height / bpp)) {
+            throw new IOException("Bad PNG image size!");
+        }
         byte newImage[] = new byte[width * height * bpp];
         int l = width * height;
 
@@ -610,7 +618,7 @@ public final class PNGImageLoader2 extends ImageLoaderImpl {
                 : ImageStorage.ImageType.RGB;
 
         return new ImageFrame(type, ByteBuffer.wrap(newImage), width, height,
-                width * bpp, null, metadata);
+                width * bpp, metadata);
     }
 
     // we won`t decode palette on fly, we will do it later
@@ -626,8 +634,11 @@ public final class PNGImageLoader2 extends ImageLoaderImpl {
         return bitDepth == 16 ? 2 : 1;
     }
 
-    public ImageFrame load(int imageIndex, int rWidth, int rHeight,
-            boolean preserveAspectRatio, boolean smooth) throws IOException {
+    @Override
+    public ImageFrame load(int imageIndex, double w, double h,
+            boolean preserveAspectRatio, boolean smooth,
+            float screenPixelScale, float imagePixelScale) throws IOException {
+        ImageTools.validateMaxDimensions(w, h, imagePixelScale);
 
         if (imageIndex != 0) {
             return null;
@@ -640,15 +651,20 @@ public final class PNGImageLoader2 extends ImageLoaderImpl {
             return null;
         }
 
-        int[] outWH = ImageTools.computeDimensions(width, height, rWidth, rHeight, preserveAspectRatio);
-        rWidth = outWH[0];
-        rHeight = outWH[1];
+        int bpp = bpp();
+        if (width >= (Integer.MAX_VALUE / height / bpp)) {
+            throw new IOException("Bad PNG image size!");
+        }
+
+        int[] outWH = ImageTools.computeDimensions(
+            width, height, (int)(w * imagePixelScale), (int)(h * imagePixelScale), preserveAspectRatio);
+        int rWidth = outWH[0];
+        int rHeight = outWH[1];
 
         ImageMetadata metaData = new ImageMetadata(null, true,
                 null, null, null, null, null, rWidth, rHeight, null, null, null);
         updateImageMetadata(metaData);
 
-        int bpp = bpp();
         ByteBuffer bb = ByteBuffer.allocate(bpp * width * height);
 
         PNGIDATChunkInputStream iDat = new PNGIDATChunkInputStream(stream, dataSize);
@@ -667,7 +683,9 @@ public final class PNGImageLoader2 extends ImageLoaderImpl {
 
         ImageFrame imgPNG = colorType == PNG_COLOR_PALETTE
                 ? decodePalette(bb.array(), metaData)
-                : new ImageFrame(getType(), bb, width, height, bpp * width, palette, metaData);
+                : new ImageFrame(getType(), bb, width, height, bpp * width, metaData);
+
+        imgPNG.setPixelScale(imagePixelScale);
 
         if (width != rWidth || height != rHeight) {
             imgPNG = ImageTools.scaleImageFrame(imgPNG, rWidth, rHeight, smooth);

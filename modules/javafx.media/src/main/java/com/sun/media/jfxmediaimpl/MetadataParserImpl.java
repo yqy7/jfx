@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,8 +42,8 @@ import java.nio.charset.Charset;
 import java.util.Collections;
 
 public abstract class MetadataParserImpl extends Thread implements com.sun.media.jfxmedia.MetadataParser {
-    private final List<WeakReference<MetadataListener>> listeners = new ArrayList<WeakReference<MetadataListener>>();
-    private Map<String, Object> metadata = new HashMap<String, Object>();
+    private final List<WeakReference<MetadataListener>> listeners = new ArrayList<>();
+    private Map<String, Object> metadata = new HashMap<>();
     private Locator locator = null;
     private ConnectionHolder connectionHolder = null;
     private ByteBuffer buffer = null;
@@ -58,14 +58,16 @@ public abstract class MetadataParserImpl extends Thread implements com.sun.media
         this.locator = locator;
     }
 
+    @Override
     public void addListener(MetadataListener listener) {
         synchronized (listeners) {
             if (listener != null) {
-                listeners.add(new WeakReference<MetadataListener>(listener));
+                listeners.add(new WeakReference<>(listener));
             }
         }
     }
 
+    @Override
     public void removeListener(MetadataListener listener) {
         synchronized (listeners) {
             if (listener != null) {
@@ -79,10 +81,12 @@ public abstract class MetadataParserImpl extends Thread implements com.sun.media
         }
     }
 
+    @Override
     public void startParser() throws IOException {
         start();
     }
 
+    @Override
     public void stopParser() {
         if (connectionHolder != null) {
             connectionHolder.closeConnection();
@@ -102,6 +106,10 @@ public abstract class MetadataParserImpl extends Thread implements com.sun.media
 
     protected void addMetadataItem(String tag, Object value) {
         metadata.put(tag, value);
+    }
+
+    protected void disposeMetadata() {
+        metadata.clear();
     }
 
     protected void done() {
@@ -124,6 +132,10 @@ public abstract class MetadataParserImpl extends Thread implements com.sun.media
             return rawMetaBlob.position();
         }
         return streamPosition;
+    }
+
+    protected long getStreamLength() {
+        return locator.getContentLength();
     }
 
     protected void startRawMetadata(int sizeHint) {
@@ -184,7 +196,7 @@ public abstract class MetadataParserImpl extends Thread implements com.sun.media
         }
 
         if (null == rawMetaMap) {
-            rawMetaMap = new HashMap<String,ByteBuffer>();
+            rawMetaMap = new HashMap<>();
             // make sure the map we add to the metadata is read-only
             metadata.put(RAW_METADATA_TAG_NAME, Collections.unmodifiableMap(rawMetaMap));
         }
@@ -318,9 +330,9 @@ public abstract class MetadataParserImpl extends Thread implements com.sun.media
         int value = 0;
 
         value |= (getNextByte() & 0xFF);
-        value = (int) (value << 8);
+        value = value << 8;
         value |= (getNextByte() & 0xFF);
-        value = (int) (value << 8);
+        value = value << 8;
         value |= (getNextByte() & 0xFF);
 
         return value;

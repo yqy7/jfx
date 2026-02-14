@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,10 +27,8 @@ package javafx.scene.control.skin;
 
 import com.sun.javafx.scene.control.ContextMenuContent;
 import com.sun.javafx.scene.control.behavior.BehaviorBase;
-import javafx.beans.WeakInvalidationListener;
 import javafx.scene.control.Control;
 import javafx.scene.control.SkinBase;
-import javafx.util.StringConverter;
 import javafx.beans.InvalidationListener;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
@@ -56,6 +54,7 @@ import javafx.collections.WeakListChangeListener;
 /**
  * Default skin implementation for the {@link ChoiceBox} control.
  *
+ * @param <T> the type of the item contained in the ChoiceBox
  * @see ChoiceBox
  * @since 9
  */
@@ -94,7 +93,7 @@ public class ChoiceBoxSkin<T> extends SkinBase<ChoiceBox<T>> {
      *                                                                         *
      **************************************************************************/
 
-    private final ListChangeListener<T> choiceBoxItemsListener = new ListChangeListener<T>() {
+    private final ListChangeListener<T> choiceBoxItemsListener = new ListChangeListener<>() {
         @Override public void onChanged(Change<? extends T> c) {
             while (c.next()) {
                 if (c.getRemovedSize() > 0 || c.wasPermutated()) {
@@ -113,12 +112,12 @@ public class ChoiceBoxSkin<T> extends SkinBase<ChoiceBox<T>> {
                 }
             }
             updateSelection();
-            getSkinnable().requestLayout(); // RT-18052 resize of choicebox should happen immediately.
+            getSkinnable().requestLayout(); // JDK-8128697 resize of choicebox should happen immediately.
         }
     };
 
     private final WeakListChangeListener<T> weakChoiceBoxItemsListener =
-            new WeakListChangeListener<T>(choiceBoxItemsListener);
+            new WeakListChangeListener<>(choiceBoxItemsListener);
 
     private final InvalidationListener itemsObserver;
 
@@ -159,12 +158,12 @@ public class ChoiceBoxSkin<T> extends SkinBase<ChoiceBox<T>> {
 
                 long currentSelectedIndex = sm.getSelectedIndex();
 
-                // This is a fix for RT-9071. Ideally this won't be necessary in
+                // This is a fix for JDK-8110365. Ideally this won't be necessary in
                 // the long-run, but for now at least this resolves the
                 // positioning
                 // problem of ChoiceBox inside a Cell.
                 getSkinnable().autosize();
-                // -- End of RT-9071 fix
+                // -- End of JDK-8110365 fix
 
                 double y = 0;
 
@@ -260,7 +259,7 @@ public class ChoiceBoxSkin<T> extends SkinBase<ChoiceBox<T>> {
         double popupWidth = popup.prefWidth(-1);
         if (popupWidth <= 0) { // first time: when the popup has not shown yet
             if (popup.getItems().size() > 0){
-                popupWidth = (new Text(((MenuItem)popup.getItems().get(0)).getText())).prefWidth(-1);
+                popupWidth = (new Text(popup.getItems().get(0).getText())).prefWidth(-1);
             }
         }
         return (popup.getItems().size() == 0) ? 50 : leftInset + Math.max(boxWidth, popupWidth)
@@ -325,8 +324,8 @@ public class ChoiceBoxSkin<T> extends SkinBase<ChoiceBox<T>> {
 //        popup.visibleProperty().addListener(new InvalidationListener() {
 //            @Override public void invalidated(ObservableValue valueModel) {
 //                if (popup.isVisible() {
-////                    RadioMenuItem selected = (RadioMenuItem) toggleGroup.getSelectedToggle();
-////                    if (selected != null) selected.requestFocus();
+//--                    RadioMenuItem selected = (RadioMenuItem) toggleGroup.getSelectedToggle();
+//--                    if (selected != null) selected.requestFocus();
 //                } else {
 //                    getBehavior().close();
 //                }

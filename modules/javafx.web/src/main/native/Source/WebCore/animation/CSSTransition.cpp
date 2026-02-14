@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,22 +27,21 @@
 #include "CSSTransition.h"
 
 #include "Animation.h"
+#include "CSSTransitionEvent.h"
 #include "DocumentTimeline.h"
 #include "InspectorInstrumentation.h"
 #include "KeyframeEffect.h"
 #include "StyleResolver.h"
-#include "TransitionEvent.h"
-#include <wtf/IsoMallocInlines.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace WebCore {
 
-WTF_MAKE_ISO_ALLOCATED_IMPL(CSSTransition);
+WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(CSSTransition);
 
-Ref<CSSTransition> CSSTransition::create(const Styleable& owningElement, CSSPropertyID property, MonotonicTime generationTime, const Animation& backingAnimation, const RenderStyle* oldStyle, const RenderStyle& newStyle, Seconds delay, Seconds duration, const RenderStyle& reversingAdjustedStartStyle, double reversingShorteningFactor)
+Ref<CSSTransition> CSSTransition::create(const Styleable& owningElement, const AnimatableCSSProperty& property, MonotonicTime generationTime, const Animation& backingAnimation, const RenderStyle& oldStyle, const RenderStyle& newStyle, Seconds delay, Seconds duration, const RenderStyle& reversingAdjustedStartStyle, double reversingShorteningFactor)
 {
-    ASSERT(oldStyle);
-    auto result = adoptRef(*new CSSTransition(owningElement, property, generationTime, backingAnimation, *oldStyle, newStyle, reversingAdjustedStartStyle, reversingShorteningFactor));
-    result->initialize(oldStyle, newStyle, { nullptr });
+    auto result = adoptRef(*new CSSTransition(owningElement, property, generationTime, backingAnimation, oldStyle, newStyle, reversingAdjustedStartStyle, reversingShorteningFactor));
+    result->initialize(&oldStyle, newStyle, { nullptr });
     result->setTimingProperties(delay, duration);
 
     InspectorInstrumentation::didCreateWebAnimation(result.get());
@@ -50,11 +49,10 @@ Ref<CSSTransition> CSSTransition::create(const Styleable& owningElement, CSSProp
     return result;
 }
 
-CSSTransition::CSSTransition(const Styleable& styleable, CSSPropertyID property, MonotonicTime generationTime, const Animation& backingAnimation, const RenderStyle& oldStyle, const RenderStyle& targetStyle, const RenderStyle& reversingAdjustedStartStyle, double reversingShorteningFactor)
-    : DeclarativeAnimation(styleable, backingAnimation)
+CSSTransition::CSSTransition(const Styleable& styleable, const AnimatableCSSProperty& property, MonotonicTime generationTime, const Animation& backingAnimation, const RenderStyle& oldStyle, const RenderStyle& targetStyle, const RenderStyle& reversingAdjustedStartStyle, double reversingShorteningFactor)
+    : StyleOriginatedAnimation(styleable, backingAnimation)
     , m_property(property)
     , m_generationTime(generationTime)
-    , m_timelineTimeAtCreation(styleable.element.document().timeline().currentTime())
     , m_targetStyle(RenderStyle::clonePtr(targetStyle))
     , m_currentStyle(RenderStyle::clonePtr(oldStyle))
     , m_reversingAdjustedStartStyle(RenderStyle::clonePtr(reversingAdjustedStartStyle))
@@ -62,16 +60,21 @@ CSSTransition::CSSTransition(const Styleable& styleable, CSSPropertyID property,
 {
 }
 
-void CSSTransition::resolve(RenderStyle& targetStyle, const Style::ResolutionContext& resolutionContext, std::optional<Seconds> startTime)
+CSSTransition::~CSSTransition() = default;
+
+OptionSet<AnimationImpact> CSSTransition::resolve(RenderStyle& targetStyle, const Style::ResolutionContext& resolutionContext)
 {
-    DeclarativeAnimation::resolve(targetStyle, resolutionContext, startTime);
+    auto impact = StyleOriginatedAnimation::resolve(targetStyle, resolutionContext);
     m_currentStyle = RenderStyle::clonePtr(targetStyle);
+    return impact;
 }
 
 void CSSTransition::animationDidFinish()
 {
+    StyleOriginatedAnimation::animationDidFinish();
+
     if (auto owningElement = this->owningElement())
-        owningElement->removeDeclarativeAnimationFromListsForOwningElement(*this);
+        owningElement->removeStyleOriginatedAnimationFromListsForOwningElement(*this);
 }
 
 void CSSTransition::setTimingProperties(Seconds delay, Seconds duration)
@@ -79,8 +82,7 @@ void CSSTransition::setTimingProperties(Seconds delay, Seconds duration)
     suspendEffectInvalidation();
 
     // This method is only called from CSSTransition::create() where we're guaranteed to have an effect.
-    auto* animationEffect = effect();
-    ASSERT(animationEffect);
+    Ref animationEffect = *effect();
 
     // In order for CSS Transitions to be seeked backwards, they need to have their fill mode set to backwards
     // such that the original CSS value applied prior to the transition is used for a negative current time.
@@ -88,15 +90,26 @@ void CSSTransition::setTimingProperties(Seconds delay, Seconds duration)
     animationEffect->setDelay(delay);
     animationEffect->setIterationDuration(duration);
     animationEffect->setTimingFunction(backingAnimation().timingFunction());
-    animationEffect->updateStaticTimingProperties();
     effectTimingDidChange();
 
     unsuspendEffectInvalidation();
 }
 
-Ref<AnimationEventBase> CSSTransition::createEvent(const AtomString& eventType, double elapsedTime, const String& pseudoId, std::optional<Seconds> timelineTime)
+Ref<StyleOriginatedAnimationEvent> CSSTransition::createEvent(const AtomString& eventType, std::optional<Seconds> scheduledTime, double elapsedTime, const std::optional<Style::PseudoElementIdentifier>& pseudoElementIdentifier)
 {
-    return TransitionEvent::create(eventType, getPropertyNameString(m_property), elapsedTime, pseudoId, timelineTime, this);
+    return CSSTransitionEvent::create(eventType, this, scheduledTime, elapsedTime, pseudoElementIdentifier, transitionProperty());
+}
+
+const AtomString CSSTransition::transitionProperty() const
+{
+    return WTF::switchOn(m_property,
+        [] (CSSPropertyID cssProperty) {
+            return nameString(cssProperty);
+        },
+        [] (const AtomString& customProperty) {
+            return customProperty;
+        }
+    );
 }
 
 } // namespace WebCore

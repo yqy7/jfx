@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2025, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,9 +28,6 @@ package javafx.scene.chart;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-
-import com.sun.javafx.scene.control.skin.Utils;
-
 import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
 import javafx.application.Platform;
@@ -40,28 +37,30 @@ import javafx.beans.property.ObjectPropertyBase;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.StringProperty;
 import javafx.beans.property.StringPropertyBase;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.ObservableValue;
 import javafx.beans.value.WritableValue;
 import javafx.collections.ObservableList;
+import javafx.css.CssMetaData;
+import javafx.css.Styleable;
+import javafx.css.StyleableBooleanProperty;
+import javafx.css.StyleableObjectProperty;
+import javafx.css.StyleableProperty;
+import javafx.css.converter.BooleanConverter;
+import javafx.css.converter.EnumConverter;
 import javafx.geometry.Pos;
 import javafx.geometry.Side;
 import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.Label;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Region;
-
+import javafx.stage.Window;
+import javafx.util.Subscription;
 import com.sun.javafx.charts.ChartLayoutAnimator;
 import com.sun.javafx.charts.Legend;
 import com.sun.javafx.scene.NodeHelper;
-
-import javafx.css.StyleableBooleanProperty;
-import javafx.css.StyleableObjectProperty;
-import javafx.css.CssMetaData;
-
-import javafx.css.converter.BooleanConverter;
-import javafx.css.converter.EnumConverter;
-
-import javafx.css.Styleable;
-import javafx.css.StyleableProperty;
+import com.sun.javafx.scene.control.skin.Utils;
 
 /**
  * Base class for all charts. It has 3 parts the title, legend and chartContent. The chart content is populated by the
@@ -103,6 +102,9 @@ public abstract class Chart extends Region {
 
     /** Animator for animating stuff on the chart */
     private final ChartLayoutAnimator animator = new ChartLayoutAnimator(chartContent);
+
+    // SimpleBooleanProperty or Subscription
+    private volatile Object accessibilityActive;
 
     // -------------- PUBLIC PROPERTIES --------------------------------------------------------------------------------
 
@@ -158,7 +160,7 @@ public abstract class Chart extends Region {
      * The node to display as the Legend. Subclasses can set a node here to be displayed on a side as the legend. If
      * no legend is wanted then this can be set to null
      */
-    private final ObjectProperty<Node> legend = new ObjectPropertyBase<Node>() {
+    private final ObjectProperty<Node> legend = new ObjectPropertyBase<>() {
         private Node old = null;
         @Override protected void invalidated() {
             Node newLegend = get();
@@ -274,7 +276,6 @@ public abstract class Chart extends Region {
      */
     public Chart() {
         titleLabel.setAlignment(Pos.CENTER);
-        titleLabel.focusTraversableProperty().bind(Platform.accessibilityActiveProperty());
         getChildren().addAll(titleLabel, chartContent);
         getStyleClass().add("chart");
         titleLabel.getStyleClass().add("chart-title");
@@ -435,8 +436,8 @@ public abstract class Chart extends Region {
 
     private static class StyleableProperties {
         private static final CssMetaData<Chart,Side> TITLE_SIDE =
-            new CssMetaData<Chart,Side>("-fx-title-side",
-                new EnumConverter<Side>(Side.class),
+            new CssMetaData<>("-fx-title-side",
+                new EnumConverter<>(Side.class),
                 Side.TOP) {
 
             @Override
@@ -451,8 +452,8 @@ public abstract class Chart extends Region {
         };
 
         private static final CssMetaData<Chart,Side> LEGEND_SIDE =
-            new CssMetaData<Chart,Side>("-fx-legend-side",
-                new EnumConverter<Side>(Side.class),
+            new CssMetaData<>("-fx-legend-side",
+                new EnumConverter<>(Side.class),
                 Side.BOTTOM) {
 
             @Override
@@ -467,7 +468,7 @@ public abstract class Chart extends Region {
         };
 
         private static final CssMetaData<Chart,Boolean> LEGEND_VISIBLE =
-            new CssMetaData<Chart,Boolean>("-fx-legend-visible",
+            new CssMetaData<>("-fx-legend-visible",
                 BooleanConverter.getInstance(), Boolean.TRUE) {
 
             @Override
@@ -477,14 +478,14 @@ public abstract class Chart extends Region {
 
             @Override
             public StyleableProperty<Boolean> getStyleableProperty(Chart node) {
-                return (StyleableProperty<Boolean>)(WritableValue<Boolean>)node.legendVisibleProperty();
+                return (StyleableProperty<Boolean>)node.legendVisibleProperty();
             }
         };
 
         private static final List<CssMetaData<? extends Styleable, ?>> STYLEABLES;
         static {
             final List<CssMetaData<? extends Styleable, ?>> styleables =
-                new ArrayList<CssMetaData<? extends Styleable, ?>>(Region.getClassCssMetaData());
+                new ArrayList<>(Region.getClassCssMetaData());
             styleables.add(TITLE_SIDE);
             styleables.add(LEGEND_VISIBLE);
             styleables.add(LEGEND_SIDE);
@@ -511,6 +512,62 @@ public abstract class Chart extends Region {
         return getClassCssMetaData();
     }
 
+    private void handleAccessibilityActive(boolean on) {
+        titleLabel.setFocusTraversable(on);
+        updateSymbolFocusable(on);
+    }
+
+    /**
+     * Invoked in the FX application thread when accessibility active platform property changes.
+     * The child classes should override this method to set focus traversable flag on every symbol, as well as
+     * other elements that need to be focusable.
+     * @param on whether the accessibility is active
+     */
+    // package protected: custom charts must handle accessbility on their own
+    void updateSymbolFocusable(boolean on) {
+    }
+
+    /**
+     * When called from JavaFX application thread, returns the value of the property.
+     * When called from any other thread, returns false and sets up the machinery to
+     * invoke {@code updateSymbolFocusable()} when needed.
+     * The chart implementations should use this method to set focus travesable flags on the nodes
+     * which needs to be focus traversable when accessibility is on.
+     * @return
+     */
+    // package protected: custom charts must handle accessbility on their own
+    final boolean isAccessibilityActive() {
+        if (Platform.isFxApplicationThread()) {
+            if (accessibilityActive instanceof SimpleBooleanProperty p) {
+                return p.get();
+            } else {
+                if (accessibilityActive instanceof Subscription sub) {
+                    sub.unsubscribe();
+                }
+                SimpleBooleanProperty active = new SimpleBooleanProperty();
+                accessibilityActive = active;
+                active.addListener((src, prev, on) -> {
+                    handleAccessibilityActive(on);
+                });
+                active.bind(Platform.accessibilityActiveProperty());
+                return active.get();
+            }
+        } else {
+            // chart and its data are allowed to be constructed in a background thread
+            if (accessibilityActive == null) {
+                // set up a subscription to be fired once the chart becomes a part of the scene graph
+                accessibilityActive = sceneProperty()
+                    .flatMap(Scene::windowProperty)
+                    .subscribe((w) -> {
+                        if (w != null) {
+                            // will unsubscribe when appears in a window, in the fx app thread
+                            if (isAccessibilityActive()) {
+                                handleAccessibilityActive(true);
+                            }
+                        }
+                    });
+            }
+            return false;
+        }
+    }
 }
-
-

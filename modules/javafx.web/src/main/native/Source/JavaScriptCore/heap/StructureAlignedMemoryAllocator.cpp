@@ -29,6 +29,25 @@
 #include "JSCConfig.h"
 #include "MarkedBlock.h"
 #include "StructureID.h"
+#include <wtf/BitVector.h>
+
+#if CPU(ADDRESS64) && !ENABLE(STRUCTURE_ID_WITH_SHIFT)
+#include <wtf/NeverDestroyed.h>
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
+#if !USE(SYSTEM_MALLOC)
+#include <bmalloc/bmalloc.h>
+#include <bmalloc/bmalloc_heap.h>
+#include <bmalloc/bmalloc_heap_config.h>
+#include <bmalloc/bmalloc_heap_inlines.h>
+#include <bmalloc/bmalloc_heap_ref.h>
+#include <bmalloc/pas_page_sharing_pool.h>
+#include <bmalloc/pas_primitive_heap_ref.h>
+#include <bmalloc/pas_probabilistic_guard_malloc_allocator.h>
+#include <bmalloc/pas_scavenger.h>
+#include <bmalloc/pas_thread_local_cache.h>
+#endif
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
+#endif
 
 #include <wtf/OSAllocator.h>
 
@@ -38,15 +57,8 @@
 
 namespace JSC {
 
-StructureAlignedMemoryAllocator::StructureAlignedMemoryAllocator(CString name)
-    : Base(name)
-{
-}
-
-StructureAlignedMemoryAllocator::~StructureAlignedMemoryAllocator()
-{
-    releaseMemoryFromSubclassDestructor();
-}
+StructureAlignedMemoryAllocator::StructureAlignedMemoryAllocator() = default;
+StructureAlignedMemoryAllocator::~StructureAlignedMemoryAllocator() = default;
 
 void StructureAlignedMemoryAllocator::dump(PrintStream& out) const
 {
@@ -70,51 +82,94 @@ void* StructureAlignedMemoryAllocator::tryReallocateMemory(void*, size_t)
     RELEASE_ASSERT_NOT_REACHED();
 }
 
-#if CPU(ADDRESS64)
+#if CPU(ADDRESS64) && !ENABLE(STRUCTURE_ID_WITH_SHIFT)
+#if !USE(SYSTEM_MALLOC)
+
+static const bmalloc_type structureHeapType { BMALLOC_TYPE_INITIALIZER(MarkedBlock::blockSize, MarkedBlock::blockSize, "Structure Heap") };
+static pas_primitive_heap_ref structureHeap { BMALLOC_AUXILIARY_HEAP_REF_INITIALIZER(&structureHeapType, pas_bmalloc_heap_ref_kind_compact) };
+
+#endif
 
 class StructureMemoryManager {
 public:
     StructureMemoryManager()
     {
-        // Don't use the first page because zero is used as the empty StructureID and the first allocation will conflict.
-        m_usedBlocks.set(0);
-
-        m_mappedHeapSize = structureHeapAddressSize;
+        static_assert(hasOneBitSet(structureHeapAddressSize));
+        uintptr_t mappedHeapSize = structureHeapAddressSize;
         for (unsigned i = 0; i < 8; ++i) {
-            g_jscConfig.startOfStructureHeap = reinterpret_cast<uintptr_t>(OSAllocator::tryReserveUncommittedAligned(m_mappedHeapSize, structureHeapAddressSize, OSAllocator::FastMallocPages));
+            g_jscConfig.startOfStructureHeap = reinterpret_cast<uintptr_t>(OSAllocator::tryReserveUncommittedAligned(mappedHeapSize, structureHeapAddressSize, OSAllocator::FastMallocPages));
             if (g_jscConfig.startOfStructureHeap)
                 break;
-            m_mappedHeapSize /= 2;
+            mappedHeapSize /= 2;
         }
+        g_jscConfig.sizeOfStructureHeap = mappedHeapSize;
+        RELEASE_ASSERT(g_jscConfig.startOfStructureHeap && ((g_jscConfig.startOfStructureHeap & ~StructureID::structureIDMask) == g_jscConfig.startOfStructureHeap));
 
-        RELEASE_ASSERT(g_jscConfig.startOfStructureHeap && ((g_jscConfig.startOfStructureHeap & ~structureIDMask) == g_jscConfig.startOfStructureHeap));
+        // Don't use the first page because zero is used as the empty StructureID and the first allocation will conflict.
+#if !USE(SYSTEM_MALLOC)
+        m_useSystemHeap = !bmalloc::api::isEnabled();
+        if (!m_useSystemHeap) [[likely]] {
+#if OS(WINDOWS)
+            // libpas isn't calling pas_page_malloc commit, so we've got to commit the region ourselves
+            // https://bugs.webkit.org/show_bug.cgi?id=292771
+            OSAllocator::commit((void *) g_jscConfig.startOfStructureHeap, MarkedBlock::blockSize, true, false);
+#endif
+            bmalloc_force_auxiliary_heap_into_reserved_memory(&structureHeap, reinterpret_cast<uintptr_t>(g_jscConfig.startOfStructureHeap) + MarkedBlock::blockSize, reinterpret_cast<uintptr_t>(g_jscConfig.startOfStructureHeap) + g_jscConfig.sizeOfStructureHeap);
+            return;
+    }
+#endif
+        m_usedBlocks.set(0);
     }
 
     void* tryMallocStructureBlock()
     {
+#if !USE(SYSTEM_MALLOC)
+#if OS(WINDOWS)
+        if (!m_useSystemHeap) [[likely]] {
+            void* result = bmalloc_try_allocate_auxiliary_with_alignment_inline(&structureHeap, MarkedBlock::blockSize, MarkedBlock::blockSize, pas_maybe_compact_allocation_mode);
+
+            // libpas isn't calling pas_page_malloc commit, so we've got to commit the region ourselves
+            // https://bugs.webkit.org/show_bug.cgi?id=292771
+            OSAllocator::commit(result, MarkedBlock::blockSize, true, false);
+            return result;
+        }
+#else
+        if (!m_useSystemHeap) [[likely]]
+            return bmalloc_try_allocate_auxiliary_with_alignment_inline(&structureHeap, MarkedBlock::blockSize, MarkedBlock::blockSize, pas_always_compact_allocation_mode);
+#endif
+#endif
+
         size_t freeIndex;
         {
             Locker locker(m_lock);
             constexpr size_t startIndex = 0;
             freeIndex = m_usedBlocks.findBit(startIndex, 0);
             ASSERT(freeIndex <= m_usedBlocks.bitCount());
-            RELEASE_ASSERT(m_mappedHeapSize <= structureHeapAddressSize);
-            if (freeIndex * MarkedBlock::blockSize >= m_mappedHeapSize)
+            RELEASE_ASSERT(g_jscConfig.sizeOfStructureHeap <= structureHeapAddressSize);
+            if (freeIndex * MarkedBlock::blockSize >= g_jscConfig.sizeOfStructureHeap)
                 return nullptr;
             // If we can't find a free block then `freeIndex == m_usedBlocks.bitCount()` and this set will grow the bit vector.
             m_usedBlocks.set(freeIndex);
         }
-
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
         auto* block = reinterpret_cast<uint8_t*>(g_jscConfig.startOfStructureHeap) + freeIndex * MarkedBlock::blockSize;
+WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
         commitBlock(block);
         return block;
     }
 
     void freeStructureBlock(void* blockPtr)
     {
+#if !USE(SYSTEM_MALLOC)
+        if (!m_useSystemHeap) [[likely]] {
+            bmalloc_deallocate_inline(blockPtr);
+            return;
+        }
+#endif
+
         decommitBlock(blockPtr);
         uintptr_t block = reinterpret_cast<uintptr_t>(blockPtr);
-        RELEASE_ASSERT(g_jscConfig.startOfStructureHeap <= block && block < g_jscConfig.startOfStructureHeap + m_mappedHeapSize);
+        RELEASE_ASSERT(g_jscConfig.startOfStructureHeap <= block && block < g_jscConfig.startOfStructureHeap + g_jscConfig.sizeOfStructureHeap);
         RELEASE_ASSERT(roundUpToMultipleOf<MarkedBlock::blockSize>(block) == block);
 
         Locker locker(m_lock);
@@ -123,8 +178,10 @@ public:
 
     static void commitBlock(void* block)
     {
-#if OS(UNIX) && ASSERT_ENABLED
-        mprotect(block, MarkedBlock::blockSize, PROT_READ | PROT_WRITE);
+#if OS(UNIX) && !PLATFORM(PLAYSTATION) && ASSERT_ENABLED
+        constexpr bool readable = true;
+        constexpr bool writable = true;
+        OSAllocator::protect(block, MarkedBlock::blockSize, readable, writable);
 #else
         constexpr bool writable = true;
         constexpr bool executable = false;
@@ -134,9 +191,10 @@ public:
 
     static void decommitBlock(void* block)
     {
-#if OS(UNIX) && ASSERT_ENABLED
-        // Release the page so we'll crash in debug if we read out of bounds rather than get a fresh page.
-        mprotect(block, MarkedBlock::blockSize, PROT_NONE);
+#if OS(UNIX) && !PLATFORM(PLAYSTATION) && ASSERT_ENABLED
+        constexpr bool readable = false;
+        constexpr bool writable = false;
+        OSAllocator::protect(block, MarkedBlock::blockSize, readable, writable);
 #else
         OSAllocator::decommit(block, MarkedBlock::blockSize);
 #endif
@@ -144,68 +202,51 @@ public:
 
 private:
     Lock m_lock;
-    size_t m_mappedHeapSize;
+#if !USE(SYSTEM_MALLOC)
+    bool m_useSystemHeap { true };
+#endif
     BitVector m_usedBlocks;
 };
 
 static LazyNeverDestroyed<StructureMemoryManager> s_structureMemoryManager;
 
-void StructureAlignedMemoryAllocator::initializeStructureAddressSpace()
+void* StructureAlignedMemoryAllocator::tryAllocateAlignedMemory(size_t alignment, size_t size)
 {
-    static_assert(hasOneBitSet(structureHeapAddressSize));
-    s_structureMemoryManager.construct();
-}
-
-void* StructureAlignedMemoryAllocator::tryMallocBlock()
-{
+    ASSERT_UNUSED(alignment, alignment == MarkedBlock::blockSize);
+    ASSERT_UNUSED(size, size == MarkedBlock::blockSize);
     return s_structureMemoryManager->tryMallocStructureBlock();
 }
 
-void StructureAlignedMemoryAllocator::freeBlock(void* block)
+void StructureAlignedMemoryAllocator::freeAlignedMemory(void* block)
 {
     s_structureMemoryManager->freeStructureBlock(block);
 }
 
-void StructureAlignedMemoryAllocator::commitBlock(void* block)
+void StructureAlignedMemoryAllocator::initializeStructureAddressSpace()
 {
-    StructureMemoryManager::commitBlock(block);
-}
-
-void StructureAlignedMemoryAllocator::decommitBlock(void* block)
-{
-    StructureMemoryManager::decommitBlock(block);
+    s_structureMemoryManager.construct();
 }
 
 #else // not CPU(ADDRESS64)
 
-// FIXME: This is the same as IsoAlignedMemoryAllocator maybe we should just use that for 32-bit.
-
 void StructureAlignedMemoryAllocator::initializeStructureAddressSpace()
 {
     g_jscConfig.startOfStructureHeap = 0;
+    g_jscConfig.sizeOfStructureHeap = UINTPTR_MAX;
 }
 
-void* StructureAlignedMemoryAllocator::tryMallocBlock()
+void* StructureAlignedMemoryAllocator::tryAllocateAlignedMemory(size_t alignment, size_t size)
 {
-    return tryFastAlignedMalloc(MarkedBlock::blockSize, MarkedBlock::blockSize);
+    ASSERT_UNUSED(alignment, alignment == MarkedBlock::blockSize);
+    ASSERT_UNUSED(size, size == MarkedBlock::blockSize);
+    return tryFastCompactAlignedMalloc(MarkedBlock::blockSize, MarkedBlock::blockSize);
 }
 
-void StructureAlignedMemoryAllocator::freeBlock(void* block)
+void StructureAlignedMemoryAllocator::freeAlignedMemory(void* block)
 {
     fastAlignedFree(block);
-}
-
-void StructureAlignedMemoryAllocator::commitBlock(void* block)
-{
-    WTF::fastCommitAlignedMemory(block, MarkedBlock::blockSize);
-}
-
-void StructureAlignedMemoryAllocator::decommitBlock(void* block)
-{
-    WTF::fastDecommitAlignedMemory(block, MarkedBlock::blockSize);
 }
 
 #endif // CPU(ADDRESS64)
 
 } // namespace JSC
-

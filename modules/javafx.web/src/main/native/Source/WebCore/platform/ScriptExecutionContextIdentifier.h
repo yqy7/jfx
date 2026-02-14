@@ -32,16 +32,11 @@
 namespace WebCore {
 
 template <>
-class ProcessQualified<UUID> {
+class ProcessQualified<WTF::UUID> {
 public:
-    static ProcessQualified generate() { return { UUID::createVersion4(), Process::identifier() }; }
+    static ProcessQualified generate() { return { WTF::UUID::createVersion4Weak(), Process::identifier() }; }
 
-    ProcessQualified()
-        : m_object(UUID::emptyValue)
-    {
-    }
-
-    ProcessQualified(UUID object, ProcessIdentifier processIdentifier)
+    ProcessQualified(WTF::UUID object, ProcessIdentifier processIdentifier)
         : m_object(WTFMove(object))
         , m_processIdentifier(processIdentifier)
     {
@@ -53,16 +48,14 @@ public:
     {
     }
 
-    operator bool() const { return !!m_object; }
+    explicit operator bool() const { return !!m_object; }
 
-    const UUID& object() const { return m_object; }
+    const WTF::UUID& object() const { return m_object; }
     ProcessIdentifier processIdentifier() const { return m_processIdentifier; }
 
-    unsigned hash() const { return m_object.hash(); }
     bool isHashTableDeletedValue() const { return m_processIdentifier.isHashTableDeletedValue(); }
 
-    bool operator==(const ProcessQualified& other) const { return m_object == other.m_object && m_processIdentifier == other.m_processIdentifier; }
-    bool operator!=(const ProcessQualified& other) const { return !(*this == other); }
+    friend bool operator==(const ProcessQualified&, const ProcessQualified&) = default;
 
     String toString() const { return m_object.toString(); }
 
@@ -70,13 +63,19 @@ public:
     template<typename Decoder> static std::optional<ProcessQualified> decode(Decoder&);
 
 private:
-    UUID m_object;
+    WTF::UUID m_object;
     ProcessIdentifier m_processIdentifier;
 };
 
-template<typename Decoder> std::optional<ProcessQualified<UUID>> ProcessQualified<UUID>::decode(Decoder& decoder)
+inline void add(Hasher& hasher, const ProcessQualified<WTF::UUID>& uuid)
 {
-    std::optional<UUID> object;
+    // Since UUIDs are unique on their own, optimize by not hashing the process identifier.
+    add(hasher, uuid.object());
+}
+
+template<typename Decoder> std::optional<ProcessQualified<WTF::UUID>> ProcessQualified<WTF::UUID>::decode(Decoder& decoder)
+{
+    std::optional<WTF::UUID> object;
     decoder >> object;
     if (!object)
         return std::nullopt;
@@ -88,22 +87,23 @@ template<typename Decoder> std::optional<ProcessQualified<UUID>> ProcessQualifie
 }
 
 template <>
-inline TextStream& operator<<(TextStream& ts, const ProcessQualified<UUID>& processQualified)
+inline TextStream& operator<<(TextStream& ts, const ProcessQualified<WTF::UUID>& processQualified)
 {
-    ts << "ProcessQualified(" << processQualified.processIdentifier().toUInt64() << '-' << processQualified.object().toString() << ')';
+    ts << "ProcessQualified("_s << processQualified.processIdentifier().toUInt64() << '-' << processQualified.object().toString() << ')';
     return ts;
 }
 
-using ScriptExecutionContextIdentifier = ProcessQualified<UUID>;
+using ScriptExecutionContextIdentifier = ProcessQualified<WTF::UUID>;
 
-}
+} // namespace WebCore
 
 namespace WTF {
 
-template<>
-inline uint32_t computeHash(const WebCore::ScriptExecutionContextIdentifier& identifier)
-{
-    return identifier.object().hash();
-}
 
-}
+template<>
+struct MarkableTraits<WebCore::ProcessQualified<UUID>> {
+    static bool isEmptyValue(const WebCore::ProcessQualified<UUID>& identifier) { return MarkableTraits<UUID>::isEmptyValue(identifier.object()); }
+    static WebCore::ProcessQualified<UUID> emptyValue() { return { MarkableTraits<UUID>::emptyValue(), MarkableTraits<WebCore::ProcessIdentifier>::emptyValue() }; }
+};
+
+} // namespace WTF

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,9 @@
 
 package test.javafx.stage;
 
-import com.sun.javafx.PlatformUtil;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
@@ -34,20 +36,15 @@ import javafx.scene.layout.VBox;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.stage.WindowEvent;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
-
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-import static org.junit.Assert.fail;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assume.assumeTrue;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import com.sun.javafx.PlatformUtil;
+import test.util.Util;
 
 public class StageAtTopPositionTest {
-    static CountDownLatch startupLatch;
+    static CountDownLatch startupLatch = new CountDownLatch(1);
     static Stage stage;
 
     public static void main(String[] args) throws Exception {
@@ -76,12 +73,14 @@ public class StageAtTopPositionTest {
         }
     }
 
-    @BeforeClass
-    public static void initFX() throws Exception {
-        startupLatch = new CountDownLatch(1);
-        new Thread(() -> Application.launch(TestApp.class, (String[])null)).start();
-        assertTrue("Timeout waiting for FX runtime to start",
-                   startupLatch.await(15, TimeUnit.SECONDS));
+    @BeforeAll
+    public static void initFX() {
+        Util.launch(startupLatch, TestApp.class);
+    }
+
+    @AfterAll
+    public static void teardown() {
+        Util.shutdown();
     }
 
     @Test
@@ -90,8 +89,8 @@ public class StageAtTopPositionTest {
         assumeTrue(PlatformUtil.isMac());
 
         Thread.sleep(200);
-        Assert.assertTrue(stage.isShowing());
-        Assert.assertFalse(stage.isFullScreen());
+        Assertions.assertTrue(stage.isShowing());
+        Assertions.assertFalse(stage.isFullScreen());
 
         final double minY = Screen.getPrimary().getVisualBounds().getMinY(); // Mac's system menubar height
 
@@ -106,19 +105,13 @@ public class StageAtTopPositionTest {
         // move once to y=0, gets moved to yMin
         Platform.runLater(() -> stage.setY(0));
         Thread.sleep(200);
-        Assert.assertEquals("Window was moved once", minY, stage.getY(), 0.1);
+        Assertions.assertEquals(minY, stage.getY(), 0.1, "Window was moved once");
 
         // move again to y=0, remains at yMin
         Platform.runLater(() -> stage.setY(0));
         latch.await(5, TimeUnit.SECONDS);
         stage.xProperty().removeListener(listenerY);
 
-        Assert.assertEquals("Window was moved twice", minY, stage.getY(), 0.1);
-    }
-
-    @AfterClass
-    public static void teardown() {
-        Platform.runLater(stage::hide);
-        Platform.exit();
+        Assertions.assertEquals(minY, stage.getY(), 0.1, "Window was moved twice");
     }
 }

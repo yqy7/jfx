@@ -22,6 +22,7 @@
 
 #include "Decimal.h"
 #include <wtf/Forward.h>
+#include <wtf/TZoneMalloc.h>
 
 namespace WebCore {
 
@@ -30,6 +31,7 @@ enum class AnyStepHandling : bool { Reject, Default };
 enum class RangeLimitations : bool { Valid, Invalid };
 
 class StepRange {
+    WTF_MAKE_TZONE_ALLOCATED(StepRange);
 public:
     enum StepValueShouldBe {
         StepValueShouldBeReal,
@@ -38,7 +40,7 @@ public:
     };
 
     struct StepDescription {
-        WTF_MAKE_FAST_ALLOCATED;
+        WTF_MAKE_TZONE_ALLOCATED(StepDescription);
     public:
         int defaultStep { 1 };
         int defaultStepBase { 0 };
@@ -74,7 +76,7 @@ public:
     Decimal maximum() const { return m_maximum; }
     Decimal minimum() const { return m_minimum; }
     Decimal stepSnappedMaximum() const;
-    static Decimal parseStep(AnyStepHandling, const StepDescription&, const String&);
+    static Decimal parseStep(AnyStepHandling, const StepDescription&, StringView);
     Decimal step() const { return m_step; }
     Decimal stepBase() const { return m_stepBase; }
     int stepScaleFactor() const { return m_stepDescription.stepScaleFactor; }

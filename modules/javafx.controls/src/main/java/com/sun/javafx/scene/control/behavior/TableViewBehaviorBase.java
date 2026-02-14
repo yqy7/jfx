@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,23 +25,29 @@
 
 package com.sun.javafx.scene.control.behavior;
 
-import com.sun.javafx.scene.control.SizeLimitedList;
+import static javafx.scene.input.KeyCode.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.collections.WeakListChangeListener;
 import javafx.event.EventHandler;
 import javafx.geometry.NodeOrientation;
-import javafx.scene.control.*;
-import com.sun.javafx.scene.control.inputmap.InputMap;
-import com.sun.javafx.scene.control.inputmap.KeyBinding;
+import javafx.scene.control.Control;
+import javafx.scene.control.SelectionMode;
+import javafx.scene.control.TableColumnBase;
+import javafx.scene.control.TableFocusModel;
+import javafx.scene.control.TablePositionBase;
+import javafx.scene.control.TableSelectionModel;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseEvent;
 import javafx.util.Callback;
-import java.util.ArrayList;
-import java.util.List;
 import com.sun.javafx.PlatformUtil;
-import static javafx.scene.input.KeyCode.*;
-import static com.sun.javafx.scene.control.inputmap.InputMap.KeyMapping;
+import com.sun.javafx.scene.control.SizeLimitedList;
+import com.sun.javafx.scene.control.inputmap.InputMap;
+import com.sun.javafx.scene.control.inputmap.InputMap.KeyMapping;
+import com.sun.javafx.scene.control.inputmap.KeyBinding;
 
 public abstract class TableViewBehaviorBase<C extends Control, T, TC extends TableColumnBase<T,?>> extends BehaviorBase<C> {
 
@@ -60,7 +66,7 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
 
     private final EventHandler<KeyEvent> keyEventListener = e -> {
         if (!e.isConsumed()) {
-            // RT-12751: we want to keep an eye on the user holding down the shift key,
+            // JDK-8114799: we want to keep an eye on the user holding down the shift key,
             // so that we know when they enter/leave multiple selection mode. This
             // changes what happens when certain key combinations are pressed.
             isShiftDown = e.getEventType() == KeyEvent.KEY_PRESSED && e.isShiftDown();
@@ -68,13 +74,17 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
         }
     };
 
-    private final SizeLimitedList<TablePositionBase> selectionHistory = new SizeLimitedList<>(10);
+    private final SizeLimitedList<TablePositionBase> selectionHistory = new SizeLimitedList<>(50);
 
     protected final ListChangeListener<TablePositionBase> selectedCellsListener = c -> {
         while (c.next()) {
             if (c.wasReplaced()) {
                 if (TreeTableCellBehavior.hasDefaultAnchor(getNode())) {
                     TreeTableCellBehavior.removeAnchor(getNode());
+                }
+                if (selectionHistory.size() > 0) {
+                    // whenever the selection is replaced, reset the selection history
+                    resetSelectionHistory();
                 }
             }
 
@@ -118,7 +128,7 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
     };
 
     protected final WeakListChangeListener<TablePositionBase> weakSelectedCellsListener =
-            new WeakListChangeListener<TablePositionBase>(selectedCellsListener);
+            new WeakListChangeListener<>(selectedCellsListener);
 
 
 
@@ -150,6 +160,11 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
                 new KeyMapping(KP_LEFT,e -> { if(isRTL()) selectRightCell(); else selectLeftCell(); }),
                 new KeyMapping(RIGHT, e -> { if(isRTL()) selectLeftCell(); else selectRightCell(); }),
                 new KeyMapping(KP_RIGHT, e -> { if(isRTL()) selectLeftCell(); else selectRightCell(); }),
+
+                new KeyMapping(new KeyBinding(RIGHT).shortcut().alt(), e -> horizontalUnitScroll(true)),
+                new KeyMapping(new KeyBinding(LEFT).shortcut().alt(), e -> horizontalUnitScroll(false)),
+                new KeyMapping(new KeyBinding(UP).shortcut().alt(), e -> verticalUnitScroll(false)),
+                new KeyMapping(new KeyBinding(DOWN).shortcut().alt(), e -> verticalUnitScroll(true)),
 
                 new KeyMapping(UP, e -> selectPreviousRow()),
                 new KeyMapping(KP_UP, e -> selectPreviousRow()),
@@ -253,7 +268,7 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
      */
     protected void setAnchor(TablePositionBase tp) {
         TableCellBehaviorBase.setAnchor(getNode(), tp, false);
-        setSelectionPathDeviated(false);
+        resetSelectionHistory();
     }
 
     /**
@@ -405,6 +420,26 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
     private Runnable onFocusLeftCell;
     public void setOnFocusLeftCell(Runnable r) { onFocusLeftCell = r; }
 
+    @Override
+    public void dispose() {
+        onScrollPageUp = null;
+        onScrollPageDown = null;
+        onFocusPreviousRow = null;
+        onFocusNextRow = null;
+        onSelectPreviousRow = null;
+        onSelectNextRow = null;
+        onMoveToFirstCell = null;
+        onMoveToLastCell = null;
+        onSelectRightCell = null;
+        onSelectLeftCell = null;
+        onFocusRightCell = null;
+        onFocusLeftCell = null;
+        onHorizontalUnitScroll = null;
+        onVerticalUnitScroll = null;
+
+        super.dispose();
+    }
+
     public void mousePressed(MouseEvent e) {
 //        // FIXME can't assume (yet) cells.get(0) is necessarily the lead cell
 //        ObservableList<? extends TablePositionBase> cells = getSelectedCells();
@@ -428,6 +463,12 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
 
     private void setSelectionPathDeviated(boolean selectionPathDeviated) {
         this.selectionPathDeviated = selectionPathDeviated;
+    }
+
+    private void resetSelectionHistory() {
+        setSelectionPathDeviated(false);
+        selectionHistory.clear();
+        selectionHistory.add(getAnchor());
     }
 
     protected void scrollUp() {
@@ -574,7 +615,7 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
         int min = Math.min(start, end);
         int max = Math.max(start, end);
 
-        List<Integer> indices = new ArrayList<Integer>(sm.getSelectedIndices());
+        List<Integer> indices = new ArrayList<>(sm.getSelectedIndices());
 
         selectionChanging = true;
         for (int i = 0; i < indices.size(); i++) {
@@ -706,6 +747,9 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
                     (backtracking ? focusedCellRow : newFocusOwner) :
                     focusedCellRow;
 
+            // remove deselected cell from selection history, if present
+            selectionHistory.removeIf(i -> i.getRow() == cellRowToClear && i.getColumn() == focusedCell.getColumn());
+
             sm.clearSelection(cellRowToClear, focusedCell.getTableColumn());
             fm.focus(newFocusOwner, focusedCell.getTableColumn());
         } else if (isShiftDown && getAnchor() != null && ! selectionPathDeviated) {
@@ -765,9 +809,8 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
 
             // work out if we're backtracking
             boolean backtracking = false;
-            ObservableList<? extends TablePositionBase> selectedCells = getSelectedCells();
-            if (selectedCells.size() >= 2) {
-                TablePositionBase<TC> secondToLastSelectedCell = selectedCells.get(selectedCells.size() - 2);
+            if (selectionHistory.size() >= 2) {
+                TablePositionBase<TC> secondToLastSelectedCell = selectionHistory.get(1);
                 backtracking = secondToLastSelectedCell.getRow() == focusedCellRow &&
                         secondToLastSelectedCell.getTableColumn().equals(adjacentColumn);
             }
@@ -777,6 +820,9 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
             TableColumnBase<?,?> cellColumnToClear = selectionPathDeviated ?
                     (backtracking ? focusedCell.getTableColumn() : adjacentColumn) :
                     focusedCell.getTableColumn();
+
+            // remove deselected cell from selection history, if present
+            selectionHistory.removeIf(i -> i.getRow() == focusedCellRow && i.getTableColumn().equals(cellColumnToClear));
 
             sm.clearSelection(focusedCellRow, cellColumnToClear);
             fm.focus(focusedCellRow, adjacentColumn);
@@ -1044,7 +1090,7 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
             if (sm.isCellSelectionEnabled()) {
                 sm.selectRange(leadIndex, col, leadSelectedIndex, col);
             } else {
-                // fix for RT-34407
+                // fix for JDK-8097503
                 int adjust = leadIndex < leadSelectedIndex ? 1 : -1;
                 sm.selectRange(leadIndex, leadSelectedIndex + adjust);
             }
@@ -1081,7 +1127,7 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
             if (sm.isCellSelectionEnabled()) {
                 sm.selectRange(leadIndex, col, leadSelectedIndex, col);
             } else {
-                // fix for RT-34407
+                // fix for JDK-8097503
                 int adjust = leadIndex < leadSelectedIndex ? 1 : -1;
                 sm.selectRange(leadIndex, leadSelectedIndex + adjust);
             }
@@ -1114,7 +1160,7 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
     // be re-enabled then.
     /*
     protected void moveToLeftMostColumn() {
-        // Functionality as described in RT-12752
+        // Functionality as described in JDK-8112552
         if (onMoveToLeftMostColumn != null) onMoveToLeftMostColumn.run();
 
         TableSelectionModel sm = getSelectionModel();
@@ -1130,7 +1176,7 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
     }
 
     protected void moveToRightMostColumn() {
-        // Functionality as described in RT-12752
+        // Functionality as described in JDK-8112552
         if (onMoveToRightMostColumn != null) onMoveToRightMostColumn.run();
 
         TableSelectionModel sm = getSelectionModel();
@@ -1321,5 +1367,28 @@ public abstract class TableViewBehaviorBase<C extends Control, T, TC extends Tab
 
     private EventHandler<KeyEvent> focusTraverseRight() {
         return FocusTraversalInputMap::traverseRight;
+    }
+
+    private Consumer<Boolean> onHorizontalUnitScroll;
+    private Consumer<Boolean> onVerticalUnitScroll;
+
+    public void setOnHorizontalUnitScroll(Consumer<Boolean> f) {
+        onHorizontalUnitScroll = f;
+    }
+
+    public void setOnVerticalUnitScroll(Consumer<Boolean> f) {
+        onVerticalUnitScroll = f;
+    }
+
+    private void horizontalUnitScroll(boolean right) {
+        if (onHorizontalUnitScroll != null) {
+            onHorizontalUnitScroll.accept(right);
+        }
+    }
+
+    private void verticalUnitScroll(boolean down) {
+        if (onVerticalUnitScroll != null) {
+            onVerticalUnitScroll.accept(down);
+        }
     }
 }

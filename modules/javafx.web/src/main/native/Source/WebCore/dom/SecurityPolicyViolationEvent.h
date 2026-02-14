@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2013 Google Inc. All rights reserved.
- * Copyright (C) 2016-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2022 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,13 +26,13 @@
 #pragma once
 
 #include "Event.h"
+#include "SecurityPolicyViolationEventDisposition.h"
 
 namespace WebCore {
 
-enum class SecurityPolicyViolationEventDisposition : bool { Enforce, Report };
-
 struct SecurityPolicyViolationEventInit : EventInit {
-    SecurityPolicyViolationEventInit() { }
+    SecurityPolicyViolationEventInit() = default;
+    WEBCORE_EXPORT SecurityPolicyViolationEventInit(EventInit&&, String&& documentURI, String&& referrer, String&& blockedURI, String&& violatedDirective, String&& effectiveDirective, String&& originalPolicy, String&& sourceFile, String&& sample, SecurityPolicyViolationEventDisposition, unsigned short statusCode, unsigned lineNumber, unsigned columnNumber);
 
     String documentURI;
     String referrer;
@@ -46,13 +46,10 @@ struct SecurityPolicyViolationEventInit : EventInit {
     unsigned short statusCode { 0 };
     unsigned lineNumber { 0 };
     unsigned columnNumber { 0 };
-
-    template<class Encoder> void encode(Encoder&) const;
-    template<class Decoder> static WARN_UNUSED_RETURN bool decode(Decoder&, SecurityPolicyViolationEventInit&);
 };
 
 class SecurityPolicyViolationEvent final : public Event {
-    WTF_MAKE_ISO_ALLOCATED(SecurityPolicyViolationEvent);
+    WTF_MAKE_TZONE_OR_ISO_ALLOCATED(SecurityPolicyViolationEvent);
 public:
     using Disposition = SecurityPolicyViolationEventDisposition;
     using Init = SecurityPolicyViolationEventInit;
@@ -75,15 +72,14 @@ public:
     unsigned lineNumber() const { return m_lineNumber; }
     unsigned columnNumber() const { return m_columnNumber; }
 
-    EventInterface eventInterface() const final { return SecurityPolicyViolationEventInterfaceType; }
-
 private:
     SecurityPolicyViolationEvent()
+        : Event(EventInterfaceType::SecurityPolicyViolationEvent)
     {
     }
 
     SecurityPolicyViolationEvent(const AtomString& type, const Init& initializer, IsTrusted isTrusted)
-        : Event(type, initializer, isTrusted)
+        : Event(EventInterfaceType::SecurityPolicyViolationEvent, type, initializer, isTrusted)
         , m_documentURI(initializer.documentURI)
         , m_referrer(initializer.referrer)
         , m_blockedURI(initializer.blockedURI)
@@ -113,66 +109,4 @@ private:
     unsigned m_columnNumber;
 };
 
-template<class Encoder>
-void SecurityPolicyViolationEventInit::encode(Encoder& encoder) const
-{
-    encoder << static_cast<const EventInit&>(*this);
-    encoder << documentURI;
-    encoder << referrer;
-    encoder << blockedURI;
-    encoder << violatedDirective;
-    encoder << effectiveDirective;
-    encoder << originalPolicy;
-    encoder << sourceFile;
-    encoder << sample;
-    encoder << disposition;
-    encoder << statusCode;
-    encoder << lineNumber;
-    encoder << columnNumber;
-}
-
-template<class Decoder>
-bool SecurityPolicyViolationEventInit::decode(Decoder& decoder, SecurityPolicyViolationEventInit& eventInit)
-{
-    if (!decoder.decode(static_cast<EventInit&>(eventInit)))
-        return false;
-    if (!decoder.decode(eventInit.documentURI))
-        return false;
-    if (!decoder.decode(eventInit.referrer))
-        return false;
-    if (!decoder.decode(eventInit.blockedURI))
-        return false;
-    if (!decoder.decode(eventInit.violatedDirective))
-        return false;
-    if (!decoder.decode(eventInit.effectiveDirective))
-        return false;
-    if (!decoder.decode(eventInit.originalPolicy))
-        return false;
-    if (!decoder.decode(eventInit.sourceFile))
-        return false;
-    if (!decoder.decode(eventInit.sample))
-        return false;
-    if (!decoder.decode(eventInit.disposition))
-        return false;
-    if (!decoder.decode(eventInit.statusCode))
-        return false;
-    if (!decoder.decode(eventInit.lineNumber))
-        return false;
-    if (!decoder.decode(eventInit.columnNumber))
-        return false;
-    return true;
-}
-
 } // namespace WebCore
-
-namespace WTF {
-
-template<> struct EnumTraits<WebCore::SecurityPolicyViolationEventDisposition> {
-    using values = EnumValues<
-    WebCore::SecurityPolicyViolationEventDisposition,
-    WebCore::SecurityPolicyViolationEventDisposition::Enforce,
-    WebCore::SecurityPolicyViolationEventDisposition::Report
-    >;
-};
-
-}

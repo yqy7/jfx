@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Apple Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,10 +30,20 @@
 #include "RealtimeMediaSource.h"
 #include "SpeechRecognitionConnectionClientIdentifier.h"
 #include <wtf/Lock.h>
+#include <wtf/TZoneMalloc.h>
 
 #if PLATFORM(COCOA)
 #include "AudioSampleDataSource.h"
 #endif
+
+namespace WebCore {
+class SpeechRecognitionCaptureSourceImpl;
+}
+
+namespace WTF {
+template<typename T> struct IsDeprecatedWeakRefSmartPointerException;
+template<> struct IsDeprecatedWeakRefSmartPointerException<WebCore::SpeechRecognitionCaptureSourceImpl> : std::true_type { };
+}
 
 namespace WTF {
 class MediaTime;
@@ -44,29 +54,36 @@ namespace WebCore {
 class AudioStreamDescription;
 class PlatformAudioData;
 class SpeechRecognitionUpdate;
-enum class SpeechRecognitionUpdateType;
+enum class SpeechRecognitionUpdateType : uint8_t;
 
-class SpeechRecognitionCaptureSourceImpl
-    : public RealtimeMediaSource::Observer
-    , public RealtimeMediaSource::AudioSampleObserver {
-    WTF_MAKE_FAST_ALLOCATED;
+class SpeechRecognitionCaptureSourceImpl final
+    : public RealtimeMediaSourceObserver
+    , public RealtimeMediaSource::AudioSampleObserver
+    , public CanMakeCheckedPtr<SpeechRecognitionCaptureSourceImpl> {
+    WTF_MAKE_TZONE_ALLOCATED(SpeechRecognitionCaptureSourceImpl);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(SpeechRecognitionCaptureSourceImpl);
 public:
-    using DataCallback = Function<void(const MediaTime&, const PlatformAudioData&, const AudioStreamDescription&, size_t)>;
+    using DataCallback = Function<void(const WTF::MediaTime&, const PlatformAudioData&, const AudioStreamDescription&, size_t)>;
     using StateUpdateCallback = Function<void(const SpeechRecognitionUpdate&)>;
     SpeechRecognitionCaptureSourceImpl(SpeechRecognitionConnectionClientIdentifier, DataCallback&&, StateUpdateCallback&&, Ref<RealtimeMediaSource>&&);
     ~SpeechRecognitionCaptureSourceImpl();
     void mute();
 
+    // CheckedPtr interface
+    uint32_t checkedPtrCount() const final { return CanMakeCheckedPtr::checkedPtrCount(); }
+    uint32_t checkedPtrCountWithoutThreadCheck() const final { return CanMakeCheckedPtr::checkedPtrCountWithoutThreadCheck(); }
+    void incrementCheckedPtrCount() const final { CanMakeCheckedPtr::incrementCheckedPtrCount(); }
+    void decrementCheckedPtrCount() const final { CanMakeCheckedPtr::decrementCheckedPtrCount(); }
+
 private:
     // RealtimeMediaSource::AudioSampleObserver
-    void audioSamplesAvailable(const MediaTime&, const PlatformAudioData&, const AudioStreamDescription&, size_t) final;
+    void audioSamplesAvailable(const WTF::MediaTime&, const PlatformAudioData&, const AudioStreamDescription&, size_t) final;
 
 #if PLATFORM(COCOA)
-    bool updateDataSource(const CAAudioStreamDescription&);
-    void pullSamplesAndCallDataCallback(const MediaTime&, const CAAudioStreamDescription&, size_t sampleCount);
+    void pullSamplesAndCallDataCallback(AudioSampleDataSource*, const WTF::MediaTime&, const CAAudioStreamDescription&, size_t sampleCount);
 #endif
 
-    // RealtimeMediaSource::Observer
+    // RealtimeMediaSourceObserver
     void sourceStarted() final;
     void sourceStopped() final;
     void sourceMutedChanged() final;
@@ -74,7 +91,7 @@ private:
     SpeechRecognitionConnectionClientIdentifier m_clientIdentifier;
     DataCallback m_dataCallback;
     StateUpdateCallback m_stateUpdateCallback;
-    Ref<RealtimeMediaSource> m_source;
+    const Ref<RealtimeMediaSource> m_source;
 
 #if PLATFORM(COCOA)
     RefPtr<AudioSampleDataSource> m_dataSource WTF_GUARDED_BY_LOCK(m_dataSourceLock);

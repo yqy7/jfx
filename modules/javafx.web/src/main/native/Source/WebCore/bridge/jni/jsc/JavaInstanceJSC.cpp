@@ -128,7 +128,8 @@ JSValue JavaInstance::stringValue(JSGlobalObject* globalObject) const
     jstring stringValue = (jstring) result.l;
     JNIEnv* env = getJNIEnv();
     const jchar* c = getUCharactersFromJStringInEnv(env, stringValue);
-    String u((const UChar*)c, (int)env->GetStringLength(stringValue));
+    std::span<const UChar> createSpan(reinterpret_cast<const UChar*>(c), (int)env->GetStringLength(stringValue));
+    String u(createSpan);
     releaseUCharactersForJStringInEnv(env, stringValue, c);
     return jsString(vm, u);
 }
@@ -176,7 +177,7 @@ JSValue JavaInstance::numberValue(JSGlobalObject*) const
         return numberValueForCharacter(obj);
     if (aClass->isBooleanClass())
         return jsNumber((int)
-                        // Replaced the following line to work around possible GCC bug, see RT-22725
+                        // Replaced the following line to work around possible GCC bug, see JDK-8126601
                     // callJNIMethod<jboolean>(obj, "booleanValue", "()Z"));
                         callJNIMethod(obj, JavaTypeBoolean, "booleanValue", "()Z", 0).z);
     return numberValueForNumber(obj);
@@ -192,7 +193,7 @@ JSValue JavaInstance::booleanValue() const
         return jsUndefined();
     }
 
-    // Changed the call to work around possible GCC bug, see RT-22725
+    // Changed the call to work around possible GCC bug, see JDK-8126601
     jboolean booleanValue = callJNIMethod(m_instance->instance(), JavaTypeBoolean, "booleanValue", "()Z", 0).z;
     return jsBoolean(booleanValue);
 }
@@ -228,11 +229,11 @@ private:
     void finishCreation(VM& vm, const String& name)
     {
         Base::finishCreation(vm, name);
-        ASSERT(inherits(vm, &s_info));
+        ASSERT(inherits(&s_info));
     }
 };
 
-const ClassInfo JavaRuntimeMethod::s_info = { "JavaRuntimeMethod", &RuntimeMethod::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JavaRuntimeMethod) };
+const ClassInfo JavaRuntimeMethod::s_info = { "JavaRuntimeMethod"_s, &RuntimeMethod::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(JavaRuntimeMethod) };
 
 JSValue JavaInstance::getMethod(JSGlobalObject* lexicalGlobalObject, PropertyName propertyName)
 {
@@ -248,8 +249,8 @@ JSValue JavaInstance::invokeMethod(JSGlobalObject* globalObject, CallFrame* call
 
     ASSERT(globalObject->vm().apiLock().currentThreadIsHoldingLock());
 
-    if (!asObject(runtimeMethod)->inherits(vm, &JavaRuntimeMethod::s_info))
-        throwException(globalObject, scope, createTypeError(globalObject, "Attempt to invoke non-Java method on Java object."));
+    if (!asObject(runtimeMethod)->inherits(&JavaRuntimeMethod::s_info))
+        throwException(globalObject, scope, createTypeError(globalObject, "Attempt to invoke non-Java method on Java object."_s));
 
 #if 0
     const MethodList& methodList = *runtimeMethod->methods();
@@ -273,7 +274,9 @@ JSValue JavaInstance::invokeMethod(JSGlobalObject* globalObject, CallFrame* call
 #endif
 
     if (!method) {
+#if !PLATFORM(JAVA)
         LOG(LiveConnect, "JavaInstance::invokeMethod unable to find an appropriate method");
+#endif
         return jsUndefined();
     }
 
@@ -282,7 +285,7 @@ JSValue JavaInstance::invokeMethod(JSGlobalObject* globalObject, CallFrame* call
     // to handle valueOf method call.
     jobject obj = m_instance->instance();
     JavaClass* aClass = static_cast<JavaClass*>(getClass());
-    if (aClass->isCharacterClass() && jMethod->name() == "valueOf")
+    if (aClass->isCharacterClass() && jMethod->name() == "valueOf"_s)
         return numberValueForCharacter(obj);
 
     // Since m_instance->instance() is WeakGlobalRef, creating a localref to safeguard instance() from GC
@@ -292,12 +295,15 @@ JSValue JavaInstance::invokeMethod(JSGlobalObject* globalObject, CallFrame* call
         LOG_ERROR("Could not get javaInstance for %p in JavaInstance::invokeMethod", (jobject)jlinstance);
         return jsUndefined();
     }
-
+#if !PLATFORM(JAVA)
     LOG(LiveConnect, "JavaInstance::invokeMethod call %s %s on %p", String(jMethod->name().impl()).utf8().data(), jMethod->signature(), m_instance->instance());
+#endif
 
     const int count = callFrame->argumentCount();
     if (jMethod->numParameters() != count) {
+#if !PLATFORM(JAVA)
         LOG(LiveConnect, "JavaInstance::invokeMethod unable to find an appropriate method with specified signature");
+#endif
         return jsUndefined();
     }
 
@@ -309,7 +315,9 @@ JSValue JavaInstance::invokeMethod(JSGlobalObject* globalObject, CallFrame* call
         jvalue jarg = convertValueToJValue(globalObject, m_rootObject.get(),
             callFrame->argument(i), jtype, javaClassName.data());
         jArgs[i] = jvalueToJObject(jarg, jtype);
+#if !PLATFORM(JAVA)
         LOG(LiveConnect, "JavaInstance::invokeMethod arg[%d] = %s", i, callFrame->argument(i).toString(globalObject)->value(globalObject).ascii().data());
+#endif
     }
 
     jvalue result;
@@ -319,7 +327,7 @@ JSValue JavaInstance::invokeMethod(JSGlobalObject* globalObject, CallFrame* call
     // to dispatch the call on the appropriate internal VM thread.
     RootObject* rootObject = this->rootObject();
     if (jMethod->isStatic())
-        return throwException(globalObject, scope, createTypeError(globalObject, "invoking static method"));
+        return throwException(globalObject, scope, createTypeError(globalObject, "invoking static method"_s));
     if (!rootObject)
         return jsUndefined();
 
@@ -340,7 +348,7 @@ JSValue JavaInstance::invokeMethod(JSGlobalObject* globalObject, CallFrame* call
         jthrowable ex = dispatchJNICall(callFrame->argumentCount(), rootObject,
                                         obj, jMethod->isStatic(),
                                         jMethod->returnType(), methodId,
-                                        jArgs.data(), result,
+                                        jArgs.mutableSpan().data(), result,
                                         accessControlContext());
         if (ex != NULL) {
             JSValue exceptionDescription

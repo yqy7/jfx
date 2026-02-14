@@ -31,16 +31,28 @@
 
 namespace WebCore {
 
-Ref<FEFlood> FEFlood::create(const Color& floodColor, float floodOpacity)
+Ref<FEFlood> FEFlood::create(const Color& floodColor, float floodOpacity, DestinationColorSpace colorSpace)
 {
+#if USE(CG) || USE(SKIA)
+    return adoptRef(*new FEFlood(floodColor, floodOpacity, colorSpace));
+#else
+    UNUSED_PARAM(colorSpace);
     return adoptRef(*new FEFlood(floodColor, floodOpacity));
+#endif
 }
 
-FEFlood::FEFlood(const Color& floodColor, float floodOpacity)
-    : FilterEffect(FilterEffect::Type::FEFlood)
+FEFlood::FEFlood(const Color& floodColor, float floodOpacity, DestinationColorSpace colorSpace)
+    : FilterEffect(FilterEffect::Type::FEFlood, colorSpace)
     , m_floodColor(floodColor)
     , m_floodOpacity(floodOpacity)
 {
+}
+
+bool FEFlood::operator==(const FEFlood& other) const
+{
+    return FilterEffect::operator==(other)
+        && m_floodColor == other.m_floodColor
+        && m_floodOpacity == other.m_floodOpacity;
 }
 
 bool FEFlood::setFloodColor(const Color& color)
@@ -59,7 +71,7 @@ bool FEFlood::setFloodOpacity(float floodOpacity)
     return true;
 }
 
-FloatRect FEFlood::calculateImageRect(const Filter& filter, const FilterImageVector&, const FloatRect& primitiveSubregion) const
+FloatRect FEFlood::calculateImageRect(const Filter& filter, std::span<const FloatRect>, const FloatRect& primitiveSubregion) const
 {
     return filter.maxEffectRect(primitiveSubregion);
 }
@@ -71,13 +83,13 @@ std::unique_ptr<FilterEffectApplier> FEFlood::createSoftwareApplier() const
 
 TextStream& FEFlood::externalRepresentation(TextStream& ts, FilterRepresentation representation) const
 {
-    ts << indent << "[feFlood";
+    ts << indent << "[feFlood"_s;
     FilterEffect::externalRepresentation(ts, representation);
 
-    ts << " flood-color=\"" << serializationForRenderTreeAsText(floodColor()) << "\"";
-    ts << " flood-opacity=\"" << floodOpacity() << "\"";
+    ts << " flood-color=\"" << serializationForRenderTreeAsText(floodColor()) << '"';
+    ts << " flood-opacity=\"" << floodOpacity() << '"';
 
-    ts << "]\n";
+    ts << "]\n"_s;
     return ts;
 }
 
